@@ -65,6 +65,7 @@ pub(crate) fn provider_http_failure(
         observability,
         terminal_projection: None,
         terminal_disposition: None,
+        error_operator_fault: None,
         matched_policy: None,
     }
 }
@@ -84,42 +85,52 @@ pub(crate) fn provider_runtime_failure(
             }
         };
         let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
-        let projected =
-            V3ErrorHandlingCenter::project_terminal(V3ErrorHandlingCenter::decide_provider(
-                V3ErrorHandlingCenterInput {
-                    source,
-                    action_scope: V3ErrorActionScope::None,
-                    candidates_remaining: 0,
-                    source_status: None,
-                },
-                false,
-                false,
+        let source_message = source.message.clone();
+        let (status, policy_error_message, terminal_projection, error_operator_fault) =
+            match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+                source,
+                V3ErrorActionScope::None,
+                0,
                 None,
-            ));
+            ) {
+                Ok(projected) => (
+                    projected.status,
+                    projected.error_detail.clone(),
+                    Some(projected),
+                    None,
+                ),
+                Err(fault) => (599, source_message, None, Some(fault)),
+            };
         return V3ResponsesRelayProviderFailure {
-            status: projected.status,
+            status,
             // Internal transport handoff failure: no upstream HTTP response exists.
             provider_status: None,
             policy_error_type: "provider_internal_transport_error".to_string(),
-            policy_error_message: projected.error_detail.clone(),
+            policy_error_message,
             provider_id: provider_id.to_string(),
             source_stage,
             observability,
-            terminal_projection: Some(projected),
+            terminal_projection,
             terminal_disposition: Some(
                 routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
             ),
+            error_operator_fault,
             matched_policy: None,
         };
     }
-    let terminal_projection =
-        matches!(&error, V3ProviderError::ClientDisconnect { .. }).then(|| {
-            project_v3_client_disconnect(
+    let (terminal_projection, error_operator_fault) =
+        if matches!(&error, V3ProviderError::ClientDisconnect { .. }) {
+            match project_v3_client_disconnect(
                 provider_id,
                 provider_runtime_failure_stage(&error),
                 error.to_string(),
-            )
-        });
+            ) {
+                Ok(projected) => (Some(projected), None),
+                Err(fault) => (None, Some(fault)),
+            }
+        } else {
+            (None, None)
+        };
     let policy_error_message = error.to_string();
     // transport 响应头挂起由错误处理中心按「transport 阶段 + 专属类别码」判定为
     // 瞬态（health-neutral 同 provider 重试 3 次）；其余 transport 错误保持原策略。
@@ -163,6 +174,7 @@ pub(crate) fn provider_runtime_failure(
         observability,
         terminal_projection,
         terminal_disposition: None,
+        error_operator_fault,
         matched_policy: None,
     }
 }
@@ -189,6 +201,7 @@ pub(crate) fn provider_response_stream_relay_failure(
             observability,
             terminal_projection: None,
             terminal_disposition: None,
+            error_operator_fault: None,
             matched_policy: None,
         },
         V3ResponsesRelayRuntimeError::ProviderJson(reason) => {
@@ -222,6 +235,7 @@ fn provider_response_codec_relay_failure(
         observability,
         terminal_projection: None,
         terminal_disposition: None,
+        error_operator_fault: None,
         matched_policy: None,
     }
 }
@@ -231,56 +245,50 @@ pub(crate) fn provider_request_relay_failure(
     provider_id: &str,
     observability: Option<V3RuntimeObservability>,
 ) -> Result<V3ResponsesRelayProviderFailure, V3ResponsesRelayRuntimeError> {
-    let (source_stage, error_type, message, terminal_projection) = match error {
+    let (source_stage, error_type, message, terminal_projection, error_operator_fault) = match error
+    {
         V3ResponsesRelayRuntimeError::ProviderCompat(error) => {
-            let boundary = match error.classification() {
+            let (boundary, error_operator_fault) = match error.classification() {
                 V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
-                    Some(V3ErrorHandlingCenter::project_terminal(
-                        V3ErrorHandlingCenter::decide_provider(
-                            V3ErrorHandlingCenterInput {
-                                source: super::provider_compat_boundary_source(
-                                    "ProviderReqCompat06ProviderCompat",
-                                    &error,
-                                ),
-                                action_scope: V3ErrorActionScope::ProviderInstance {
-                                    provider_id: provider_id.to_string(),
-                                },
-                                candidates_remaining: 0,
-                                source_status: Some(400),
-                            },
-                            false,
-                            false,
-                            None,
+                    match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+                        super::provider_compat_boundary_source(
+                            "ProviderReqCompat06ProviderCompat",
+                            &error,
                         ),
-                    ))
+                        V3ErrorActionScope::ProviderInstance {
+                            provider_id: provider_id.to_string(),
+                        },
+                        0,
+                        Some(400),
+                    ) {
+                        Ok(projected) => (Some(projected), None),
+                        Err(fault) => (None, Some(fault)),
+                    }
                 }
                 V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
-                    Some(V3ErrorHandlingCenter::project_terminal(
-                        V3ErrorHandlingCenter::decide_provider(
-                            V3ErrorHandlingCenterInput {
-                                source: super::provider_request_payload_source(
-                                    "ProviderReqCompat06ProviderCompat",
-                                    &error,
-                                ),
-                                action_scope: V3ErrorActionScope::ProviderInstance {
-                                    provider_id: provider_id.to_string(),
-                                },
-                                candidates_remaining: 0,
-                                source_status: Some(400),
-                            },
-                            false,
-                            false,
-                            None,
+                    match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+                        super::provider_request_payload_source(
+                            "ProviderReqCompat06ProviderCompat",
+                            &error,
                         ),
-                    ))
+                        V3ErrorActionScope::ProviderInstance {
+                            provider_id: provider_id.to_string(),
+                        },
+                        0,
+                        Some(400),
+                    ) {
+                        Ok(projected) => (Some(projected), None),
+                        Err(fault) => (None, Some(fault)),
+                    }
                 }
-                V3ProviderCompatErrorClassification::Other => None,
+                V3ProviderCompatErrorClassification::Other => (None, None),
             };
             (
                 "ProviderReqCompat06ProviderCompat",
                 "provider_request_compat_error",
                 format!("V3 Responses Relay provider compat failed: {error}"),
                 boundary,
+                error_operator_fault,
             )
         }
         V3ResponsesRelayRuntimeError::ProviderWireEncoding(message) => (
@@ -288,11 +296,13 @@ pub(crate) fn provider_request_relay_failure(
             "provider_request_wire_error",
             format!("V3 Responses Relay provider wire encoding failed: {message}"),
             None,
+            None,
         ),
         V3ResponsesRelayRuntimeError::Provider(error) => (
             "V3ProviderReqOutbound08WirePayload",
             "provider_request_wire_error",
             error.to_string(),
+            None,
             None,
         ),
         other => return Err(other),
@@ -310,6 +320,7 @@ pub(crate) fn provider_request_relay_failure(
         observability,
         terminal_projection,
         terminal_disposition: None,
+        error_operator_fault,
         matched_policy: None,
     })
 }
@@ -318,34 +329,35 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure(
     mut failure: V3ResponsesRelayProviderFailure,
     last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
 ) -> V3ResponsesRelayProviderFailure {
-    if failure.terminal_projection.is_none() {
-        let source = routecodex_v3_error::build_v3_error_01_source_raised(
-            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
-            failure.source_stage,
-            &failure.policy_error_type,
-            &failure.policy_error_message,
-        );
-        let terminal = V3ErrorHandlingCenter::decide_provider(
-            V3ErrorHandlingCenterInput {
-                source,
-                action_scope: V3ErrorActionScope::ProviderInstance {
-                    provider_id: failure.provider_id.clone(),
-                },
-                candidates_remaining: 0,
-                source_status: Some(failure.status),
-            },
-            false,
-            false,
-            None,
-        )
-        .try_into_terminal()
-        .expect("Responses residence-budget terminal requires exhausted Error05");
-        failure.terminal_disposition = Some(V3ErrorHandlingCenter::provider_terminal_disposition(
-            terminal.clone(),
-            last_external_http,
-        ));
-        failure.terminal_projection =
-            Some(V3ErrorHandlingCenter::project_terminal_decision(terminal));
+    if failure.terminal_projection.is_some() {
+        return failure;
+    }
+    let terminal_disposition = match last_external_http {
+        Some(witness) => routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+    };
+    failure
+        .terminal_disposition
+        .get_or_insert(terminal_disposition);
+    if failure.error_operator_fault.is_some() {
+        return failure;
+    }
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        failure.source_stage,
+        &failure.policy_error_type,
+        &failure.policy_error_message,
+    );
+    match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+        source,
+        V3ErrorActionScope::ProviderInstance {
+            provider_id: failure.provider_id.clone(),
+        },
+        0,
+        None,
+    ) {
+        Ok(projected) => failure.terminal_projection = Some(projected),
+        Err(fault) => failure.error_operator_fault = Some(fault),
     }
     failure
 }
@@ -441,6 +453,7 @@ pub(crate) fn provider_response_hook_failure(
                 observability,
                 terminal_projection: None,
                 terminal_disposition: None,
+                error_operator_fault: None,
                 matched_policy: None,
             }
         }
@@ -460,6 +473,26 @@ pub(crate) fn provider_failure_output_with_observation(
     mut trace: Vec<&'static str>,
     stream_observation: Option<V3RuntimeStreamObservation>,
 ) -> V3ResponsesRelayRuntimeOutput {
+    if let Some(fault) = failure.error_operator_fault {
+        return V3ResponsesRelayRuntimeOutput {
+            status: 599,
+            terminal_disposition: Some(
+                failure
+                    .terminal_disposition
+                    .unwrap_or(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+            ),
+            client_body: V3ResponsesRelayClientBody::Json(Value::Null),
+            node_trace: trace,
+            error_chain: None,
+            observability: failure.observability,
+            diagnostic_source: Some(fault.policy_failure),
+            diagnostic_cause: fault.original_source,
+            stream_observation,
+            finalized_response: None,
+            provider_snapshots: None,
+            protocol_direct_handoff: None,
+        };
+    }
     let projected = failure
         .terminal_projection
         .expect("terminal Responses provider failure must carry typed Error06 projection");
@@ -483,6 +516,8 @@ pub(crate) fn provider_failure_output_with_observation(
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
         observability,
+        diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         stream_observation,
         finalized_response: None,
         provider_snapshots: None,
@@ -498,15 +533,14 @@ pub(crate) fn error_output(
     mut observability: Option<V3RuntimeObservability>,
     candidates_remaining: usize,
 ) -> V3ResponsesRelayRuntimeOutput {
-    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+    let projected = crate::provider_failure_runtime_policy::project_v3_relay_error_source(
         source,
-        action_scope: V3ErrorActionScope::ProviderInstance {
+        V3ErrorActionScope::ProviderInstance {
             provider_id: provider_id.to_string(),
         },
         candidates_remaining,
-        source_status: Some(status),
-    });
-    trace.extend(V3_ERROR_CHAIN_NODE_IDS);
+        Some(status),
+    );
     if let Some(observability) = observability.as_mut() {
         observability.response_status = Some("error".to_string());
         // `status` is the internal projection status (598/599/400/500), not an
@@ -516,6 +550,39 @@ pub(crate) fn error_output(
             observability.provider_id = Some(provider_id.to_string());
         }
     }
+    local_error_output_from_projection(projected, trace, observability)
+}
+
+fn local_error_output_from_projection(
+    projected: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    mut trace: Vec<&'static str>,
+    observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesRelayRuntimeOutput {
+    let projected = match projected {
+        Ok(projected) => projected,
+        Err(fault) => {
+            return V3ResponsesRelayRuntimeOutput {
+                status: 599,
+                terminal_disposition: Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                ),
+                client_body: V3ResponsesRelayClientBody::Json(Value::Null),
+                node_trace: trace,
+                error_chain: None,
+                observability,
+                diagnostic_source: Some(fault.policy_failure),
+                diagnostic_cause: fault.original_source,
+                stream_observation: None,
+                finalized_response: None,
+                provider_snapshots: None,
+                protocol_direct_handoff: None,
+            }
+        }
+    };
+    trace.extend(V3_ERROR_CHAIN_NODE_IDS);
     V3ResponsesRelayRuntimeOutput {
         status: projected.status,
         terminal_disposition: None,
@@ -523,6 +590,8 @@ pub(crate) fn error_output(
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
         observability,
+        diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         stream_observation: None,
         finalized_response: None,
         provider_snapshots: None,
@@ -533,6 +602,237 @@ pub(crate) fn error_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn internal_transport_projection_preserves_response_source() {
+        let expected_source = crate::hooks::build_v3_provider_error_source(
+            "V3ProviderRespInbound01Raw",
+            V3ProviderError::InternalTransport {
+                request_id: "req-internal-sdk".to_string(),
+                provider_id: "goaichat".to_string(),
+                lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
+                reason: "provider frame sequence mismatch".to_string(),
+            },
+        );
+        let success = provider_runtime_failure(
+            V3ProviderError::InternalTransport {
+                request_id: "req-internal-sdk".to_string(),
+                provider_id: "goaichat".to_string(),
+                lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
+                reason: "provider frame sequence mismatch".to_string(),
+            },
+            "goaichat",
+            None,
+        );
+        let projected = success
+            .terminal_projection
+            .as_ref()
+            .expect("successful InternalTransport must carry Error06");
+        assert_eq!(
+            projected.chain,
+            routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+        );
+        assert_eq!(projected.diagnostic_source, expected_source);
+        assert_eq!(success.source_stage, "V3ProviderRespInbound01Raw");
+        assert_eq!(success.policy_error_message, expected_source.message);
+        assert_eq!(
+            success.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(success.error_operator_fault.is_none());
+    }
+
+    #[test]
+    fn local_error_sdk_fault_survives_consumer() {
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "local_error_sdk_fault_source",
+            "local error SDK operation failed",
+        );
+        let expected_source = source.clone();
+        let error = crate::operation_runner::run_v3_error_02_to_05_decision_operators(
+            Value::Null,
+            source.clone(),
+            V3ErrorActionScope::None,
+            0,
+            false,
+            false,
+            None,
+        )
+        .expect_err("Value::Null must fail through the real Error02 decision operator");
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Err(error),
+        )
+        .expect_err("the real OperationRunnerError must become a typed relay fault");
+        let policy_failure = fault.policy_failure.clone();
+        let original_source = fault
+            .original_source
+            .clone()
+            .expect("the relay fault must preserve its original source");
+        let trace = vec!["V3RuntimeRequestStarted"];
+
+        let output = local_error_output_from_projection(Err(fault), trace.clone(), None);
+
+        assert_eq!(output.status, 599);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(matches!(
+            &output.client_body,
+            V3ResponsesRelayClientBody::Json(value) if value.is_null()
+        ));
+        assert!(output.error_chain.is_none());
+        assert_eq!(output.node_trace, trace);
+        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+        assert_eq!(output.diagnostic_source, Some(policy_failure.clone()));
+        assert_eq!(output.diagnostic_cause, Some(original_source.clone()));
+        assert_eq!(original_source, expected_source);
+        assert_eq!(
+            policy_failure.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(policy_failure.code, "relay_error_operator_sdk_failure");
+    }
+
+    #[test]
+    fn relay_error_operator_fault_projects_internal_599_without_client_error() {
+        let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+            429,
+            vec![("retry-after".to_string(), b"7".to_vec())],
+            br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
+        )
+        .with_body_read_failure("provider body truncated");
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "relay_error_projection_nonterminal",
+            "Error06 SDK completed without a terminal client projection",
+        );
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Ok(None),
+        )
+        .expect_err("Ok(None) must produce a typed operator fault");
+        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_cause = fault
+            .original_source
+            .clone()
+            .expect("the real source must remain the fault cause");
+
+        let output = provider_failure_output(
+            V3ResponsesRelayProviderFailure {
+                status: 502,
+                provider_status: None,
+                policy_error_type: "relay_error_projection_nonterminal".to_string(),
+                policy_error_message: "Error06 SDK completed without a terminal client projection"
+                    .to_string(),
+                provider_id: "provider-a".to_string(),
+                source_stage: "V3Error06ClientProjected",
+                observability: None,
+                terminal_projection: None,
+                terminal_disposition: Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(
+                        witness.clone(),
+                    ),
+                ),
+                error_operator_fault: Some(fault),
+                matched_policy: None,
+            },
+            vec!["V3ProviderRespInbound01Raw"],
+            0,
+        );
+
+        assert_eq!(output.status, 599);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness))
+        );
+        assert!(matches!(
+            &output.client_body,
+            V3ResponsesRelayClientBody::Json(value) if value.is_null()
+        ));
+        assert!(output.error_chain.is_none());
+        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+        assert_eq!(output.diagnostic_source, Some(diagnostic_source.clone()));
+        assert_eq!(output.diagnostic_cause, Some(diagnostic_cause.clone()));
+        assert_eq!(
+            diagnostic_source.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(diagnostic_source.code, "relay_error_projection_nonterminal");
+        assert_eq!(diagnostic_cause, source);
+    }
+
+    #[test]
+    fn terminalizer_preserves_sdk_fault_witness_without_erasing_existing_disposition() {
+        let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+            200,
+            vec![("content-type".to_string(), b"application/json".to_vec())],
+            br#"{"status":"completed"}"#.to_vec(),
+        )
+        .with_body_read_failure("provider body failed after the 200 head");
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "relay_error_projection_nonterminal",
+            "Error06 SDK completed without a terminal client projection",
+        );
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source,
+            Ok(None),
+        )
+        .expect_err("Ok(None) must produce a typed operator fault");
+        let failure = V3ResponsesRelayProviderFailure {
+            status: 502,
+            provider_status: Some(200),
+            policy_error_type: "relay_error_projection_nonterminal".to_string(),
+            policy_error_message: "Error06 SDK completed without a terminal client projection"
+                .to_string(),
+            provider_id: "provider-a".to_string(),
+            source_stage: "V3Error06ClientProjected",
+            observability: None,
+            terminal_projection: None,
+            terminal_disposition: None,
+            error_operator_fault: Some(fault.clone()),
+            matched_policy: None,
+        };
+
+        let terminalized =
+            terminalize_v3_responses_relay_provider_failure(failure, Some(witness.clone()));
+
+        assert!(terminalized.terminal_projection.is_none());
+        assert_eq!(
+            terminalized.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness))
+        );
+        assert_eq!(terminalized.error_operator_fault, Some(fault.clone()));
+
+        let existing = routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse;
+        let authored = terminalize_v3_responses_relay_provider_failure(
+            V3ResponsesRelayProviderFailure {
+                status: 502,
+                provider_status: None,
+                policy_error_type: "relay_error_projection_nonterminal".to_string(),
+                policy_error_message: "authored disposition".to_string(),
+                provider_id: "provider-a".to_string(),
+                source_stage: "V3Error06ClientProjected",
+                observability: None,
+                terminal_projection: None,
+                terminal_disposition: Some(existing.clone()),
+                error_operator_fault: Some(fault),
+                matched_policy: None,
+            },
+            Some(routecodex_v3_error::V3ExternalHttpWitness::new(
+                429,
+                vec![],
+                b"rate limited".to_vec(),
+            )),
+        );
+        assert_eq!(authored.terminal_disposition, Some(existing));
+    }
 
     #[test]
     fn exhausted_received_http_200_codec_failure_never_projects_error06_to_client() {
@@ -556,6 +856,44 @@ mod tests {
         assert_eq!(
             output.terminal_disposition,
             Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+    }
+
+    #[test]
+    fn provider_429_projects_internal_502_with_full_external_http_witness() {
+        let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+            429,
+            vec![("retry-after".to_string(), b"7".to_vec())],
+            br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
+        )
+        .with_body_read_failure("provider body truncated");
+        let failure = terminalize_v3_responses_relay_provider_failure(
+            provider_http_failure(
+                429,
+                br#"{"error":{"type":"rate_limit_error"}}"#,
+                "provider-a",
+                None,
+            ),
+            Some(witness.clone()),
+        );
+        let output =
+            provider_failure_output(failure, vec!["V3ProviderReqOutbound09TransportRequest"], 0);
+
+        assert_eq!(output.status, 502);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness))
+        );
+        assert!(matches!(
+            &output.client_body,
+            V3ResponsesRelayClientBody::Json(value) if value.get("error").is_some()
+        ));
+        assert_eq!(
+            output
+                .observability
+                .as_ref()
+                .and_then(|observability| observability.provider_status),
+            None
         );
     }
 
@@ -701,7 +1039,47 @@ mod tests {
         )
         .expect("request compat failure must become terminal client error");
         assert_eq!(failure.status, 598);
-        assert!(failure.terminal_projection.is_some());
+        let projected = failure
+            .terminal_projection
+            .as_ref()
+            .expect("request compat failure must carry a terminal projection");
+        assert_eq!(
+            projected.diagnostic_source.code,
+            "provider_request_payload_invalid"
+        );
+        assert!(failure.error_operator_fault.is_none());
+        assert_eq!(failure.policy_error_type, "provider_request_compat_error");
+    }
+
+    #[test]
+    fn payload_boundary_compat_failure_preserves_internal_runtime_projection() {
+        let profile = V3ProviderCompatProfileId::Passthrough;
+        let error = classify_v3_provider_compat_error(
+            "request",
+            &profile,
+            "ProviderCompatPayloadBoundaryViolation field=metadata detail=control-like field"
+                .to_string(),
+        );
+        let failure = provider_request_relay_failure(
+            V3ResponsesRelayRuntimeError::ProviderCompat(error),
+            "provider-1",
+            None,
+        )
+        .expect("payload boundary failure must retain an internal terminal projection");
+        assert_eq!(failure.status, 598);
+        let projected = failure
+            .terminal_projection
+            .as_ref()
+            .expect("payload boundary failure must carry its typed projection");
+        assert_eq!(
+            projected.diagnostic_source.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(
+            projected.diagnostic_source.code,
+            routecodex_v3_error::V3_PROVIDER_COMPAT_PAYLOAD_BOUNDARY_VIOLATION_CODE
+        );
+        assert!(failure.error_operator_fault.is_none());
         assert_eq!(failure.policy_error_type, "provider_request_compat_error");
     }
 

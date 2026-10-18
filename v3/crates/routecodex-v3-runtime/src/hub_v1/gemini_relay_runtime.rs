@@ -66,6 +66,9 @@ pub struct V3GeminiRelayRuntimeOutput {
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
     pub observability: Option<V3RuntimeObservability>,
+    pub provider_failure_attempts: Vec<V3RuntimeProviderFailureObservation>,
+    pub diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub provider_snapshots: Option<V3RelayProviderSnapshots>,
 }
@@ -421,6 +424,9 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             node_trace: trace,
             error_chain: None,
             observability: Some(observability),
+            provider_failure_attempts: Vec::new(),
+            diagnostic_source: None,
+            diagnostic_cause: None,
             stream_observation: None,
             provider_snapshots: Some(provider_snapshots),
         }
@@ -440,6 +446,9 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             node_trace: trace,
             error_chain: None,
             observability: Some(observability),
+            provider_failure_attempts: Vec::new(),
+            diagnostic_source: None,
+            diagnostic_cause: None,
             stream_observation: Some(stream_observation),
             provider_snapshots: Some(provider_snapshots),
         }
@@ -448,9 +457,9 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
     fn assemble_failure_output(
         failure: V3RelayProviderFailure,
         trace: Vec<&'static str>,
-        _provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
+        provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     ) -> V3GeminiRelayRuntimeOutput {
-        provider_failure_output(failure, trace)
+        provider_failure_output(failure, trace, provider_failure_events)
     }
 }
 
@@ -548,6 +557,37 @@ pub fn project_v3_gemini_relay_runtime_failure(
         "none",
         Vec::new(),
     );
+    gemini_error_output_from_projection(projected, trace, provider_pool_exhausted)
+}
+
+fn gemini_error_output_from_projection(
+    projected: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    trace: Vec<&'static str>,
+    provider_pool_exhausted: bool,
+) -> V3GeminiRelayRuntimeOutput {
+    let projected = match projected {
+        Ok(projected) => projected,
+        Err(fault) => {
+            return V3GeminiRelayRuntimeOutput {
+                status: 599,
+                terminal_disposition: Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                ),
+                client_body: V3GeminiRelayClientBody::Json(Value::Null),
+                node_trace: trace,
+                error_chain: None,
+                observability: None,
+                provider_failure_attempts: Vec::new(),
+                diagnostic_source: Some(fault.policy_failure),
+                diagnostic_cause: fault.original_source,
+                stream_observation: None,
+                provider_snapshots: None,
+            }
+        }
+    };
     V3GeminiRelayRuntimeOutput {
         status: projected.status,
         terminal_disposition: provider_pool_exhausted
@@ -556,6 +596,9 @@ pub fn project_v3_gemini_relay_runtime_failure(
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
         observability: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         stream_observation: None,
         provider_snapshots: None,
     }
@@ -884,7 +927,27 @@ fn server_routing_group<'a>(
 fn provider_failure_output(
     failure: V3RelayProviderFailure,
     mut trace: Vec<&'static str>,
+    provider_failure_attempts: Vec<V3RuntimeProviderFailureObservation>,
 ) -> V3GeminiRelayRuntimeOutput {
+    if let Some(fault) = failure.error_operator_fault {
+        return V3GeminiRelayRuntimeOutput {
+            status: 599,
+            terminal_disposition: Some(
+                failure
+                    .terminal_disposition
+                    .unwrap_or(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+            ),
+            client_body: V3GeminiRelayClientBody::Json(Value::Null),
+            node_trace: trace,
+            error_chain: None,
+            observability: None,
+            provider_failure_attempts,
+            diagnostic_source: Some(fault.policy_failure),
+            diagnostic_cause: fault.original_source,
+            stream_observation: None,
+            provider_snapshots: None,
+        };
+    }
     let projected = failure
         .terminal_projection
         .expect("terminal Gemini provider failure must carry typed Error06 projection");
@@ -896,6 +959,9 @@ fn provider_failure_output(
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
         observability: None,
+        provider_failure_attempts,
+        diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         stream_observation: None,
         provider_snapshots: None,
     }
@@ -918,4 +984,157 @@ pub(crate) fn gemini_model_from_endpoint_path(
         .filter(|value| !value.is_empty() && !value.contains('/') && !value.contains(':'))
         .ok_or_else(|| V3GeminiRelayRuntimeError::EndpointPath(endpoint_path.to_string()))?;
     Ok(model.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relay_error_operator_fault_projects_internal_599_without_client_error() {
+        let attempts = vec![
+            V3RuntimeProviderFailureObservation {
+                provider_id: "provider-a".to_string(),
+                status: 502,
+                message: "attempt-a".to_string(),
+                ..Default::default()
+            },
+            V3RuntimeProviderFailureObservation {
+                provider_id: "provider-b".to_string(),
+                status: 503,
+                message: "attempt-b".to_string(),
+                ..Default::default()
+            },
+        ];
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "relay_error_projection_nonterminal",
+            "Error06 SDK completed without a terminal client projection",
+        );
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Ok(None),
+        )
+        .expect_err("Ok(None) must produce a typed operator fault");
+        let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+            429,
+            vec![("x-upstream".to_string(), b"rate-limit".to_vec())],
+            b"{\"error\":{\"code\":\"rate_limited\"}}".to_vec(),
+        )
+        .with_body_read_failure("truncated");
+        let cases = [
+            (
+                None,
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+            ),
+            (
+                Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(
+                        witness.clone(),
+                    ),
+                ),
+                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+            ),
+        ];
+
+        for (terminal_disposition, expected_disposition) in cases {
+            let output = provider_failure_output(
+                V3RelayProviderFailure {
+                    status: 502,
+                    provider_status: None,
+                    client_response: Value::Null,
+                    source_stage: "V3Error06ClientProjected",
+                    terminal_projection: None,
+                    terminal_disposition,
+                    error_operator_fault: Some(fault.clone()),
+                    error_type_fn: |_| None,
+                    error_message_fn: |_| "unused".to_string(),
+                },
+                vec!["V3ProviderRespInbound01Raw"],
+                attempts.clone(),
+            );
+
+            assert_eq!(output.status, 599);
+            assert_eq!(output.terminal_disposition, Some(expected_disposition));
+            assert!(matches!(
+                &output.client_body,
+                V3GeminiRelayClientBody::Json(value) if value.is_null()
+            ));
+            assert!(output.error_chain.is_none());
+            assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+            assert_eq!(output.diagnostic_source, Some(fault.policy_failure.clone()));
+            assert_eq!(output.diagnostic_cause, fault.original_source.clone());
+            assert_eq!(
+                fault.policy_failure.source_kind,
+                routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+            );
+            assert_eq!(
+                fault.policy_failure.code,
+                "relay_error_projection_nonterminal"
+            );
+            assert_eq!(fault.original_source, Some(source.clone()));
+            assert_eq!(output.provider_failure_attempts, attempts);
+        }
+    }
+
+    #[test]
+    fn local_error_sdk_fault_survives_consumer() {
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "local_error_sdk_failure",
+            "local error SDK failure must remain the projected cause",
+        );
+        let error = crate::operation_runner::run_v3_error_02_to_05_decision_operators(
+            Value::Null,
+            source.clone(),
+            routecodex_v3_error::V3ErrorActionScope::None,
+            0,
+            false,
+            false,
+            None,
+        )
+        .expect_err("a null source projection must fail the real Error operator SDK");
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Err(error),
+        )
+        .expect_err("the real Error operator SDK failure must remain a typed fault");
+        let policy_failure = fault.policy_failure.clone();
+        let original_source = fault
+            .original_source
+            .clone()
+            .expect("the real original source must remain attached to the fault");
+        let trace = vec![
+            "V3Error02Classified",
+            "V3Error03TargetLocalAction",
+            "V3Error04TargetExhaustion",
+            "V3Error05ExecutionDecision",
+        ];
+
+        let output = gemini_error_output_from_projection(Err(fault), trace.clone(), false);
+
+        assert_eq!(output.status, 599);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(matches!(
+            &output.client_body,
+            V3GeminiRelayClientBody::Json(value) if value.is_null()
+        ));
+        assert!(output.error_chain.is_none());
+        assert_eq!(output.node_trace, trace);
+        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+        assert_eq!(output.diagnostic_source, Some(policy_failure.clone()));
+        assert_eq!(output.diagnostic_cause, Some(original_source.clone()));
+        assert_eq!(
+            policy_failure.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(policy_failure.source_stage, "V3Error06ClientProjected");
+        assert_eq!(policy_failure.code, "relay_error_operator_sdk_failure");
+        assert_eq!(original_source, source);
+    }
 }

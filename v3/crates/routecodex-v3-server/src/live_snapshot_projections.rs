@@ -192,14 +192,15 @@ pub(crate) fn persist_v3_provider_terminal_evidence(
 /// Queue failures remain in the existing Debug persistence-failure ledger, so a
 /// diagnostic write can never turn a client response into an error.
 pub(crate) fn persist_v3_chat_failure_evidence_sources(
-    state: &Arc<V3ListenerState>,
+    state: &V3ListenerState,
     entry_protocol: &str,
     endpoint: &str,
     request_id: &str,
     attempts: &[V3RuntimeProviderFailureObservation],
     terminal_source: Option<&routecodex_v3_error::V3Error01SourceRaised>,
+    terminal_cause: Option<&routecodex_v3_error::V3Error01SourceRaised>,
 ) {
-    if attempts.is_empty() && terminal_source.is_none() {
+    if attempts.is_empty() && terminal_source.is_none() && terminal_cause.is_none() {
         return;
     }
     let attempts = attempts
@@ -219,12 +220,17 @@ pub(crate) fn persist_v3_chat_failure_evidence_sources(
             projected
         })
         .collect::<Vec<Value>>();
-    let payload = json!({
+    let mut payload = json!({
         "object": "routecodex.v3.provider_failed_attempt_evidence",
         "request_id": request_id,
         "attempts": attempts,
         "terminal_source": terminal_source,
     });
+    if let Some(terminal_cause) = terminal_cause {
+        if let Value::Object(fields) = &mut payload {
+            fields.insert("terminal_cause".to_string(), json!(terminal_cause));
+        }
+    }
     let _persisted = persist_v3_error_evidence_payload(
         state,
         entry_protocol,

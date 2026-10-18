@@ -61,6 +61,7 @@ pub struct V3OpenAiChatRelayRuntimeOutput {
     pub provider_snapshots: Option<V3RelayProviderSnapshots>,
     pub provider_failure_attempts: Vec<V3RuntimeProviderFailureObservation>,
     pub diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
 }
 impl V3OpenAiChatRelayRuntimeOutput {
     pub fn into_v3_resp_15_client_payload(self) -> V3Resp15ClientPayload {
@@ -1278,6 +1279,7 @@ fn openai_chat_provider_http_failure(
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
         terminal_disposition: None,
+        error_operator_fault: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -1359,6 +1361,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             source_stage,
             terminal_projection: None,
             terminal_disposition: None,
+            error_operator_fault: None,
             error_type_fn: extract_error_type_style,
             error_message_fn: extract_message_type_style,
         }
@@ -1532,6 +1535,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             error_detail: None,
             provider_failure_attempts: Vec::new(),
             diagnostic_source: None,
+            diagnostic_cause: None,
             observability: Some(observability),
             stream_observation: None,
             provider_snapshots: Some(provider_snapshots),
@@ -1555,6 +1559,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             error_detail: None,
             provider_failure_attempts: Vec::new(),
             diagnostic_source: None,
+            diagnostic_cause: None,
             observability: Some(observability),
             stream_observation: Some(stream_observation),
             provider_snapshots: Some(provider_snapshots),

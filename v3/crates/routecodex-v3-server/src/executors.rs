@@ -258,6 +258,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
                 &request_id,
                 &handoff.provider_failure_events,
                 output.diagnostic_source.as_ref(),
+                output.diagnostic_cause.as_ref(),
             );
             return error_output_response_for_server(
                 &state.server,
@@ -361,6 +362,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             .map(|observation| observation.provider_failure_events.as_slice())
             .unwrap_or(&[]),
         output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
     );
     if let Some(disposition) = output.terminal_disposition {
         return provider_terminal_response(
@@ -548,6 +550,7 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
             Ok(output) => output,
             Err(error) => project_v3_anthropic_relay_runtime_failure(error),
         };
+        persist_v3_anthropic_relay_failure_evidence(state, &path, &request_id, &relay_output);
         if let Some(disposition) = relay_output.terminal_disposition.clone() {
             return provider_terminal_response(
                 state,
@@ -584,6 +587,7 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
             .map(|observation| observation.provider_failure_events.as_slice())
             .unwrap_or(&[]),
         output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
     );
     if let Some(disposition) = output.terminal_disposition {
         return provider_terminal_response(
@@ -692,6 +696,7 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
             Ok(output) => output,
             Err(error) => project_v3_gemini_relay_runtime_failure(error),
         };
+        persist_v3_gemini_relay_failure_evidence(state, &path, &request_id, &relay_output);
         if let Some(disposition) = relay_output.terminal_disposition.clone() {
             return provider_terminal_response(
                 state,
@@ -747,6 +752,7 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
             .map(|observation| observation.provider_failure_events.as_slice())
             .unwrap_or(&[]),
         output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
     );
     if let Some(disposition) = output.terminal_disposition {
         return provider_terminal_response(

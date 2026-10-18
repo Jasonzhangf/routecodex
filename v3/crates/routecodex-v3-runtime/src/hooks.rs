@@ -17,9 +17,8 @@ use crate::shared::{
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
     build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3Error05ExecutionDecision,
-    V3Error05RecoveryAdmissionWitness, V3ErrorActionScope, V3ErrorHandlingCenter,
-    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
-    V3InternalErrorCode,
+    V3Error05RecoveryAdmissionWitness, V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind,
+    V3ExternalErrorLink, V3InternalErrorCode,
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
@@ -90,7 +89,10 @@ type ErrorHook = fn(
     bool,
     bool,
     Option<V3Error05RecoveryAdmissionWitness>,
-) -> V3Error05ExecutionDecision;
+) -> Result<
+    (Value, V3Error05ExecutionDecision),
+    crate::operation_runner::OperationRunnerError,
+>;
 
 #[derive(Clone, Copy)]
 pub struct V3HookRegistry {
@@ -181,7 +183,8 @@ impl V3HookRegistry {
         default_pool_available: bool,
         same_provider_retry_available: bool,
         recovery: Option<V3Error05RecoveryAdmissionWitness>,
-    ) -> V3Error05ExecutionDecision {
+    ) -> Result<(Value, V3Error05ExecutionDecision), crate::operation_runner::OperationRunnerError>
+    {
         (self.error)(
             source,
             scope,
@@ -1223,14 +1226,17 @@ pub(crate) fn responses_direct_error_hook(
     default_pool_available: bool,
     same_provider_retry_available: bool,
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
-) -> V3Error05ExecutionDecision {
-    V3ErrorHandlingCenter::decide_provider(
-        V3ErrorHandlingCenterInput {
-            source,
-            action_scope: scope,
-            candidates_remaining,
-            source_status: None,
-        },
+) -> Result<(Value, V3Error05ExecutionDecision), crate::operation_runner::OperationRunnerError> {
+    let source_projection = serde_json::to_value(&source).map_err(|error| {
+        crate::operation_runner::OperationRunnerError {
+            message: format!("serialize raised Error01 source: {error}"),
+        }
+    })?;
+    crate::operation_runner::run_v3_error_02_to_05_decision_operators(
+        source_projection,
+        source,
+        scope,
+        candidates_remaining,
         default_pool_available,
         same_provider_retry_available,
         recovery,

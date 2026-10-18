@@ -249,6 +249,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                         observability: None,
                         terminal_projection: None,
                         terminal_disposition: None,
+                        error_operator_fault: None,
                         matched_policy: None,
                     };
                     return Ok(provider_failure_output(
@@ -377,6 +378,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             observability: None,
                             terminal_projection: None,
                             terminal_disposition: None,
+                            error_operator_fault: None,
                             matched_policy: None,
                         };
                         return Ok(provider_failure_output(
@@ -430,6 +432,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                     node_trace: handoff_trace.clone(),
                     error_chain: None,
                     observability: None,
+                    diagnostic_source: None,
+                    diagnostic_cause: None,
                     stream_observation: None,
                     finalized_response: None,
                     provider_snapshots: None,
@@ -1072,6 +1076,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                         node_trace: trace,
                         error_chain: None,
                         observability: Some(observability),
+                        diagnostic_source: None,
+                        diagnostic_cause: None,
                         stream_observation: None,
                         finalized_response: Some(finalized_response),
                         provider_snapshots: None,
@@ -1393,6 +1399,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                         node_trace: trace,
                         error_chain: None,
                         observability: Some(observability),
+                        diagnostic_source: None,
+                        diagnostic_cause: None,
                         stream_observation: if client_response_is_sse {
                             Some(stream_observation)
                         } else {

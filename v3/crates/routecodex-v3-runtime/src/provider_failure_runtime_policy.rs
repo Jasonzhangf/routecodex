@@ -169,31 +169,192 @@ pub(crate) fn is_health_neutral_request_compat_failure(
         || error_type == Some("invalid_request_error")
 }
 
+/// A Relay Error-operator contract failure. This is a typed control resource:
+/// the SDK did not produce a usable Error06, and the original Source remains
+/// available as evidence when it already existed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3RelayErrorOperatorFault {
+    pub policy_failure: V3Error01SourceRaised,
+    pub original_source: Option<V3Error01SourceRaised>,
+}
+
+fn relay_error_operator_fault(
+    code: &str,
+    message: impl Into<String>,
+    original_source: Option<V3Error01SourceRaised>,
+) -> V3RelayErrorOperatorFault {
+    V3RelayErrorOperatorFault {
+        policy_failure: build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            code,
+            message,
+        ),
+        original_source,
+    }
+}
+
+/// Convert the canonical Error06 SDK result without inventing a projection or
+/// recursively invoking the SDK. Both an SDK error and a missing terminal
+/// projection are typed operator faults.
+pub(crate) fn finish_v3_relay_error_projection(
+    original_source: V3Error01SourceRaised,
+    result: Result<
+        Option<(Value, V3Error06ClientProjected)>,
+        crate::operation_runner::OperationRunnerError,
+    >,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    match result {
+        Ok(Some((_, projected))) => Ok(projected),
+        Ok(None) => Err(relay_error_operator_fault(
+            "relay_error_projection_nonterminal",
+            "Error06 SDK completed without a terminal client projection",
+            Some(original_source),
+        )),
+        Err(error) => Err(relay_error_operator_fault(
+            "relay_error_operator_sdk_failure",
+            error.message,
+            Some(original_source),
+        )),
+    }
+}
+
+pub(crate) fn project_v3_relay_error_source(
+    source: V3Error01SourceRaised,
+    scope: V3ErrorActionScope,
+    candidates_remaining: usize,
+    source_status: Option<u16>,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    let source_projection = serde_json::to_value(&source).map_err(|error| {
+        relay_error_operator_fault(
+            "relay_error_operator_sdk_failure",
+            format!("failed to serialize V3Error01SourceRaised: {error}"),
+            Some(source.clone()),
+        )
+    })?;
+    project_v3_relay_error_source_with_projection(
+        source,
+        source_projection,
+        scope,
+        candidates_remaining,
+        source_status,
+    )
+}
+
+fn project_v3_relay_error_source_with_projection(
+    source: V3Error01SourceRaised,
+    source_projection: Value,
+    scope: V3ErrorActionScope,
+    candidates_remaining: usize,
+    source_status: Option<u16>,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    let original_source = source.clone();
+    let (decision_projection, decision) = run_v3_error_02_to_05_decision_operators(
+        source_projection,
+        source,
+        scope,
+        candidates_remaining,
+        false,
+        false,
+        None,
+    )
+    .map_err(|error| {
+        relay_error_operator_fault(
+            "relay_error_operator_sdk_failure",
+            error.message,
+            Some(original_source.clone()),
+        )
+    })?;
+    let mut projected = finish_v3_relay_error_projection(
+        original_source.clone(),
+        run_v3_error_06_terminal_projection_operator(decision_projection, decision),
+    )?;
+
+    let internal_runtime_failure = original_source.source_kind == V3ErrorSourceKind::RuntimeFailure;
+    let target_pool_exhausted =
+        original_source.source_kind == V3ErrorSourceKind::TargetPoolExhausted;
+    if !internal_runtime_failure && !target_pool_exhausted {
+        let linked_status = projected
+            .body
+            .pointer("/error/external_error/status")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|status| u16::try_from(status).ok())
+            .filter(|status| *status >= 400);
+        if let Some(status) = source_status
+            .filter(|status| *status >= 400)
+            .or(linked_status)
+        {
+            projected.status = status;
+        }
+    }
+
+    Ok(projected)
+}
+
+fn relay_error_operator_fault_from_err01_failure(
+    provider_id: &str,
+    source_stage: &'static str,
+    code: &str,
+    raw_message: &str,
+    runner_error: crate::operation_runner::OperationRunnerError,
+) -> V3RelayErrorOperatorFault {
+    // Err01 failed before it could produce a typed Source. Preserve the raw
+    // origin in the fault diagnostic instead of reducing it to the runner text.
+    relay_error_operator_fault(
+        "relay_error_operator_sdk_failure",
+        format!(
+            "Err01 operator failed ({}) while raising {source_stage}:{code} for provider {provider_id}: {raw_message}",
+            runner_error.message
+        ),
+        None,
+    )
+}
+
 pub(crate) fn project_v3_client_disconnect(
     provider_id: &str,
     source_stage: &'static str,
     message: impl Into<String>,
-) -> V3Error06ClientProjected {
-    let source = build_v3_error_01_source_raised(
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    let message = message.into();
+    let (source_projection, source) = run_v3_err01_source_raised_operator(
         V3ErrorSourceKind::ClientDisconnect,
         source_stage,
         "client_disconnect",
-        message,
-    );
-    let decision = V3ErrorHandlingCenter::decide_provider(
-        V3ErrorHandlingCenterInput {
-            source,
-            action_scope: V3ErrorActionScope::ProviderInstance {
-                provider_id: provider_id.to_string(),
-            },
-            candidates_remaining: 0,
-            source_status: Some(499),
+        message.clone(),
+        V3Err01SourceInput::Plain,
+    )
+    .map_err(|error| {
+        relay_error_operator_fault_from_err01_failure(
+            provider_id,
+            source_stage,
+            "client_disconnect",
+            &message,
+            error,
+        )
+    })?;
+    let original_source = source.clone();
+    let (decision_projection, decision) = run_v3_error_02_to_05_decision_operators(
+        source_projection,
+        source,
+        V3ErrorActionScope::ProviderInstance {
+            provider_id: provider_id.to_string(),
         },
+        0,
         false,
         false,
         None,
-    );
-    V3ErrorHandlingCenter::project_terminal(decision)
+    )
+    .map_err(|error| {
+        relay_error_operator_fault(
+            "relay_error_operator_sdk_failure",
+            error.message,
+            Some(original_source.clone()),
+        )
+    })?;
+    finish_v3_relay_error_projection(
+        original_source,
+        run_v3_error_06_terminal_projection_operator(decision_projection, decision),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1249,12 +1410,7 @@ fn target_resolution_source(
     code: &'static str,
     error: impl std::fmt::Display,
 ) -> routecodex_v3_error::V3Error01SourceRaised {
-    build_v3_error_01_source_raised(
-        V3ErrorSourceKind::RuntimeFailure,
-        stage,
-        code,
-        error.to_string(),
-    )
+    crate::shared::raise_v3_runtime_failure_source(stage, code, error.to_string())
 }
 
 pub(crate) fn v3_relay_provider_target_selection_sample(request_id: &str) -> u64 {

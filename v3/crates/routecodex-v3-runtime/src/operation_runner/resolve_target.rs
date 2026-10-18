@@ -6,9 +6,7 @@ use crate::route_policy::{
 };
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use routecodex_v3_config::V3Config05ManifestPublished;
-use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorSourceKind,
-};
+use routecodex_v3_error::V3Error01SourceRaised;
 use routecodex_v3_virtual_router::{V3Router07OpaqueTargetHitOnce, V3VirtualRouter};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
@@ -164,8 +162,7 @@ fn resolve_target_from_value(
             let classified = router
                 .classify_request_with_facts(manifest, server_id, endpoint_path, facts)
                 .map_err(|error| {
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::RuntimeFailure,
+                    crate::shared::raise_v3_runtime_failure_source(
                         "V3Router05RequestClassified",
                         "v3_route_target_runtime_failure",
                         error.to_string(),
@@ -190,8 +187,7 @@ fn resolve_target_from_value(
                     *now_epoch_ms,
                 )
                 .map_err(|error| {
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::RuntimeFailure,
+                    crate::shared::raise_v3_runtime_failure_source(
                         "V3Router05RequestClassified",
                         "v3_route_target_runtime_failure",
                         error,
@@ -209,8 +205,7 @@ fn resolve_target_from_value(
             let opaque_hit = router
                 .hit_opaque_target_plan_once(plan, 0)
                 .map_err(|error| {
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::RuntimeFailure,
+                    crate::shared::raise_v3_runtime_failure_source(
                         "V3Router07OpaqueTargetHitOnce",
                         "v3_route_target_runtime_failure",
                         error.to_string(),

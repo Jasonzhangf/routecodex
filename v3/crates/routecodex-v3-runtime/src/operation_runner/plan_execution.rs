@@ -549,7 +549,43 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
     }
 }
 
-pub(crate) async fn run_v3_plan_execution_operator_with_probes(
+#[inline(never)]
+pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
+    target_resolved_request: Value,
+    manifest: &'a V3Config05ManifestPublished,
+    target_source: V3PlanExecutionTargetSource,
+    failure_session_scope: &'a V3ProviderFailureSessionScope,
+    provider_health: &'a V3ProviderFailureRuntimeHealth,
+    request_local_excluded_candidates: &'a BTreeSet<String>,
+    now_ms: u64,
+    deterministic_sample: u64,
+    allow_exhaustion_rescue_probe: bool,
+    preferred_selected: Option<V3Target10ConcreteProviderSelected>,
+    mode_policy: V3PlanExecutionModePolicy,
+) -> std::pin::Pin<
+    Box<
+        impl std::future::Future<
+                Output = Result<(Value, V3PlanExecutionCompleted), V3PlanExecutionStop>,
+            > + Send
+            + 'a,
+    >,
+> {
+    Box::pin(run_v3_plan_execution_with_probes_unboxed(
+        target_resolved_request,
+        manifest,
+        target_source,
+        failure_session_scope,
+        provider_health,
+        request_local_excluded_candidates,
+        now_ms,
+        deterministic_sample,
+        allow_exhaustion_rescue_probe,
+        preferred_selected,
+        mode_policy,
+    ))
+}
+
+async fn run_v3_plan_execution_with_probes_unboxed(
     target_resolved_request: Value,
     manifest: &V3Config05ManifestPublished,
     target_source: V3PlanExecutionTargetSource,
