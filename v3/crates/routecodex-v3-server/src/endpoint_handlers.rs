@@ -756,6 +756,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             Ok(output) => output,
             Err(error) => project_v3_anthropic_relay_runtime_failure(error),
         };
+        persist_v3_anthropic_relay_failure_evidence(&state, &path, &request_id, &output);
         if let Some(disposition) = output.terminal_disposition.clone() {
             return provider_terminal_response(
                 &state,
@@ -872,6 +873,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             Ok(output) => output,
             Err(error) => project_v3_gemini_relay_runtime_failure(error),
         };
+        persist_v3_gemini_relay_failure_evidence(&state, &path, &request_id, &output);
         if let Some(disposition) = output.terminal_disposition.clone() {
             return provider_terminal_response(
                 &state,
@@ -1005,6 +1007,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
             Err(error) => project_v3_responses_relay_runtime_failure(error, None),
         };
+        persist_v3_responses_relay_failure_sources(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &output,
+        );
         if let Some(disposition) = output.terminal_disposition.take() {
             // A provider terminal disposition ends the client transport without
             // a client payload, so this path never reaches the relay closeout
@@ -1127,6 +1136,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     );
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(mut relay_output) => {
+                    persist_v3_responses_relay_failure_sources(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        &relay_output,
+                    );
                     if let Some(disposition) = relay_output.terminal_disposition.take() {
                         // Same entry, same defect as the branch below: a
                         // provider terminal disposition bypasses the relay
@@ -1318,6 +1334,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 )
             }
             V3ResponsesDirectServerOutcome::RelayOutput(output) => {
+                persist_v3_responses_relay_failure_sources(
+                    &state,
+                    &entry_protocol,
+                    &path,
+                    &request_id,
+                    &output,
+                );
                 if let Some(disposition) = output.terminal_disposition.clone() {
                     // Third and last Responses terminal-disposition site: same
                     // entry, same defect, so the real typed chain and the

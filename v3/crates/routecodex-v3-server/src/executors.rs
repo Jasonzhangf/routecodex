@@ -550,6 +550,7 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
             Ok(output) => output,
             Err(error) => project_v3_anthropic_relay_runtime_failure(error),
         };
+        persist_v3_anthropic_relay_failure_evidence(state, &path, &request_id, &relay_output);
         if let Some(disposition) = relay_output.terminal_disposition.clone() {
             return provider_terminal_response(
                 state,
@@ -695,6 +696,7 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
             Ok(output) => output,
             Err(error) => project_v3_gemini_relay_runtime_failure(error),
         };
+        persist_v3_gemini_relay_failure_evidence(state, &path, &request_id, &relay_output);
         if let Some(disposition) = relay_output.terminal_disposition.clone() {
             return provider_terminal_response(
                 state,
