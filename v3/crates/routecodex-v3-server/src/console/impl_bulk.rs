@@ -1053,7 +1053,19 @@ impl V3SseConsoleFinalizer {
         ) {
             emit_v3_webui_projection_failure(&self.context, &error);
         }
-        self.emit_relay_sse_failure_console_line(499, raise_v3_sse_client_disconnect());
+        let result = routecodex_v3_runtime::foundation::project_v3_server_boundary_error_via_sdk(
+            routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
+            "V3ServerRespOutbound06ClientFrame",
+            "client_disconnect",
+            "client disconnected before provider SSE stream completed",
+            Some(499),
+        );
+        emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
+            &self.context,
+            &self.observability,
+            499,
+            result,
+        );
     }
 
     pub(crate) fn emit_relay_sse_failure_console_line(
@@ -1153,7 +1165,19 @@ impl V3DirectSseConsoleFinalizer {
         ) {
             emit_v3_webui_projection_failure(&self.context, &error);
         }
-        self.emit_direct_sse_failure_console_line(499, raise_v3_sse_client_disconnect());
+        let result = routecodex_v3_runtime::foundation::project_v3_server_boundary_error_via_sdk(
+            routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
+            "V3ServerRespOutbound06ClientFrame",
+            "client_disconnect",
+            "client disconnected before provider SSE stream completed",
+            Some(499),
+        );
+        emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
+            &self.context,
+            &self.observability,
+            499,
+            result,
+        );
     }
 
     pub(crate) fn merge_stream_observation(&mut self) -> Result<(), String> {
@@ -1166,14 +1190,16 @@ impl V3DirectSseConsoleFinalizer {
 
     pub(crate) fn emit_direct_sse_failure_console_line(
         self,
-        status: u16,
-        source: V3Error01SourceRaised,
+        result: Result<
+            routecodex_v3_error::V3Error06ClientProjected,
+            routecodex_v3_runtime::V3RelayErrorOperatorFault,
+        >,
     ) {
-        emit_v3_post_commit_sse_source_console_line_for_context(
+        emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
             &self.context,
             &self.observability,
-            status,
-            &source,
+            599,
+            result,
         );
     }
 }
@@ -1184,28 +1210,86 @@ pub(crate) fn emit_v3_post_commit_sse_source_console_line_for_context(
     status: u16,
     source: &V3Error01SourceRaised,
 ) {
-    let projected = project_v3_post_commit_sse_source(source.clone(), status);
-    emit_v3_error_console_line_for_context(
+    let result = routecodex_v3_runtime::foundation::project_v3_post_commit_sse_source_via_sdk(
+        source.clone(),
+        status,
+    );
+    emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
         context,
         observability,
-        projected.status,
-        &projected.chain,
-        Some(&projected.body),
+        status,
+        result,
     );
-    if let Err(error) = record_v3_webui_error_for_context(
-        context,
-        projected.status,
-        Some(&projected.body),
-        // Forward the typed Error06 truth this lane already holds verbatim.
-        V3ObsErrorProjection {
-            exposed: true,
-            error_class: Some(projected.error_class),
-            error_chain: &projected.chain,
-            health_action: projected.health_action.as_ref(),
-            upstream_request_id: None,
-        },
-    ) {
-        emit_v3_webui_projection_failure(context, &error);
+}
+
+pub(crate) fn emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
+    context: &V3ConsoleEmissionContext,
+    observability: &V3RuntimeObservability,
+    status: u16,
+    result: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        routecodex_v3_runtime::V3RelayErrorOperatorFault,
+    >,
+) {
+    match result {
+        Ok(projected) => {
+            emit_v3_error_console_line_for_context(
+                context,
+                observability,
+                projected.status,
+                &projected.chain,
+                Some(&projected.body),
+            );
+            if let Err(error) = record_v3_webui_error_for_context(
+                context,
+                projected.status,
+                Some(&projected.body),
+                // Forward the typed Error06 truth this lane already holds verbatim.
+                V3ObsErrorProjection {
+                    exposed: true,
+                    error_class: Some(projected.error_class),
+                    error_chain: &projected.chain,
+                    health_action: projected.health_action.as_ref(),
+                    upstream_request_id: None,
+                },
+            ) {
+                emit_v3_webui_projection_failure(context, &error);
+            }
+        }
+        Err(fault) => {
+            let policy = &fault.policy_failure;
+            let cause = fault
+                .original_source
+                .as_ref()
+                .map(|source| {
+                    format!(
+                        " cause_kind={:?} cause_stage={} cause_code={} cause_message={}",
+                        source.source_kind, source.source_stage, source.code, source.message
+                    )
+                })
+                .unwrap_or_default();
+            let line = format!(
+                "[{}] v3 post-commit sse error sdk fault req={} status={} source_kind={:?} source_stage={} code={} message={}{}",
+                context.state.server.port,
+                context.request_identity.request_id,
+                status,
+                policy.source_kind,
+                policy.source_stage,
+                policy.code,
+                policy.message,
+                cause
+            );
+            append_v3_human_console_line(&context.state, &line);
+            eprintln!("{line}");
+            if let Err(error) = record_v3_webui_error_for_context(
+                context,
+                status,
+                None,
+                V3ObsErrorProjection::default(),
+            ) {
+                emit_v3_webui_projection_failure(context, &error);
+            }
+        }
     }
 }
 

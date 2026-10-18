@@ -10,6 +10,7 @@ use std::sync::Mutex as StdMutex;
 
 mod foundation_output;
 mod local599_output;
+mod post_commit_sse_sdk_fault;
 mod websocket_sdk_fault;
 
 #[tokio::test]
@@ -3881,13 +3882,12 @@ async fn direct_live_sse_drop_after_completed_before_ping_is_completed() {
         stream_observation: Some(observation),
     };
     let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
-    let mut stream = wrap_v3_direct_live_sse_console_stream(
-        match frame.body {
-            V3Server16Body::Sse(stream) => stream,
-            _ => unreachable!("test frame owns Direct live SSE body"),
-        },
-        finalizer,
-    );
+    let client_stream = match frame.body {
+        V3Server16Body::Sse(stream) => stream,
+        _ => unreachable!("test frame owns Direct live SSE body"),
+    };
+    let mut stream: V3IoSseStream =
+        wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
     let chunk = stream.next().await.unwrap().unwrap();
     assert!(std::str::from_utf8(&chunk)
         .unwrap()
@@ -3937,13 +3937,12 @@ async fn direct_live_sse_drop_before_terminal_remains_client_disconnect() {
         stream_observation: Some(V3RuntimeStreamObservation::default()),
     };
     let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
-    let mut stream = wrap_v3_direct_live_sse_console_stream(
-        match frame.body {
-            V3Server16Body::Sse(stream) => stream,
-            _ => unreachable!("test frame owns Direct live SSE body"),
-        },
-        finalizer,
-    );
+    let client_stream = match frame.body {
+        V3Server16Body::Sse(stream) => stream,
+        _ => unreachable!("test frame owns Direct live SSE body"),
+    };
+    let mut stream: V3IoSseStream =
+        wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
     assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
     drop(stream);
 
@@ -3994,13 +3993,12 @@ async fn direct_live_sse_drop_after_failure_terminal_does_not_become_client_disc
         stream_observation: Some(observation),
     };
     let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
-    let mut stream = wrap_v3_direct_live_sse_console_stream(
-        match frame.body {
-            V3Server16Body::Sse(stream) => stream,
-            _ => unreachable!("test frame owns Direct live SSE body"),
-        },
-        finalizer,
-    );
+    let client_stream = match frame.body {
+        V3Server16Body::Sse(stream) => stream,
+        _ => unreachable!("test frame owns Direct live SSE body"),
+    };
+    let mut stream: V3IoSseStream =
+        wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
     assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
     drop(stream);
 
@@ -5018,6 +5016,7 @@ async fn responses_live_sse_error_aborts_without_failed_terminal() {
     )]);
     let body = v3_live_client_sse_body_for_protocol(
         Box::pin(provider),
+        None,
         None,
         V3SseClientProtocol::Responses,
     );

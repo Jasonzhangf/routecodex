@@ -341,12 +341,99 @@ fn v3_sse_runtime_error_source_chunk_for_protocol(
     status: u16,
     _protocol: V3SseClientProtocol,
 ) -> io::Error {
-    let projected = project_v3_post_commit_sse_source(
-        raise_v3_sse_runtime_failure(source_stage, code, message),
-        status,
+    let result = routecodex_v3_runtime::foundation::project_v3_server_boundary_error_via_sdk(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        source_stage,
+        code,
+        message,
+        Some(status),
     );
     // The typed error stays internal; Hyper must abort, not encode an error event.
-    io::Error::other(projected.error_detail)
+    v3_post_commit_sse_sdk_result_io_error(result)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum V3PostCommitSseTransportError {
+    Projected(routecodex_v3_error::V3Error06ClientProjected),
+    OperatorFault(routecodex_v3_runtime::V3RelayErrorOperatorFault),
+}
+
+impl std::fmt::Display for V3PostCommitSseTransportError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Projected(projected) => formatter.write_str(&projected.error_detail),
+            Self::OperatorFault(fault) => {
+                let policy = &fault.policy_failure;
+                match fault.original_source.as_ref() {
+                    Some(cause) => write!(
+                        formatter,
+                        "v3 post-commit sse error sdk fault policy_kind={:?} policy_stage={} policy_code={} policy_message={} cause_kind={:?} cause_stage={} cause_code={} cause_message={}",
+                        policy.source_kind,
+                        policy.source_stage,
+                        policy.code,
+                        policy.message,
+                        cause.source_kind,
+                        cause.source_stage,
+                        cause.code,
+                        cause.message
+                    ),
+                    None => write!(
+                        formatter,
+                        "v3 post-commit sse error sdk fault policy_kind={:?} policy_stage={} policy_code={} policy_message={}",
+                        policy.source_kind, policy.source_stage, policy.code, policy.message
+                    ),
+                }
+            }
+        }
+    }
+}
+
+impl std::error::Error for V3PostCommitSseTransportError {}
+
+pub(crate) fn find_v3_post_commit_sse_transport_error<'a>(
+    mut error: &'a (dyn std::error::Error + 'static),
+) -> Option<&'a V3PostCommitSseTransportError> {
+    loop {
+        if let Some(found) = error.downcast_ref::<V3PostCommitSseTransportError>() {
+            return Some(found);
+        }
+        if let Some(inner) = error
+            .downcast_ref::<io::Error>()
+            .and_then(io::Error::get_ref)
+        {
+            error = inner;
+            continue;
+        }
+        error = error.source()?;
+    }
+}
+
+fn v3_post_commit_sse_sdk_result_io_error(
+    result: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        routecodex_v3_runtime::V3RelayErrorOperatorFault,
+    >,
+) -> io::Error {
+    v3_post_commit_sse_sdk_result_io_error_with_sdk_fallback(result, true)
+}
+
+fn v3_post_commit_sse_sdk_result_io_error_with_sdk_fallback(
+    result: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        routecodex_v3_runtime::V3RelayErrorOperatorFault,
+    >,
+    emit_sdk_fallback: bool,
+) -> io::Error {
+    match result {
+        Ok(projected) => io::Error::other(V3PostCommitSseTransportError::Projected(projected)),
+        Err(fault) => {
+            let rendered = V3PostCommitSseTransportError::OperatorFault(fault);
+            if emit_sdk_fallback {
+                eprintln!("[v3-sse-internal-error] {rendered}");
+            }
+            io::Error::other(rendered)
+        }
+    }
 }
 
 pub(crate) fn responses_direct_output_response_with_console(
@@ -380,7 +467,6 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
         }
         V3Server16Body::Bytes(bytes) => bytes,
         V3Server16Body::Sse(stream) => {
-            let stream = wrap_v3_direct_live_sse_console_stream(stream, stream_console_finalizer);
             let keepalive = frame
                 .error_chain
                 .is_empty()
@@ -388,7 +474,10 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
                 .flatten();
             return builder
                 .body(v3_live_client_sse_body_for_protocol(
-                    stream, keepalive, protocol,
+                    stream,
+                    stream_console_finalizer,
+                    keepalive,
+                    protocol,
                 ))
                 .expect("typed response");
         }
@@ -563,35 +652,50 @@ pub(crate) fn wrap_v3_direct_committed_sse_console_stream(
 pub(crate) fn wrap_v3_direct_live_sse_console_stream(
     stream: V3ClientSseStream,
     finalizer: Option<V3DirectSseConsoleFinalizer>,
-) -> V3ClientSseStream {
-    let Some(finalizer) = finalizer else {
-        return stream;
-    };
+) -> V3IoSseStream {
     Box::pin(V3DirectLiveSseConsoleStream {
         stream,
-        finalizer: Some(finalizer),
+        finalizer,
+        terminated_after_error: false,
     })
 }
 
 struct V3DirectLiveSseConsoleStream {
     stream: V3ClientSseStream,
     finalizer: Option<V3DirectSseConsoleFinalizer>,
+    terminated_after_error: bool,
 }
 
 impl futures_util::Stream for V3DirectLiveSseConsoleStream {
-    type Item = Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>;
+    type Item = Result<Vec<u8>, io::Error>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
+        if self.terminated_after_error {
+            return std::task::Poll::Ready(None);
+        }
         match self.stream.as_mut().poll_next(cx) {
             std::task::Poll::Ready(Some(Ok(chunk))) => std::task::Poll::Ready(Some(Ok(chunk))),
-            std::task::Poll::Ready(Some(Err(error))) => {
-                if let Some(finalizer) = self.finalizer.take() {
-                    finalizer.emit_direct_sse_failure_console_line(599, error.clone());
-                }
-                std::task::Poll::Ready(Some(Err(error)))
+            std::task::Poll::Ready(Some(Err(source))) => {
+                self.terminated_after_error = true;
+                let result =
+                    routecodex_v3_runtime::foundation::project_v3_post_commit_sse_source_via_sdk(
+                        source, 599,
+                    );
+                let has_finalizer = if let Some(finalizer) = self.finalizer.take() {
+                    finalizer.emit_direct_sse_failure_console_line(result.clone());
+                    true
+                } else {
+                    false
+                };
+                std::task::Poll::Ready(Some(Err(
+                    v3_post_commit_sse_sdk_result_io_error_with_sdk_fallback(
+                        result,
+                        !has_finalizer,
+                    ),
+                )))
             }
             std::task::Poll::Ready(None) => {
                 if let Some(finalizer) = self.finalizer.take() {
@@ -648,6 +752,7 @@ pub(crate) fn v3_live_client_sse_body(
 ) -> Body {
     v3_live_client_sse_body_for_protocol(
         stream,
+        None,
         keepalive_interval,
         V3SseClientProtocol::OpenAiChat,
     )
@@ -655,25 +760,12 @@ pub(crate) fn v3_live_client_sse_body(
 
 pub(crate) fn v3_live_client_sse_body_for_protocol(
     stream: V3ClientSseStream,
+    finalizer: Option<V3DirectSseConsoleFinalizer>,
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Body {
-    // Failures already entered the typed Error chain. Abort the transfer;
-    // neither an error event nor a clean EOF may disguise an incomplete response.
-    let stream: V3IoSseStream = Box::pin(stream::unfold(
-        (stream, false),
-        move |(mut stream, done)| async move {
-            if done {
-                return None;
-            }
-            match stream.next().await {
-                Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-                Some(Err(source)) => Some((Err(io::Error::other(source.message)), (stream, true))),
-                None => None,
-            }
-        },
-    ));
-    v3_io_sse_body_for_protocol(Box::pin(stream), keepalive_interval, protocol)
+    let stream = wrap_v3_direct_live_sse_console_stream(stream, finalizer);
+    v3_io_sse_body_for_protocol(stream, keepalive_interval, protocol)
 }
 
 pub(crate) fn wrap_v3_committed_sse_dump_stream(
@@ -826,13 +918,19 @@ fn v3_io_sse_body_for_protocol(
             match stream.next().await {
                 Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
                 Some(Err(error)) => Some((
-                    Err(v3_sse_runtime_error_source_chunk_for_protocol(
-                        "V3ServerRespOutbound05ClientFrame",
-                        "internal_response_stream_error",
-                        format!("internal response stream failed: {error}"),
-                        599,
-                        protocol,
-                    )),
+                    Err(
+                        if find_v3_post_commit_sse_transport_error(&error).is_some() {
+                            error
+                        } else {
+                            v3_sse_runtime_error_source_chunk_for_protocol(
+                                "V3ServerRespOutbound05ClientFrame",
+                                "internal_response_stream_error",
+                                format!("internal response stream failed: {error}"),
+                                599,
+                                protocol,
+                            )
+                        },
+                    ),
                     (stream, true),
                 )),
                 None => None,
@@ -852,13 +950,17 @@ fn v3_io_sse_body_for_protocol(
                 {
                     Ok(Some(Ok(bytes))) => Some((Ok::<Vec<u8>, io::Error>(bytes), (stream, false))),
                     Ok(Some(Err(error))) => {
-                        let frame = v3_sse_runtime_error_source_chunk_for_protocol(
-                            "V3ServerRespOutbound05ClientFrame",
-                            "front_sse_io_stream_failed",
-                            error.to_string(),
-                            599,
-                            protocol,
-                        );
+                        let frame = if find_v3_post_commit_sse_transport_error(&error).is_some() {
+                            error
+                        } else {
+                            v3_sse_runtime_error_source_chunk_for_protocol(
+                                "V3ServerRespOutbound05ClientFrame",
+                                "front_sse_io_stream_failed",
+                                error.to_string(),
+                                599,
+                                protocol,
+                            )
+                        };
                         Some((Err(frame), (Box::pin(stream::empty()), true)))
                     }
                     Ok(None) => None,
@@ -910,13 +1012,17 @@ fn v3_io_sse_body_for_protocol(
             match next {
                 Some((Ok(bytes), state)) => Some((Ok(bytes), state)),
                 Some((Err(error), (stream, interval, _, keepalive_chunk))) => {
-                    let frame = v3_sse_runtime_error_source_chunk_for_protocol(
-                        "V3ServerRespOutbound05ClientFrame",
-                        "front_sse_io_stream_failed",
-                        error.to_string(),
-                        599,
-                        protocol,
-                    );
+                    let frame = if find_v3_post_commit_sse_transport_error(&error).is_some() {
+                        error
+                    } else {
+                        v3_sse_runtime_error_source_chunk_for_protocol(
+                            "V3ServerRespOutbound05ClientFrame",
+                            "front_sse_io_stream_failed",
+                            error.to_string(),
+                            599,
+                            protocol,
+                        )
+                    };
                     Some((
                         Err(frame),
                         (Box::pin(stream::empty()), interval, false, keepalive_chunk),

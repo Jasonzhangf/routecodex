@@ -148,6 +148,22 @@ pub fn project_v3_server_websocket_error_via_sdk(
     )
 }
 
+/// Project an already-raised Source through the REST error SDK.
+///
+/// Post-commit producers own reaching a real `V3Error01SourceRaised`. Running
+/// Err01 again would replace that source with a synthetic local failure.
+pub fn project_v3_post_commit_sse_source_via_sdk(
+    source: V3Error01SourceRaised,
+    status: u16,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    project_v3_relay_error_source(source, V3ErrorActionScope::None, 0, Some(status)).map(
+        |mut projected| {
+            projected.status = status;
+            projected
+        },
+    )
+}
+
 pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
     raw: V3Server03HttpRequestRaw,
     manifest: &V3Config05ManifestPublished,
