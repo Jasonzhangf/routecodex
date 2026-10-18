@@ -285,7 +285,7 @@ async fn handle_v3_responses_relay_provider_failure(
     if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
     }
-    let result = run_v3_relay_provider_failure_policy(
+    let result = match run_v3_relay_provider_failure_policy(
         context,
         selected,
         failure.source_stage,
@@ -306,7 +306,14 @@ async fn handle_v3_responses_relay_provider_failure(
         },
     )
     .await
-    .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)?;
+    {
+        Ok(result) => result,
+        Err(Ok(error)) => return Err(V3ResponsesRelayRuntimeError::ProviderHealth(error)),
+        Err(Err(fault)) => {
+            failure.error_operator_fault = Some(fault);
+            return Ok(Some(failure));
+        }
+    };
     // Carry the real upstream HTTP status (if any) into the policy event so the
     // failure observation can separate it from the client projection status.
     let mut policy_event = result.event.clone();
@@ -1255,6 +1262,10 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
 
         let output = output.expect("operator fault must remain terminal");
         assert_eq!(output.error_operator_fault, Some(fault));
+        assert!(
+            output.terminal_projection.is_none(),
+            "synthetic Source01 fault must not become a client projection"
+        );
         assert!(failed_candidates.is_empty());
         assert!(same_candidate_retries.is_empty());
         assert!(retry_selected.is_none());

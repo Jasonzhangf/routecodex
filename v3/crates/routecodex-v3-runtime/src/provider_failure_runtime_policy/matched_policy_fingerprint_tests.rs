@@ -75,7 +75,7 @@ message_mode = "code_only"
                 "matched class failure",
                 100 + index as u64,
             )
-            .expect("matched-policy failure should record");
+            .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
         assert_eq!(
             record.failure_count, 1,
             "class {class} must start its own streak instead of inheriting the other class' count"

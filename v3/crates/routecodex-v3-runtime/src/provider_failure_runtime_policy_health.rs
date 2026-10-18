@@ -413,7 +413,7 @@ impl V3ProviderFailureRuntimeHealth {
         error_type: Option<&str>,
         message: &str,
         now_ms: u64,
-    ) -> Result<V3ProviderFailureRecord, String> {
+    ) -> Result<V3ProviderFailureRecord, Result<String, V3RelayErrorOperatorFault>> {
         self.record_provider_failure_record_with_policy_for_interface(
             matched_policy_directive,
             _manifest,
@@ -448,30 +448,30 @@ impl V3ProviderFailureRuntimeHealth {
         error_type: Option<&str>,
         message: &str,
         now_ms: u64,
-    ) -> Result<V3ProviderFailureRecord, String> {
+    ) -> Result<V3ProviderFailureRecord, Result<String, V3RelayErrorOperatorFault>> {
         let code = error_type.unwrap_or("provider_failure").to_string();
         let (source_projection, source) =
-            crate::operation_runner::run_v3_err01_source_raised_operator(
+            raise_v3_source_via_err01(
                 V3ErrorSourceKind::ProviderFailure,
                 source_stage,
-                code.clone(),
+                code,
                 message,
-                crate::operation_runner::V3Err01SourceInput::External(V3ExternalErrorLink {
+                V3Err01SourceInput::External(V3ExternalErrorLink {
                     kind: V3ExternalErrorKind::Provider,
                     status: Some(status),
-                    code: Some(code),
+                    code: error_type.map(str::to_string),
                     provider_id: Some(provider_id.to_string()),
                     upstream_request_id: None,
                     message: Some(message.to_string()),
                 }),
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(Err)?;
         let (_, classified) = crate::operation_runner::run_v3_err02_classified_operator(
             source_projection,
             source,
             None,
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| Ok(error.to_string()))?;
         let failure_action = build_v3_provider_failure_action_from_v3_error_02(&classified);
         if let Some(policy) = matched_policy_directive
             .map(|policy| {
@@ -481,7 +481,8 @@ impl V3ProviderFailureRuntimeHealth {
                     failure_action.recovery,
                 )
             })
-            .transpose()?
+            .transpose()
+            .map_err(Ok)?
             .flatten()
         {
             return self
@@ -497,7 +498,7 @@ impl V3ProviderFailureRuntimeHealth {
                     now_ms,
                     Some(policy),
                 )
-                .map_err(|error| error.to_string());
+                .map_err(|error| Ok(error.to_string()));
         }
         // 统一错误模型：任何 provider 失败（含 400/invalid_request）都按
         // internal 全局策略表盖章阈值后计入全局健康；连续达到阈值即进入
@@ -515,7 +516,8 @@ impl V3ProviderFailureRuntimeHealth {
             model_id,
             &action,
             now_ms,
-        )?;
+        )
+        .map_err(Ok)?;
         let session_record = self
             .record_provider_failure_in_session_without_health_cooldown_for_interface(
                 failure_session_scope,
@@ -525,7 +527,8 @@ impl V3ProviderFailureRuntimeHealth {
                 model_id,
                 reason,
                 now_ms,
-            )?;
+            )
+            .map_err(Ok)?;
         let Some(projection) = projection else {
             return Ok(session_record);
         };
