@@ -413,6 +413,38 @@ fn error_output(
     mut trace: Vec<&'static str>,
 ) -> V3AnthropicRelayRuntimeOutput {
     let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
+    error_output_from_projection(projected, trace)
+}
+
+fn error_output_from_projection(
+    projected: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    trace: Vec<&'static str>,
+) -> V3AnthropicRelayRuntimeOutput {
+    let projected = match projected {
+        Ok(projected) => projected,
+        Err(fault) => {
+            return V3AnthropicRelayRuntimeOutput {
+                status: 599,
+                terminal_disposition: Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                ),
+                client_response: Value::Null,
+                client_body: V3AnthropicRelayClientBody::Json,
+                node_trace: trace,
+                error_chain: None,
+                servertool_followup_required: false,
+                observability: None,
+                provider_failure_attempts: Vec::new(),
+                diagnostic_source: Some(fault.policy_failure),
+                diagnostic_cause: fault.original_source,
+                stream_observation: None,
+                provider_snapshots: None,
+            }
+        }
+    };
     V3AnthropicRelayRuntimeOutput {
         status: projected.status,
         terminal_disposition: None,
@@ -722,10 +754,7 @@ mod tests {
             diagnostic_source.source_kind,
             routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
         );
-        assert_eq!(
-            diagnostic_source.code,
-            "relay_error_projection_nonterminal"
-        );
+        assert_eq!(diagnostic_source.code, "relay_error_projection_nonterminal");
         assert_eq!(diagnostic_cause, source);
         assert_eq!(output.provider_failure_attempts, attempts);
     }

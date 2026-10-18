@@ -530,15 +530,14 @@ pub(crate) fn error_output(
     mut observability: Option<V3RuntimeObservability>,
     candidates_remaining: usize,
 ) -> V3ResponsesRelayRuntimeOutput {
-    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+    let projected = crate::provider_failure_runtime_policy::project_v3_relay_error_source(
         source,
-        action_scope: V3ErrorActionScope::ProviderInstance {
+        V3ErrorActionScope::ProviderInstance {
             provider_id: provider_id.to_string(),
         },
         candidates_remaining,
-        source_status: Some(status),
-    });
-    trace.extend(V3_ERROR_CHAIN_NODE_IDS);
+        Some(status),
+    );
     if let Some(observability) = observability.as_mut() {
         observability.response_status = Some("error".to_string());
         // `status` is the internal projection status (598/599/400/500), not an
@@ -548,6 +547,39 @@ pub(crate) fn error_output(
             observability.provider_id = Some(provider_id.to_string());
         }
     }
+    local_error_output_from_projection(projected, trace, observability)
+}
+
+fn local_error_output_from_projection(
+    projected: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    mut trace: Vec<&'static str>,
+    observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesRelayRuntimeOutput {
+    let projected = match projected {
+        Ok(projected) => projected,
+        Err(fault) => {
+            return V3ResponsesRelayRuntimeOutput {
+                status: 599,
+                terminal_disposition: Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                ),
+                client_body: V3ResponsesRelayClientBody::Json(Value::Null),
+                node_trace: trace,
+                error_chain: None,
+                observability,
+                diagnostic_source: Some(fault.policy_failure),
+                diagnostic_cause: fault.original_source,
+                stream_observation: None,
+                finalized_response: None,
+                provider_snapshots: None,
+                protocol_direct_handoff: None,
+            }
+        }
+    };
+    trace.extend(V3_ERROR_CHAIN_NODE_IDS);
     V3ResponsesRelayRuntimeOutput {
         status: projected.status,
         terminal_disposition: None,

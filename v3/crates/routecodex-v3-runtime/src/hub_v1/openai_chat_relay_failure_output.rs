@@ -54,6 +54,38 @@ pub(super) fn error_output(
     mut trace: Vec<&'static str>,
 ) -> V3OpenAiChatRelayRuntimeOutput {
     let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
+    error_output_from_projection(projected, trace)
+}
+
+fn error_output_from_projection(
+    projected: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    trace: Vec<&'static str>,
+) -> V3OpenAiChatRelayRuntimeOutput {
+    let projected = match projected {
+        Ok(projected) => projected,
+        Err(fault) => {
+            return V3OpenAiChatRelayRuntimeOutput {
+                status: 599,
+                terminal_disposition: Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                ),
+                client_body: V3OpenAiChatRelayClientBody::Json(Value::Null),
+                node_trace: trace,
+                error_chain: None,
+                error_class: None,
+                error_detail: None,
+                provider_failure_attempts: Vec::new(),
+                diagnostic_source: Some(fault.policy_failure),
+                diagnostic_cause: fault.original_source,
+                observability: None,
+                stream_observation: None,
+                provider_snapshots: None,
+            }
+        }
+    };
     let error_class = projected.error_class;
     let error_detail = projected.error_detail.clone();
     V3OpenAiChatRelayRuntimeOutput {

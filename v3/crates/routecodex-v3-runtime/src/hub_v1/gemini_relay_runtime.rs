@@ -557,6 +557,37 @@ pub fn project_v3_gemini_relay_runtime_failure(
         "none",
         Vec::new(),
     );
+    gemini_error_output_from_projection(projected, trace, provider_pool_exhausted)
+}
+
+fn gemini_error_output_from_projection(
+    projected: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    trace: Vec<&'static str>,
+    provider_pool_exhausted: bool,
+) -> V3GeminiRelayRuntimeOutput {
+    let projected = match projected {
+        Ok(projected) => projected,
+        Err(fault) => {
+            return V3GeminiRelayRuntimeOutput {
+                status: 599,
+                terminal_disposition: Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                ),
+                client_body: V3GeminiRelayClientBody::Json(Value::Null),
+                node_trace: trace,
+                error_chain: None,
+                observability: None,
+                provider_failure_attempts: Vec::new(),
+                diagnostic_source: Some(fault.policy_failure),
+                diagnostic_cause: fault.original_source,
+                stream_observation: None,
+                provider_snapshots: None,
+            }
+        }
+    };
     V3GeminiRelayRuntimeOutput {
         status: projected.status,
         terminal_disposition: provider_pool_exhausted

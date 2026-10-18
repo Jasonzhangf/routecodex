@@ -730,16 +730,24 @@ pub fn error_output(
     status: u16,
     provider_id: &str,
     mut trace: Vec<&'static str>,
-) -> (V3Error06ClientProjected, Vec<&'static str>) {
-    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+) -> (
+    Result<
+        V3Error06ClientProjected,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    Vec<&'static str>,
+) {
+    let projected = crate::provider_failure_runtime_policy::project_v3_relay_error_source(
         source,
-        action_scope: V3ErrorActionScope::ProviderInstance {
+        V3ErrorActionScope::ProviderInstance {
             provider_id: provider_id.to_string(),
         },
-        candidates_remaining: 0,
-        source_status: Some(status),
-    });
-    trace.extend(V3_ERROR_CHAIN_NODE_IDS);
+        0,
+        Some(status),
+    );
+    if projected.is_ok() {
+        trace.extend(V3_ERROR_CHAIN_NODE_IDS);
+    }
     (projected, trace)
 }
 
