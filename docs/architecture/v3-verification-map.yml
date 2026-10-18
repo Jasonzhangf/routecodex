@@ -3234,10 +3234,12 @@ features:
 - feature_id: v3.history_image_cleanup
   status: active_latest_image_preservation
   change_risk: medium
-  owner_kind: rust_project_v3_req_inbound_normalization
-  owner_scope: ReqInbound preserves the latest image-bearing carrier despite later text-only reminders and cleans earlier images; ProviderReqCompat06 preserves representable latest images and paired tool receipts independently of target capability metadata.
+  owner_kind: rust_project_v3_runtime_chat_process_gate
+  owner_scope: history_image_cleanup owns the stateless latest-carrier image normalization rule. Relay invokes it from Chat Process Req04 in relay_request.rs; Inbound remains lossless and does not rewrite payload. Direct reaches it only through its existing registered request standardization/hook path. ProviderReqCompat06 preserves representable latest images and paired tool receipts independently of target capability metadata.
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target

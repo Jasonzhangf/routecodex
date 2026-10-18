@@ -317,6 +317,9 @@ fn govern_chat_request_at_req04(
     if let Some(key) = find_v3_hub_side_channel_key(normalized.payload()) {
         return Err(V3HubRelayRequestError::SideChannelLeaked { key });
     }
+    super::normalize_v3_history_image_placeholders(Arc::make_mut(
+        &mut normalized.previous.payload.0,
+    ));
     if normalized.entry_protocol() == V3HubEntryProtocol::Responses
         && profile.memory_raw_capture_enabled()
         && !normalized.memory_raw_capture_guidance_injected

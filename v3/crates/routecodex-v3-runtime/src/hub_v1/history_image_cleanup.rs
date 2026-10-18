@@ -1,8 +1,10 @@
 // feature: 唯一登记的历史 payload 清理例外 —— 历史图片统一占位清理
 //
 // 规则（Jason 2026-10-06）：
-// - 所有请求在 inbound 归一化阶段统一执行（Relay ReqInbound02 + Direct
-//   V3Req04StandardizedResponses 共用本纯函数）。
+// - 唯一实现是本文件的纯函数。Relay 由 Chat Process Req04
+//   （relay_request.rs::govern_chat_request_at_req04）调用；ReqInbound 保持
+//   lossless，不执行 payload 重写。Direct 沿用已注册的 request
+//   standardization/hook 入口，并在这些入口内复用同一纯函数。
 // - 仅清理最后一条图片载体之前的图片；最后一条消息/工具结果中的图片全部保留。
 //   后续纯文本提醒不改变图片边界；保留的图片驱动 multimodal 路由。
 // - 历史图片 part 原位替换为统一固定文本占位符 {"type":"text","text":"[Image]"}
