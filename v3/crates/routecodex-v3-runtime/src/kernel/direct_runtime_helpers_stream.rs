@@ -1113,10 +1113,6 @@ pub(crate) fn provider_terminal_output(
     provider_request_snapshot: Option<serde_json::Value>,
     provider_response_snapshot: Option<serde_json::Value>,
 ) -> V3ResponsesDirectRuntimeOutput {
-    let terminal = decision
-        .clone()
-        .try_into_terminal()
-        .expect("provider terminal output requires terminal Error05 decision");
     let decision_projection = match serde_json::to_value(&decision) {
         Ok(projection) => projection,
         Err(error) => {
@@ -1131,7 +1127,10 @@ pub(crate) fn provider_terminal_output(
             )
         }
     };
-    let disposition = V3ErrorHandlingCenter::provider_terminal_disposition(terminal, witness);
+    let disposition = match witness {
+        Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
+        None => V3ProviderTerminalDisposition::NoResponse,
+    };
     provider_terminal_output_with_decision_projection(
         decision,
         decision_projection,
@@ -1444,6 +1443,90 @@ mod target_exhaustion_disposition_tests {
         };
         let request_snapshot = json!({"model": "provider-wire-model"});
         let response_snapshot = json!({"status": 200, "body": {"id": "provider-response"}});
+
+        let nonterminal_source = routecodex_v3_error::build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3Transport13ResponsesHttpRequest",
+            "provider_transport_error",
+            "provider connection failed",
+        );
+        let nonterminal_recovery = V3Error05RecoveryAdmissionWitness::new(
+            V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
+                .expect("test session scope must be valid"),
+            "provider-a:key-a:model-a",
+            "provider_transport_error",
+            1,
+        )
+        .expect("test recovery witness must be valid");
+        let nonterminal_decision = V3ErrorHandlingCenter::decide_provider(
+            V3ErrorHandlingCenterInput {
+                source: nonterminal_source.clone(),
+                action_scope: V3ErrorActionScope::ProviderKeyModel {
+                    provider_id: "provider-a".to_string(),
+                    auth_alias: "key-a".to_string(),
+                    model_id: "model-a".to_string(),
+                },
+                candidates_remaining: 1,
+                source_status: Some(200),
+            },
+            false,
+            false,
+            Some(nonterminal_recovery),
+        );
+        assert_eq!(
+            nonterminal_decision.action,
+            V3Error05ExecutionAction::WaitThenReselect {
+                recovery: nonterminal_decision
+                    .action
+                    .recovery_witness()
+                    .expect("nonterminal decision must retain recovery")
+                    .clone(),
+            }
+        );
+        let nonterminal = provider_terminal_output(
+            nonterminal_decision,
+            Some(witness.clone()),
+            vec!["V3ProviderResp14Raw"],
+            Some(observability.clone()),
+            Some(request_snapshot.clone()),
+            Some(response_snapshot.clone()),
+        );
+        let nonterminal_fault = nonterminal
+            .diagnostic_source
+            .as_ref()
+            .expect("failed SDK06 must retain the generated RuntimeFailure");
+        assert_eq!(
+            nonterminal_fault.source_kind,
+            V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(nonterminal_fault.source_stage, "V3Error06ClientProjected");
+        assert_eq!(nonterminal_fault.code, "v3_route_target_runtime_failure");
+        assert_eq!(
+            nonterminal.diagnostic_cause.as_ref(),
+            Some(&nonterminal_source)
+        );
+        assert_eq!(
+            nonterminal.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::ExternalHttp(witness.clone()))
+        );
+        assert_eq!(
+            nonterminal.provider_request_snapshot.as_ref(),
+            Some(&request_snapshot)
+        );
+        assert_eq!(
+            nonterminal.provider_response_snapshot.as_ref(),
+            Some(&response_snapshot)
+        );
+        assert_eq!(nonterminal.observability, Some(observability.clone()));
+        assert_eq!(nonterminal.node_trace, vec!["V3ProviderResp14Raw"]);
+        assert_eq!(nonterminal.error_chain, None);
+        assert!(nonterminal.stream_observation.is_none());
+        assert!(nonterminal.protocol_relay_handoff.is_none());
+        assert_eq!(nonterminal.client_payload.status, 599);
+        assert!(matches!(
+            &nonterminal.client_payload.body,
+            V3ClientBody::Json(value) if value.is_null()
+        ));
 
         let output = provider_terminal_output_with_decision_projection(
             decision,
