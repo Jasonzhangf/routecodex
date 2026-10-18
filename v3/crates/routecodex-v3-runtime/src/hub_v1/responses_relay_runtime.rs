@@ -282,7 +282,7 @@ async fn handle_v3_responses_relay_provider_failure(
     mut failure: V3ResponsesRelayProviderFailure,
     state: &mut V3ResponsesRelayProviderRetryState<'_>,
 ) -> Result<Option<V3ResponsesRelayProviderFailure>, V3ResponsesRelayRuntimeError> {
-    if failure.terminal_projection.is_some() {
+    if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
     }
     let result = run_v3_relay_provider_failure_policy(
@@ -1139,6 +1139,141 @@ pub(crate) fn provider_target(
         initial_concurrency_budget: selected.initial_concurrency_budget,
         concurrency_acquire_timeout_ms: selected.concurrency_acquire_timeout_ms,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider_failure_runtime_policy::{
+        resolve_v3_relay_target_outcome, V3RelayProviderTargetResolution,
+    };
+    use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+
+    fn operator_fault_manifest() -> V3Config05ManifestPublished {
+        let source = r#"
+version = 3
+[servers.operator_fault]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "operator_fault"
+endpoints = ["responses"]
+[providers.primary]
+type = "responses"
+base_url = "http://primary.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "OPERATOR_FAULT_KEY" }] }
+[providers.primary.models.gpt-test]
+wire_name = "gpt-test"
+[route_groups.operator_fault.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", key = "key", priority = 1 }]
+"#;
+        compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(source).expect("operator-fault authoring"),
+        )
+        .expect("operator-fault manifest")
+    }
+
+    #[tokio::test]
+    async fn operator_fault_short_circuits_before_retry_health_and_candidate_mutation() {
+        let manifest = operator_fault_manifest();
+        let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+        let failure_session_scope =
+            V3ProviderFailureSessionScope::new("operator_fault", "operator_fault", "session")
+                .expect("operator-fault session scope");
+        let selected = match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
+            manifest: &manifest,
+            server_id: "operator_fault",
+            failure_session_scope: &failure_session_scope,
+            entry_kind: "responses",
+            endpoint_path: "/v1/responses",
+            body: &json!({"model": "gpt-test", "input": "hello"}),
+            request_local_excluded_candidates: &BTreeSet::new(),
+            provider_health: &health,
+            now_ms: 0,
+            deterministic_sample: 0,
+        }) {
+            V3RelayProviderTargetResolution::Selected(selected) => selected,
+            _ => panic!("fixture must select its provider"),
+        };
+        let source = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "relay_error_projection_nonterminal",
+            "Error06 SDK completed without a terminal client projection",
+        );
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source,
+            Ok(None),
+        )
+        .expect_err("missing Error06 must produce the actual typed SDK fault");
+        let failure = V3ResponsesRelayProviderFailure {
+            status: 502,
+            provider_status: None,
+            policy_error_type: "provider_request_compat_error".to_string(),
+            policy_error_message: "operator fault must not enter provider policy".to_string(),
+            provider_id: selected.candidate.provider_id.clone(),
+            source_stage: "ProviderReqCompat06ProviderCompat",
+            observability: None,
+            terminal_projection: None,
+            terminal_disposition: None,
+            error_operator_fault: Some(fault.clone()),
+            matched_policy: None,
+        };
+        let context = V3RelayProviderFailurePolicyContext {
+            manifest: &manifest,
+            captured_target_09: None,
+            failure_session_scope: failure_session_scope.clone(),
+            provider_health: &health,
+            retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+            deterministic_sample: 0,
+        };
+        let mut last_external_http = None;
+        let mut failed_candidates = BTreeSet::new();
+        let mut same_candidate_retries = BTreeMap::new();
+        let mut retry_selected = None;
+        let mut pending_recovery = None;
+        let mut provider_failure_events = Vec::new();
+        let selected_observability = V3RuntimeObservability::default();
+        let mut trace = Vec::new();
+        let mut state = V3ResponsesRelayProviderRetryState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            retry_selected: &mut retry_selected,
+            pending_recovery: &mut pending_recovery,
+            provider_failure_events: &mut provider_failure_events,
+            provider_failure_event_sink: None,
+            selected_observability: &selected_observability,
+            trace: &mut trace,
+            last_external_http: &mut last_external_http,
+        };
+
+        let output =
+            handle_v3_responses_relay_provider_failure(&context, selected, failure, &mut state)
+                .await
+                .expect("operator fault must exit without a policy error");
+
+        let output = output.expect("operator fault must remain terminal");
+        assert_eq!(output.error_operator_fault, Some(fault));
+        assert!(failed_candidates.is_empty());
+        assert!(same_candidate_retries.is_empty());
+        assert!(retry_selected.is_none());
+        assert!(pending_recovery.is_none());
+        assert!(provider_failure_events.is_empty());
+        assert!(trace.is_empty());
+        assert!(
+            health
+                .store()
+                .availability_for_session(
+                    &failure_session_scope,
+                    "primary",
+                    Some("key"),
+                    Some("gpt-test"),
+                    u64::MAX,
+                )
+                .available
+        );
+    }
 }
 
 #[cfg(test)]
