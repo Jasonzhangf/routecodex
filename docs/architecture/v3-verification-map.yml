@@ -4066,6 +4066,9 @@ features:
     - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_govern_operator_uses_sdk_output_as_business_payload
   required_gates:
   - npm run verify:v3-operation-runner-dagpipe
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib typed_planning_failure_is_sdk_error_and_keeps_original_source -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib protocol_candidate_keys_raise_only_actual_failures -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server error01_protocol_decision_normal_http_failure_no_client_error -- --nocapture
   - npm run test:v3-operation-runner-red-fixtures
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime operation_runner --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_req_compat_06_provider_compat --lib
