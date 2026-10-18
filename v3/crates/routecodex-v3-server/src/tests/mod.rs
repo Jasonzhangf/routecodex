@@ -556,6 +556,146 @@ fn failure_evidence_preserves_distinct_terminal_sources() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn relay_consumers_preserve_sources_without_observation_or_attempts() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-relay-source-consumers-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let (runtime, mut worker) = start_test_codex_sample_worker(&state);
+    let cause = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
+        "V3ProviderReqOutbound09TransportRequest",
+        "client_disconnect",
+        "client closed",
+    );
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3Error06ClientProjected",
+        "relay_error_operator_sdk_failure",
+        "SDK rejected input",
+    );
+    let chat = V3OpenAiChatRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        client_body: routecodex_v3_runtime::V3OpenAiChatRelayClientBody::Json(Value::Null),
+        node_trace: Vec::new(),
+        error_chain: None,
+        error_class: None,
+        error_detail: None,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(source.clone()),
+        diagnostic_cause: Some(cause.clone()),
+    };
+    persist_v3_chat_failure_evidence(
+        &state,
+        "openai_chat",
+        "/v1/chat/completions",
+        "relay-chat",
+        &chat,
+    );
+    let anthropic = V3AnthropicRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        client_response: Value::Null,
+        client_body: routecodex_v3_runtime::V3AnthropicRelayClientBody::Json,
+        node_trace: Vec::new(),
+        error_chain: None,
+        servertool_followup_required: false,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(source.clone()),
+        diagnostic_cause: Some(cause.clone()),
+    };
+    persist_v3_anthropic_relay_failure_evidence(
+        &state,
+        "/v1/messages",
+        "relay-anthropic",
+        &anthropic,
+    );
+    let gemini = V3GeminiRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        client_body: routecodex_v3_runtime::V3GeminiRelayClientBody::Json(Value::Null),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(source.clone()),
+        diagnostic_cause: Some(cause.clone()),
+    };
+    persist_v3_gemini_relay_failure_evidence(
+        &state,
+        "/v1beta/models/model:generateContent",
+        "relay-gemini",
+        &gemini,
+    );
+    let responses = V3ResponsesRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        client_body: routecodex_v3_runtime::V3ResponsesRelayClientBody::Json(Value::Null),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+        finalized_response: None,
+        protocol_direct_handoff: None,
+        diagnostic_source: Some(source.clone()),
+        diagnostic_cause: Some(cause.clone()),
+    };
+    persist_v3_responses_relay_failure_sources(
+        &state,
+        "responses",
+        "/v1/responses",
+        "relay-responses",
+        &responses,
+    );
+    runtime.block_on(worker.wait_until_idle()).unwrap();
+    for (protocol, request) in [
+        ("openai-chat-completions", "relay-chat"),
+        ("anthropic-messages", "relay-anthropic"),
+        ("gemini-generate-content", "relay-gemini"),
+        ("openai-responses", "relay-responses"),
+    ] {
+        let path = root
+            .join(".rcc/codex-samples")
+            .join(protocol)
+            .join("ports/5555")
+            .join(request)
+            .join("provider-failed-attempts.json");
+        let evidence: Value = serde_json::from_str(
+            &fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display())),
+        )
+        .unwrap();
+        assert_eq!(
+            evidence["terminal_source"],
+            serde_json::to_value(&source).unwrap()
+        );
+        assert_eq!(
+            evidence["terminal_cause"],
+            serde_json::to_value(&cause).unwrap()
+        );
+        assert_eq!(evidence["attempts"], json!([]));
+    }
+    runtime.block_on(worker.shutdown());
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[tokio::test]
 async fn responses_direct_policy_failure_consumer_preserves_cause_and_transport_break() {
     let _home_lock = TEST_HOME_LOCK.lock().unwrap();
@@ -1046,6 +1186,8 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
     let mut output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({})),
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: Vec::new(),
         error_chain: None,
         observability: None,
@@ -1118,6 +1260,8 @@ fn relay_missing_provider_snapshot_does_not_project_client_failure() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({"status": "completed"})),
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: Vec::new(),
         error_chain: None,
         observability: None,
@@ -1166,6 +1310,9 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
         node_trace: vec!["V3Resp03ToolReason"],
         error_chain: None,
         servertool_followup_required: false,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        provider_failure_attempts: Vec::new(),
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
@@ -1438,8 +1585,6 @@ fn test_direct_observability(
             external: std::time::Duration::from_millis(20),
             internal: std::time::Duration::from_millis(5),
         }),
-        diagnostic_source: None,
-        diagnostic_cause: None,
     }
 }
 
@@ -1453,6 +1598,8 @@ fn direct_to_relay_handoff_preserves_failure_event_order() {
     let mut output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({"status":"completed"})),
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: Vec::new(),
         error_chain: None,
         observability: Some(test_direct_observability(vec![relay_event])),
@@ -3008,6 +3155,7 @@ fn openai_chat_relay_internal_error_returns_typed_no_response() {
         provider_snapshots: None,
         provider_failure_attempts: Vec::new(),
         diagnostic_source: None,
+        diagnostic_cause: None,
         terminal_disposition: None,
     };
     let response = openai_chat_relay_output_response(output, None, Duration::from_secs(1), false);
@@ -3918,6 +4066,8 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
         ..Default::default()
     };
     let mut recovered = V3ResponsesRelayRuntimeOutput {
+        diagnostic_source: None,
+        diagnostic_cause: None,
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({"status": "completed"})),
         node_trace: Vec::new(),
@@ -3945,6 +4095,8 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
     );
 
     let mut terminal_failure = V3ResponsesRelayRuntimeOutput {
+        diagnostic_source: None,
+        diagnostic_cause: None,
         status: 502,
         client_body: V3ResponsesRelayClientBody::Json(json!({})),
         node_trace: Vec::new(),
@@ -4410,6 +4562,8 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Sse(test_committed_responses_sse()),
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3HubRespOutbound05ClientSemantic"],
         error_chain: None,
         observability: None,
@@ -4443,6 +4597,8 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
 async fn responses_relay_json_error_returns_typed_no_response() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 598,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         client_body: V3ResponsesRelayClientBody::Json(json!({
             "error": {
                 "code": "provider_request_payload_invalid",
@@ -4792,6 +4948,9 @@ async fn anthropic_relay_output_consumes_typed_sealed_sse_body() {
         status: 200,
         client_response: json!({"events": events.clone()}),
         client_body: V3AnthropicRelayClientBody::Sse(test_committed_anthropic_sse(events)),
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        provider_failure_attempts: Vec::new(),
         node_trace: vec!["V3ServerRespOutbound06ClientFrame"],
         error_chain: None,
         servertool_followup_required: false,
