@@ -341,12 +341,32 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure(
     if failure.error_operator_fault.is_some() {
         return failure;
     }
-    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+    let source = crate::shared::direct_source_error(
         routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
         failure.source_stage,
         &failure.policy_error_type,
         &failure.policy_error_message,
+        match failure.provider_status {
+            Some(status) => crate::operation_runner::V3Err01SourceInput::External(
+                routecodex_v3_error::V3ExternalErrorLink {
+                    kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+                    status: Some(status),
+                    code: Some(failure.policy_error_type.clone()),
+                    provider_id: None,
+                    upstream_request_id: None,
+                    message: Some(failure.policy_error_message.clone()),
+                },
+            ),
+            None => crate::operation_runner::V3Err01SourceInput::Plain,
+        },
     );
+    let source = match source {
+        Ok(source) => source,
+        Err(fault) => {
+            failure.error_operator_fault = Some(fault);
+            return failure;
+        }
+    };
     match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
         source,
         V3ErrorActionScope::ProviderInstance {
@@ -552,7 +572,7 @@ pub(crate) fn error_output(
     local_error_output_from_projection(projected, trace, observability)
 }
 
-fn local_error_output_from_projection(
+pub(super) fn local_error_output_from_projection(
     projected: Result<
         routecodex_v3_error::V3Error06ClientProjected,
         crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
@@ -882,6 +902,33 @@ mod tests {
                 .and_then(|observability| observability.provider_status),
             None
         );
+    }
+
+    #[test]
+    fn responses_terminalizer_preserves_upstream_http_link_in_error01_source() {
+        let failure = terminalize_v3_responses_relay_provider_failure(
+            provider_http_failure(
+                429,
+                br#"{"error":{"type":"rate_limit_error","message":"slow down"}}"#,
+                "provider-a",
+                None,
+            ),
+            None,
+        );
+        let projection = failure
+            .terminal_projection
+            .expect("terminalized provider failure must carry Error06 projection");
+        let external = projection
+            .diagnostic_source
+            .external_error
+            .expect("a real provider HTTP status must stay linked in Error01");
+        assert_eq!(
+            external.kind,
+            routecodex_v3_error::V3ExternalErrorKind::Provider
+        );
+        assert_eq!(external.status, Some(429));
+        assert_eq!(external.code.as_deref(), Some("rate_limit_error"));
+        assert_eq!(external.message.as_deref(), Some("slow down"));
     }
 
     #[test]

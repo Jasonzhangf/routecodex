@@ -526,10 +526,10 @@ pub fn project_v3_gemini_relay_runtime_failure(
     let source = match error {
         V3GeminiRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
-        } => Ok(provider_pool_exhausted_source(
+        } => provider_pool_exhausted_source(
             "V3Target10ConcreteProviderSelected",
             &attempted_candidates,
-        )),
+        ),
         V3GeminiRelayRuntimeError::ProviderCompat(error) => match error.classification() {
             V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
                 super::provider_compat_boundary_source("ProviderRespCompat02ProviderCompat", &error)
@@ -544,12 +544,12 @@ pub fn project_v3_gemini_relay_runtime_failure(
                 error.to_string(),
             ),
         },
-        error => Ok(build_v3_error_01_source_raised(
+        error => crate::shared::direct_plain_error(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",
             "gemini_relay_runtime_error",
             error.to_string(),
-        )),
+        ),
     };
     let (projected, trace) = match source {
         Ok(source) => error_output(
