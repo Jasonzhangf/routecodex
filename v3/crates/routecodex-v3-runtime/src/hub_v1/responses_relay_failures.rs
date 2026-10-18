@@ -601,6 +601,61 @@ mod tests {
     use super::*;
 
     #[test]
+    fn local_error_sdk_fault_survives_consumer() {
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "local_error_sdk_fault_source",
+            "local error SDK operation failed",
+        );
+        let expected_source = source.clone();
+        let error = crate::operation_runner::run_v3_error_02_to_05_decision_operators(
+            Value::Null,
+            source.clone(),
+            V3ErrorActionScope::None,
+            0,
+            false,
+            false,
+            None,
+        )
+        .expect_err("Value::Null must fail through the real Error02 decision operator");
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Err(error),
+        )
+        .expect_err("the real OperationRunnerError must become a typed relay fault");
+        let policy_failure = fault.policy_failure.clone();
+        let original_source = fault
+            .original_source
+            .clone()
+            .expect("the relay fault must preserve its original source");
+        let trace = vec!["V3RuntimeRequestStarted"];
+
+        let output = local_error_output_from_projection(Err(fault), trace.clone(), None);
+
+        assert_eq!(output.status, 599);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(matches!(
+            &output.client_body,
+            V3ResponsesRelayClientBody::Json(value) if value.is_null()
+        ));
+        assert!(output.error_chain.is_none());
+        assert_eq!(output.node_trace, trace);
+        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+        assert_eq!(output.diagnostic_source, Some(policy_failure.clone()));
+        assert_eq!(output.diagnostic_cause, Some(original_source.clone()));
+        assert_eq!(original_source, expected_source);
+        assert_eq!(
+            policy_failure.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(policy_failure.code, "relay_error_operator_sdk_failure");
+    }
+
+    #[test]
     fn relay_error_operator_fault_projects_internal_599_without_client_error() {
         let source = routecodex_v3_error::build_v3_error_01_source_raised(
             routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
