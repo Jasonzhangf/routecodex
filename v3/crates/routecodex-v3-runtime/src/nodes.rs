@@ -18,7 +18,7 @@ pub(crate) use crate::execution_control::{
 };
 
 pub(crate) type V3SseAttemptStream =
-    Pin<Box<dyn Stream<Item = Result<V3SseAttemptFrame, V3Error01SourceRaised>> + Send>>;
+    Pin<Box<dyn Stream<Item = crate::shared::V3DirectSourceResult<V3SseAttemptFrame>> + Send>>;
 pub use crate::execution_control::{
     V3AttemptSuccessReceipt, V3CommittedClientSseStream, V3CommittedSseTerminal,
     V3RequestExecutionControl,
@@ -228,18 +228,20 @@ pub struct V3Execution11ProtocolDecision {
 
 pub type V3ClientSseStream =
     Pin<Box<dyn Stream<Item = Result<Vec<u8>, V3Error01SourceRaised>> + Send>>;
+pub(crate) type V3ProviderAttemptSseInnerStream =
+    Pin<Box<dyn Stream<Item = crate::shared::V3DirectSourceResult<Vec<u8>>> + Send>>;
 pub(crate) struct V3ProviderAttemptSseStream {
-    inner: V3ClientSseStream,
+    inner: V3ProviderAttemptSseInnerStream,
 }
 
 impl V3ProviderAttemptSseStream {
-    pub(crate) fn new(inner: V3ClientSseStream) -> Self {
+    pub(crate) fn new(inner: V3ProviderAttemptSseInnerStream) -> Self {
         Self { inner }
     }
 }
 
 impl Stream for V3ProviderAttemptSseStream {
-    type Item = Result<Vec<u8>, V3Error01SourceRaised>;
+    type Item = crate::shared::V3DirectSourceResult<Vec<u8>>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Pin::new(&mut self.inner).poll_next(cx)

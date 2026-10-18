@@ -1,4 +1,6 @@
-fn v3_direct_retired_continuation_error(body: &Value) -> Option<V3Error01SourceRaised> {
+fn v3_direct_retired_continuation_error(
+    body: &Value,
+) -> Option<crate::shared::V3DirectSourceError> {
     body.get("previous_response_id")
         .is_some_and(|value| !value.is_null())
         .then(|| {
@@ -37,8 +39,9 @@ fn v3_direct_admit_pinned_target(
                 None,
             ),
         ),
-        Err(reason) => Err(error_output(
+        Err(reason) => Err(direct_runtime_helpers_stream::source_failure_output(
             runtime_source("V3Target10ConcreteProviderSelected", reason),
+            last_external_http.clone(),
             trace.to_vec(),
             hook_registry,
         )),
@@ -244,7 +247,7 @@ fn record_v3_direct_provider_failure_record(
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     source: &V3Error01SourceRaised,
     now_epoch_ms: u64,
-) -> Result<V3ProviderFailureRecord, V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<V3ProviderFailureRecord> {
     provider_health
         .record_provider_failure_record_from_source_for_interface(
             failure_session_scope,
@@ -264,7 +267,7 @@ fn record_v3_direct_provider_success(
     failure_session_scope: &V3ProviderFailureSessionScope,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     now_epoch_ms: u64,
-) -> Result<(), V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<()> {
     provider_health
         .record_provider_success_in_failure_scope_for_interface(
             receipt,
@@ -588,17 +591,31 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             reason: (!source.message.trim().is_empty()).then(|| source.message.clone()),
         }
     } else {
-        record_v3_direct_provider_failure_record(
+        match record_v3_direct_provider_failure_record(
             context.provider_health,
             context.failure_session_scope,
             selected,
             &source,
             context.now_epoch_ms,
-        )
-        .map_err(|policy_failure| DirectPolicyFailure {
-            original_source: source.clone(),
-            policy_failure,
-        })?
+        ) {
+            Ok(record) => record,
+            Err(Ok(policy_failure)) => {
+                return Err(DirectPolicyFailure {
+                    original_source: source.clone(),
+                    policy_failure,
+                })
+            }
+            Err(Err(fault)) => {
+                let original_source = match fault.original_source {
+                    Some(original_source) => original_source,
+                    None => source.clone(),
+                };
+                return Err(DirectPolicyFailure {
+                    original_source,
+                    policy_failure: fault.policy_failure,
+                });
+            }
+        }
     };
     let expanded_candidates = match (context.expanded, context.provider_pinned) {
         (Some(expanded), _) => Some(&expanded.candidates),

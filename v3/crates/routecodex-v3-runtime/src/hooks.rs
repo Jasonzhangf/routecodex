@@ -703,7 +703,7 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
             context.toolreason_client_projection,
             context.toolreason_observation_session_id.as_deref(),
         )
-        .await.map_err(Ok)?;
+        .await?;
         if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
             crate::hub_v1::restore_v3_responses_namespace_identities(
                 payload,
@@ -761,7 +761,7 @@ pub(crate) fn chat_direct_response_projection_hook(
             context.toolreason_client_projection,
             context.toolreason_observation_session_id.as_deref(),
         )
-        .await.map_err(Ok)?;
+        .await?;
         if context.tool_thinking_enabled {
             if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
                 crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(

@@ -210,7 +210,7 @@ impl V3DirectProtocolCodec for V3AnthropicDirectCodec {
                 toolreason_client_projection,
                 observation_session_id.as_deref(),
             )
-            .await.map_err(Ok)
+            .await
         })
     }
 
