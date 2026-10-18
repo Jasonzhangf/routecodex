@@ -9,7 +9,9 @@ pub(super) fn provider_failure_output(
         return V3OpenAiChatRelayRuntimeOutput {
             status: 599,
             terminal_disposition: Some(
-                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                failure
+                    .terminal_disposition
+                    .unwrap_or(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
             ),
             client_body: V3OpenAiChatRelayClientBody::Json(Value::Null),
             node_trace: trace,
@@ -195,41 +197,78 @@ mod tests {
             },
         ];
 
-        let output = provider_failure_output(
-            V3RelayProviderFailure {
-                status: 502,
-                provider_status: None,
-                client_response: Value::Null,
-                source_stage: "V3Error06ClientProjected",
-                terminal_projection: None,
-                terminal_disposition: None,
-                error_operator_fault: Some(fault),
-                error_type_fn: |_| None,
-                error_message_fn: |_| "unused".to_string(),
-            },
-            vec!["V3ProviderRespInbound01Raw"],
-            attempts.clone(),
-        );
+        let headers = vec![("content-type".to_string(), b"application/json".to_vec())];
+        let body = br#"{"error":{"message":"rate limited"}}"#.to_vec();
+        let witness =
+            routecodex_v3_error::V3ExternalHttpWitness::new(429, headers.clone(), body.clone())
+                .with_body_read_failure("provider body truncated");
+        let outputs = [
+            provider_failure_output(
+                V3RelayProviderFailure {
+                    status: 502,
+                    provider_status: None,
+                    client_response: Value::Null,
+                    source_stage: "V3Error06ClientProjected",
+                    terminal_projection: None,
+                    terminal_disposition: None,
+                    error_operator_fault: Some(fault.clone()),
+                    error_type_fn: |_| None,
+                    error_message_fn: |_| "unused".to_string(),
+                },
+                vec!["V3ProviderRespInbound01Raw"],
+                attempts.clone(),
+            ),
+            provider_failure_output(
+                V3RelayProviderFailure {
+                    status: 502,
+                    provider_status: None,
+                    client_response: Value::Null,
+                    source_stage: "V3Error06ClientProjected",
+                    terminal_projection: None,
+                    terminal_disposition: Some(
+                        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(
+                            witness.clone(),
+                        ),
+                    ),
+                    error_operator_fault: Some(fault),
+                    error_type_fn: |_| None,
+                    error_message_fn: |_| "unused".to_string(),
+                },
+                vec!["V3ProviderRespInbound01Raw"],
+                attempts.clone(),
+            ),
+        ];
 
-        assert_eq!(output.status, 599);
+        for output in &outputs {
+            assert_eq!(output.status, 599);
+            assert!(matches!(
+                &output.client_body,
+                V3OpenAiChatRelayClientBody::Json(value) if value.is_null()
+            ));
+            assert!(output.error_chain.is_none());
+            assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+            assert_eq!(output.diagnostic_source, Some(diagnostic_source.clone()));
+            assert_eq!(output.diagnostic_cause, Some(diagnostic_cause.clone()));
+            assert_eq!(output.provider_failure_attempts, attempts);
+        }
         assert_eq!(
-            output.terminal_disposition,
+            outputs[0].terminal_disposition,
             Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
         );
-        assert!(matches!(
-            &output.client_body,
-            V3OpenAiChatRelayClientBody::Json(value) if value.is_null()
-        ));
-        assert!(output.error_chain.is_none());
-        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
-        assert_eq!(output.diagnostic_source, Some(diagnostic_source.clone()));
-        assert_eq!(output.diagnostic_cause, Some(diagnostic_cause.clone()));
+        match outputs[1].terminal_disposition.as_ref() {
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)) => {
+                assert_eq!(witness.status(), 429);
+                assert_eq!(witness.headers(), headers.as_slice());
+                assert_eq!(witness.body(), body.as_slice());
+                assert_eq!(witness.body_read_failure(), Some("provider body truncated"));
+            }
+            other => panic!("expected external HTTP witness, got {other:?}"),
+        }
         assert_eq!(
             diagnostic_source.source_kind,
             routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
         );
         assert_eq!(diagnostic_source.code, "relay_error_projection_nonterminal");
         assert_eq!(diagnostic_cause, source);
-        assert_eq!(output.provider_failure_attempts, attempts);
     }
 }
