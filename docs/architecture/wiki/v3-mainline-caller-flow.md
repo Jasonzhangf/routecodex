@@ -981,7 +981,7 @@ flowchart TD
   end
   subgraph c_23_v3_entry_protocol_endpoint_binding_mainline_m_v3_server["v3-server"]
     c_23_v3_entry_protocol_endpoint_binding_mainline_4["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_23_v3_entry_protocol_endpoint_binding_mainline_5["v3-server<br/>pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
+    c_23_v3_entry_protocol_endpoint_binding_mainline_5["v3-server<br/>execute_v3_non_responses_protocol_branch<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
     c_23_v3_entry_protocol_endpoint_binding_mainline_6["v3-server<br/>execute_v3_gemini_direct_server_outcome<br/><small>routecodex-v3-server/src/executors.rs</small>"]
   end
   c_23_v3_entry_protocol_endpoint_binding_mainline_0 -->|v3-entry-bind-01<br/>V3Config05ManifestPublished → V3EntryBind01EndpointPatternDeclared| c_23_v3_entry_protocol_endpoint_binding_mainline_1
@@ -995,7 +995,7 @@ flowchart TD
 | `v3-entry-bind-01` | `V3Config05ManifestPublished` → `V3EntryBind01EndpointPatternDeclared` | anchored | compile_entry_protocol_bindings<br/><small>routecodex-v3-config/src/validate.rs</small> | v3.entry_protocol_endpoint_binding.mainline<br/><small>docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml</small> | `v3.entry_protocol_endpoint_binding` |
 | `v3-entry-bind-02` | `V3EntryBind01EndpointPatternDeclared` → `V3EntryBind02ProtocolResolved` | anchored | V3HubV1Manifest::entry_protocol_binding_for_endpoint<br/><small>routecodex-v3-config/src/types.rs</small> | V3EntryProtocolBindingManifest<br/><small>routecodex-v3-config/src/types.rs</small> | `v3.entry_protocol_endpoint_binding` |
 | `v3-entry-bind-03` | `V3EntryBind02ProtocolResolved` → `V3EntryBind03ServerEnablementChecked` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | V3HubV1Manifest::entry_protocol_binding_for_endpoint<br/><small>routecodex-v3-config/src/types.rs</small> | `v3.entry_protocol_endpoint_binding` |
-| `v3-entry-bind-04` | `V3EntryBind03ServerEnablementChecked` → `V3EntryBind04ExecutionBindingProjected` | anchored | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | execute_v3_gemini_direct_server_outcome<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.entry_protocol_endpoint_binding` |
+| `v3-entry-bind-04` | `V3EntryBind03ServerEnablementChecked` → `V3EntryBind04ExecutionBindingProjected` | anchored | execute_v3_non_responses_protocol_branch<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | execute_v3_gemini_direct_server_outcome<br/><small>routecodex-v3-server/src/executors.rs</small> | `v3.entry_protocol_endpoint_binding` |
 
 ## v3.hub_pipeline.v1.hook_registry_compile
 
@@ -2134,7 +2134,7 @@ flowchart TD
   subgraph c_50_v3_error_raw_wire_evidence_m_v3_server["v3-server"]
     c_50_v3_error_raw_wire_evidence_0["v3-server<br/>finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
     c_50_v3_error_raw_wire_evidence_1["v3-server<br/>persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
-    c_50_v3_error_raw_wire_evidence_5["v3-server<br/>pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
+    c_50_v3_error_raw_wire_evidence_5["v3-server<br/>execute_v3_non_responses_protocol_branch<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
     c_50_v3_error_raw_wire_evidence_6["v3-server<br/>persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_50_v3_error_raw_wire_evidence_7["v3-server<br/>persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small>"]
     c_50_v3_error_raw_wire_evidence_8["v3-server<br/>execute_v3_openai_chat_direct_server_outcome<br/><small>routecodex-v3-server/src/executors.rs</small>"]
@@ -2155,7 +2155,7 @@ flowchart TD
 | `v3-responses-relay-error-evidence-01` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-02` | `V3ErrorEvidencePersistQueued` → `V3ErrorEvidenceFlushOnTerminalFailure` | anchored | run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-03` | `V3ErrorEvidencePersistFailed` → `V3ErrorEvidencePersistFailureReported` | anchored | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
-| `v3-chat-relay-error-evidence-01` | `V3OpenAiChatRelayRuntimeOutput` → `V3ChatFailedAttemptEvidence` | anchored | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-chat-relay-error-evidence-01` | `V3OpenAiChatRelayRuntimeOutput` → `V3ChatFailedAttemptEvidence` | anchored | execute_v3_non_responses_protocol_branch<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-chat-relay-error-evidence-02` | `V3ChatFailedAttemptEvidence` → `V3ChatFailedAttemptEvidenceSerialized` | anchored | persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small> | persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-chat-relay-error-evidence-03` | `V3ChatFailedAttemptEvidenceSerialized` → `V3ErrorEvidencePersistQueued` | anchored | persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-chat-direct-error-evidence-01` | `V3ResponsesDirectRuntimeOutput` → `V3ChatFailedAttemptEvidenceSerialized` | anchored | execute_v3_openai_chat_direct_server_outcome<br/><small>routecodex-v3-server/src/executors.rs</small> | persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small> | `v3.error.raw_wire_evidence` |
