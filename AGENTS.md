@@ -125,10 +125,14 @@ its authoritative issue ID to a solution receipt. Every repeated regression
 requires a regression test in the mapped required gate. Each issue gets its own
 clean worktree under `playground/<issue-id>` from the latest `origin/main`; do
 not reproduce or fix separate issues in one shared worktree. Classify provider
-sample errors using the typed probe bound to the same provider, auth-key
-identity, and model: probe success with payload failure is a local request
-problem; a sample-bound probe failure may be excluded as upstream; an unbound
-probe is unresolved and cannot pass the sample gate.
+sample errors from their typed cause and a probe bound to the same provider,
+interface, auth-key identity, and model. A later probe success is an independent
+attempt, not proof that an earlier payload failure was local. Confirmed local
+failures and unresolved causes keep the sample gate open. Confirmed upstream
+capacity failures or transport failures may be recorded as upstream exceptions;
+they are not passing payloads or local fixes. The sole classification procedure
+and retention limits are in
+`.agents/skills/rcc-dev-skills/references/60-defect-lifecycle.md`.
 
 Do not start issue work until canonical AppSDK intake/dedup returns the bug ID.
 If intake is unavailable, report the blocker and recovery condition before

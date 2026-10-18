@@ -91,21 +91,39 @@ runtime identity or complete sample enumeration cannot be established, the
 sample gate remains open. For each sample error, bind its provider probe to the
 same provider, auth-key identity, and model as the payload request. Use the
 typed provider-health probe result; a generic HTTP 2xx, log line, or debug
-snapshot alone does not prove semantic probe success. Then apply this rule:
+snapshot alone does not prove typed probe success. A probe is a separate request
+at its recorded time; a later HTTP 2xx does not prove that an earlier payload
+failure was local. Classify the attempt from its typed source, upstream status
+and error details, retained wire evidence, and bound probe:
 
-- **Probe succeeded, payload failed:** this is a local request-path problem.
-  Deduplicate or open its bug and fix it in that bug's own issue worktree. A
+- **Local failure is demonstrated:** deduplicate or open its bug and fix it in
+  that bug's own issue worktree. A
   matching/recurring failure or a regression introduced by the current
   candidate fails this issue's sample gate. An independent known local issue
   requires its own bug and pre-candidate evidence before exclusion from this
   issue's regression comparison.
-- **The sample-bound probe failed:** classify it as an upstream failure for
-  this local regression audit. Record it, but it may be excluded from the local
-  regression gate, per the project instruction.
-- **No probe result can be tied to the sample:** classify it as unresolved; it
-  cannot be counted as upstream or as a passing sample, so the sample gate stays
-  open.
+- **A bound probe confirms the same upstream failure:** record an upstream
+  exception to the local regression gate. A different probe failure does not
+  establish the cause of the payload failure.
+- **The attempt proves upstream capacity failure or transport failure:** retain
+  that classification even if a later bound probe succeeds. An explicit
+  provider account-unavailable error on HTTP 503 is capacity evidence; HTTP 5xx
+  alone is not. A typed pre-response connection close is transport evidence.
+  A confirmed repeat pattern still requires its declared provider policy/config
+  fix and regression evidence; switching providers does not close that failure.
+- **Cause is unresolved:** keep the sample gate open. Probe success plus payload
+  failure, or a missing/unbound probe without independent causal evidence, does
+  not establish either a local bug or an upstream exception.
 - **Probe and payload both succeeded:** record the sample as passing.
+
+With `error_samples_only`, a recovered request can persist only
+`provider-failed-attempts.json` with `terminal_source: null`; ordinary request,
+provider-bound and response snapshots are not retained. This is not a sample
+enumeration failure and does not prove final client delivery. Record the missing
+payload boundary and do not claim an exact replay. It does not excuse local
+stage errors, internal 598/599, schema/parameter failures, terminal failures, or
+unresolved causes. Investigate those from the retained evidence under the rules
+above. Do not reconstruct missing business payloads from diagnostic records.
 
 Replay the issue's exact failing sample, recurring samples, and relevant control
 samples through the real entrypoint. Preserve the closed UTC window, sample and
