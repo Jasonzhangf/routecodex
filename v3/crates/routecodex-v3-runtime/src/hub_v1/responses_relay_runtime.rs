@@ -152,7 +152,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
     server_tool_state: &V3ResponsesRelayServerToolState,
     scope: V3ResponsesRelayServerToolScope,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    Box::pin(execute_v3_responses_relay_runtime_inner(
+    execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
@@ -170,7 +170,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
         None,
         BTreeSet::new(),
         V3ResponsesRelayRuntimeSeeds::default(),
-    ))
+    )
     .await
 }
 
@@ -190,7 +190,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
-    let mut output = Box::pin(execute_v3_responses_relay_runtime_inner(
+    let mut output = execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         &transport,
@@ -208,7 +208,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
         initial_expanded,
         initial_request_local_excluded_candidates,
         initial_relay_seeds,
-    ))
+    )
     .await?;
     output.provider_snapshots = Some(snapshots.into_payload(
         provider_snapshots.provider_request,
@@ -225,7 +225,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
-    Box::pin(execute_v3_responses_relay_runtime_inner(
+    execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
@@ -239,7 +239,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         None,
         BTreeSet::new(),
         V3ResponsesRelayRuntimeSeeds::default(),
-    ))
+    )
     .await
 }
 
@@ -252,7 +252,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
     provider_health: &V3ResponsesRelayProviderHealthHandle,
     retry_policy: V3ResponsesRelayRetryPolicy,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    Box::pin(execute_v3_responses_relay_runtime_inner(
+    execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
@@ -266,7 +266,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         None,
         BTreeSet::new(),
         V3ResponsesRelayRuntimeSeeds::default(),
-    ))
+    )
     .await
 }
 
