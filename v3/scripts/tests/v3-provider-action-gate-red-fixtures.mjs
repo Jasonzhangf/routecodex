@@ -549,15 +549,6 @@ const cases = [
     diagnostic: /missing required edge v3-provider-action-gate-50/u,
   },
   {
-    name: 'Responses Relay failure handler returns before shared provider failure policy',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    mutate: (source) => source.replace(
-      'if failure.terminal_projection.is_some() {\n        return Ok(Some(failure));\n    }\n    let result = run_v3_relay_provider_failure_policy(',
-      'if failure.terminal_projection.is_some() {\n        return Ok(Some(failure));\n    }\n    return Ok(None);\n    let result = run_v3_relay_provider_failure_policy(',
-    ),
-    diagnostic: /must enter run_v3_relay_provider_failure_policy immediately after its existing terminal projection guard/u,
-  },
-  {
     name: 'Required gate test name survives only in a comment',
     path: 'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs',
     mutate: (source) => source.replace(

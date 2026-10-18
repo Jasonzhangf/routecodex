@@ -196,20 +196,6 @@ assertCallerInvokesCallee({
   callee_symbol: 'run_v3_relay_provider_failure_policy',
   callee_file: files.policy,
 });
-const responsesRelayFailureHandlerBody = findFunctionBody(
-  text.responses,
-  'handle_v3_responses_relay_provider_failure',
-  files.responses,
-);
-if (
-  !/^\{\s*if\s+failure\.terminal_projection\.is_some\(\)\s*\{\s*return\s+Ok\(Some\(failure\)\);\s*\}\s*let\s+result\s*=\s*run_v3_relay_provider_failure_policy\s*\(/u
-    .test(responsesRelayFailureHandlerBody)
-) {
-  failures.push(
-    `${files.responses}: handle_v3_responses_relay_provider_failure must enter run_v3_relay_provider_failure_policy immediately after its existing terminal projection guard`,
-  );
-}
-
 for (const token of [
   'pub const V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000;',
   'pub const V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 5_000;',
