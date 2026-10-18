@@ -333,34 +333,35 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure(
     mut failure: V3ResponsesRelayProviderFailure,
     last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
 ) -> V3ResponsesRelayProviderFailure {
-    if failure.terminal_projection.is_none() && failure.error_operator_fault.is_none() {
-        let source = routecodex_v3_error::build_v3_error_01_source_raised(
-            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
-            failure.source_stage,
-            &failure.policy_error_type,
-            &failure.policy_error_message,
-        );
-        let terminal = V3ErrorHandlingCenter::decide_provider(
-            V3ErrorHandlingCenterInput {
-                source,
-                action_scope: V3ErrorActionScope::ProviderInstance {
-                    provider_id: failure.provider_id.clone(),
-                },
-                candidates_remaining: 0,
-                source_status: Some(failure.status),
-            },
-            false,
-            false,
-            None,
-        )
-        .try_into_terminal()
-        .expect("Responses residence-budget terminal requires exhausted Error05");
-        failure.terminal_disposition = Some(V3ErrorHandlingCenter::provider_terminal_disposition(
-            terminal.clone(),
-            last_external_http,
-        ));
-        failure.terminal_projection =
-            Some(V3ErrorHandlingCenter::project_terminal_decision(terminal));
+    if failure.terminal_projection.is_some() {
+        return failure;
+    }
+    let terminal_disposition = match last_external_http {
+        Some(witness) => routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+    };
+    failure
+        .terminal_disposition
+        .get_or_insert(terminal_disposition);
+    if failure.error_operator_fault.is_some() {
+        return failure;
+    }
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        failure.source_stage,
+        &failure.policy_error_type,
+        &failure.policy_error_message,
+    );
+    match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+        source,
+        V3ErrorActionScope::ProviderInstance {
+            provider_id: failure.provider_id.clone(),
+        },
+        0,
+        None,
+    ) {
+        Ok(projected) => failure.terminal_projection = Some(projected),
+        Err(fault) => failure.error_operator_fault = Some(fault),
     }
     failure
 }
@@ -480,7 +481,9 @@ pub(crate) fn provider_failure_output_with_observation(
         return V3ResponsesRelayRuntimeOutput {
             status: 599,
             terminal_disposition: Some(
-                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                failure
+                    .terminal_disposition
+                    .unwrap_or(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
             ),
             client_body: V3ResponsesRelayClientBody::Json(Value::Null),
             node_trace: trace,
@@ -700,6 +703,12 @@ mod tests {
 
     #[test]
     fn relay_error_operator_fault_projects_internal_599_without_client_error() {
+        let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+            429,
+            vec![("retry-after".to_string(), b"7".to_vec())],
+            br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
+        )
+        .with_body_read_failure("provider body truncated");
         let source = routecodex_v3_error::build_v3_error_01_source_raised(
             routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
             "V3Error06ClientProjected",
@@ -728,7 +737,11 @@ mod tests {
                 source_stage: "V3Error06ClientProjected",
                 observability: None,
                 terminal_projection: None,
-                terminal_disposition: None,
+                terminal_disposition: Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(
+                        witness.clone(),
+                    ),
+                ),
                 error_operator_fault: Some(fault),
                 matched_policy: None,
             },
@@ -739,7 +752,7 @@ mod tests {
         assert_eq!(output.status, 599);
         assert_eq!(
             output.terminal_disposition,
-            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness))
         );
         assert!(matches!(
             &output.client_body,
@@ -755,6 +768,74 @@ mod tests {
         );
         assert_eq!(diagnostic_source.code, "relay_error_projection_nonterminal");
         assert_eq!(diagnostic_cause, source);
+    }
+
+    #[test]
+    fn terminalizer_preserves_sdk_fault_witness_without_erasing_existing_disposition() {
+        let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+            200,
+            vec![("content-type".to_string(), b"application/json".to_vec())],
+            br#"{"status":"completed"}"#.to_vec(),
+        )
+        .with_body_read_failure("provider body failed after the 200 head");
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "relay_error_projection_nonterminal",
+            "Error06 SDK completed without a terminal client projection",
+        );
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source,
+            Ok(None),
+        )
+        .expect_err("Ok(None) must produce a typed operator fault");
+        let failure = V3ResponsesRelayProviderFailure {
+            status: 502,
+            provider_status: Some(200),
+            policy_error_type: "relay_error_projection_nonterminal".to_string(),
+            policy_error_message: "Error06 SDK completed without a terminal client projection"
+                .to_string(),
+            provider_id: "provider-a".to_string(),
+            source_stage: "V3Error06ClientProjected",
+            observability: None,
+            terminal_projection: None,
+            terminal_disposition: None,
+            error_operator_fault: Some(fault.clone()),
+            matched_policy: None,
+        };
+
+        let terminalized =
+            terminalize_v3_responses_relay_provider_failure(failure, Some(witness.clone()));
+
+        assert!(terminalized.terminal_projection.is_none());
+        assert_eq!(
+            terminalized.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness))
+        );
+        assert_eq!(terminalized.error_operator_fault, Some(fault.clone()));
+
+        let existing = routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse;
+        let authored = terminalize_v3_responses_relay_provider_failure(
+            V3ResponsesRelayProviderFailure {
+                status: 502,
+                provider_status: None,
+                policy_error_type: "relay_error_projection_nonterminal".to_string(),
+                policy_error_message: "authored disposition".to_string(),
+                provider_id: "provider-a".to_string(),
+                source_stage: "V3Error06ClientProjected",
+                observability: None,
+                terminal_projection: None,
+                terminal_disposition: Some(existing.clone()),
+                error_operator_fault: Some(fault),
+                matched_policy: None,
+            },
+            Some(routecodex_v3_error::V3ExternalHttpWitness::new(
+                429,
+                vec![],
+                b"rate limited".to_vec(),
+            )),
+        );
+        assert_eq!(authored.terminal_disposition, Some(existing));
     }
 
     #[test]
@@ -779,6 +860,44 @@ mod tests {
         assert_eq!(
             output.terminal_disposition,
             Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+    }
+
+    #[test]
+    fn provider_429_projects_internal_502_with_full_external_http_witness() {
+        let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+            429,
+            vec![("retry-after".to_string(), b"7".to_vec())],
+            br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
+        )
+        .with_body_read_failure("provider body truncated");
+        let failure = terminalize_v3_responses_relay_provider_failure(
+            provider_http_failure(
+                429,
+                br#"{"error":{"type":"rate_limit_error"}}"#,
+                "provider-a",
+                None,
+            ),
+            Some(witness.clone()),
+        );
+        let output =
+            provider_failure_output(failure, vec!["V3ProviderReqOutbound09TransportRequest"], 0);
+
+        assert_eq!(output.status, 502);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness))
+        );
+        assert!(matches!(
+            &output.client_body,
+            V3ResponsesRelayClientBody::Json(value) if value.get("error").is_some()
+        ));
+        assert_eq!(
+            output
+                .observability
+                .as_ref()
+                .and_then(|observability| observability.provider_status),
+            None
         );
     }
 
