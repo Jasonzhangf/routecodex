@@ -3067,6 +3067,8 @@ features:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
+  - Failed transport attempts retain their admitted ordinal, provider request projection, actual response head and redacted body bytes in the request-qualified artifact; a pre-head failure records no_response and an unreadable body records the received head plus read failure without inventing partial bytes.
+  - The public fa22072_chat_failed_attempt_recovers_with_source_public_entry and seeded Relay success/exhaustion cases assert failed wire pairing, cumulative attempt order and preserved client behavior for JSON and SSE.
   - Terminal Relay failure enqueues verbatim request and Error chain evidence through the declared side-channel edge, and the shared sample worker persists it.
   - One Chat client request retains its connection across failed Provider A and genuine Provider B completion in JSON and SSE, while the private artifact retains the exact original typed cause and actual upstream status.
   - Diagnostic filesystem failure remains request/file-qualified in the failure ledger while the same client request completes from B without extra attempts.

@@ -923,7 +923,7 @@ where
                 }
             }
         }
-        attempt_budget.admit_transport_attempt().map_err(|error| {
+        let transport_attempt = attempt_budget.admit_transport_attempt().map_err(|error| {
             V3RelayCoreError::Target(format!(
                 "V3ExecutionAttemptBudget rejected provider transport attempt: {error}"
             ))
@@ -967,7 +967,7 @@ where
                     last_external_http = Some(
                         crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
                     );
-                    let failure = if response.body_read_failure.is_some() {
+                    let mut failure = if response.body_read_failure.is_some() {
                         crate::hub_v1::relay_runtime_shared::provider_http_body_read_failure(
                             &response,
                             &selected_target_provider_id,
@@ -979,6 +979,16 @@ where
                             &selected_target_provider_id,
                         )
                     };
+                    failure.failed_attempt_evidence = Some(
+                        build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                            transport_attempt,
+                            Some(provider_request_snapshot.clone()),
+                            response.status,
+                            &response.headers,
+                            &response.body,
+                            response.body_read_failure.as_deref(),
+                        ),
+                    );
                     let _ = runtime_timing.finish_external();
                     drop(provider_action_permit.take());
                     if let Some(failure) = handle_provider_failure(
@@ -1012,7 +1022,14 @@ where
                     {
                         last_external_http = Some(witness);
                     }
-                    let failure = provider_runtime_failure(error, &selected_target_provider_id);
+                    let failed_attempt_evidence =
+                        build_v3_runtime_provider_failed_attempt_evidence_from_error(
+                            transport_attempt,
+                            Some(provider_request_snapshot.clone()),
+                            &error,
+                        );
+                    let mut failure = provider_runtime_failure(error, &selected_target_provider_id);
+                    failure.failed_attempt_evidence = failed_attempt_evidence;
                     let _ = runtime_timing.finish_external();
                     drop(provider_action_permit.take());
                     if let Some(failure) = handle_provider_failure(

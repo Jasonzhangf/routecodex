@@ -3672,7 +3672,7 @@ flowchart TD
         <span class="summary-sub">9 edges · <code>v3.error.raw_wire_evidence</code> · V3Error06ClientProjected → V3ChatFailedAttemptEvidenceSerialized</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">Responses terminal failures and Chat failed attempts enqueue private diagnostic evidence through the Server-owned side channel. Chat retains original typed sources even when a later Provider succeeds; diagnostic writes do not alter provider selection or client framing.</p>
+        <p class="chain-summary">Responses terminal failures and Chat failed attempts enqueue private diagnostic evidence through the Server-owned side channel. Runtime observations retain failure-only admitted request/response evidence before candidate switching; Server serializes it with original typed sources even when a later Provider succeeds. Diagnostic writes do not alter provider selection or client framing.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.error.raw_wire_evidence</code></span>
           <span>modules: <code>v3-debug · v3-server</code></span>

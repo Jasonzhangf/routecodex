@@ -1051,6 +1051,7 @@ mod tests {
                     terminal_projection: None,
                     terminal_disposition,
                     error_operator_fault: Some(fault.clone()),
+                    failed_attempt_evidence: None,
                     error_type_fn: |_| None,
                     error_message_fn: |_| "unused".to_string(),
                 },

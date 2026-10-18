@@ -253,6 +253,7 @@ fn provider_http_failure(status: u16, body: &[u8], _provider_id: &str) -> V3Rela
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -272,6 +273,7 @@ fn provider_request_failure(
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -321,6 +323,7 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
             terminal_projection,
             terminal_disposition: None,
             error_operator_fault,
+            failed_attempt_evidence: None,
             error_type_fn: extract_error_type_style,
             error_message_fn: extract_message_type_style,
         };
@@ -362,6 +365,7 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
         terminal_projection,
         terminal_disposition: None,
         error_operator_fault,
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -821,6 +825,7 @@ mod tests {
                     terminal_projection: None,
                     terminal_disposition: terminal_disposition.clone(),
                     error_operator_fault: Some(fault),
+                    failed_attempt_evidence: None,
                     error_type_fn: |_| None,
                     error_message_fn: |_| "unused".to_string(),
                 },
@@ -936,6 +941,7 @@ mod tests {
                     routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
                 ),
                 error_operator_fault: Some(fault),
+                failed_attempt_evidence: None,
                 error_type_fn: extract_error_type_style,
                 error_message_fn: extract_message_type_style,
             },

@@ -318,6 +318,7 @@ async fn handle_v3_responses_relay_provider_failure(
     // failure observation can separate it from the client projection status.
     let mut policy_event = result.event.clone();
     policy_event.provider_status = failure.provider_status;
+    policy_event.failed_attempt_evidence = failure.failed_attempt_evidence.clone();
     let event = build_v3_runtime_provider_failure_observation_from_policy_event(&policy_event);
     state.provider_failure_events.push(event.clone());
     if let Some(sink) = state.provider_failure_event_sink {
@@ -1357,6 +1358,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             terminal_projection: None,
             terminal_disposition: None,
             error_operator_fault: Some(fault.clone()),
+            failed_attempt_evidence: None,
             matched_policy: None,
         };
         let context = V3RelayProviderFailurePolicyContext {

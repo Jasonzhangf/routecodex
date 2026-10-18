@@ -66,6 +66,7 @@ pub(crate) fn provider_http_failure(
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
+        failed_attempt_evidence: None,
         matched_policy: None,
     }
 }
@@ -117,6 +118,7 @@ pub(crate) fn provider_runtime_failure(
                 routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
             ),
             error_operator_fault,
+            failed_attempt_evidence: None,
             matched_policy: None,
         };
     }
@@ -177,6 +179,7 @@ pub(crate) fn provider_runtime_failure(
         terminal_projection,
         terminal_disposition: None,
         error_operator_fault,
+        failed_attempt_evidence: None,
         matched_policy: None,
     }
 }
@@ -204,6 +207,7 @@ pub(crate) fn provider_response_stream_relay_failure(
             terminal_projection: None,
             terminal_disposition: None,
             error_operator_fault: None,
+            failed_attempt_evidence: None,
             matched_policy: None,
         },
         V3ResponsesRelayRuntimeError::ProviderJson(reason) => {
@@ -238,6 +242,7 @@ fn provider_response_codec_relay_failure(
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
+        failed_attempt_evidence: None,
         matched_policy: None,
     }
 }
@@ -320,6 +325,7 @@ pub(crate) fn provider_request_relay_failure(
         terminal_projection,
         terminal_disposition: None,
         error_operator_fault,
+        failed_attempt_evidence: None,
         matched_policy: None,
     })
 }
@@ -473,6 +479,7 @@ pub(crate) fn provider_response_hook_failure(
                 terminal_projection: None,
                 terminal_disposition: None,
                 error_operator_fault: None,
+                failed_attempt_evidence: None,
                 matched_policy: None,
             }
         }
@@ -759,6 +766,7 @@ mod tests {
                     ),
                 ),
                 error_operator_fault: Some(fault),
+                failed_attempt_evidence: None,
                 matched_policy: None,
             },
             vec!["V3ProviderRespInbound01Raw"],
@@ -830,6 +838,7 @@ mod tests {
                 terminal_projection: None,
                 terminal_disposition: Some(existing.clone()),
                 error_operator_fault: Some(fault),
+                failed_attempt_evidence: None,
                 matched_policy: None,
             },
             Some(routecodex_v3_error::V3ExternalHttpWitness::new(
@@ -1149,6 +1158,7 @@ mod tests {
                 terminal_projection: None,
                 terminal_disposition: None,
                 error_operator_fault: Some(fault),
+                failed_attempt_evidence: None,
                 matched_policy: None,
             },
             vec!["ProviderReqCompat06ProviderCompat"],

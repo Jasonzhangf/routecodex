@@ -599,6 +599,12 @@ where
                 continue;
             }
             Err(error) => {
+                let failed_attempt_evidence =
+                    crate::hub_v1::build_v3_runtime_provider_failed_attempt_evidence_from_error(
+                        total_attempts(&accumulator, send_attempts),
+                        provider_request_snapshot.clone(),
+                        &error,
+                    );
                 if let Some(witness) =
                     crate::hub_v1::external_http_witness_from_provider_error(&error)
                 {
@@ -686,6 +692,8 @@ where
                     }
                 };
                 if let Some(event) = policy_result.event.clone() {
+                    let mut event = event;
+                    event.failed_attempt_evidence = failed_attempt_evidence;
                     provider_failure_events.push(event.clone());
                     publish_v3_direct_provider_failure_event(
                         provider_failure_event_sink,

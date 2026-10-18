@@ -2122,7 +2122,7 @@ flowchart TD
 
 ## v3.error.raw_wire_evidence
 
-Responses terminal failures and Chat failed attempts enqueue private diagnostic evidence through the Server-owned side channel. Chat retains original typed sources even when a later Provider succeeds; diagnostic writes do not alter provider selection or client framing.
+Responses terminal failures and Chat failed attempts enqueue private diagnostic evidence through the Server-owned side channel. Runtime observations retain failure-only admitted request/response evidence before candidate switching; Server serializes it with original typed sources even when a later Provider succeeds. Diagnostic writes do not alter provider selection or client framing.
 
 Owner feature: `v3.error.raw_wire_evidence`
 

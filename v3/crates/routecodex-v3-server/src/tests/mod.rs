@@ -1832,6 +1832,7 @@ fn test_provider_failure_observation() -> V3RuntimeProviderFailureObservation {
         next_provider_key: Some("second:key:gpt-5.5".to_string()),
         wait_ms: None,
         diagnostic_source: None,
+        failed_attempt_evidence: None,
     }
 }
 
@@ -3060,6 +3061,7 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
         next_provider_key: Some("minimax:key1:MiniMax-M3".to_string()),
         wait_ms: None,
         diagnostic_source: None,
+        failed_attempt_evidence: None,
     };
     let error_content = format_v3_provider_failure_console_content("req-provider-switch", &event);
     assert!(error_content.contains("❌ [provider-error]"));
