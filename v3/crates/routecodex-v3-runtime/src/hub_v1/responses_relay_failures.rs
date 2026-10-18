@@ -245,56 +245,50 @@ pub(crate) fn provider_request_relay_failure(
     provider_id: &str,
     observability: Option<V3RuntimeObservability>,
 ) -> Result<V3ResponsesRelayProviderFailure, V3ResponsesRelayRuntimeError> {
-    let (source_stage, error_type, message, terminal_projection) = match error {
+    let (source_stage, error_type, message, terminal_projection, error_operator_fault) = match error
+    {
         V3ResponsesRelayRuntimeError::ProviderCompat(error) => {
-            let boundary = match error.classification() {
+            let (boundary, error_operator_fault) = match error.classification() {
                 V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
-                    Some(V3ErrorHandlingCenter::project_terminal(
-                        V3ErrorHandlingCenter::decide_provider(
-                            V3ErrorHandlingCenterInput {
-                                source: super::provider_compat_boundary_source(
-                                    "ProviderReqCompat06ProviderCompat",
-                                    &error,
-                                ),
-                                action_scope: V3ErrorActionScope::ProviderInstance {
-                                    provider_id: provider_id.to_string(),
-                                },
-                                candidates_remaining: 0,
-                                source_status: Some(400),
-                            },
-                            false,
-                            false,
-                            None,
+                    match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+                        super::provider_compat_boundary_source(
+                            "ProviderReqCompat06ProviderCompat",
+                            &error,
                         ),
-                    ))
+                        V3ErrorActionScope::ProviderInstance {
+                            provider_id: provider_id.to_string(),
+                        },
+                        0,
+                        Some(400),
+                    ) {
+                        Ok(projected) => (Some(projected), None),
+                        Err(fault) => (None, Some(fault)),
+                    }
                 }
                 V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
-                    Some(V3ErrorHandlingCenter::project_terminal(
-                        V3ErrorHandlingCenter::decide_provider(
-                            V3ErrorHandlingCenterInput {
-                                source: super::provider_request_payload_source(
-                                    "ProviderReqCompat06ProviderCompat",
-                                    &error,
-                                ),
-                                action_scope: V3ErrorActionScope::ProviderInstance {
-                                    provider_id: provider_id.to_string(),
-                                },
-                                candidates_remaining: 0,
-                                source_status: Some(400),
-                            },
-                            false,
-                            false,
-                            None,
+                    match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+                        super::provider_request_payload_source(
+                            "ProviderReqCompat06ProviderCompat",
+                            &error,
                         ),
-                    ))
+                        V3ErrorActionScope::ProviderInstance {
+                            provider_id: provider_id.to_string(),
+                        },
+                        0,
+                        Some(400),
+                    ) {
+                        Ok(projected) => (Some(projected), None),
+                        Err(fault) => (None, Some(fault)),
+                    }
                 }
-                V3ProviderCompatErrorClassification::Other => None,
+                V3ProviderCompatErrorClassification::Other => (None, None),
             };
             (
                 "ProviderReqCompat06ProviderCompat",
                 "provider_request_compat_error",
                 format!("V3 Responses Relay provider compat failed: {error}"),
                 boundary,
+                error_operator_fault,
             )
         }
         V3ResponsesRelayRuntimeError::ProviderWireEncoding(message) => (
@@ -302,11 +296,13 @@ pub(crate) fn provider_request_relay_failure(
             "provider_request_wire_error",
             format!("V3 Responses Relay provider wire encoding failed: {message}"),
             None,
+            None,
         ),
         V3ResponsesRelayRuntimeError::Provider(error) => (
             "V3ProviderReqOutbound08WirePayload",
             "provider_request_wire_error",
             error.to_string(),
+            None,
             None,
         ),
         other => return Err(other),
@@ -324,7 +320,7 @@ pub(crate) fn provider_request_relay_failure(
         observability,
         terminal_projection,
         terminal_disposition: None,
-        error_operator_fault: None,
+        error_operator_fault,
         matched_policy: None,
     })
 }
@@ -1043,7 +1039,47 @@ mod tests {
         )
         .expect("request compat failure must become terminal client error");
         assert_eq!(failure.status, 598);
-        assert!(failure.terminal_projection.is_some());
+        let projected = failure
+            .terminal_projection
+            .as_ref()
+            .expect("request compat failure must carry a terminal projection");
+        assert_eq!(
+            projected.diagnostic_source.code,
+            "provider_request_payload_invalid"
+        );
+        assert!(failure.error_operator_fault.is_none());
+        assert_eq!(failure.policy_error_type, "provider_request_compat_error");
+    }
+
+    #[test]
+    fn payload_boundary_compat_failure_preserves_internal_runtime_projection() {
+        let profile = V3ProviderCompatProfileId::Passthrough;
+        let error = classify_v3_provider_compat_error(
+            "request",
+            &profile,
+            "ProviderCompatPayloadBoundaryViolation field=metadata detail=control-like field"
+                .to_string(),
+        );
+        let failure = provider_request_relay_failure(
+            V3ResponsesRelayRuntimeError::ProviderCompat(error),
+            "provider-1",
+            None,
+        )
+        .expect("payload boundary failure must retain an internal terminal projection");
+        assert_eq!(failure.status, 598);
+        let projected = failure
+            .terminal_projection
+            .as_ref()
+            .expect("payload boundary failure must carry its typed projection");
+        assert_eq!(
+            projected.diagnostic_source.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(
+            projected.diagnostic_source.code,
+            routecodex_v3_error::V3_PROVIDER_COMPAT_PAYLOAD_BOUNDARY_VIOLATION_CODE
+        );
+        assert!(failure.error_operator_fault.is_none());
         assert_eq!(failure.policy_error_type, "provider_request_compat_error");
     }
 
