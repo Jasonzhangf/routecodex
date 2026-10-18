@@ -62,7 +62,12 @@ fn server_side_failures_are_raised_by_error_owner() {
         Some("500-300")
     );
 
-    let observability = raise_v3_runtime_observability_contract_failure("missing terminal");
+    let observability = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3RuntimeObservability",
+        "runtime_observability_contract",
+        "missing terminal",
+    );
     assert_eq!(observability.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert_eq!(observability.source_stage, "V3RuntimeObservability");
     assert_eq!(observability.code, "runtime_observability_contract");

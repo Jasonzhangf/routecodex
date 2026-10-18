@@ -1331,17 +1331,6 @@ pub fn raise_v3_debug_artifact_failure(message: impl Into<String>) -> V3Error01S
     )
 }
 
-pub fn raise_v3_runtime_observability_contract_failure(
-    message: impl Into<String>,
-) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised(
-        V3ErrorSourceKind::RuntimeFailure,
-        "V3RuntimeObservability",
-        "runtime_observability_contract",
-        message,
-    )
-}
-
 pub fn project_v3_post_commit_sse_source(
     source: V3Error01SourceRaised,
     status: u16,

@@ -683,8 +683,15 @@ pub(crate) fn emit_v3_runtime_observability_contract_failure(
     observability: &V3RuntimeObservability,
     error: impl Into<String>,
 ) {
-    let source = raise_v3_runtime_observability_contract_failure(error);
-    emit_v3_post_commit_sse_source_console_line_for_context(context, observability, 500, &source);
+    let result = routecodex_v3_runtime::foundation::project_v3_runtime_observability_contract_failure_via_sdk(
+        error,
+    );
+    emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
+        context,
+        observability,
+        500,
+        result,
+    );
 }
 
 fn emit_v3_runtime_observability_contract_or_warning(

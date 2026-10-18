@@ -164,6 +164,19 @@ pub fn project_v3_post_commit_sse_source_via_sdk(
     )
 }
 
+pub fn project_v3_runtime_observability_contract_failure_via_sdk(
+    message: impl Into<String>,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    let (_source_projection, source) = raise_v3_source_via_err01(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3RuntimeObservability",
+        "runtime_observability_contract",
+        message.into(),
+        V3Err01SourceInput::Plain,
+    )?;
+    project_v3_post_commit_sse_source_via_sdk(source, 500)
+}
+
 pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
     raw: V3Server03HttpRequestRaw,
     manifest: &V3Config05ManifestPublished,
@@ -733,6 +746,31 @@ mod tests {
         assert_eq!(
             capture.diagnostic_source.code,
             "operation_runner_capture_client_json_failed"
+        );
+
+        let observability =
+            project_v3_runtime_observability_contract_failure_via_sdk("missing required timing")
+                .expect("observability contract must project through Err01..Err06");
+        assert_eq!(observability.status, 500);
+        assert_eq!(
+            observability.chain,
+            routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+        );
+        assert_eq!(
+            observability.diagnostic_source.source_kind,
+            V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(
+            observability.diagnostic_source.source_stage,
+            "V3RuntimeObservability"
+        );
+        assert_eq!(
+            observability.diagnostic_source.code,
+            "runtime_observability_contract"
+        );
+        assert_eq!(
+            observability.diagnostic_source.message,
+            "missing required timing"
         );
     }
 

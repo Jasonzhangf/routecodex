@@ -2,7 +2,10 @@ use super::*;
 
 #[test]
 fn post_commit_sse_preserves_declared_diagnostic_status() {
-    let source = routecodex_v3_error::raise_v3_runtime_observability_contract_failure(
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3RuntimeObservability",
+        "runtime_observability_contract",
         "missing required timing",
     );
     let projected =
