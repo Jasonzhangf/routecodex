@@ -128,7 +128,15 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
                                 .and_then(|id| custom_results.get(id))
                                 .copied()
                                 .unwrap_or(false);
-                            encoded.push(json!({"type":if custom {"custom_tool_call_output"} else {"function_call_output"},"call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),"output":anthropic_tool_result_output_as_responses_semantic(part.get("content"))?}));
+                            let mut output = json!({"type":if custom {"custom_tool_call_output"} else {"function_call_output"},"call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),"output":anthropic_tool_result_output_as_responses_semantic(part.get("content"))?});
+                            // Preserve the native explicit is_error marker as
+                            // opaque business data so the inverse projection can
+                            // distinguish an explicit false from an absent flag.
+                            if let Some(is_error) = part.get("is_error") {
+                                output["routecodex_chat_extension"] =
+                                    json!({"anthropic_tool_result_is_error": is_error.clone()});
+                            }
+                            encoded.push(output);
                         }
                         _ => {}
                     }

@@ -498,6 +498,185 @@ async fn anthropic_relay_tool_only_terminal_stays_deliverable() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// Native Anthropic Relay must preserve an explicit `tool_result.is_error`
+/// boolean exactly. The client's explicit `false`, explicit `true`, and absent
+/// marker must each project to the provider-bound Anthropic wire unchanged, and
+/// an explicit `false` must never be synthesized for an unmarked success.
+#[tokio::test]
+async fn anthropic_relay_preserves_explicit_tool_result_is_error_presence() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let provider_body = json!({
+        "id":"msg_business_ok","type":"message","role":"assistant",
+        "model":"wire-test","content":[{"type":"text","text":"provider finished the turn"}],
+        "stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":4}
+    })
+    .to_string();
+    for (label, marker) in [
+        ("explicit_false", Some(false)),
+        ("explicit_true", Some(true)),
+        ("absent", None),
+    ] {
+        let mut tool_result = json!({
+            "type":"tool_result",
+            "tool_use_id":"toolu_bash_1",
+            "content":"MARKER tool output for is_error preservation"
+        });
+        if let Some(marker) = marker {
+            tool_result["is_error"] = json!(marker);
+        }
+        let request = json!({
+            "model":"test.test","max_tokens":128,"stream":false,
+            "tools":[{"name":"Bash","description":"run a shell command","input_schema":{
+                "type":"object",
+                "properties":{"command":{"type":"string"},"description":{"type":"string"}},
+                "required":["command","description"]}}],
+            "messages":[
+                {"role":"user","content":[{"type":"text","text":"run the check"}]},
+                {"role":"assistant","content":[{"type":"tool_use","id":"toolu_bash_1","name":"Bash",
+                    "input":{"command":"ls -la","description":"list files"}}]},
+                {"role":"user","content":[tool_result]}
+            ]
+        });
+        let (endpoint, handle, mut captures, shutdown) = start_entry(
+            "anthropic",
+            "chat",
+            StatusCode::OK,
+            "application/json",
+            provider_body.clone(),
+        )
+        .await;
+        let (_, client_body) = successful_transfer(
+            client()
+                .post(endpoint.replace("/v1/responses", "/v1/messages"))
+                .json(&request)
+                .send()
+                .await,
+        )
+        .await;
+        stop_entry(handle, shutdown).await;
+        let captured = tokio::time::timeout(Duration::from_secs(2), captures.recv())
+            .await
+            .expect("real upstream attempt")
+            .unwrap();
+        assert_eq!(captured["model"], "wire-test");
+        assert!(
+            matches!(
+                captures.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+            ),
+            "{label}: exactly one upstream attempt"
+        );
+        let parts = |message: &Value| -> Vec<Value> {
+            message["content"].as_array().cloned().unwrap_or_default()
+        };
+        let messages = captured["messages"].as_array().expect("provider messages");
+        let call = messages
+            .iter()
+            .flat_map(parts)
+            .find(|part| part["type"] == "tool_use")
+            .unwrap_or_else(|| panic!("{label}: tool_use missing: {captured}"));
+        assert_eq!(call["id"], "toolu_bash_1", "{label}: {captured}");
+        assert_eq!(call["name"], "Bash", "{label}: {captured}");
+        assert_eq!(call["input"]["command"], "ls -la", "{label}: {captured}");
+        assert_eq!(
+            call["input"]["description"], "list files",
+            "{label}: {captured}"
+        );
+        let result = messages
+            .iter()
+            .flat_map(parts)
+            .find(|part| part["type"] == "tool_result")
+            .unwrap_or_else(|| panic!("{label}: tool_result missing: {captured}"));
+        assert_eq!(result["tool_use_id"], "toolu_bash_1", "{label}: {captured}");
+        assert!(
+            result["content"]
+                .to_string()
+                .contains("MARKER tool output for is_error preservation"),
+            "{label}: tool result content preserved: {captured}"
+        );
+        match marker {
+            Some(expected) => assert_eq!(
+                result.get("is_error"),
+                Some(&json!(expected)),
+                "{label}: explicit is_error must survive the roundtrip: {captured}"
+            ),
+            None => assert!(
+                result.get("is_error").is_none(),
+                "{label}: absent marker must remain absent: {captured}"
+            ),
+        }
+        assert!(
+            client_body.contains("provider finished the turn"),
+            "{label}: client success body must carry provider text: {client_body}"
+        );
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// A generic Responses `completed` status is not a native Anthropic marker.
+/// It must project to Anthropic without synthesizing `is_error: false`.
+#[tokio::test]
+async fn responses_completed_tool_output_does_not_synthesize_anthropic_is_error() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let provider_body = json!({
+        "id":"msg_business_ok","type":"message","role":"assistant",
+        "model":"wire-test","content":[{"type":"text","text":"generic Responses control"}],
+        "stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":4}
+    })
+    .to_string();
+    let request = json!({
+        "model":"test.test","stream":false,
+        "input":[
+            {"type":"message","role":"user","content":"run the check"},
+            {"type":"function_call","call_id":"call_completed","name":"Bash",
+                "arguments":"{\"command\":\"ls -la\",\"description\":\"list files\"}"},
+            {"type":"function_call_output","call_id":"call_completed","status":"completed",
+                "output":"generic completed output"}
+        ]
+    });
+    let (endpoint, handle, mut captures, shutdown) = start_entry(
+        "anthropic",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        provider_body,
+    )
+    .await;
+    let (_, client_body) =
+        successful_transfer(client().post(&endpoint).json(&request).send().await).await;
+    stop_entry(handle, shutdown).await;
+    let captured = tokio::time::timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("real upstream attempt")
+        .unwrap();
+    assert!(
+        matches!(
+            captures.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+        ),
+        "exactly one upstream attempt"
+    );
+    let result = captured["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|part| part["type"] == "tool_result")
+        .unwrap_or_else(|| panic!("tool_result missing: {captured}"));
+    assert_eq!(result["tool_use_id"], "call_completed", "{captured}");
+    assert!(
+        result.get("is_error").is_none(),
+        "generic Responses completed must not synthesize an Anthropic marker: {captured}"
+    );
+    assert!(
+        client_body.contains("generic Responses control"),
+        "client success body must carry provider text: {client_body}"
+    );
+    std::env::remove_var(KEY_ENV);
+}
+
 struct MixedRoundtrip {
     declarations: Vec<Value>,
     response: Value,

@@ -74,7 +74,6 @@ pub(super) fn chat_messages_as_anthropic_messages(
             continue;
         }
         if role == "tool" {
-            let is_error = responses_tool_result_is_error(chat_tool_result_status(object)?)?;
             let mut tool_result = Map::new();
             tool_result.insert("type".to_string(), Value::String("tool_result".to_string()));
             tool_result.insert(
@@ -85,7 +84,9 @@ pub(super) fn chat_messages_as_anthropic_messages(
                 "content".to_string(),
                 responses_tool_output_as_anthropic_content(object.get("content"))?,
             );
-            if is_error {
+            if let Some(is_error) = tool_result_explicit_is_error(object)? {
+                tool_result.insert("is_error".to_string(), is_error.clone());
+            } else if responses_tool_result_is_error(chat_tool_result_status(object)?)? {
                 tool_result.insert("is_error".to_string(), Value::Bool(true));
             }
             output.push(json!({
@@ -427,7 +428,6 @@ pub(super) fn responses_tool_call_as_anthropic_tool_use(
 pub(super) fn responses_tool_output_as_anthropic_tool_result(
     object: &Map<String, Value>,
 ) -> Result<Value, V3AnthropicCodecError> {
-    let is_error = responses_tool_result_is_error(object.get("status"))?;
     let mut result = Map::new();
     result.insert("type".to_string(), Value::String("tool_result".to_string()));
     result.insert(
@@ -438,10 +438,24 @@ pub(super) fn responses_tool_output_as_anthropic_tool_result(
         "content".to_string(),
         responses_tool_output_as_anthropic_content(object.get("output"))?,
     );
-    if is_error {
+    if let Some(is_error) = tool_result_explicit_is_error(object)? {
+        result.insert("is_error".to_string(), is_error.clone());
+    } else if responses_tool_result_is_error(object.get("status"))? {
         result.insert("is_error".to_string(), Value::Bool(true));
     }
     Ok(Value::Object(result))
+}
+
+fn tool_result_explicit_is_error<'a>(
+    object: &'a Map<String, Value>,
+) -> Result<Option<&'a Value>, V3AnthropicCodecError> {
+    match object.get("routecodex_chat_extension") {
+        None => Ok(None),
+        Some(Value::Object(extension)) => Ok(extension.get("anthropic_tool_result_is_error")),
+        Some(_) => Err(V3AnthropicCodecError::MalformedField {
+            field: "routecodex_chat_extension",
+        }),
+    }
 }
 
 fn chat_tool_result_status<'a>(

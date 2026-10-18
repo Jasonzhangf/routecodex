@@ -2029,6 +2029,8 @@ features:
   - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
   - responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak
   - responses_relay_anthropic_json_schema_name_is_consumed_at_provider_wire_boundary
+  - anthropic_relay_preserves_explicit_tool_result_is_error_presence
+  - responses_completed_tool_output_does_not_synthesize_anthropic_is_error
   - anthropic_consumes_responses_json_schema_name_in_outbound_projection
   - openai_chat_wire_projects_responses_web_search_tool_to_options
   - responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history
@@ -2058,6 +2060,7 @@ features:
   - npm run test:v3-protocol-conversion-field-parity
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_relay_json_projects_legacy_output_text_items_without_losing_fields
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_cross_protocol_public -- --nocapture
+  - CARGO_NET_OFFLINE=true cargo test --locked --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox is_error -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_native_discovery_public -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test gemini_sse_attempt_public -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test gemini_terminal_public -- --nocapture --test-threads=1
