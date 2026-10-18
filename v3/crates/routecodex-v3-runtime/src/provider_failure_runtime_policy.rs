@@ -5,7 +5,7 @@ use routecodex_v3_config::{
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    build_v3_error_02_classified_from_v3_error_01,
+    build_v3_error_01_source_raised_internal, build_v3_error_02_classified_from_v3_error_01,
     build_v3_provider_failure_action_from_v3_error_02,
     build_v3_provider_global_error_fingerprint_from_classified,
     build_v3_provider_global_failure_policy, is_v3_provider_pool_exhausted, V3Error01SourceRaised,
@@ -178,6 +178,51 @@ pub struct V3RelayErrorOperatorFault {
     pub original_source: Option<V3Error01SourceRaised>,
 }
 
+/// Run the canonical Source01 SDK once and preserve its two successful side
+/// outputs. If the SDK cannot raise the source, keep the reconstructed origin
+/// as diagnostic evidence and report the SDK failure separately.
+pub(crate) fn raise_v3_source_via_err01(
+    source_kind: V3ErrorSourceKind,
+    source_stage: &'static str,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    source_input: V3Err01SourceInput,
+) -> Result<(Value, V3Error01SourceRaised), V3RelayErrorOperatorFault> {
+    let code = code.into();
+    let message = message.into();
+    let original_source = match &source_input {
+        V3Err01SourceInput::Plain => build_v3_error_01_source_raised(
+            source_kind.clone(),
+            source_stage,
+            code.clone(),
+            message.clone(),
+        ),
+        V3Err01SourceInput::Internal(internal_code) => build_v3_error_01_source_raised_internal(
+            source_kind.clone(),
+            source_stage,
+            code.clone(),
+            message.clone(),
+            *internal_code,
+        ),
+        V3Err01SourceInput::External(external_error) => build_v3_error_01_source_raised_external(
+            source_kind.clone(),
+            source_stage,
+            code.clone(),
+            message.clone(),
+            external_error.clone(),
+        ),
+    };
+
+    run_v3_err01_source_raised_operator(source_kind, source_stage, code, message, source_input)
+        .map_err(|runner_error| {
+            relay_error_operator_fault_from_err01_source(
+                source_stage,
+                original_source,
+                runner_error,
+            )
+        })
+}
+
 fn relay_error_operator_fault(
     code: &str,
     message: impl Into<String>,
@@ -191,6 +236,25 @@ fn relay_error_operator_fault(
             message,
         ),
         original_source,
+    }
+}
+
+fn relay_error_operator_fault_from_err01_source(
+    source_stage: &'static str,
+    original_source: V3Error01SourceRaised,
+    runner_error: crate::operation_runner::OperationRunnerError,
+) -> V3RelayErrorOperatorFault {
+    V3RelayErrorOperatorFault {
+        policy_failure: build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Error01SourceRaised",
+            "err01_source_operator_sdk_failure",
+            format!(
+                "Err01 operator failed ({}) while raising {source_stage}:{}",
+                runner_error.message, original_source.code
+            ),
+        ),
+        original_source: Some(original_source),
     }
 }
 
