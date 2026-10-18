@@ -487,12 +487,12 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
                 &state.server,
                 &path,
                 &request_id,
-                project_v3_server_runtime_failure(
+                Ok(project_v3_server_runtime_failure(
                     "V3Server03HttpRequestRaw",
                     "anthropic_client_headers_invalid",
                     error,
                     598,
-                ),
+                )),
             )
         }
     };

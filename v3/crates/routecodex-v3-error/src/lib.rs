@@ -1168,10 +1168,9 @@ pub enum V3HttpBoundaryErrorKind {
     WebSocketBetaRequired,
 }
 
-pub fn project_v3_http_boundary_error(
+pub const fn v3_http_boundary_error_spec(
     kind: V3HttpBoundaryErrorKind,
-    detail: impl Into<String>,
-) -> V3Error06ClientProjected {
+) -> (V3ErrorSourceKind, &'static str, &'static str) {
     let (source_kind, code) = match kind {
         V3HttpBoundaryErrorKind::MalformedJson => {
             (V3ErrorSourceKind::InvalidRequest, "malformed_json")
@@ -1207,14 +1206,7 @@ pub fn project_v3_http_boundary_error(
             (V3ErrorSourceKind::InvalidRequest, "websocket_beta_required")
         }
     };
-    let source =
-        build_v3_error_01_source_raised(source_kind, "V3Server03HttpRequestRaw", code, detail);
-    V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-        source,
-        action_scope: V3ErrorActionScope::None,
-        candidates_remaining: 0,
-        source_status: None,
-    })
+    (source_kind, "V3Server03HttpRequestRaw", code)
 }
 
 fn project_v3_server_boundary_error(

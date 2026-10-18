@@ -2595,9 +2595,10 @@ async fn malformed_json_error_includes_body_length_without_raw_payload() {
         .body(Body::from(r#"{"model":"gpt-5.5","input":"#))
         .unwrap();
 
-    let projected = read_json_payload(request)
+    let projection = read_json_payload(request)
         .await
         .expect_err("truncated JSON must fail at the HTTP boundary");
+    let projected = projection.expect("normal malformed JSON must produce Error06");
 
     assert_eq!(projected.status, 400);
     assert_eq!(projected.body["error"]["code"], "malformed_json");

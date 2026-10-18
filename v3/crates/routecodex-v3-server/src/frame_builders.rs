@@ -1042,9 +1042,14 @@ pub(crate) fn build_v3_debug_runtime_from_manifest(
 // 图片，wire 侧体积回到正常量级，内存峰值仅存在于读取-清洗窗口。
 pub(crate) const V3_MAX_REQUEST_BODY_BYTES: usize = 256 * 1024 * 1024;
 
+pub(crate) type V3HttpInputErrorProjection = Result<
+    routecodex_v3_error::V3Error06ClientProjected,
+    routecodex_v3_runtime::V3RelayErrorOperatorFault,
+>;
+
 pub(crate) async fn read_json_payload(
     request: Request,
-) -> Result<serde_json::Value, routecodex_v3_error::V3Error06ClientProjected> {
+) -> Result<serde_json::Value, V3HttpInputErrorProjection> {
     let content_length = request
         .headers()
         .get(CONTENT_LENGTH)
@@ -1145,18 +1150,31 @@ pub(crate) async fn path_not_found(
 pub(crate) fn project_http_input_error(
     kind: V3HttpBoundaryErrorKind,
     message: impl Into<String>,
-) -> routecodex_v3_error::V3Error06ClientProjected {
-    project_v3_http_boundary_error(kind, message)
+) -> V3HttpInputErrorProjection {
+    project_v3_http_boundary_error_via_sdk(kind, message)
+}
+
+fn resolve_http_input_error_projection(
+    projection: V3HttpInputErrorProjection,
+) -> Result<routecodex_v3_error::V3Error06ClientProjected, Response<Body>> {
+    projection.map_err(|fault| {
+        foundation_output_response(foundation_output_from_error_sdk_result(
+            "V3Server03HttpRequestRaw",
+            vec!["V3Server03HttpRequestRaw"],
+            None,
+            Err(fault),
+        ))
+    })
 }
 
 pub(crate) fn error_output_response_for_server(
     server: &V3ServerManifest,
     endpoint: &str,
     request_id: &str,
-    projected: routecodex_v3_error::V3Error06ClientProjected,
+    projection: V3HttpInputErrorProjection,
 ) -> Response<Body> {
     error_output_response_for_server_with_project_path(
-        server, endpoint, request_id, projected, None,
+        server, endpoint, request_id, projection, None,
     )
 }
 
@@ -1164,9 +1182,13 @@ pub(crate) fn error_output_response_for_server_with_project_path(
     server: &V3ServerManifest,
     endpoint: &str,
     request_id: &str,
-    projected: routecodex_v3_error::V3Error06ClientProjected,
+    projection: V3HttpInputErrorProjection,
     project_path: Option<&str>,
 ) -> Response<Body> {
+    let projected = match resolve_http_input_error_projection(projection) {
+        Ok(projected) => projected,
+        Err(response) => return response,
+    };
     let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
     emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
     if endpoint.starts_with("/_routecodex/") {
@@ -1185,11 +1207,15 @@ pub(crate) fn error_output_response_for_responses_request_with_project_path(
     server: &V3ServerManifest,
     endpoint: &str,
     request_id: &str,
-    projected: routecodex_v3_error::V3Error06ClientProjected,
+    projection: V3HttpInputErrorProjection,
     request_headers: &HeaderMap,
     payload: Option<&Value>,
     project_path: Option<&str>,
 ) -> Response<Body> {
+    let projected = match resolve_http_input_error_projection(projection) {
+        Ok(projected) => projected,
+        Err(response) => return response,
+    };
     let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
     emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
     responses_direct_output_response(

@@ -9,7 +9,8 @@ use crate::provider_failure_runtime_policy::{
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime};
 use routecodex_v3_error::{
-    V3Error01SourceRaised, V3Error06ClientProjected, V3ErrorActionScope, V3ErrorSourceKind,
+    v3_http_boundary_error_spec, V3Error01SourceRaised, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorSourceKind, V3HttpBoundaryErrorKind,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityReader, V3ProviderAvailabilityRegistry,
@@ -88,7 +89,7 @@ fn raise_and_project_foundation_error(
     project_v3_relay_error_source(source, V3ErrorActionScope::None, 0, None)
 }
 
-fn foundation_output_from_error_sdk_result(
+pub fn foundation_output_from_error_sdk_result(
     debug_node: &'static str,
     fault_node_trace: Vec<&'static str>,
     success_node_trace: Option<Vec<&'static str>>,
@@ -122,6 +123,14 @@ fn foundation_output_from_error_sdk_result(
             diagnostic_cause: fault.original_source,
         },
     }
+}
+
+pub fn project_v3_http_boundary_error_via_sdk(
+    kind: V3HttpBoundaryErrorKind,
+    detail: impl Into<String>,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    let (source_kind, source_stage, code) = v3_http_boundary_error_spec(kind);
+    raise_and_project_foundation_error(source_kind, source_stage, code, detail.into())
 }
 
 pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
@@ -554,6 +563,74 @@ mod tests {
             "relay_error_operator_sdk_failure"
         );
         assert_eq!(output.diagnostic_cause, Some(original_source));
+    }
+
+    #[test]
+    fn http_boundary_error_executes_canonical_error_nodes_and_preserves_fault_cause() {
+        let projected = project_v3_http_boundary_error_via_sdk(
+            routecodex_v3_error::V3HttpBoundaryErrorKind::MalformedJson,
+            "malformed JSON request body",
+        )
+        .expect("normal HTTP boundary input must project through Err01..Err06");
+
+        assert_eq!(
+            projected.chain,
+            [
+                "V3Error01SourceRaised",
+                "V3Error02Classified",
+                "V3Error03TargetLocalAction",
+                "V3Error04TargetExhaustionDecision",
+                "V3Error05ExecutionDecision",
+                "V3Error06ClientProjected",
+            ]
+        );
+        assert_eq!(projected.status, 400);
+        assert_eq!(projected.body["error"]["code"], "malformed_json");
+        assert_eq!(
+            projected.diagnostic_source.source_stage,
+            "V3Server03HttpRequestRaw"
+        );
+
+        let (_, original_source) = raise_v3_source_via_err01(
+            V3ErrorSourceKind::InvalidRequest,
+            "V3Server03HttpRequestRaw",
+            "malformed_json",
+            "malformed JSON request body",
+            V3Err01SourceInput::Plain,
+        )
+        .expect("fault fixture source must be canonical");
+        let fault = V3RelayErrorOperatorFault {
+            policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Error06ClientProjected",
+                "relay_error_operator_sdk_failure",
+                "synthetic HTTP boundary Error06 failure",
+            ),
+            original_source: Some(original_source.clone()),
+        };
+        let output = foundation_output_from_error_sdk_result(
+            "V3Server03HttpRequestRaw",
+            vec!["V3Server03HttpRequestRaw"],
+            None,
+            Err(fault),
+        );
+
+        assert_eq!(output.status, 599);
+        assert_eq!(output.body, Value::Null);
+        assert_eq!(output.error_node, "none");
+        assert_eq!(
+            output.diagnostic_source.as_ref().unwrap().source_stage,
+            "V3Error06ClientProjected"
+        );
+        assert_eq!(output.diagnostic_cause, Some(original_source));
+        assert!(
+            output
+                .node_trace
+                .iter()
+                .all(|node| *node != "V3Error01SourceRaised"),
+            "the raw SDK fault must not recursively raise another Err01: {:?}",
+            output.node_trace
+        );
     }
 
     #[test]

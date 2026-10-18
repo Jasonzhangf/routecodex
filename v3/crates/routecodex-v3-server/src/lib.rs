@@ -77,12 +77,12 @@ use routecodex_v3_debug::{
     V3DebugTraceScope, V3DryRunFixture, V3RedactionPolicy,
 };
 use routecodex_v3_error::{
-    is_v3_client_disconnect_source, project_v3_http_boundary_error,
-    project_v3_post_commit_sse_source, project_v3_server_invalid_request,
-    project_v3_server_runtime_failure, project_v3_server_websocket_error,
-    raise_v3_debug_artifact_failure, raise_v3_runtime_observability_contract_failure,
-    raise_v3_sse_client_disconnect, raise_v3_sse_provider_failure, raise_v3_sse_runtime_failure,
-    V3Error01SourceRaised, V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
+    is_v3_client_disconnect_source, project_v3_post_commit_sse_source,
+    project_v3_server_invalid_request, project_v3_server_runtime_failure,
+    project_v3_server_websocket_error, raise_v3_debug_artifact_failure,
+    raise_v3_runtime_observability_contract_failure, raise_v3_sse_client_disconnect,
+    raise_v3_sse_provider_failure, raise_v3_sse_runtime_failure, V3Error01SourceRaised,
+    V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw, build_v3_server_03_http_request_raw_with_purpose,
@@ -106,26 +106,27 @@ use routecodex_v3_runtime::{
     execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state,
     execute_v3_responses_relay_runtime_with_default_transport,
     execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state,
+    foundation_output_from_error_sdk_result,
     plan_v3_responses_protocol_execution_with_provider_health,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
-    project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
-    project_v3_protocol_execution_plan_failure, project_v3_responses_relay_runtime_failure,
-    project_v3_virtual_router_dry_run, project_v3_virtual_router_status,
-    register_responses_direct_hooks, V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput,
-    V3AnthropicRelayRuntimeOutput, V3ChatDirectCodec, V3ClientBody, V3ClientSseStream,
-    V3CommittedClientSseStream, V3CommittedSseTerminal, V3Execution11ProtocolDecisionMode,
-    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayClientBody,
-    V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3HubExecutionMode,
-    V3OpenAiChatClientStream, V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3RelayProviderSnapshots,
-    V3RequestExecutionControl, V3Resp15ClientPayload, V3ResponsesDirectRuntimeSharedState,
-    V3ResponsesDirectServerToolScope, V3ResponsesDirectServerToolState,
-    V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
-    V3ResponsesRelayDryRunOutcome, V3ResponsesRelayProviderHealthHandle,
-    V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
-    V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeSeeds,
-    V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState, V3RuntimeObservability,
-    V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
+    project_v3_gemini_relay_runtime_failure, project_v3_http_boundary_error_via_sdk,
+    project_v3_openai_chat_relay_runtime_failure, project_v3_protocol_execution_plan_failure,
+    project_v3_responses_relay_runtime_failure, project_v3_virtual_router_dry_run,
+    project_v3_virtual_router_status, register_responses_direct_hooks,
+    V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
+    V3ChatDirectCodec, V3ClientBody, V3ClientSseStream, V3CommittedClientSseStream,
+    V3CommittedSseTerminal, V3Execution11ProtocolDecisionMode, V3FoundationRuntimeInput,
+    V3FoundationRuntimeOutput, V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput,
+    V3GeminiRelayRuntimeOutput, V3HubExecutionMode, V3OpenAiChatClientStream,
+    V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput,
+    V3OpenAiChatRelayRuntimeOutput, V3RelayProviderSnapshots, V3RequestExecutionControl,
+    V3Resp15ClientPayload, V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
+    V3ResponsesDirectServerToolState, V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody,
+    V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
+    V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
+    V3ResponsesRelayRuntimeSeeds, V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState,
+    V3RuntimeObservability, V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
     V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
 };
@@ -877,12 +878,12 @@ async fn virtual_router_status(
             &state.server,
             "/_routecodex/diagnostics/virtual-router",
             "diagnostics",
-            project_v3_server_invalid_request(
+            Ok(project_v3_server_invalid_request(
                 "V3Server03HttpRequestRaw",
                 "forbidden",
                 "forbidden",
                 403,
-            ),
+            )),
         );
     }
     match project_v3_virtual_router_status(
@@ -905,12 +906,12 @@ async fn virtual_router_status(
             &state.server,
             "/_routecodex/diagnostics/virtual-router",
             "diagnostics",
-            project_v3_server_runtime_failure(
+            Ok(project_v3_server_runtime_failure(
                 "V3RouterDiagnostics",
                 "virtual_router_diagnostics_failed",
                 message,
                 500,
-            ),
+            )),
         ),
     }
 }
@@ -925,12 +926,12 @@ async fn virtual_router_dry_run(
             &state.server,
             "/_routecodex/diagnostics/virtual-router/dry-run",
             "diagnostics",
-            project_v3_server_invalid_request(
+            Ok(project_v3_server_invalid_request(
                 "V3Server03HttpRequestRaw",
                 "forbidden",
                 "forbidden",
                 403,
-            ),
+            )),
         );
     }
     let payload = match read_json_payload(request).await {
@@ -965,12 +966,12 @@ async fn virtual_router_dry_run(
             &state.server,
             "/_routecodex/diagnostics/virtual-router/dry-run",
             "diagnostics",
-            project_v3_server_runtime_failure(
+            Ok(project_v3_server_runtime_failure(
                 "V3RouterDiagnostics",
                 "virtual_router_dry_run_failed",
                 message,
                 500,
-            ),
+            )),
         ),
     }
 }
@@ -1032,12 +1033,12 @@ async fn admit_v3_responses_session_after_json_parse(
                     &state.server,
                     path,
                     &request_id,
-                    project_v3_server_runtime_failure(
+                    Ok(project_v3_server_runtime_failure(
                         "V3ServerResponsesSessionAdmission",
                         "responses_session_admission_unavailable",
                         error.to_string(),
                         598,
-                    ),
+                    )),
                     request_headers,
                     Some(payload),
                     resolve_v3_console_project_path(request_headers, payload).as_deref(),
@@ -1144,6 +1145,26 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
             let request_id = match allocate_v3_console_request_id(&state, &path, None) {
                 Ok(request_id) => request_id,
                 Err(response) => return *response,
+            };
+            let projected = match projected {
+                Ok(projected) => projected,
+                Err(fault) => {
+                    persist_v3_chat_failure_evidence_sources(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        &[],
+                        Some(&fault.policy_failure),
+                        fault.original_source.as_ref(),
+                    );
+                    return foundation_output_response(foundation_output_from_error_sdk_result(
+                        "V3Server03HttpRequestRaw",
+                        vec!["V3Server03HttpRequestRaw"],
+                        None,
+                        Err(fault),
+                    ));
+                }
             };
             let execution_id = state.debug.next_execution_id(&state.server.id);
             let trace_scope =

@@ -189,3 +189,87 @@ async fn foundation_nochain_fault_breaks_model_transport_without_client_payload(
         "the exact typed cause must reach the Debug sink: {log}"
     );
 }
+
+#[tokio::test]
+async fn http_boundary_sdk_fault_preserves_typed_source_cause_and_model_transport_break() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let (policy_source, original_source) = foundation_fault_sources();
+    let fault = routecodex_v3_runtime::V3RelayErrorOperatorFault {
+        policy_failure: policy_source.clone(),
+        original_source: Some(original_source.clone()),
+    };
+
+    let log = std::env::temp_dir().join(format!(
+        "rcc-m4-http-boundary-fault-{}.log",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&log);
+    let state = test_v3_listener_state_with_debug(&log, 5555, false, false, None, false);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let connection = state.front_transport_broker.allocate_connection_identity();
+    let broker = state.front_transport_broker.clone();
+    let router = axum::Router::new().route(
+        "/v1/responses",
+        axum::routing::post(move || {
+            let state = state.clone();
+            let fault = fault.clone();
+            async move {
+                let response = error_output_response_for_server(
+                    &state.server,
+                    "/v1/responses",
+                    "pre-request",
+                    Err(fault),
+                );
+                commit_model_transport_outcome(&state, Some(connection), response)
+            }
+        }),
+    );
+    let server = tokio::spawn(async move {
+        let (accepted, remote) = listener.accept().await.unwrap();
+        crate::restart_handoff::serve_v3_front_http_connection(
+            accepted, remote, connection, broker, router,
+        )
+        .await
+    });
+    let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+    client
+        .write_all(b"POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n{}")
+        .await
+        .unwrap();
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut bytes))
+        .await
+        .expect("the accepted model client socket must terminate")
+        .expect("the accepted model client socket must close normally");
+    assert!(
+        bytes.is_empty(),
+        "an SDK fault must not become an HTTP status, error payload or null success: {bytes:?}"
+    );
+    let _connection_result = tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .expect("Front connection task must settle")
+        .expect("Front connection task must not panic");
+    let log = fs::read_to_string(&log).expect("typed fault diagnostics must reach Debug");
+    assert!(
+        log.contains(&format!(
+            "source_kind={:?} source_stage={} code={} message={}",
+            policy_source.source_kind,
+            policy_source.source_stage,
+            policy_source.code,
+            policy_source.message
+        )),
+        "the typed SDK policy source must be retained: {log}"
+    );
+    assert!(
+        log.contains(&format!(
+            "cause_kind={:?} cause_stage={} cause_code={} cause_message={}",
+            original_source.source_kind,
+            original_source.source_stage,
+            original_source.code,
+            original_source.message
+        )),
+        "the original HTTP boundary source must be retained as cause: {log}"
+    );
+}
