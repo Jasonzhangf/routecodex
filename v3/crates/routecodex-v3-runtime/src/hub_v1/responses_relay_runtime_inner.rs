@@ -49,7 +49,49 @@ fn construct_responses_relay_transport_request(
         .map_err(V3ResponsesRelayRuntimeError::Target)
 }
 
-pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
+// Construct the large Relay state machine outside the caller's poll frame.
+// The owner returns only the heap pointer to every caller, including dry-run.
+#[inline(never)]
+pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport + 'a>(
+    manifest: &'a V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    transport: &'a T,
+    server_tool_state: Option<V3ResponsesRelayServerToolExecution<'a>>,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    retry_policy: V3ResponsesRelayRetryPolicy,
+    allow_exhaustion_rescue_probe: bool,
+    provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
+    route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    initial_request_local_excluded_candidates: BTreeSet<String>,
+    initial_relay_seeds: V3ResponsesRelayRuntimeSeeds,
+) -> std::pin::Pin<
+    Box<
+        impl std::future::Future<
+                Output = Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError>,
+            > + Send
+            + 'a,
+    >,
+> {
+    Box::pin(execute_v3_responses_relay_runtime_unboxed(
+        manifest,
+        input,
+        transport,
+        server_tool_state,
+        provider_health,
+        retry_policy,
+        allow_exhaustion_rescue_probe,
+        provider_failure_event_sink,
+        route_selection_event_sink,
+        initial_selected_target,
+        initial_expanded,
+        initial_request_local_excluded_candidates,
+        initial_relay_seeds,
+    ))
+}
+
+async fn execute_v3_responses_relay_runtime_unboxed<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
