@@ -1357,6 +1357,10 @@ features:
   - External provider/upstream/transport errors keep external_error identity and never receive internal_code
   - RouteCodex-owned runtime failures receive stable internal_code 500-* by node and never receive external_error
   - Client-input malformed request projection has neither internal_code nor external_error
+  required_positive:
+  - v3_http_server_responses_direct_sse_optional_snapshot_failure_is_diagnostic_only proves the public Responses Direct live SSE consumer receives every original business byte after optional snapshot append and terminal persistence fail, while the snapshot diagnostic remains observable.
+  required_negative:
+  - The optional snapshot failure test proves no V3DebugArtifact source replaces the original upstream source and no snapshot failure terminates the public SSE consumer.
   required_integration:
   - All model entry errors stay internal even on pool exhaustion; multi_listener_server model_entries_never_deliver_provider_or_sse_decode_errors_blackbox captures real HTTP bytes for Chat, Responses including compact, Messages, and Gemini JSON/SSE with upstream503 and malformed SSE; responses_inbound_websocket_sse_decode_failure_never_sends_client_error and the provider429/binary/502, malformed input, pool exhaustion, session isolation, and successful tool tests are mandatory in test:v3-server-debug-error-blackbox and the V3 cargo workspace CI run
   - multi_listener_server malformed_http_framing_never_sends_client_error_blackbox proves fresh, reused and pipelined HTTP parse failures terminate with zero new bytes; front_http_framing_preserves_authorized_responses_blackbox preserves control errors, opaque/multi-flush bodies and Expect/100-continue; hyper_default_error_policy_preserves_upstream_behavior_blackbox proves the dependency default and explicit true preserve native 400/431; existing success gates preserve SSE and WebSocket
@@ -1386,6 +1390,7 @@ features:
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
   - npm run build:v3-cli
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib tests::v3_http_server_responses_direct_sse_optional_snapshot_failure_is_diagnostic_only -- --exact --nocapture
   completion_rule:
     source: P3/P4 unit, module blackbox, architecture gates, fmt, clippy, workspace tests, and CLI build must pass.
     runtime: The built V3 CLI must start dedicated multi-listener fixture ports and real HTTP probes must prove debug endpoints, dry-run no-send, and six-node error chain.

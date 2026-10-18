@@ -50,18 +50,6 @@ fn sse_runtime_failure_projects_through_the_complete_error_chain() {
 
 #[test]
 fn server_side_failures_are_raised_by_error_owner() {
-    let debug = raise_v3_debug_artifact_failure("disk full");
-    assert_eq!(debug.source_kind, V3ErrorSourceKind::RuntimeFailure);
-    assert_eq!(debug.source_stage, "V3DebugArtifact");
-    assert_eq!(debug.code, "codex_sample_persistence_failed");
-    assert_eq!(
-        debug
-            .internal_error
-            .as_ref()
-            .map(|internal| internal.internal_code),
-        Some("500-300")
-    );
-
     let observability = raise_v3_runtime_observability_contract_failure("missing terminal");
     assert_eq!(observability.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert_eq!(observability.source_stage, "V3RuntimeObservability");
