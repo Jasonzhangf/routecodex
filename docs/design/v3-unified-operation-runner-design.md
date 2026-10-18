@@ -2,11 +2,15 @@
 
 Model-client delivery follows AGENTS.md's mandatory all-entry no-client-error contract and [the client transport design](../goals/provider-terminal-no-502-dag-20260930.md). Legacy symbols containing `ClientProjected`, `client_projection_candidate`, or `terminal_client_error` name internal resources/decisions only; they never authorize an HTTP error, error payload/event, or fabricated success. This target design supersedes their former client-error semantics; current code has not completed that cutover.
 
-> Contract for the complete target graphs. Separately from the current production baseline, the M2 candidate
-> compiles and runs nine of twenty operation nodes as canonical single-node SDK executions. The
-> complete request, response, and error graphs, their eleven remaining Operators, and field-profile
-> execution are not claimed as runtime cutovers. Existing Hub v1 owners and maps remain the
-> execution truth for every pending node.
+> Contract for the complete target graphs. Separately from the current production baseline, the M2
+> candidate accepts thirteen of twenty operation nodes within scoped behavior: nine request nodes and
+> four response nodes, including the existing Responses JSON frame path. `resolve_target` and
+> `plan_execution` are wired through Direct, four-protocol Relay, and Server non-admitting preplan,
+> and have passed the fresh full-chain matrix. Ordinary response inverse projection is
+> wired; its hosted path still awaits REQ02. The six global Error nodes have only single-node SDK
+> executions and no global pipeline cutover, so all six remain pending acceptance. The complete
+> graphs, remaining node acceptance, and field-profile execution are not claimed as runtime cutovers.
+> Existing Hub v1 owners and maps remain the execution truth for pending paths.
 
 ## Scope
 
@@ -142,9 +146,12 @@ response, or error source. `dagpipe graph validate` proves static topology only.
 Every node in the three design graphs has one owner, one typed input/output ARC pair, and one
 resource family. The actual caller/callee bindings for the M2 candidate are the
 `candidate_stage_bindings` tables in the request and response chains of
-[`v3-mainline-call-map.yml`](../architecture/v3-mainline-call-map.yml). They bind nine nodes; the
-other eleven node bindings remain pending. The runtime tables and existing H1 owners remain the
-production baseline for the pending nodes; they are not the design's field mapping truth.
+[`v3-mainline-call-map.yml`](../architecture/v3-mainline-call-map.yml). They record scoped acceptance
+for thirteen nodes and partial SDK wiring for the remaining seven. The accepted thirteen are
+nine request nodes and four response nodes, with frame acceptance limited to the existing Responses
+JSON path. Inverse and global Error paths remain pending outside that scope. The runtime
+tables and existing H1 owners remain the production baseline for those paths; they are not the
+design's field mapping truth.
 
 ### Request graph `v3.operation_runner.request@1`
 
@@ -199,9 +206,10 @@ or payload-carried control replaces this chain.
 The future runner is one Rust `Runtime::run` call per request/response/error invocation. It compiles
 only immutable graphs and never accepts mutable graph configuration at request time. The request
 and response graphs are separate SESE object flows; the error graph is separate and is invoked by
-typed failure from any fixed node. Today, `run_v3_single_node_operator` executes slices of the
-request and response graphs. It does not execute the Error graph. This design defines the later
-Runtime slices; it does not claim that Error SDK execution is wired.
+typed failure from any fixed node. Today, canonical single-node SDK execution exists for Error01,
+Error02, and the Error03 through Error06 operator slices. Their consumers compose those slices in
+`provider_failure_runtime_policy.rs`; there is still no global Error pipeline cutover or global-node
+acceptance.
 
 The runner owns:
 
@@ -562,15 +570,16 @@ supported; no local continuation is introduced.
 | Node family | Current production caller/callee | Current runtime implementation | Design owner | Physical ablation | Verification evidence |
 | --- | --- | --- | --- | --- | --- |
 | Request capture/normalize | HTTP: `pending_endpoint_after_responses_admission_inner`; WebSocket: `handle_responses_websocket_message_with_mode`; Relay: `V3HubRelayRequestHooks::run`; Direct retains `V3Server03HttpRequestRaw`/`C::build_standardized` | `capture_client_json` and `normalize_request_losslessly` are compiled/run through canonical single-node SDK execution; Direct normalization remains in its existing owner | `routecodex-v3-runtime` fixed runner | remove remaining mode-specific normalization only at Direct's later cutover | actual binding table in `v3-mainline-call-map.yml`; same-entry tool and payload black-box replay |
-| Target/execution/request projection | `execute_v3_direct_runtime_kernel_core` and `execute_v3_relay_runtime_core` | current Direct/Relay loops | `routecodex-v3-runtime` | remove old decision-after-ChatProcess order | design graph + this matrix |
+| Target/execution/request projection | Direct: `execute_v3_responses_direct_runtime_kernel_core`, `execute_v3_direct_runtime_kernel_core_resident`, and `plan_v3_responses_protocol_execution_with_provider_health`; Relay: `execute_v3_relay_runtime_core`, `execute_v3_responses_relay_runtime_inner`, and `execute_v3_anthropic_relay_runtime_inner` | current Direct/Relay loops call `run_v3_resolve_target_operator` and `run_v3_plan_execution_operator_with_probes`; fresh full-chain matrix acceptance passed | `routecodex-v3-runtime` | preserve accepted routing-before-governance order | design graph + this matrix |
 | Response normalize/govern/project | old Direct/Relay response loops | current codecs and hooks | `routecodex-v3-runtime` | remove second response exit | design graph + this matrix |
 | Error | existing `error.mainline.yml` callers | ErrorErr01-06 chain | `error.pipeline_contract` / `error.client_projection` | none; retain chain | `error.mainline.yml` + error graph |
 
-The M2 candidate binds nine nodes through canonical single-node SDK execution; the other eleven
-graph-node bindings are `binding_pending`. This does not claim that the production Server, Direct,
-or Relay execution loops have been replaced by the complete request, response, or error graph. The
-actual binding list and caller/callee evidence stay in the mainline map's
-`candidate_stage_bindings` tables; this design does not keep a second inventory.
+The M2 candidate records scoped acceptance for thirteen nodes through canonical single-node SDK
+execution. Response inverse and all global Error nodes remain outside that acceptance. This
+does not claim that the production Server, Direct, or Relay execution loops have been replaced by
+the complete request, response, or error graph. The actual binding list and caller/callee evidence
+stay in the mainline map's `candidate_stage_bindings` tables; this design does not keep a second
+inventory.
 
 ## Runner foundation and per-node delivery
 
@@ -702,9 +711,9 @@ independently.
 ## Evidence boundary
 
 - Graph topology: `dagpipe graph validate` only proves static DAG shape.
-- Operator admission: the nine candidate Operators are compiled and run through canonical
-  single-node SDK execution; the remaining eleven still require their own project
-  `pipeline_runtime::compile()` evidence.
+- Operator admission: the thirteen scoped-accepted candidate Operators are compiled and run through
+  canonical single-node SDK execution. Inverse and Error Operators have partial caller bindings;
+  SDK compilation alone does not establish their remaining caller acceptance.
 - Runtime behavior: Server dispatch and existing Direct/Relay loops remain execution truth for
   pending nodes; the complete request, response, and error graph bindings remain pending.
 - Field coverage: semantic matrix statuses remain unchanged; partial/declared rows are not relabeled
