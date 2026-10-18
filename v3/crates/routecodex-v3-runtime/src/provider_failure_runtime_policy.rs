@@ -355,47 +355,19 @@ fn project_v3_relay_error_source_with_projection(
     Ok(projected)
 }
 
-fn relay_error_operator_fault_from_err01_failure(
-    provider_id: &str,
-    source_stage: &'static str,
-    code: &str,
-    raw_message: &str,
-    runner_error: crate::operation_runner::OperationRunnerError,
-) -> V3RelayErrorOperatorFault {
-    // Err01 failed before it could produce a typed Source. Preserve the raw
-    // origin in the fault diagnostic instead of reducing it to the runner text.
-    relay_error_operator_fault(
-        "relay_error_operator_sdk_failure",
-        format!(
-            "Err01 operator failed ({}) while raising {source_stage}:{code} for provider {provider_id}: {raw_message}",
-            runner_error.message
-        ),
-        None,
-    )
-}
-
 pub(crate) fn project_v3_client_disconnect(
     provider_id: &str,
     source_stage: &'static str,
     message: impl Into<String>,
 ) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
     let message = message.into();
-    let (source_projection, source) = run_v3_err01_source_raised_operator(
+    let (source_projection, source) = raise_v3_source_via_err01(
         V3ErrorSourceKind::ClientDisconnect,
         source_stage,
         "client_disconnect",
         message.clone(),
         V3Err01SourceInput::Plain,
-    )
-    .map_err(|error| {
-        relay_error_operator_fault_from_err01_failure(
-            provider_id,
-            source_stage,
-            "client_disconnect",
-            &message,
-            error,
-        )
-    })?;
+    )?;
     let original_source = source.clone();
     let (decision_projection, decision) = run_v3_error_02_to_05_decision_operators(
         source_projection,

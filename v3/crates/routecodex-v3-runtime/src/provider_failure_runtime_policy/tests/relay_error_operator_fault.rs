@@ -242,18 +242,18 @@ fn project_v3_relay_error_source_keeps_provider_failure_status_path() {
 
 #[test]
 fn project_v3_client_disconnect_returns_real_client_disconnect_error06() {
-    let projected = project_v3_client_disconnect(
-        "provider-a",
-        "V3ProviderReqOutbound09TransportRequest",
-        "client disconnected",
-    )
-    .expect("real disconnect projection must return Error06");
+    let source_stage = "V3ProviderReqOutbound09TransportRequest";
+    let projected = project_v3_client_disconnect("provider-a", source_stage, "client disconnected")
+        .expect("real disconnect projection must return Error06");
 
     assert_eq!(
         projected.diagnostic_source.source_kind,
         V3ErrorSourceKind::ClientDisconnect
     );
+    assert_eq!(projected.diagnostic_source.source_stage, source_stage);
+    assert_eq!(projected.diagnostic_source.code, "client_disconnect");
     assert_eq!(projected.diagnostic_source.message, "client disconnected");
+    assert!(projected.health_action.is_none());
     assert_eq!(projected.body["error"]["code"], "client_disconnect");
 }
 
@@ -286,7 +286,6 @@ fn sdk_error_keeps_original_source_and_runner_message() {
     assert!(fault.policy_failure.message.contains(&runner_error.message));
     assert_eq!(fault.original_source, Some(source));
 }
-
 #[test]
 fn omitted_terminal_projection_is_a_typed_contract_fault() {
     let (_, source) = real_client_disconnect_source();
@@ -302,37 +301,4 @@ fn omitted_terminal_projection_is_a_typed_contract_fault() {
         "relay_error_projection_nonterminal"
     );
     assert_eq!(fault.original_source, Some(source));
-}
-
-#[test]
-fn err01_before_source_preserves_raw_provenance() {
-    let (_, source) = real_client_disconnect_source();
-    let runner_error = run_v3_error_02_to_05_decision_operators(
-        json!(null),
-        source,
-        V3ErrorActionScope::ProviderInstance {
-            provider_id: "provider-a".to_string(),
-        },
-        0,
-        false,
-        false,
-        None,
-    )
-    .expect_err("real SDK error fixture");
-    let fault = relay_error_operator_fault_from_err01_failure(
-        "provider-a",
-        "V3ProviderReqOutbound09TransportRequest",
-        "client_disconnect",
-        "client disconnected",
-        runner_error,
-    );
-
-    assert!(fault.original_source.is_none());
-    assert!(fault
-        .policy_failure
-        .message
-        .contains("V3ProviderReqOutbound09TransportRequest:client_disconnect"));
-    assert!(fault.policy_failure.message.contains("provider-a"));
-    assert!(fault.policy_failure.message.contains("client disconnected"));
-    assert!(!fault.policy_failure.message.is_empty());
 }
