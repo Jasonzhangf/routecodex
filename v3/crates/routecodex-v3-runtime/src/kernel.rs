@@ -1374,9 +1374,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                         code,
                                         message,
                                         retryable: _,
-                                    } => Ok(crate::hub_v1::web_search_sidecar_failure_source(
+                                    } => crate::hub_v1::web_search_sidecar_failure_source(
                                         &call_id, code, &message,
-                                    )),
+                                    ),
                                     error => runtime_source(
                                         "V3DirectWebSearchResp02RuntimeControlUpdated",
                                         error,

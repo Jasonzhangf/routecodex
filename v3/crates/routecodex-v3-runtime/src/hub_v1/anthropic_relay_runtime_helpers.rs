@@ -171,10 +171,10 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
     let source = match error {
         V3AnthropicRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
-        } => Ok(provider_pool_exhausted_source(
+        } => provider_pool_exhausted_source(
             "V3Target10ConcreteProviderSelected",
             &attempted_candidates,
-        )),
+        ),
         V3AnthropicRelayRuntimeError::ProviderCompat(error) => match error.classification() {
             V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
                 super::provider_compat_boundary_source("ProviderRespCompat02ProviderCompat", &error)
@@ -190,24 +190,24 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
             ),
         },
         V3AnthropicRelayRuntimeError::ExecutionControlRequest(message) => {
-            Ok(build_v3_error_01_source_raised(
+            crate::shared::direct_plain_error(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ProviderReqOutbound09TransportRequest",
                 "anthropic_relay_request_execution_control_error",
                 message,
-            ))
+            )
         }
         V3AnthropicRelayRuntimeError::ExecutionControlResponse(message) => {
-            Ok(build_v3_error_01_source_raised(
+            crate::shared::direct_plain_error(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ServerRespOutbound06ClientFrame",
                 "anthropic_relay_response_execution_control_error",
                 message,
-            ))
+            )
         }
         V3AnthropicRelayRuntimeError::Codec(
             V3AnthropicCodecError::UnrepresentableToolArguments { arguments, reason },
-        ) => Ok(build_v3_error_01_source_raised(
+        ) => crate::shared::direct_plain_error(
             V3ErrorSourceKind::RuntimeFailure,
             "V3ServerRespOutbound06ClientFrame",
             "anthropic_unrepresentable_tool_arguments",
@@ -219,13 +219,13 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
                     None => "<absent>".to_string(),
                 }
             ),
-        )),
-        error => Ok(build_v3_error_01_source_raised(
+        ),
+        error => crate::shared::direct_plain_error(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",
             "anthropic_relay_runtime_error",
             error.to_string(),
-        )),
+        ),
     };
     let status = internal_status.unwrap_or(if request_payload_invalid { 400 } else { 500 });
     let (projected, trace) = match source {

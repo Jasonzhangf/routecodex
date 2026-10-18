@@ -22,9 +22,9 @@ use crate::provider_failure_runtime_policy::{
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
-    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorSourceKind, V3ExternalHttpWitness,
-    V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
+    V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3ExternalHttpWitness, V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
     v3_provider_auth_handle_from_manifest_entry, V3ProviderAuthHandle, V3ProviderError,
@@ -233,8 +233,8 @@ pub fn server_routing_group<'a>(
 pub(crate) fn provider_pool_exhausted_source(
     source_stage: &'static str,
     attempted_candidates: &[String],
-) -> routecodex_v3_error::V3Error01SourceRaised {
-    build_v3_error_01_source_raised(
+) -> crate::shared::V3DirectSourceError {
+    crate::shared::direct_plain_error(
         V3ErrorSourceKind::TargetPoolExhausted,
         source_stage,
         "selected_target_exhausted",
@@ -734,14 +734,34 @@ pub fn terminalize_provider_failure(
     if failure.error_operator_fault.is_some() {
         return failure;
     }
-    let source = build_v3_error_01_source_raised(
+    let source = crate::shared::direct_source_error(
         V3ErrorSourceKind::ProviderFailure,
         failure.source_stage,
         failure_error_type(&failure)
             .as_deref()
             .unwrap_or("provider_error"),
         provider_failure_message(&failure),
+        match failure.provider_status {
+            Some(status) => {
+                crate::operation_runner::V3Err01SourceInput::External(V3ExternalErrorLink {
+                    kind: V3ExternalErrorKind::Provider,
+                    status: Some(status),
+                    code: failure_error_type(&failure),
+                    provider_id: None,
+                    upstream_request_id: None,
+                    message: Some(provider_failure_message(&failure)),
+                })
+            }
+            None => crate::operation_runner::V3Err01SourceInput::Plain,
+        },
     );
+    let source = match source {
+        Ok(source) => source,
+        Err(fault) => {
+            failure.error_operator_fault = Some(fault);
+            return failure;
+        }
+    };
     match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
         source,
         V3ErrorActionScope::None,
@@ -1269,7 +1289,7 @@ mod tests {
                     "provider-a",
                 );
                 if sdk_fault {
-                    let source = build_v3_error_01_source_raised(
+                    let source = routecodex_v3_error::build_v3_error_01_source_raised(
                         V3ErrorSourceKind::ProviderFailure,
                         failure.source_stage,
                         "provider_error",
@@ -1301,6 +1321,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn terminalizer_preserves_upstream_http_link_in_error01_source() {
+        let failure = provider_http_failure(
+            429,
+            br#"{"error":{"code":"rate_limit_error","message":"slow down"}}"#,
+            "provider-a",
+        );
+        let terminal = terminalize_provider_failure(failure, None);
+        let projection = terminal
+            .terminal_projection
+            .expect("terminalized provider failure must carry Error06 projection");
+        let external = projection
+            .diagnostic_source
+            .external_error
+            .expect("a real provider HTTP status must stay linked in Error01");
+        assert_eq!(
+            external.kind,
+            routecodex_v3_error::V3ExternalErrorKind::Provider
+        );
+        assert_eq!(external.status, Some(429));
+        assert_eq!(external.code.as_deref(), Some("rate_limit_error"));
+        assert_eq!(external.message.as_deref(), Some("slow down"));
     }
 
     #[test]
