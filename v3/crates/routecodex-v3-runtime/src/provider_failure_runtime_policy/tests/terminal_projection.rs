@@ -47,7 +47,7 @@ async fn transient_terminal_projection_releases_action_admission() {
     )
     .await
     .expect("terminal projection must not wait on its own transient admission")
-    .expect("transient provider failure must project through Error05");
+    .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
 
     assert!(
         matches!(

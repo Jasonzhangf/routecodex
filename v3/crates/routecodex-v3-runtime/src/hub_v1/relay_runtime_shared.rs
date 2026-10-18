@@ -332,7 +332,7 @@ pub async fn handle_provider_failure(
     if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
     }
-    let mut result = run_v3_relay_provider_failure_policy(
+    let mut result = match run_v3_relay_provider_failure_policy(
         context,
         selected,
         failure.source_stage,
@@ -343,7 +343,14 @@ pub async fn handle_provider_failure(
         state,
     )
     .await
-    .map_err(|error| error.to_string())?;
+    {
+        Ok(result) => result,
+        Err(Ok(error)) => return Err(error),
+        Err(Err(fault)) => {
+            failure.error_operator_fault = Some(fault);
+            return Ok(Some(failure));
+        }
+    };
     result.event.provider_status = failure.provider_status;
     provider_failure_events
         .push(build_v3_runtime_provider_failure_observation_from_policy_event(&result.event));

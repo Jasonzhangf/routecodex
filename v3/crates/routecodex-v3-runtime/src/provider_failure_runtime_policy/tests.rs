@@ -386,7 +386,9 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                     "upstream status",
                     10_000 + attempt as u64,
                 )
-                .expect("runtime provider failure policy should record");
+                .expect(
+                    "ordinary provider policy failure must remain distinct from a Source01 fault",
+                );
             assert_eq!(record.failure_count, attempt + 1);
             let expected_state = if attempt + 1 == threshold {
                 "cooldown"
@@ -444,7 +446,7 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                 "request rejected",
                 20_000 + attempt as u64,
             )
-            .expect("request-shaped failure should record into global health");
+            .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
         let available = health
             .store()
             .availability_for_session(
@@ -884,7 +886,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         &mut state,
     )
     .await
-    .expect("target-resolution source failure must remain projectable");
+    .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
 
     assert_eq!(
         result
@@ -1144,7 +1146,7 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
         &mut state,
     )
     .await
-    .expect("transport failure must project through the policy");
+    .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
 
     let reselected = result
         .retry_selected
@@ -1244,7 +1246,7 @@ message_mode = "code_only"
         &mut state,
     )
     .await
-    .expect("429 must project through the policy");
+    .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
 
     let projection = result
         .terminal_projection
@@ -1359,7 +1361,7 @@ targets = [
         },
     )
     .await
-    .expect("exact matched policy must drive Error05");
+    .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
 
     assert_ne!(
         result.event.action, "policy_retry_same",
@@ -1413,7 +1415,7 @@ async fn provider_response_event_codec_failure_never_retries_same_candidate() {
         },
     )
     .await
-    .expect("codec failure must resolve through the matched no-same-retry policy");
+    .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
 
     assert_ne!(
         result.event.action, "policy_retry_same",

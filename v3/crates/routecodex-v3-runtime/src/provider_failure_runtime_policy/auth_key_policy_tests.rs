@@ -98,7 +98,9 @@ fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_thresh
                     "account failure",
                     100 + index,
                 )
-                .unwrap();
+                .expect(
+                    "ordinary provider policy failure must remain distinct from a Source01 fault",
+                );
             assert_eq!(record.state, "cooldown");
             assert_eq!(record.failure_count, index as u32 + 1);
         }
@@ -139,7 +141,7 @@ fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_thresh
                 "ordinary failure",
                 200 + index,
             )
-            .unwrap();
+            .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
         assert_eq!(record.state, "cooldown");
         assert_eq!(record.failure_count, index as u32 + 1);
     }
@@ -189,7 +191,7 @@ fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
             "account failure",
             100,
         )
-        .expect("first 401 should be recorded by the runtime policy bridge");
+        .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
     assert_eq!(first.state, "cooldown");
     assert_eq!(first.failure_count, 1);
     assert!(
@@ -217,7 +219,7 @@ fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
             "account failure",
             101,
         )
-        .expect("second 401 should be recorded by the runtime policy bridge");
+        .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
     assert_eq!(second.state, "cooldown");
     assert_eq!(second.failure_count, 2);
     assert_eq!(second.cooldown_until_ms, Some(5_101));

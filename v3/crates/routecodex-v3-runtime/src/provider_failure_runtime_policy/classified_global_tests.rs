@@ -193,7 +193,7 @@ fn recoverable_http_429_blocks_after_third_global_failure() {
                 "rate limited",
                 now_ms,
             )
-            .expect("runtime provider failure policy should record");
+            .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
         let projection = health
             .store()
             .scheduling_projection("first", "key1", "gpt-test", 100, 1, now_ms)
