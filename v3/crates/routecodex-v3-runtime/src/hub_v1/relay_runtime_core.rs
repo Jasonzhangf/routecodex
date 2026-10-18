@@ -500,18 +500,28 @@ where
         },
     };
     let (target_resolved_request, resolved_target) =
-        crate::operation_runner::run_v3_resolve_target_operator(
+        match crate::operation_runner::run_v3_resolve_target_operator(
             (*req02.previous.payload.0).clone(),
             resolve_mode,
-        )
-        .map_err(|error| match error {
-            crate::operation_runner::V3ResolveTargetOperatorError::Typed(source) => {
-                V3RelayCoreError::Target(format!("{}: {}", source.code, source.message))
+        ) {
+            Ok(resolved) => resolved,
+            Err(crate::operation_runner::V3ResolveTargetOperatorError::Typed(source)) => {
+                return Err(V3RelayCoreError::Target(format!(
+                    "{}: {}",
+                    source.code, source.message
+                )));
             }
-            crate::operation_runner::V3ResolveTargetOperatorError::Runner(error) => {
-                V3RelayCoreError::Target(error.to_string())
+            Err(crate::operation_runner::V3ResolveTargetOperatorError::OperatorFault(fault)) => {
+                return Ok(C::assemble_failure_output(
+                    super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                    trace,
+                    std::mem::take(failure_events),
+                ));
             }
-        })?;
+            Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
+                return Err(V3RelayCoreError::Target(error.to_string()));
+            }
+        };
     let route_policy_pending = resolved_target.route_policy_pending;
     if execution_mode != V3HubExecutionMode::Relay {
         return Err(V3RelayCoreError::Target(format!(
@@ -546,6 +556,13 @@ where
                     "{}: {}",
                     source.code, source.message
                 )));
+            }
+            Err(V3PlanExecutionStop::OperatorFault(fault)) => {
+                return Ok(C::assemble_failure_output(
+                    super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                    trace,
+                    std::mem::take(failure_events),
+                ));
             }
             Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
                 let failure = C::request_failure_builder(
@@ -632,6 +649,16 @@ where
                         "{}: {}",
                         source.code, source.message
                     )));
+                }
+                Err(V3PlanExecutionStop::OperatorFault(fault)) => {
+                    return Ok(C::assemble_failure_output(
+                        terminalize_provider_failure(
+                            super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                            last_external_http.clone(),
+                        ),
+                        trace,
+                        std::mem::take(failure_events),
+                    ));
                 }
                 Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
                     let attempted_candidates = exhaustion.attempted_candidates;

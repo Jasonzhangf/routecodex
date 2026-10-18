@@ -966,6 +966,57 @@ pub(crate) fn error_output(
     error_output_with_observability(source, node_trace, hook_registry, None)
 }
 
+pub(crate) fn operator_fault_output(
+    fault: crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    node_trace: Vec<&'static str>,
+    hook_registry: &V3HookRegistry,
+) -> V3ResponsesDirectRuntimeOutput {
+    let _ = hook_registry;
+    operator_fault_output_with_observability_and_snapshots(fault, node_trace, None, None, None)
+}
+
+pub(crate) fn operator_fault_output_with_observability(
+    fault: crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    node_trace: Vec<&'static str>,
+    hook_registry: &V3HookRegistry,
+    observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesDirectRuntimeOutput {
+    let _ = hook_registry;
+    operator_fault_output_with_observability_and_snapshots(
+        fault,
+        node_trace,
+        observability,
+        None,
+        None,
+    )
+}
+
+pub(crate) fn operator_fault_output_with_observability_and_snapshots(
+    fault: crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    node_trace: Vec<&'static str>,
+    observability: Option<V3RuntimeObservability>,
+    provider_request_snapshot: Option<serde_json::Value>,
+    provider_response_snapshot: Option<serde_json::Value>,
+) -> V3ResponsesDirectRuntimeOutput {
+    V3ResponsesDirectRuntimeOutput {
+        observability,
+        terminal_disposition: Some(V3ProviderTerminalDisposition::NoResponse),
+        diagnostic_source: Some(fault.policy_failure),
+        diagnostic_cause: fault.original_source,
+        stream_observation: None,
+        provider_request_snapshot,
+        provider_response_snapshot,
+        client_payload: V3Resp15ClientPayload {
+            status: 599,
+            headers: BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),
+            body: V3ClientBody::Json(serde_json::Value::Null),
+        },
+        node_trace,
+        error_chain: None,
+        protocol_relay_handoff: None,
+    }
+}
+
 pub(crate) fn error_output_with_observability(
     source: V3Error01SourceRaised,
     node_trace: Vec<&'static str>,

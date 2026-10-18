@@ -1,6 +1,29 @@
 include!("../../tests/support/kernel_unit.rs");
 
 #[test]
+fn protocol_plan_operator_fault_keeps_original_cause_without_running_error_projection() {
+    let original = routecodex_v3_error::build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3Execution11ProtocolDecision",
+        "protocol_plan_failure",
+        "the original planning failure",
+    );
+    // Seed the typed fault at the planning boundary; this does not claim that
+    // a public request can force an SDK01 rejection with the fixed catalog.
+    let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+        original.clone(),
+        Ok(None),
+    )
+    .expect_err("missing terminal projection is an actual typed operator fault");
+    let failure =
+        protocol_plan_operator_fault(fault.clone(), vec!["V3Execution11ProtocolDecision"]);
+    let returned = project_v3_protocol_execution_plan_failure(failure)
+        .expect_err("an operator fault must not become a successful Error06 projection");
+    assert_eq!(returned, fault);
+    assert_eq!(returned.original_source, Some(original));
+}
+
+#[test]
 fn protocol_plan_failure_preserves_source_status_and_pool_exhausted() {
     let routing_group = "protocol_plan_failure";
     let mut manifest = scoped_test_manifest(responses_process_chat_manifest(), routing_group);

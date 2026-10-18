@@ -149,6 +149,24 @@ pub struct V3RelayProviderFailure {
     pub error_message_fn: fn(&Value) -> String,
 }
 
+/// Keep a planning operator fault typed until the Relay failure output consumes
+/// it. Reselection retains any preceding provider witness in the terminalizer.
+pub(crate) fn provider_operator_fault_failure(
+    fault: V3RelayErrorOperatorFault,
+) -> V3RelayProviderFailure {
+    V3RelayProviderFailure {
+        status: 599,
+        provider_status: None,
+        client_response: Value::Null,
+        source_stage: fault.policy_failure.source_stage,
+        terminal_projection: None,
+        terminal_disposition: None,
+        error_operator_fault: Some(fault),
+        error_type_fn: extract_error_code_style,
+        error_message_fn: extract_message_code_style,
+    }
+}
+
 /// code/status 风格错误提取（gemini / openai / responses 形状：`error.code` 或 `error.status`）。
 pub fn extract_error_code_style(value: &Value) -> Option<String> {
     value
@@ -1021,6 +1039,9 @@ pub(crate) async fn resolve_v3_relay_entry_target(
         V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
             V3RelayProviderAdmittedTargetResolution::Failed(source)
         }
+        V3AdmittedTargetSelectionAfterRescue::OperatorFault(fault) => {
+            V3RelayProviderAdmittedTargetResolution::OperatorFault(fault)
+        }
     }
 }
 
@@ -1245,7 +1266,7 @@ mod tests {
                         "provider_error",
                         "residence budget exhausted",
                     );
-                    failure.error_operator_fault = Some(
+                    failure = provider_operator_fault_failure(
                         crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
                             source,
                             Ok(None),

@@ -63,6 +63,7 @@ pub(crate) enum V3PlanExecutionStop {
         exhaustion: V3TargetExhaustion,
     },
     Failed(V3Error01SourceRaised),
+    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
 }
 
 pub(crate) enum V3PlanExecutionOutcome {
@@ -75,6 +76,7 @@ pub(crate) enum V3PlanExecutionOutcome {
         exhaustion: V3TargetExhaustion,
     },
     Failed(V3Error01SourceRaised),
+    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
     NeedPreExhaustionProbes {
         expanded: V3Target09CandidateSetExpanded,
         rescue_candidates: Vec<V3TargetCandidate>,
@@ -104,6 +106,7 @@ enum PlanExecutionOperatorOutput {
         exhaustion: V3TargetExhaustion,
     },
     Failed(V3Error01SourceRaised),
+    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
     NeedPreExhaustionProbes {
         expanded: V3Target09CandidateSetExpanded,
         rescue_candidates: Vec<V3TargetCandidate>,
@@ -204,7 +207,8 @@ impl PlanExecutionOperator {
                     self.deterministic_sample,
                 ) {
                     Ok(expanded) => expanded,
-                    Err(source) => return PlanExecutionOperatorOutput::Failed(source),
+                    Err(Ok(source)) => return PlanExecutionOperatorOutput::Failed(source),
+                    Err(Err(fault)) => return PlanExecutionOperatorOutput::OperatorFault(fault),
                 }
             }
         };
@@ -292,6 +296,9 @@ impl PlanExecutionOperator {
             V3SynchronousTargetAdmissionStep::Failed(source) => {
                 PlanExecutionOperatorOutput::Failed(source)
             }
+            V3SynchronousTargetAdmissionStep::OperatorFault(fault) => {
+                PlanExecutionOperatorOutput::OperatorFault(fault)
+            }
         }
     }
 }
@@ -317,6 +324,9 @@ impl Operator for PlanExecutionOperator {
         let output = self.execute_plan();
         let failure = match &output {
             PlanExecutionOperatorOutput::Failed(source) => Some(source.message.clone()),
+            PlanExecutionOperatorOutput::OperatorFault(fault) => {
+                Some(fault.policy_failure.message.clone())
+            }
             _ => None,
         };
         let mut holder = self
@@ -375,67 +385,81 @@ pub(crate) fn run_v3_plan_execution_operator(
             OperationRunnerError::new("plan_execution typed side-output holder is poisoned")
         })?
         .take();
-    if let Some(PlanExecutionOperatorOutput::Failed(source)) = output {
-        return Ok(V3PlanExecutionOutcome::Failed(source));
-    }
-    let execution_planned_request = runner_result?;
-    let output = output.ok_or_else(|| {
-        OperationRunnerError::new("plan_execution operator omitted typed side output")
-    })?;
-    Ok(match output {
-        PlanExecutionOperatorOutput::Preplanned { .. } => {
-            return Err(OperationRunnerError::new(
-                "admitting plan_execution operator returned a preplanned output",
-            ))
+    match output {
+        Some(PlanExecutionOperatorOutput::Failed(source)) => {
+            return Ok(V3PlanExecutionOutcome::Failed(source))
         }
-        PlanExecutionOperatorOutput::Selected {
-            expanded,
-            decision,
-            admission,
-            request_local_excluded_candidates,
-        } => V3PlanExecutionOutcome::Selected {
-            execution_planned_request,
-            plan: V3PlanExecutionCompleted {
-                expanded,
-                selected: decision.target.clone(),
-                admission,
-                request_local_excluded_candidates,
-                execution_mode: match decision.mode {
-                    V3Execution11ProtocolDecisionMode::SameProtocolDirect => {
-                        V3HubExecutionMode::Direct
-                    }
-                    V3Execution11ProtocolDecisionMode::HubRelay => V3HubExecutionMode::Relay,
+        Some(PlanExecutionOperatorOutput::OperatorFault(fault)) => {
+            return Ok(V3PlanExecutionOutcome::OperatorFault(fault))
+        }
+        output => {
+            let output = output.ok_or_else(|| {
+                OperationRunnerError::new("plan_execution operator omitted typed side output")
+            })?;
+            let execution_planned_request = runner_result?;
+            Ok(match output {
+                PlanExecutionOperatorOutput::Preplanned { .. } => {
+                    return Err(OperationRunnerError::new(
+                        "admitting plan_execution operator returned a preplanned output",
+                    ))
+                }
+                PlanExecutionOperatorOutput::Selected {
+                    expanded,
+                    decision,
+                    admission,
+                    request_local_excluded_candidates,
+                } => V3PlanExecutionOutcome::Selected {
+                    execution_planned_request,
+                    plan: V3PlanExecutionCompleted {
+                        expanded,
+                        selected: decision.target.clone(),
+                        admission,
+                        request_local_excluded_candidates,
+                        execution_mode: match decision.mode {
+                            V3Execution11ProtocolDecisionMode::SameProtocolDirect => {
+                                V3HubExecutionMode::Direct
+                            }
+                            V3Execution11ProtocolDecisionMode::HubRelay => {
+                                V3HubExecutionMode::Relay
+                            }
+                        },
+                        protocol_decision: decision,
+                    },
                 },
-                protocol_decision: decision,
-            },
-        },
-        PlanExecutionOperatorOutput::Exhausted {
-            expanded,
-            exhaustion,
-        } => V3PlanExecutionOutcome::Exhausted {
-            expanded,
-            exhaustion,
-        },
-        PlanExecutionOperatorOutput::Failed(source) => V3PlanExecutionOutcome::Failed(source),
-        PlanExecutionOperatorOutput::NeedPreExhaustionProbes {
-            expanded,
-            rescue_candidates,
-            request_local_excluded_candidates,
-        } => V3PlanExecutionOutcome::NeedPreExhaustionProbes {
-            expanded,
-            rescue_candidates,
-            request_local_excluded_candidates,
-        },
-        PlanExecutionOperatorOutput::NeedExhaustionProbes {
-            expanded,
-            exhaustion,
-            request_local_excluded_candidates,
-        } => V3PlanExecutionOutcome::NeedExhaustionProbes {
-            expanded,
-            exhaustion,
-            request_local_excluded_candidates,
-        },
-    })
+                PlanExecutionOperatorOutput::Exhausted {
+                    expanded,
+                    exhaustion,
+                } => V3PlanExecutionOutcome::Exhausted {
+                    expanded,
+                    exhaustion,
+                },
+                PlanExecutionOperatorOutput::Failed(source) => {
+                    V3PlanExecutionOutcome::Failed(source)
+                }
+                PlanExecutionOperatorOutput::OperatorFault(fault) => {
+                    V3PlanExecutionOutcome::OperatorFault(fault)
+                }
+                PlanExecutionOperatorOutput::NeedPreExhaustionProbes {
+                    expanded,
+                    rescue_candidates,
+                    request_local_excluded_candidates,
+                } => V3PlanExecutionOutcome::NeedPreExhaustionProbes {
+                    expanded,
+                    rescue_candidates,
+                    request_local_excluded_candidates,
+                },
+                PlanExecutionOperatorOutput::NeedExhaustionProbes {
+                    expanded,
+                    exhaustion,
+                    request_local_excluded_candidates,
+                } => V3PlanExecutionOutcome::NeedExhaustionProbes {
+                    expanded,
+                    exhaustion,
+                    request_local_excluded_candidates,
+                },
+            })
+        }
+    }
 }
 
 pub(crate) struct V3PlanExecutionPreplan {
@@ -494,16 +518,20 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
     match runner_result {
         Ok(_) => {}
         Err(error) => {
-            let source = match output {
-                Some(PlanExecutionOperatorOutput::Failed(source)) => source,
-                _ => build_v3_error_01_source_raised(
+            return Err(match output {
+                Some(PlanExecutionOperatorOutput::Failed(source)) => {
+                    V3PlanExecutionStop::Failed(source)
+                }
+                Some(PlanExecutionOperatorOutput::OperatorFault(fault)) => {
+                    V3PlanExecutionStop::OperatorFault(fault)
+                }
+                _ => V3PlanExecutionStop::Failed(build_v3_error_01_source_raised(
                     V3ErrorSourceKind::RuntimeFailure,
                     "V3OperationRunnerPlanExecution",
                     "plan_execution_operator_failed",
                     error.message,
-                ),
-            };
-            return Err(V3PlanExecutionStop::Failed(source));
+                )),
+            });
         }
     }
     match output {
@@ -525,6 +553,9 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
         }),
         Some(PlanExecutionOperatorOutput::Failed(source)) => {
             Err(V3PlanExecutionStop::Failed(source))
+        }
+        Some(PlanExecutionOperatorOutput::OperatorFault(fault)) => {
+            Err(V3PlanExecutionStop::OperatorFault(fault))
         }
         Some(
             PlanExecutionOperatorOutput::Selected { .. }
@@ -650,7 +681,7 @@ async fn run_v3_plan_execution_with_probes_unboxed(
                 rescue_candidates,
                 request_local_excluded_candidates: admitted_exclusions,
             } => {
-                if let Err(source) = initiate_v3_target_pre_exhaustion_rescue_probes(
+                match initiate_v3_target_pre_exhaustion_rescue_probes(
                     provider_health,
                     manifest,
                     &rescue_candidates,
@@ -658,7 +689,9 @@ async fn run_v3_plan_execution_with_probes_unboxed(
                 )
                 .await
                 {
-                    return Err(V3PlanExecutionStop::Failed(source));
+                    Ok(()) => {}
+                    Err(Ok(source)) => return Err(V3PlanExecutionStop::Failed(source)),
+                    Err(Err(fault)) => return Err(V3PlanExecutionStop::OperatorFault(fault)),
                 }
                 request_local_excluded_candidates.extend(admitted_exclusions);
                 exhaustion_probes_completed = false;
@@ -735,6 +768,9 @@ async fn run_v3_plan_execution_with_probes_unboxed(
             }
             V3PlanExecutionOutcome::Failed(source) => {
                 return Err(V3PlanExecutionStop::Failed(source));
+            }
+            V3PlanExecutionOutcome::OperatorFault(fault) => {
+                return Err(V3PlanExecutionStop::OperatorFault(fault));
             }
         }
     }
@@ -934,6 +970,9 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
                         format!("exhausted: {exhaustion:?}")
                     }
                     V3PlanExecutionStop::Failed(source) => format!("failed: {source:?}"),
+                    V3PlanExecutionStop::OperatorFault(fault) => {
+                        format!("operator fault: {fault:?}")
+                    }
                 }
             )
         });
@@ -1051,6 +1090,9 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
                         format!("exhausted: {exhaustion:?}")
                     }
                     V3PlanExecutionStop::Failed(source) => format!("failed: {source:?}"),
+                    V3PlanExecutionStop::OperatorFault(fault) => {
+                        format!("operator fault: {fault:?}")
+                    }
                 }
             )
         });

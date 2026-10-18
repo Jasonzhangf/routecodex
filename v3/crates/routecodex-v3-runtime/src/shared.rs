@@ -51,7 +51,8 @@ pub(crate) fn v3_route_plan_error_source(
     stage: &'static str,
     code: &'static str,
     error: V3VirtualRouterError,
-) -> V3Error01SourceRaised {
+) -> Result<V3Error01SourceRaised, crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault>
+{
     // An unlisted model name is no longer a route-plan error: the router falls
     // back to normal classification, so every remaining route-plan failure is a
     // real runtime failure.
@@ -62,68 +63,16 @@ pub(crate) fn raise_v3_runtime_failure_source(
     stage: &'static str,
     code: &'static str,
     message: impl Into<String>,
-) -> V3Error01SourceRaised {
-    let raw_message = message.into();
-    let operator_result = crate::operation_runner::run_v3_err01_source_raised_operator(
+) -> Result<V3Error01SourceRaised, crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault>
+{
+    crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
         V3ErrorSourceKind::RuntimeFailure,
         stage,
         code,
-        raw_message.clone(),
+        message,
         crate::operation_runner::V3Err01SourceInput::Plain,
-    );
-    v3_runtime_failure_source_from_err01_result(stage, code, raw_message, operator_result)
-}
-
-fn v3_runtime_failure_source_from_err01_result(
-    stage: &'static str,
-    code: &'static str,
-    raw_message: String,
-    operator_result: Result<
-        (serde_json::Value, V3Error01SourceRaised),
-        crate::operation_runner::OperationRunnerError,
-    >,
-) -> V3Error01SourceRaised {
-    match operator_result {
-        Ok((_projection, source)) => source,
-        Err(runner_error) => build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            stage,
-            "v3_error_01_operator_sdk_failure",
-            format!(
-                "Err01 operator failed ({}) while raising {stage}:{code}: {raw_message}",
-                runner_error.message
-            ),
-        ),
-    }
-}
-
-#[cfg(test)]
-#[test]
-fn err01_sdk_fault_is_a_new_runtime_failure_with_raw_origin_provenance() {
-    let stage = "V3Target10ConcreteProviderSelected";
-    let code = "provider_concurrency_admission_invalid_budget";
-    let raw_message = "provider concurrency budget must be positive";
-    let source = v3_runtime_failure_source_from_err01_result(
-        stage,
-        code,
-        raw_message.to_string(),
-        Err(crate::operation_runner::OperationRunnerError {
-            message: "canonical Error graph compile failed".to_string(),
-        }),
-    );
-
-    assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
-    assert_eq!(source.source_stage, stage);
-    assert_eq!(source.code, "v3_error_01_operator_sdk_failure");
-    assert_ne!(source.code, code);
-    assert!(source
-        .message
-        .contains("canonical Error graph compile failed"));
-    assert!(source.message.contains(stage));
-    assert!(source.message.contains(code));
-    assert!(source.message.contains(raw_message));
-    assert!(source.internal_error.is_none());
-    assert!(source.external_error.is_none());
+    )
+    .map(|(_projection, source)| source)
 }
 
 pub(crate) enum V3ProviderAttemptBody {

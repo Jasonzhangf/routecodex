@@ -517,6 +517,10 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let (runtime_timing, mut failed_candidates, mut retry_selected) =
         super::relay_runtime_shared::relay_handoff_entry_state(initial_handoff.as_ref());
+    let mut provider_failure_events: Vec<V3RuntimeProviderFailureObservation> = initial_handoff
+        .as_ref()
+        .map(|handoff| handoff.provider_failure_events.clone())
+        .unwrap_or_default();
     let resolve_mode = match initial_handoff.as_ref() {
         Some(handoff) => crate::operation_runner::V3ResolveTargetExecutionMode::CapturedHandoff {
             opaque_hit: handoff.expanded.route.clone(),
@@ -533,11 +537,20 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         },
     };
     let (resolved_request, resolved_target) =
-        crate::operation_runner::run_v3_resolve_target_operator(
+        match crate::operation_runner::run_v3_resolve_target_operator(
             req02.payload().clone(),
             resolve_mode,
-        )
-        .map_err(|error| V3AnthropicRelayRuntimeError::Target(error.to_string()))?;
+        ) {
+            Ok(resolved) => resolved,
+            Err(crate::operation_runner::V3ResolveTargetOperatorError::OperatorFault(fault)) => {
+                return Ok(provider_failure_output(
+                    super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                    trace,
+                    std::mem::take(&mut provider_failure_events),
+                ));
+            }
+            Err(error) => return Err(V3AnthropicRelayRuntimeError::Target(error.to_string())),
+        };
     let target_source = match initial_handoff.as_ref() {
         Some(handoff) => V3PlanExecutionTargetSource::Expanded(handoff.expanded.clone()),
         None => V3PlanExecutionTargetSource::OpaqueHit(resolved_target.opaque_hit),
@@ -565,6 +578,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 "{}: {}",
                 source.code, source.message
             )))
+        }
+        Err(V3PlanExecutionStop::OperatorFault(fault)) => {
+            return Ok(provider_failure_output(
+                super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                trace,
+                std::mem::take(&mut provider_failure_events),
+            ))
         }
         Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
             let failure = provider_request_failure(
@@ -627,10 +647,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
-    let mut provider_failure_events: Vec<V3RuntimeProviderFailureObservation> = initial_handoff
-        .as_ref()
-        .map(|handoff| handoff.provider_failure_events.clone())
-        .unwrap_or_default();
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
         captured_target_09: Some(&retained_expanded),
@@ -675,6 +691,16 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             "{}: {}",
                             source.code, source.message
                         )))
+                    }
+                    Err(V3PlanExecutionStop::OperatorFault(fault)) => {
+                        return Ok(provider_failure_output(
+                            terminalize_provider_failure(
+                                super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                                last_external_http.clone(),
+                            ),
+                            trace,
+                            std::mem::take(&mut provider_failure_events),
+                        ))
                     }
                     Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
                         let attempted_candidates = exhaustion.attempted_candidates;

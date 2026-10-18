@@ -239,7 +239,7 @@ fn relay_error_operator_fault(
     }
 }
 
-fn relay_error_operator_fault_from_err01_source(
+pub(crate) fn relay_error_operator_fault_from_err01_source(
     source_stage: &'static str,
     original_source: V3Error01SourceRaised,
     runner_error: crate::operation_runner::OperationRunnerError,
@@ -479,6 +479,7 @@ pub(crate) enum V3RelayProviderTargetResolution {
     Selected(V3Target10ConcreteProviderSelected),
     Exhausted { attempted_candidates: Vec<String> },
     Failed(routecodex_v3_error::V3Error01SourceRaised),
+    OperatorFault(V3RelayErrorOperatorFault),
 }
 
 pub(crate) fn select_v3_target_with_session_then_global(
@@ -762,11 +763,14 @@ async fn reselect_from_captured_target_plan(
             ) {
                 Ok(expanded) => expanded,
                 Err(error) => {
-                    return V3RelayProviderTargetResolution::Failed(target_resolution_source(
+                    return match target_resolution_source(
                         "V3Target09CandidateSetExpanded",
                         "captured_target_plan_expansion_failed",
                         error,
-                    ));
+                    ) {
+                        Ok(source) => V3RelayProviderTargetResolution::Failed(source),
+                        Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
+                    };
                 }
             }
         }
@@ -793,6 +797,9 @@ async fn reselect_from_captured_target_plan(
         }
         V3TargetSelectionAfterRescue::Failed(source) => {
             V3RelayProviderTargetResolution::Failed(source)
+        }
+        V3TargetSelectionAfterRescue::OperatorFault(fault) => {
+            V3RelayProviderTargetResolution::OperatorFault(fault)
         }
     }
 }
@@ -1023,6 +1030,9 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                     },
                 ),
             });
+        }
+        V3RelayProviderTargetResolution::OperatorFault(fault) => {
+            return Err(fault.policy_failure.message.clone());
         }
     };
     if is_request_local_compat_failure {
@@ -1334,7 +1344,13 @@ pub(crate) fn resolve_v3_relay_opaque_target_once(
     endpoint_path: &str,
     body: &Value,
     deterministic_sample: u64,
-) -> Result<V3Router07OpaqueTargetHitOnce, V3Error01SourceRaised> {
+) -> Result<
+    V3Router07OpaqueTargetHitOnce,
+    Result<
+        V3Error01SourceRaised,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+> {
     let facts = crate::build_v3_router_request_facts_for_entry_with_manifest(
         body,
         entry_kind,
@@ -1377,7 +1393,13 @@ pub(crate) fn expand_v3_relay_target_candidates_from_opaque_hit(
     manifest: &V3Config05ManifestPublished,
     hit: V3Router07OpaqueTargetHitOnce,
     deterministic_sample: u64,
-) -> Result<V3Target09CandidateSetExpanded, V3Error01SourceRaised> {
+) -> Result<
+    V3Target09CandidateSetExpanded,
+    Result<
+        V3Error01SourceRaised,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+> {
     let target = V3TargetInterpreter::default();
     let kind = target.classify_kind(hit);
     target
@@ -1402,13 +1424,19 @@ fn build_v3_relay_target_candidates(
         input.body,
         input.deterministic_sample,
     )
-    .map_err(V3RelayProviderTargetResolution::Failed)?;
+    .map_err(|error| match error {
+        Ok(source) => V3RelayProviderTargetResolution::Failed(source),
+        Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
+    })?;
     expand_v3_relay_target_candidates_from_opaque_hit(
         input.manifest,
         hit,
         input.deterministic_sample,
     )
-    .map_err(V3RelayProviderTargetResolution::Failed)
+    .map_err(|error| match error {
+        Ok(source) => V3RelayProviderTargetResolution::Failed(source),
+        Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
+    })
 }
 
 pub(crate) fn resolve_v3_relay_target_outcome(
@@ -1445,7 +1473,10 @@ fn target_resolution_source(
     stage: &'static str,
     code: &'static str,
     error: impl std::fmt::Display,
-) -> routecodex_v3_error::V3Error01SourceRaised {
+) -> Result<
+    routecodex_v3_error::V3Error01SourceRaised,
+    crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+> {
     crate::shared::raise_v3_runtime_failure_source(stage, code, error.to_string())
 }
 

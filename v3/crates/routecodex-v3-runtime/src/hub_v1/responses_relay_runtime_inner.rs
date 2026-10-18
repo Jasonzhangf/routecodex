@@ -169,21 +169,30 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
             },
         };
         let (target_resolved_request, resolved_target) =
-            crate::operation_runner::run_v3_resolve_target_operator(
+            match crate::operation_runner::run_v3_resolve_target_operator(
                 req02.payload().clone(),
                 resolve_mode,
-            )
-            .map_err(|error| match error {
-                crate::operation_runner::V3ResolveTargetOperatorError::Typed(source) => {
-                    V3ResponsesRelayRuntimeError::Target(format!(
+            ) {
+                Ok(resolved) => resolved,
+                Err(crate::operation_runner::V3ResolveTargetOperatorError::Typed(source)) => {
+                    return Err(V3ResponsesRelayRuntimeError::Target(format!(
                         "{}: {}",
                         source.code, source.message
-                    ))
+                    )));
                 }
-                crate::operation_runner::V3ResolveTargetOperatorError::Runner(error) => {
-                    V3ResponsesRelayRuntimeError::Target(error.to_string())
+                Err(crate::operation_runner::V3ResolveTargetOperatorError::OperatorFault(
+                    fault,
+                )) => {
+                    return Ok(provider_failure_output(
+                        V3ResponsesRelayProviderFailure::from(fault),
+                        trace,
+                        0,
+                    ));
                 }
-            })?;
+                Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
+                    return Err(V3ResponsesRelayRuntimeError::Target(error.to_string()));
+                }
+            };
         route_policy_pending = resolved_target.route_policy_pending;
         let target_source = match initial_expanded.clone() {
             Some(expanded) => V3PlanExecutionTargetSource::Expanded(expanded),
@@ -234,6 +243,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                         "{}: {}",
                         source.code, source.message
                     )));
+                }
+                Err(V3PlanExecutionStop::OperatorFault(fault)) => {
+                    return Ok(provider_failure_output(
+                        V3ResponsesRelayProviderFailure::from(fault),
+                        trace,
+                        0,
+                    ));
                 }
                 Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
                     let failure = V3ResponsesRelayProviderFailure {
@@ -363,6 +379,16 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             "{}: {}",
                             source.code, source.message
                         )));
+                    }
+                    Err(V3PlanExecutionStop::OperatorFault(fault)) => {
+                        return Ok(provider_failure_output(
+                            terminalize_v3_responses_relay_provider_failure(
+                                V3ResponsesRelayProviderFailure::from(fault),
+                                last_external_http.clone(),
+                            ),
+                            trace,
+                            0,
+                        ));
                     }
                     Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
                         let failure = V3ResponsesRelayProviderFailure {

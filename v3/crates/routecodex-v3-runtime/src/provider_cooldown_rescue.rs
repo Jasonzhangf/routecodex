@@ -2,6 +2,7 @@ pub(crate) enum V3TargetSelectionAfterRescue {
     Selected(V3Target10ConcreteProviderSelected),
     Exhausted(V3TargetExhaustion),
     Failed(routecodex_v3_error::V3Error01SourceRaised),
+    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
 }
 
 pub(crate) struct V3AdmittedTargetSelection {
@@ -43,6 +44,7 @@ pub(crate) enum V3AdmittedTargetSelectionAfterRescue {
     Selected(V3AdmittedTargetSelection),
     Exhausted(V3TargetExhaustion),
     Failed(routecodex_v3_error::V3Error01SourceRaised),
+    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
 }
 
 pub(crate) enum V3SynchronousTargetPlanningStep {
@@ -59,6 +61,7 @@ pub(crate) enum V3SynchronousTargetPlanningStep {
     },
     Exhausted(V3TargetExhaustion),
     Failed(routecodex_v3_error::V3Error01SourceRaised),
+    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
 }
 
 pub(crate) enum V3SynchronousTargetAdmissionStep {
@@ -78,6 +81,7 @@ pub(crate) enum V3SynchronousTargetAdmissionStep {
     },
     Exhausted(V3TargetExhaustion),
     Failed(routecodex_v3_error::V3Error01SourceRaised),
+    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
 }
 
 pub(crate) async fn initiate_v3_target_pre_exhaustion_rescue_probes(
@@ -85,7 +89,13 @@ pub(crate) async fn initiate_v3_target_pre_exhaustion_rescue_probes(
     manifest: &V3Config05ManifestPublished,
     candidates: &[V3TargetCandidate],
     now_ms: u64,
-) -> Result<(), routecodex_v3_error::V3Error01SourceRaised> {
+) -> Result<
+    (),
+    Result<
+        routecodex_v3_error::V3Error01SourceRaised,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+> {
     let mut identities = BTreeSet::new();
     for candidate in candidates {
         if !identities.insert(v3_relay_provider_candidate_key(candidate)) {
@@ -134,6 +144,7 @@ pub(crate) enum V3RelayProviderAdmittedTargetResolution {
     Selected(V3AdmittedTargetSelection),
     Exhausted { attempted_candidates: Vec<String> },
     Failed(routecodex_v3_error::V3Error01SourceRaised),
+    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
 }
 
 pub(crate) fn v3_provider_concurrency_key_parts(provider_id: &str, auth_alias: &str) -> String {
@@ -403,11 +414,14 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
                         // caller's recovery policy for eligible cooled peers.
                     }
                     Err(reason) => {
-                        return V3SynchronousTargetAdmissionStep::Failed(target_resolution_source(
+                        return match target_resolution_source(
                             "V3Target10ConcreteProviderSelected",
                             "provider_concurrency_admission_invalid_budget",
                             reason,
-                        ));
+                        ) {
+                            Ok(source) => V3SynchronousTargetAdmissionStep::Failed(source),
+                            Err(fault) => V3SynchronousTargetAdmissionStep::OperatorFault(fault),
+                        };
                     }
                 }
             }
@@ -440,6 +454,9 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
             }
             V3SynchronousTargetPlanningStep::Failed(source) => {
                 return V3SynchronousTargetAdmissionStep::Failed(source);
+            }
+            V3SynchronousTargetPlanningStep::OperatorFault(fault) => {
+                return V3SynchronousTargetAdmissionStep::OperatorFault(fault);
             }
         }
     }
@@ -481,6 +498,9 @@ pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
                 }
                 V3SynchronousTargetPlanningStep::Failed(source) => {
                     V3TargetSelectionAfterRescue::Failed(source)
+                }
+                V3SynchronousTargetPlanningStep::OperatorFault(fault) => {
+                    V3TargetSelectionAfterRescue::OperatorFault(fault)
                 }
                 V3SynchronousTargetPlanningStep::NeedPreExhaustionProbes { .. }
                 | V3SynchronousTargetPlanningStep::NeedExhaustionProbes { .. } => {
@@ -532,13 +552,14 @@ pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
                         .await;
                     }
                     Err(reason) => {
-                        return V3AdmittedTargetSelectionAfterRescue::Failed(
-                            target_resolution_source(
-                                "V3Target10ConcreteProviderSelected",
-                                "provider_concurrency_admission_invalid_budget",
-                                reason,
-                            ),
-                        )
+                        return match target_resolution_source(
+                            "V3Target10ConcreteProviderSelected",
+                            "provider_concurrency_admission_invalid_budget",
+                            reason,
+                        ) {
+                            Ok(source) => V3AdmittedTargetSelectionAfterRescue::Failed(source),
+                            Err(fault) => V3AdmittedTargetSelectionAfterRescue::OperatorFault(fault),
+                        };
                     }
                 }
             }
@@ -547,6 +568,9 @@ pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
             }
             V3TargetSelectionAfterRescue::Failed(source) => {
                 return V3AdmittedTargetSelectionAfterRescue::Failed(source);
+            }
+            V3TargetSelectionAfterRescue::OperatorFault(fault) => {
+                return V3AdmittedTargetSelectionAfterRescue::OperatorFault(fault);
             }
         }
     }
@@ -697,6 +721,9 @@ pub(crate) async fn resolve_v3_relay_target_outcome_with_admission_rescue(
         Err(V3RelayProviderTargetResolution::Failed(source)) => {
             return V3RelayProviderAdmittedTargetResolution::Failed(source)
         }
+        Err(V3RelayProviderTargetResolution::OperatorFault(fault)) => {
+            return V3RelayProviderAdmittedTargetResolution::OperatorFault(fault)
+        }
     };
     match select_v3_expanded_target_with_admission_rescue(
         input.manifest,
@@ -721,6 +748,9 @@ pub(crate) async fn resolve_v3_relay_target_outcome_with_admission_rescue(
         }
         V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
             V3RelayProviderAdmittedTargetResolution::Failed(source)
+        }
+        V3AdmittedTargetSelectionAfterRescue::OperatorFault(fault) => {
+            V3RelayProviderAdmittedTargetResolution::OperatorFault(fault)
         }
     }
 }
@@ -756,7 +786,7 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         V3SynchronousTargetPlanningStep::NeedPreExhaustionProbes {
             rescue_candidates, ..
         } => {
-            if let Err(source) = initiate_v3_target_pre_exhaustion_rescue_probes(
+            match initiate_v3_target_pre_exhaustion_rescue_probes(
                 provider_health,
                 manifest,
                 &rescue_candidates,
@@ -764,16 +794,21 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
             )
             .await
             {
-                return V3TargetSelectionAfterRescue::Failed(source);
+                Ok(()) => {}
+                Err(Ok(source)) => return V3TargetSelectionAfterRescue::Failed(source),
+                Err(Err(fault)) => return V3TargetSelectionAfterRescue::OperatorFault(fault),
             }
             let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
                 Ok(now_ms) => now_ms,
                 Err(error) => {
-                    return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                    return match target_resolution_source(
                         "V3ProviderCooldownRescueProbe",
                         "target_pre_exhaustion_rescue_clock_failed",
                         error,
-                    ))
+                    ) {
+                        Ok(source) => V3TargetSelectionAfterRescue::Failed(source),
+                        Err(fault) => V3TargetSelectionAfterRescue::OperatorFault(fault),
+                    };
                 }
             };
             return match select_v3_target_with_session_then_global(
@@ -796,6 +831,9 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         V3SynchronousTargetPlanningStep::Failed(source) => {
             return V3TargetSelectionAfterRescue::Failed(source);
         }
+        V3SynchronousTargetPlanningStep::OperatorFault(fault) => {
+            return V3TargetSelectionAfterRescue::OperatorFault(fault);
+        }
     };
     if !allow_exhaustion_rescue_probe {
         return V3TargetSelectionAfterRescue::Exhausted(initial_exhaustion);
@@ -804,11 +842,14 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
             Ok(now_ms) => now_ms,
             Err(error) => {
-                return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                return match target_resolution_source(
                     "V3ProviderCooldownRescueProbe",
                     "target_exhaustion_rescue_clock_failed",
                     error,
-                ))
+                ) {
+                    Ok(source) => V3TargetSelectionAfterRescue::Failed(source),
+                    Err(fault) => V3TargetSelectionAfterRescue::OperatorFault(fault),
+                };
             }
         };
         let observed_generation = provider_health.store.availability_generation();
@@ -843,11 +884,14 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         {
             Ok(completed) => completed,
             Err(error) => {
-                return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                return match target_resolution_source(
                     "V3ProviderCooldownRescueProbe",
                     "target_exhaustion_rescue_probe_failed",
                     error,
-                ));
+                ) {
+                    Ok(source) => V3TargetSelectionAfterRescue::Failed(source),
+                    Err(fault) => V3TargetSelectionAfterRescue::OperatorFault(fault),
+                };
             }
         };
         if !rescue_probes_completed {
@@ -859,11 +903,14 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         let after_probe_ms = match v3_relay_provider_policy_now_epoch_ms() {
             Ok(now_ms) => now_ms,
             Err(error) => {
-                return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                return match target_resolution_source(
                     "V3ProviderCooldownRescueProbe",
                     "target_exhaustion_rescue_clock_failed",
                     error,
-                ))
+                ) {
+                    Ok(source) => V3TargetSelectionAfterRescue::Failed(source),
+                    Err(fault) => V3TargetSelectionAfterRescue::OperatorFault(fault),
+                };
             }
         };
         return match select_v3_target_with_session_then_global(

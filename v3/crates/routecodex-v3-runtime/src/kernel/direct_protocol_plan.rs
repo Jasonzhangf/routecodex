@@ -82,6 +82,9 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
             Err(crate::operation_runner::V3ResolveTargetOperatorError::Typed(source)) => {
                 return Err(protocol_plan_failure(source, trace))
             }
+            Err(crate::operation_runner::V3ResolveTargetOperatorError::OperatorFault(fault)) => {
+                return Err(crate::kernel::protocol_plan_operator_fault(fault, trace))
+            }
             Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
                 return Err(protocol_plan_failure(
                     runtime_source("V3Router07OpaqueTargetHitOnce", error),
@@ -136,6 +139,9 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
             }
             Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Failed(source)) => {
                 return Err(protocol_plan_failure(source, trace))
+            }
+            Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::OperatorFault(fault)) => {
+                return Err(crate::kernel::protocol_plan_operator_fault(fault, trace))
             }
         };
     trace.push("V3Target08KindClassified");
@@ -207,7 +213,11 @@ fn protocol_plan_failure(
     source: V3Error01SourceRaised,
     node_trace: Vec<&'static str>,
 ) -> V3ResponsesProtocolExecutionPlanFailure {
-    V3ResponsesProtocolExecutionPlanFailure { source, node_trace }
+    V3ResponsesProtocolExecutionPlanFailure {
+        source,
+        node_trace,
+        error_operator_fault: None,
+    }
 }
 
 async fn execute_v3_responses_direct_runtime_kernel_with_transport_debug_core<

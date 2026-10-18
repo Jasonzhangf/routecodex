@@ -785,20 +785,7 @@ mod tests {
             Ok(None),
         )
         .expect_err("Ok(None) must produce a typed operator fault");
-        let failure = V3ResponsesRelayProviderFailure {
-            status: 502,
-            provider_status: Some(200),
-            policy_error_type: "relay_error_projection_nonterminal".to_string(),
-            policy_error_message: "Error06 SDK completed without a terminal client projection"
-                .to_string(),
-            provider_id: "provider-a".to_string(),
-            source_stage: "V3Error06ClientProjected",
-            observability: None,
-            terminal_projection: None,
-            terminal_disposition: None,
-            error_operator_fault: Some(fault.clone()),
-            matched_policy: None,
-        };
+        let failure = V3ResponsesRelayProviderFailure::from(fault.clone());
 
         let terminalized =
             terminalize_v3_responses_relay_provider_failure(failure, Some(witness.clone()));

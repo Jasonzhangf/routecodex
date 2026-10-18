@@ -283,6 +283,24 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
     pub(crate) matched_policy: Option<V3ProviderFailureDirective>,
 }
 
+impl From<V3RelayErrorOperatorFault> for V3ResponsesRelayProviderFailure {
+    fn from(fault: V3RelayErrorOperatorFault) -> Self {
+        Self {
+            status: 599,
+            provider_status: None,
+            policy_error_type: fault.policy_failure.code.clone(),
+            policy_error_message: fault.policy_failure.message.clone(),
+            provider_id: "none".to_string(),
+            source_stage: fault.policy_failure.source_stage,
+            observability: None,
+            terminal_projection: None,
+            terminal_disposition: None,
+            error_operator_fault: Some(fault),
+            matched_policy: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct V3ProviderFailureDirective {
     policy: V3ProviderErrorActionPolicyManifest,

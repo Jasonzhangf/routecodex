@@ -233,6 +233,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             Err(crate::operation_runner::V3ResolveTargetOperatorError::Typed(source)) => {
                 return error_output(source, trace, &hook_registry);
             }
+            Err(crate::operation_runner::V3ResolveTargetOperatorError::OperatorFault(fault)) => {
+                return direct_runtime_helpers_stream::operator_fault_output(
+                    fault,
+                    trace,
+                    &hook_registry,
+                );
+            }
             Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
                 return error_output(
                     runtime_source("V3Router07OpaqueTargetHitOnce", error),
@@ -342,6 +349,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     }
                     Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Failed(source)) => {
                         return error_output(source, trace, &hook_registry);
+                    }
+                    Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::OperatorFault(fault)) => {
+                        return direct_runtime_helpers_stream::operator_fault_output(
+                            fault,
+                            trace,
+                            &hook_registry,
+                        );
                     }
                     Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Exhausted { exhaustion: error, .. }) => {
                         let detail = if error.attempted_candidates.is_empty() {
