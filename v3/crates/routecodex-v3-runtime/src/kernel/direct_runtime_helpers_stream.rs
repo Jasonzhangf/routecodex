@@ -1197,15 +1197,25 @@ pub(crate) fn policy_failure_output_with_observability(
 }
 
 pub(crate) fn target_exhausted_output_with_observability(
-    source: V3Error01SourceRaised,
+    source: crate::shared::V3DirectSourceError,
     witness: Option<V3ExternalHttpWitness>,
     node_trace: Vec<&'static str>,
     hook_registry: &V3HookRegistry,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
-    assert_eq!(source.source_kind, V3ErrorSourceKind::TargetPoolExhausted);
-    let mut output =
-        error_output_with_observability(source, node_trace, hook_registry, observability);
+    let mut output = match source {
+        Ok(source) => {
+            assert_eq!(source.source_kind, V3ErrorSourceKind::TargetPoolExhausted);
+            error_output_with_observability(source, node_trace, hook_registry, observability)
+        }
+        Err(fault) => operator_fault_output_with_observability_and_snapshots(
+            fault,
+            node_trace,
+            observability,
+            None,
+            None,
+        ),
+    };
     output.terminal_disposition = Some(match witness {
         Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
         None => V3ProviderTerminalDisposition::NoResponse,
@@ -1536,12 +1546,52 @@ mod target_exhaustion_disposition_tests {
             "all route tiers unavailable",
         );
         let output = target_exhausted_output_with_observability(
-            source,
+            Ok(source),
             Some(witness.clone()),
             Vec::new(),
             &crate::hooks::register_responses_direct_hooks(),
             None,
         );
+        assert_eq!(
+            output.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
+        );
+    }
+
+    #[test]
+    fn direct_target_exhaustion_sdk_fault_keeps_cause_and_witness() {
+        let original = routecodex_v3_error::build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderRespInbound01Raw",
+            "provider_unavailable",
+            "provider unavailable",
+        );
+        let policy_failure = routecodex_v3_error::build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Error01SourceRaised",
+            "err01_source_operator_sdk_failure",
+            "Error01 operator failed",
+        );
+        let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
+            policy_failure: policy_failure.clone(),
+            original_source: Some(original.clone()),
+        };
+        let witness = V3ExternalHttpWitness::new(
+            429,
+            vec![("content-type".into(), b"application/json".to_vec())],
+            br#"{"error":"limit"}"#.to_vec(),
+        );
+        let output = target_exhausted_output_with_observability(
+            Err(fault),
+            Some(witness.clone()),
+            vec!["V3Target10ConcreteProviderSelected"],
+            &crate::hooks::register_responses_direct_hooks(),
+            None,
+        );
+
+        assert_eq!(output.client_payload.status, 599);
+        assert_eq!(output.diagnostic_source, Some(policy_failure));
+        assert_eq!(output.diagnostic_cause, Some(original));
         assert_eq!(
             output.terminal_disposition,
             Some(V3ProviderTerminalDisposition::ExternalHttp(witness))

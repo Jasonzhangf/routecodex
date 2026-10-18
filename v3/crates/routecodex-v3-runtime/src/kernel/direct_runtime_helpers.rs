@@ -27,7 +27,7 @@ fn v3_direct_admit_pinned_target(
         Ok(Some(admission)) => Ok((selected, Some(admission))),
         Ok(None) => Err(
             direct_runtime_helpers_stream::target_exhausted_output_with_observability(
-                build_v3_error_01_source_raised(
+                crate::shared::direct_plain_error(
                     V3ErrorSourceKind::TargetPoolExhausted,
                     "V3Target10ConcreteProviderSelected",
                     "provider_concurrency_busy",

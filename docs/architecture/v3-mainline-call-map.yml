@@ -10205,9 +10205,9 @@ chains:
     public_evidence: [publicChat46, publicGemini24, publicAnthropic18, policy86]
     merged_candidate: c15ac140d
     pending:
-    - 'H: remaining Server HTTP error source origins outside the read_json_payload/project_http_input_error SDK closure'
-    - 'D: Direct runtime request/response/SSE error source origins outside shared raise'
-    - 'R: Remaining Relay/target-origin/post-commit SSE error source bindings and global Error pipeline cutover'
+    - 'H: Server HTTP, WebSocket, precommit and postcommit source implementations are integrated; final combined runtime acceptance, review and main delivery remain pending'
+    - 'D: Direct shared Provider/Compat and private response stream sources are integrated; target/protocol Source01 closure is under author acceptance'
+    - 'R: remaining ordinary Relay/pool/terminal Source01 callers and final global Error pipeline acceptance'
     - inverse_project_client_response (pending REQ02)
   edges:
   - step_id: v3-op-runner-err-01

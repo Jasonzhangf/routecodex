@@ -388,7 +388,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             ..V3RuntimeObservability::default()
                         };
                         return direct_runtime_helpers_stream::target_exhausted_output_with_observability(
-                            build_v3_error_01_source_raised(
+                            crate::shared::direct_plain_error(
                                 V3ErrorSourceKind::TargetPoolExhausted,
                                 "V3Target10ConcreteProviderSelected",
                                 "selected_target_exhausted",
@@ -549,13 +549,27 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             now_epoch_ms,
         );
         if !selected_available {
-            let source = build_v3_error_01_source_raised(
+            let source = crate::shared::direct_plain_error(
                 V3ErrorSourceKind::ProviderFailure,
                 "V3HubReqTarget06Resolved",
                 "selected_provider_unavailable",
                 "selected provider is unavailable",
             );
             drop(provider_action_permit.take());
+            let source = match source {
+                Ok(source) => source,
+                Err(fault) => {
+                    return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
+                        Err(fault),
+                        last_external_http,
+                        trace,
+                        &hook_registry,
+                        None,
+                        provider_request_snapshot,
+                        None,
+                    )
+                }
+            };
             let policy_result = match run_v3_direct_provider_failure_policy(
                 &V3DirectProviderFailurePolicyContext {
                     failure_session_scope: &direct_failure_session_scope,

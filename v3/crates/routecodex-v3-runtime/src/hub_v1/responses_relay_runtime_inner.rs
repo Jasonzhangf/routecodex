@@ -434,20 +434,31 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                 protocol_decision.mode,
                 crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
             ) {
-                let protocol_candidate_keys = handle_error_before_resp03!(
-                    crate::kernel::protocol_candidate_keys_for_decision_mode(
+                let protocol_candidate_keys =
+                    match crate::kernel::protocol_candidate_keys_for_decision_mode(
                         &retained_expanded,
                         "responses",
                         &allowed_execution_modes,
                         protocol_decision.mode,
-                    )
-                    .map_err(|source| {
-                        V3ResponsesRelayRuntimeError::ExecutionControl(format!(
-                            "{}: {}",
-                            source.code, source.message
-                        ))
-                    })
-                );
+                    ) {
+                        Ok(keys) => keys,
+                        Err(Ok(source)) => {
+                            return Err(V3ResponsesRelayRuntimeError::ExecutionControl(format!(
+                                "{}: {}",
+                                source.code, source.message
+                            )))
+                        }
+                        Err(Err(fault)) => {
+                            return Ok(provider_failure_output(
+                                terminalize_v3_responses_relay_provider_failure(
+                                    V3ResponsesRelayProviderFailure::from(fault),
+                                    last_external_http.clone(),
+                                ),
+                                trace,
+                                0,
+                            ));
+                        }
+                    };
                 let mut handoff_trace = trace.clone();
                 handoff_trace.push("V3Target10ConcreteProviderSelected");
                 handoff_trace.push("V3Execution11ProtocolDecision");
