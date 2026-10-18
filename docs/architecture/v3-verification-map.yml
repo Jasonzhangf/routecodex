@@ -3933,7 +3933,7 @@ features:
   - RespInbound02/Resp03/RespOutbound05 use only the successful attempt map and current response binding
   - remote continuation is projection-only; no local continuation is introduced
   - semantic matrix partial/declared statuses are preserved, not relabeled as covered
-  - ErrorErr02HostCaptured is mandatory between ErrorErr01 and ErrorErr03
+  - ErrorErr02Classified is mandatory between ErrorErr01 and ErrorErr03
   - Direct/Relay, ToolThinking, inverse context, attempt projection, and response binding have one writer and declared readers
   - servertool hop re-enters the same runner before client commit
   - servertool_sidecar_plan is produced only by Resp03 when execution_disposition=servertool_followup, read only by RuntimeInternalFollowup, and released after sidecar execution before request re-entry
@@ -3957,6 +3957,7 @@ features:
   - tests::protocol_plan_operator_fault_consumer_preserves_sources_without_error06 tests the private Server typed-fault consumer for persisted policy source and original cause, zero attempts and detectable transport termination; real SDK rejection is separately covered by canonical_sdk_failure_is_returned_without_typed_reconstruction, without claiming a public HTTP fault injection path
   - inverse_project_client_response has ordinary Anthropic Relay wiring through resp_outbound_05_client_semantic.rs; its hosted path remains pending REQ02 and is not a released API symbol
   - six Error nodes execute as single-node SDK slices through provider_failure_runtime_policy.rs and operation_runner/error_decision.rs; the Relay Err01 source builder calls the canonical SDK node, the decision helper runs Error02 through Error05, and the terminal helper runs Error06. Direct source binding, disconnect, and target-origin Err01 remain pending global acceptance
+  - Foundation failure output binds raise_and_project_foundation_error -> raise_v3_source_via_err01 -> project_v3_relay_error_source before the Error02..05 decision operators and Error06 terminal operator; the Server NoResponse outcome preserves the typed source and cause. No deterministic public SDK fault input is established for the fixed operator catalog, so consumer-seeded typed fault tests do not claim public fault injection coverage
   - provider_failure_runtime_policy_health.rs binds record_provider_failure_record_with_policy_for_interface to Error01 then Error02; record_provider_failure_record_from_source_for_interface and record_post_commit_provider_stream_failure_from_source_for_interface consume already-raised sources through Error02 only. Actual status Some, fingerprints, identity isolation, and mutation order remain unchanged
   - pending acceptance retains existing Hub owners; R02 image residual composition passed the combined matrix, and Direct hooks remain owned by Direct
   - candidate behavior is13of20 scoped; remaining7 are inverse projection and all6globalError nodes. Whole-graph execution, Native Direct payload migration, independent review, and main merge are not inferred

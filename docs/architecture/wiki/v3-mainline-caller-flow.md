@@ -48,7 +48,6 @@ flowchart TD
   module_v3_config -->|1 edges / 1 paths| module_docs__manifest
   module_v3_config -->|17 edges / 8 paths| module_v3_config
   module_v3_debug -->|7 edges / 3 paths| module_v3_debug
-  module_v3_error -->|5 edges / 1 paths| module_v3_error
   module_v3_lifecycle -->|1 edges / 1 paths| module_routecodex_v3_hooks
   module_v3_lifecycle -->|1 edges / 1 paths| module_v3_config
   module_v3_lifecycle -->|31 edges / 4 paths| module_v3_lifecycle
@@ -72,9 +71,9 @@ flowchart TD
   module_v3_runtime -->|3 edges / 3 paths| module_routecodex_v3_route_classifier
   module_v3_runtime -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
-  module_v3_runtime -->|9 edges / 5 paths| module_v3_error
+  module_v3_runtime -->|8 edges / 5 paths| module_v3_error
   module_v3_runtime -->|24 edges / 8 paths| module_v3_provider_responses
-  module_v3_runtime -->|58 edges / 19 paths| module_v3_runtime
+  module_v3_runtime -->|64 edges / 19 paths| module_v3_runtime
   module_v3_runtime -->|48 edges / 13 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|3 edges / 1 paths| module_v3_target
   module_v3_runtime -->|5 edges / 2 paths| module_v3_virtual_router
@@ -107,7 +106,6 @@ flowchart TD
 | v3-config | docs::manifest | 1 | `v3.entry_protocol_endpoint_binding.mainline` |
 | v3-config | v3-config | 17 | `v3.config.compact_hub_v1_defaults`<br/>`v3.config.compile`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.config.server_manifest_compile.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.entry_protocol_registry_contract.mainline`<br/>`v3.provider_oauth_credentials.mainline`<br/>`v3.user_config.compile` |
 | v3-debug | v3-debug | 7 | `v3.codex_sample_retention_snap_scope`<br/>`v3.error.raw_wire_evidence`<br/>`v3.managed_restart_attempt` |
-| v3-error | v3-error | 5 | `v3.debug_error_foundation.mainline` |
 | v3-lifecycle | routecodex-v3-hooks | 1 | `v3.rcc_internal_hooks_sidecar` |
 | v3-lifecycle | v3-config | 1 | `v3.user_config.compile` |
 | v3-lifecycle | v3-lifecycle | 31 | `v3.managed_restart_attempt`<br/>`v3.rcc_internal_hooks_sidecar`<br/>`v3.runtime_fd_limit`<br/>`v3.server.managed_lifecycle` |
@@ -131,9 +129,9 @@ flowchart TD
 | v3-runtime | routecodex-v3-route-classifier | 3 | `v3.route_classifier.facts_classification`<br/>`v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
 | v3-runtime | routecodex-v3-sse | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
-| v3-runtime | v3-error | 9 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
+| v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime | v3-provider-responses | 24 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime | v3-runtime | 58 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-runtime | 64 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-runtime::hub_v1 | 48 | `v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 3 | `v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 5 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
@@ -176,10 +174,10 @@ flowchart TD
 | v3.operation_runner.dagpipe.request | v3-op-runner-req-05 | V3OperationRunnerGovernChatRequest | V3OperationRunnerProjectProviderSemantic |
 | v3.operation_runner.dagpipe.response | v3-op-runner-resp-03 | V3OperationRunnerGovernResponse | V3OperationRunnerInverseProjectClient |
 | v3.operation_runner.dagpipe.response | v3-op-runner-resp-04 | V3OperationRunnerInverseProjectClient | V3OperationRunnerFrameClient |
-| v3.operation_runner.dagpipe.error | v3-op-runner-err-01 | ErrorErr01SourceRaised | ErrorErr02HostCaptured |
-| v3.operation_runner.dagpipe.error | v3-op-runner-err-02 | ErrorErr02HostCaptured | ErrorErr03RuntimeClassified |
-| v3.operation_runner.dagpipe.error | v3-op-runner-err-03 | ErrorErr03RuntimeClassified | ErrorErr04RouterPolicyApplied |
-| v3.operation_runner.dagpipe.error | v3-op-runner-err-04 | ErrorErr04RouterPolicyApplied | ErrorErr05ExecutionDecision |
+| v3.operation_runner.dagpipe.error | v3-op-runner-err-01 | ErrorErr01SourceRaised | ErrorErr02Classified |
+| v3.operation_runner.dagpipe.error | v3-op-runner-err-02 | ErrorErr02Classified | ErrorErr03TargetLocalAction |
+| v3.operation_runner.dagpipe.error | v3-op-runner-err-03 | ErrorErr03TargetLocalAction | ErrorErr04TargetExhaustion |
+| v3.operation_runner.dagpipe.error | v3-op-runner-err-04 | ErrorErr04TargetExhaustion | ErrorErr05ExecutionDecision |
 | v3.operation_runner.dagpipe.error | v3-op-runner-err-05 | ErrorErr05ExecutionDecision | ErrorErr06ClientProjected |
 
 ### Missing caller/callee fields
@@ -1483,14 +1481,6 @@ flowchart TD
     c_36_v3_debug_error_foundation_mainline_15["v3-debug<br/>V3DebugRuntime::start_snapshot_session<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
   end
   subgraph c_36_v3_debug_error_foundation_mainline_m_v3_error["v3-error"]
-    c_36_v3_debug_error_foundation_mainline_5["v3-error<br/>build_v3_error_01_source_raised<br/><small>routecodex-v3-error/src/lib.rs</small>"]
-    c_36_v3_debug_error_foundation_mainline_6["v3-error<br/>V3ErrorHandlingCenter::decide_provider<br/><small>routecodex-v3-error/src/lib.rs</small>"]
-    c_36_v3_debug_error_foundation_mainline_7["v3-error<br/>build_v3_error_02_classified_from_v3_error_01<br/><small>routecodex-v3-error/src/lib.rs</small>"]
-    c_36_v3_debug_error_foundation_mainline_8["v3-error<br/>build_v3_error_03_target_local_action_from_v3_error_02<br/><small>routecodex-v3-error/src/lib.rs</small>"]
-    c_36_v3_debug_error_foundation_mainline_9["v3-error<br/>build_v3_error_04_target_exhaustion_decision_with_provider_availability<br/><small>routecodex-v3-error/src/lib.rs</small>"]
-    c_36_v3_debug_error_foundation_mainline_10["v3-error<br/>build_v3_error_05_execution_decision_from_v3_error_04<br/><small>routecodex-v3-error/src/lib.rs</small>"]
-    c_36_v3_debug_error_foundation_mainline_11["v3-error<br/>V3ErrorHandlingCenter::handle<br/><small>routecodex-v3-error/src/lib.rs</small>"]
-    c_36_v3_debug_error_foundation_mainline_12["v3-error<br/>build_v3_error_06_client_projected_from_v3_error_05<br/><small>routecodex-v3-error/src/lib.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_23["v3-error<br/>build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_24["v3-error<br/>build_v3_error_01_source_raised_internal<br/><small>routecodex-v3-error/src/lib.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_26["v3-error<br/>V3ProviderFailureSessionScope::new<br/><small>routecodex-v3-error/src/lib.rs</small>"]
@@ -1504,7 +1494,15 @@ flowchart TD
   end
   subgraph c_36_v3_debug_error_foundation_mainline_m_v3_runtime["v3-runtime"]
     c_36_v3_debug_error_foundation_mainline_0["v3-runtime<br/>execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
-    c_36_v3_debug_error_foundation_mainline_4["v3-runtime<br/>build_pending_projection<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_4["v3-runtime<br/>raise_and_project_foundation_error<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_5["v3-runtime<br/>raise_v3_source_via_err01<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_6["v3-runtime<br/>run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_7["v3-runtime<br/>run_v3_err02_classified_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err02_classified.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_8["v3-runtime<br/>run_v3_error_03_target_local_action_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err03_target_local_action.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_9["v3-runtime<br/>run_v3_error_04_target_exhaustion_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err04_target_exhaustion.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_10["v3-runtime<br/>execute_v3_operation_runner_error_err05_execution_decision<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err05_execution_decision.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_11["v3-runtime<br/>run_v3_error_06_terminal_projection_operator<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small>"]
+    c_36_v3_debug_error_foundation_mainline_12["v3-runtime<br/>execute_v3_operation_runner_error_err06_client_projected<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err06_client_projected.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_13["v3-runtime<br/>execute_v3_responses_direct_dry_run_runtime<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_16["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_failure_record<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_36_v3_debug_error_foundation_mainline_20["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
@@ -1555,12 +1553,12 @@ flowchart TD
 | `v3-de-01` | `V3Server03HttpRequestRaw` → `V3DebugTraceContextStarted` | anchored | execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3DebugRuntime::start_trace<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-02` | `V3DebugTraceContextStarted` → `V3DebugRawCaptureStored` | anchored | execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3DebugRuntime::capture_raw_request<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-03` | `V3DebugTraceContextStarted` → `V3DebugEventLedgerRecorded` | anchored | execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3DebugRuntime::record_node_event<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
-| `v3-de-04` | `V3Server03HttpRequestRaw` → `V3Error01SourceRaised` | anchored | build_pending_projection<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | build_v3_error_01_source_raised<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
-| `v3-de-05` | `V3Error01SourceRaised` → `V3Error02Classified` | anchored | V3ErrorHandlingCenter::decide_provider<br/><small>routecodex-v3-error/src/lib.rs</small> | build_v3_error_02_classified_from_v3_error_01<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
-| `v3-de-06` | `V3Error02Classified` → `V3Error03TargetLocalAction` | anchored | V3ErrorHandlingCenter::decide_provider<br/><small>routecodex-v3-error/src/lib.rs</small> | build_v3_error_03_target_local_action_from_v3_error_02<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
-| `v3-de-07` | `V3Error03TargetLocalAction` → `V3Error04TargetExhaustionDecision` | anchored | V3ErrorHandlingCenter::decide_provider<br/><small>routecodex-v3-error/src/lib.rs</small> | build_v3_error_04_target_exhaustion_decision_with_provider_availability<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
-| `v3-de-08` | `V3Error04TargetExhaustionDecision` → `V3Error05ExecutionDecision` | anchored | V3ErrorHandlingCenter::decide_provider<br/><small>routecodex-v3-error/src/lib.rs</small> | build_v3_error_05_execution_decision_from_v3_error_04<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
-| `v3-de-09` | `V3Error05ExecutionDecision` → `V3Error06ClientProjected` | anchored | V3ErrorHandlingCenter::handle<br/><small>routecodex-v3-error/src/lib.rs</small> | build_v3_error_06_client_projected_from_v3_error_05<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-04` | `V3Server03HttpRequestRaw` → `V3Error01SourceRaised` | anchored | raise_and_project_foundation_error<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | raise_v3_source_via_err01<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-05` | `V3Error01SourceRaised` → `V3Error02Classified` | anchored | run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | run_v3_err02_classified_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err02_classified.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-06` | `V3Error02Classified` → `V3Error03TargetLocalAction` | anchored | run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | run_v3_error_03_target_local_action_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err03_target_local_action.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-07` | `V3Error03TargetLocalAction` → `V3Error04TargetExhaustionDecision` | anchored | run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | run_v3_error_04_target_exhaustion_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err04_target_exhaustion.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-08` | `V3Error04TargetExhaustionDecision` → `V3Error05ExecutionDecision` | anchored | run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | execute_v3_operation_runner_error_err05_execution_decision<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err05_execution_decision.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-09` | `V3Error05ExecutionDecision` → `V3Error06ClientProjected` | anchored | run_v3_error_06_terminal_projection_operator<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | execute_v3_operation_runner_error_err06_client_projected<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err06_client_projected.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-10` | `V3DryRunFixture` → `V3DryRunNoNetworkTerminalEffect` | anchored | execute_v3_responses_direct_dry_run_runtime<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | V3DebugRuntime::build_dry_run_execution_plan<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-11` | `V3DebugTraceContextStarted` → `V3DebugSnapshotSessionRegistered` | anchored | execute_v3_responses_direct_dry_run_runtime<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | V3DebugRuntime::start_snapshot_session<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-12` | `V3Error03TargetLocalAction` → `V3ProviderHealthStateMutated` | anchored | V3ProviderFailureRuntimeHealth::record_provider_failure_record<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::record_provider_failure_in_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.debug_error_foundation` |
@@ -3638,19 +3636,19 @@ flowchart TD
   subgraph c_86_v3_operation_runner_dagpipe_error_m_pending["pending"]
     c_86_v3_operation_runner_dagpipe_error_0["pending<br/>pending<br/><small>pending</small>"]
   end
-  c_86_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-01<br/>ErrorErr01SourceRaised → ErrorErr02HostCaptured| c_86_v3_operation_runner_dagpipe_error_0
-  c_86_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-02<br/>ErrorErr02HostCaptured → ErrorErr03RuntimeClassified| c_86_v3_operation_runner_dagpipe_error_0
-  c_86_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-03<br/>ErrorErr03RuntimeClassified → ErrorErr04RouterPolicyApplied| c_86_v3_operation_runner_dagpipe_error_0
-  c_86_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-04<br/>ErrorErr04RouterPolicyApplied → ErrorErr05ExecutionDecision| c_86_v3_operation_runner_dagpipe_error_0
+  c_86_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-01<br/>ErrorErr01SourceRaised → ErrorErr02Classified| c_86_v3_operation_runner_dagpipe_error_0
+  c_86_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-02<br/>ErrorErr02Classified → ErrorErr03TargetLocalAction| c_86_v3_operation_runner_dagpipe_error_0
+  c_86_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-03<br/>ErrorErr03TargetLocalAction → ErrorErr04TargetExhaustion| c_86_v3_operation_runner_dagpipe_error_0
+  c_86_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-04<br/>ErrorErr04TargetExhaustion → ErrorErr05ExecutionDecision| c_86_v3_operation_runner_dagpipe_error_0
   c_86_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-05<br/>ErrorErr05ExecutionDecision → ErrorErr06ClientProjected| c_86_v3_operation_runner_dagpipe_error_0
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-op-runner-err-01` | `ErrorErr01SourceRaised` → `ErrorErr02HostCaptured` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
-| `v3-op-runner-err-02` | `ErrorErr02HostCaptured` → `ErrorErr03RuntimeClassified` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
-| `v3-op-runner-err-03` | `ErrorErr03RuntimeClassified` → `ErrorErr04RouterPolicyApplied` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
-| `v3-op-runner-err-04` | `ErrorErr04RouterPolicyApplied` → `ErrorErr05ExecutionDecision` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-err-01` | `ErrorErr01SourceRaised` → `ErrorErr02Classified` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-err-02` | `ErrorErr02Classified` → `ErrorErr03TargetLocalAction` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-err-03` | `ErrorErr03TargetLocalAction` → `ErrorErr04TargetExhaustion` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-err-04` | `ErrorErr04TargetExhaustion` → `ErrorErr05ExecutionDecision` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
 | `v3-op-runner-err-05` | `ErrorErr05ExecutionDecision` → `ErrorErr06ClientProjected` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
 
 ## v3.admin.control_plane_admission

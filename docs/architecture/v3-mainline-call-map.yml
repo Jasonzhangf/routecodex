@@ -3341,10 +3341,10 @@ chains:
   - step_id: v3-de-04
     from_node: V3Server03HttpRequestRaw
     to_node: V3Error01SourceRaised
-    caller_symbol: build_pending_projection
+    caller_symbol: raise_and_project_foundation_error
     caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
-    callee_symbol: build_v3_error_01_source_raised
-    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    callee_symbol: raise_v3_source_via_err01
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes:
@@ -3362,10 +3362,10 @@ chains:
   - step_id: v3-de-05
     from_node: V3Error01SourceRaised
     to_node: V3Error02Classified
-    caller_symbol: V3ErrorHandlingCenter::decide_provider
-    caller_file: v3/crates/routecodex-v3-error/src/lib.rs
-    callee_symbol: build_v3_error_02_classified_from_v3_error_01
-    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    caller_symbol: run_v3_error_02_to_05_decision_operators
+    caller_file: v3/crates/routecodex-v3-runtime/src/operation_runner/error_decision.rs
+    callee_symbol: run_v3_err02_classified_operator
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/err02_classified.rs
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes:
@@ -3380,10 +3380,10 @@ chains:
   - step_id: v3-de-06
     from_node: V3Error02Classified
     to_node: V3Error03TargetLocalAction
-    caller_symbol: V3ErrorHandlingCenter::decide_provider
-    caller_file: v3/crates/routecodex-v3-error/src/lib.rs
-    callee_symbol: build_v3_error_03_target_local_action_from_v3_error_02
-    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    caller_symbol: run_v3_error_02_to_05_decision_operators
+    caller_file: v3/crates/routecodex-v3-runtime/src/operation_runner/error_decision.rs
+    callee_symbol: run_v3_error_03_target_local_action_operator
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/err03_target_local_action.rs
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes:
@@ -3398,10 +3398,10 @@ chains:
   - step_id: v3-de-07
     from_node: V3Error03TargetLocalAction
     to_node: V3Error04TargetExhaustionDecision
-    caller_symbol: V3ErrorHandlingCenter::decide_provider
-    caller_file: v3/crates/routecodex-v3-error/src/lib.rs
-    callee_symbol: build_v3_error_04_target_exhaustion_decision_with_provider_availability
-    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    caller_symbol: run_v3_error_02_to_05_decision_operators
+    caller_file: v3/crates/routecodex-v3-runtime/src/operation_runner/error_decision.rs
+    callee_symbol: run_v3_error_04_target_exhaustion_operator
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/err04_target_exhaustion.rs
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes:
@@ -3416,10 +3416,10 @@ chains:
   - step_id: v3-de-08
     from_node: V3Error04TargetExhaustionDecision
     to_node: V3Error05ExecutionDecision
-    caller_symbol: V3ErrorHandlingCenter::decide_provider
-    caller_file: v3/crates/routecodex-v3-error/src/lib.rs
-    callee_symbol: build_v3_error_05_execution_decision_from_v3_error_04
-    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    caller_symbol: run_v3_error_02_to_05_decision_operators
+    caller_file: v3/crates/routecodex-v3-runtime/src/operation_runner/error_decision.rs
+    callee_symbol: execute_v3_operation_runner_error_err05_execution_decision
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/err05_execution_decision.rs
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes:
@@ -3434,10 +3434,10 @@ chains:
   - step_id: v3-de-09
     from_node: V3Error05ExecutionDecision
     to_node: V3Error06ClientProjected
-    caller_symbol: V3ErrorHandlingCenter::handle
-    caller_file: v3/crates/routecodex-v3-error/src/lib.rs
-    callee_symbol: build_v3_error_06_client_projected_from_v3_error_05
-    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+    caller_symbol: run_v3_error_06_terminal_projection_operator
+    caller_file: v3/crates/routecodex-v3-runtime/src/operation_runner/error_decision.rs
+    callee_symbol: execute_v3_operation_runner_error_err06_client_projected
+    callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/err06_client_projected.rs
     owner_feature_id: v3.debug_error_foundation
     resource_flow:
       consumes:
@@ -10153,6 +10153,13 @@ chains:
     status: sdk_single_node_slices_acceptance_pending
     acceptance_scope: all_six_global_error_nodes_pending
     execution_owner_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    source_policy_owner:
+      symbol: raise_v3_source_via_err01
+      file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      operator_symbol: run_v3_err01_source_raised_operator
+      operator_file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/err01_source_raised.rs
+      node: error_err01_source_raised
+      fault_type: V3RelayErrorOperatorFault
     decision_helper:
       symbol: run_v3_error_02_to_05_decision_operators
       file: v3/crates/routecodex-v3-runtime/src/operation_runner/error_decision.rs
@@ -10169,6 +10176,17 @@ chains:
       consumer_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
       preserves: typed_sdk_fault_policy_source_and_original_cause_without_fake_error06
       terminal: existing_NoResponse_request_transport_termination_without_provider_attempt
+    shared_runtime_source_raise:
+      symbol: raise_v3_runtime_failure_source
+      file: v3/crates/routecodex-v3-runtime/src/shared.rs
+      delegate: raise_v3_source_via_err01
+      returns: Result<V3Error01SourceRaised, V3RelayErrorOperatorFault>
+    foundation_error_consumers:
+      symbol: raise_and_project_foundation_error
+      file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+      delegates: [raise_v3_source_via_err01, project_v3_relay_error_source]
+      output_carrier: V3FoundationRuntimeOutput { diagnostic_source, diagnostic_cause }
+      server_terminal_carrier: V3ModelClientNoResponse
     source_builder:
       symbol: build_v3_relay_provider_attempt_source
       file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -10189,14 +10207,14 @@ chains:
     public_evidence: [publicChat46, publicGemini24, publicAnthropic18, policy86]
     merged_candidate: c15ac140d
     pending:
-    - Direct and Relay source binding
-    - client disconnect source binding
-    - target-origin source binding
-    - global Error pipeline cutover
+    - 'H: Server HTTP boundary error source origins (read_json_payload / project_v3_http_boundary_error)'
+    - 'D: Direct runtime request/response/SSE error source origins outside shared raise'
+    - 'R: Remaining Relay/target-origin/post-commit SSE error source bindings and global Error pipeline cutover'
+    - inverse_project_client_response (pending REQ02)
   edges:
   - step_id: v3-op-runner-err-01
     from_node: ErrorErr01SourceRaised
-    to_node: ErrorErr02HostCaptured
+    to_node: ErrorErr02Classified
     caller_symbol: pending
     caller_file: pending
     callee_symbol: pending
@@ -10206,12 +10224,11 @@ chains:
     resource_flow:
       consumes: [v3.error.chain]
       produces: [v3.error.chain]
-      side_channel_reads:
-      - v3.operation_runner.metadata_center_control
+      side_channel_reads: [v3.error.chain]
       side_channel_writes: [v3.error.chain]
   - step_id: v3-op-runner-err-02
-    from_node: ErrorErr02HostCaptured
-    to_node: ErrorErr03RuntimeClassified
+    from_node: ErrorErr02Classified
+    to_node: ErrorErr03TargetLocalAction
     caller_symbol: pending
     caller_file: pending
     callee_symbol: pending
@@ -10220,12 +10237,12 @@ chains:
     owner_feature_id: v3.unified_operation_runner_design
     resource_flow:
       consumes: [v3.error.chain]
-      produces: [v3.error.chain]
+      produces: [v3.error.chain, v3.error.action_plan]
       side_channel_reads: [v3.error.chain]
-      side_channel_writes: [v3.error.chain]
+      side_channel_writes: [v3.error.chain, v3.error.action_plan]
   - step_id: v3-op-runner-err-03
-    from_node: ErrorErr03RuntimeClassified
-    to_node: ErrorErr04RouterPolicyApplied
+    from_node: ErrorErr03TargetLocalAction
+    to_node: ErrorErr04TargetExhaustion
     caller_symbol: pending
     caller_file: pending
     callee_symbol: pending
@@ -10233,12 +10250,12 @@ chains:
     status: binding_pending
     owner_feature_id: v3.unified_operation_runner_design
     resource_flow:
-      consumes: [v3.error.chain]
-      produces: [v3.error.chain]
-      side_channel_reads: [v3.error.chain]
-      side_channel_writes: [v3.error.chain]
+      consumes: [v3.error.chain, v3.error.action_plan]
+      produces: [v3.error.chain, v3.error.exhaustion_decision]
+      side_channel_reads: [v3.error.chain, v3.error.action_plan]
+      side_channel_writes: [v3.error.chain, v3.error.exhaustion_decision]
   - step_id: v3-op-runner-err-04
-    from_node: ErrorErr04RouterPolicyApplied
+    from_node: ErrorErr04TargetExhaustion
     to_node: ErrorErr05ExecutionDecision
     caller_symbol: pending
     caller_file: pending
@@ -10247,10 +10264,10 @@ chains:
     status: binding_pending
     owner_feature_id: v3.unified_operation_runner_design
     resource_flow:
-      consumes: [v3.error.chain]
-      produces: [v3.error.chain]
-      side_channel_reads: [v3.error.chain]
-      side_channel_writes: [v3.error.chain]
+      consumes: [v3.error.chain, v3.error.exhaustion_decision]
+      produces: [v3.error.chain, v3.error.execution_decision]
+      side_channel_reads: [v3.error.chain, v3.error.exhaustion_decision]
+      side_channel_writes: [v3.error.chain, v3.error.execution_decision]
   - step_id: v3-op-runner-err-05
     from_node: ErrorErr05ExecutionDecision
     to_node: ErrorErr06ClientProjected
