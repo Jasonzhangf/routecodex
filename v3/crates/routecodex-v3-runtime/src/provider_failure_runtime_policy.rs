@@ -1249,12 +1249,7 @@ fn target_resolution_source(
     code: &'static str,
     error: impl std::fmt::Display,
 ) -> routecodex_v3_error::V3Error01SourceRaised {
-    build_v3_error_01_source_raised(
-        V3ErrorSourceKind::RuntimeFailure,
-        stage,
-        code,
-        error.to_string(),
-    )
+    crate::shared::raise_v3_runtime_failure_source(stage, code, error.to_string())
 }
 
 pub(crate) fn v3_relay_provider_target_selection_sample(request_id: &str) -> u64 {
