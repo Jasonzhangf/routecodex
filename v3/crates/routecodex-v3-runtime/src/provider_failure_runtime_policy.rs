@@ -219,6 +219,78 @@ pub(crate) fn finish_v3_relay_error_projection(
     }
 }
 
+pub(crate) fn project_v3_relay_error_source(
+    source: V3Error01SourceRaised,
+    scope: V3ErrorActionScope,
+    candidates_remaining: usize,
+    source_status: Option<u16>,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    let source_projection = serde_json::to_value(&source).map_err(|error| {
+        relay_error_operator_fault(
+            "relay_error_operator_sdk_failure",
+            format!("failed to serialize V3Error01SourceRaised: {error}"),
+            Some(source.clone()),
+        )
+    })?;
+    project_v3_relay_error_source_with_projection(
+        source,
+        source_projection,
+        scope,
+        candidates_remaining,
+        source_status,
+    )
+}
+
+fn project_v3_relay_error_source_with_projection(
+    source: V3Error01SourceRaised,
+    source_projection: Value,
+    scope: V3ErrorActionScope,
+    candidates_remaining: usize,
+    source_status: Option<u16>,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    let original_source = source.clone();
+    let (decision_projection, decision) = run_v3_error_02_to_05_decision_operators(
+        source_projection,
+        source,
+        scope,
+        candidates_remaining,
+        false,
+        false,
+        None,
+    )
+    .map_err(|error| {
+        relay_error_operator_fault(
+            "relay_error_operator_sdk_failure",
+            error.message,
+            Some(original_source.clone()),
+        )
+    })?;
+    let mut projected = finish_v3_relay_error_projection(
+        original_source.clone(),
+        run_v3_error_06_terminal_projection_operator(decision_projection, decision),
+    )?;
+
+    let internal_runtime_failure = original_source.source_kind == V3ErrorSourceKind::RuntimeFailure;
+    let target_pool_exhausted =
+        original_source.source_kind == V3ErrorSourceKind::TargetPoolExhausted;
+    if !internal_runtime_failure && !target_pool_exhausted {
+        let linked_status = projected
+            .body
+            .pointer("/error/external_error/status")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|status| u16::try_from(status).ok())
+            .filter(|status| *status >= 400);
+        if let Some(status) = source_status
+            .filter(|status| *status >= 400)
+            .or(linked_status)
+        {
+            projected.status = status;
+        }
+    }
+
+    Ok(projected)
+}
+
 fn relay_error_operator_fault_from_err01_failure(
     provider_id: &str,
     source_stage: &'static str,

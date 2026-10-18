@@ -557,6 +557,37 @@ pub fn project_v3_gemini_relay_runtime_failure(
         "none",
         Vec::new(),
     );
+    gemini_error_output_from_projection(projected, trace, provider_pool_exhausted)
+}
+
+fn gemini_error_output_from_projection(
+    projected: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    trace: Vec<&'static str>,
+    provider_pool_exhausted: bool,
+) -> V3GeminiRelayRuntimeOutput {
+    let projected = match projected {
+        Ok(projected) => projected,
+        Err(fault) => {
+            return V3GeminiRelayRuntimeOutput {
+                status: 599,
+                terminal_disposition: Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                ),
+                client_body: V3GeminiRelayClientBody::Json(Value::Null),
+                node_trace: trace,
+                error_chain: None,
+                observability: None,
+                provider_failure_attempts: Vec::new(),
+                diagnostic_source: Some(fault.policy_failure),
+                diagnostic_cause: fault.original_source,
+                stream_observation: None,
+                provider_snapshots: None,
+            }
+        }
+    };
     V3GeminiRelayRuntimeOutput {
         status: projected.status,
         terminal_disposition: provider_pool_exhausted
@@ -1026,5 +1057,65 @@ mod tests {
         assert_eq!(diagnostic_source.code, "relay_error_projection_nonterminal");
         assert_eq!(diagnostic_cause, source);
         assert_eq!(output.provider_failure_attempts, attempts);
+    }
+
+    #[test]
+    fn local_error_sdk_fault_survives_consumer() {
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "local_error_sdk_failure",
+            "local error SDK failure must remain the projected cause",
+        );
+        let error = crate::operation_runner::run_v3_error_02_to_05_decision_operators(
+            Value::Null,
+            source.clone(),
+            routecodex_v3_error::V3ErrorActionScope::None,
+            0,
+            false,
+            false,
+            None,
+        )
+        .expect_err("a null source projection must fail the real Error operator SDK");
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Err(error),
+        )
+        .expect_err("the real Error operator SDK failure must remain a typed fault");
+        let policy_failure = fault.policy_failure.clone();
+        let original_source = fault
+            .original_source
+            .clone()
+            .expect("the real original source must remain attached to the fault");
+        let trace = vec![
+            "V3Error02Classified",
+            "V3Error03TargetLocalAction",
+            "V3Error04TargetExhaustion",
+            "V3Error05ExecutionDecision",
+        ];
+
+        let output = gemini_error_output_from_projection(Err(fault), trace.clone(), false);
+
+        assert_eq!(output.status, 599);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(matches!(
+            &output.client_body,
+            V3GeminiRelayClientBody::Json(value) if value.is_null()
+        ));
+        assert!(output.error_chain.is_none());
+        assert_eq!(output.node_trace, trace);
+        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+        assert_eq!(output.diagnostic_source, Some(policy_failure.clone()));
+        assert_eq!(output.diagnostic_cause, Some(original_source.clone()));
+        assert_eq!(
+            policy_failure.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(policy_failure.source_stage, "V3Error06ClientProjected");
+        assert_eq!(policy_failure.code, "relay_error_operator_sdk_failure");
+        assert_eq!(original_source, source);
     }
 }
