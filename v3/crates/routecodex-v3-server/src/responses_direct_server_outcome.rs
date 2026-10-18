@@ -6,6 +6,31 @@ pub(super) enum V3ResponsesDirectServerOutcome {
     ProviderTerminal(routecodex_v3_error::V3ProviderTerminalDisposition),
 }
 
+pub(super) fn take_responses_direct_terminal_outcome(
+    state: &V3ListenerState,
+    path: &str,
+    request_id: &str,
+    output: &mut routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput,
+) -> Option<V3ResponsesDirectServerOutcome> {
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        "responses",
+        path,
+        request_id,
+        output
+            .observability
+            .as_ref()
+            .map(|observation| observation.provider_failure_events.as_slice())
+            .unwrap_or(&[]),
+        output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
+    );
+    output
+        .terminal_disposition
+        .take()
+        .map(V3ResponsesDirectServerOutcome::ProviderTerminal)
+}
+
 pub(super) fn execute_responses_direct_server_outcome<'a>(
     state: &'a V3ListenerState,
     request_headers: &'a HeaderMap,
@@ -391,8 +416,10 @@ async fn execute_responses_direct_server_outcome_inner(
             ),
         );
     }
-    if let Some(disposition) = output.terminal_disposition.take() {
-        return V3ResponsesDirectServerOutcome::ProviderTerminal(disposition);
+    if let Some(terminal) =
+        take_responses_direct_terminal_outcome(state, &path, &request_id, &mut output)
+    {
+        return terminal;
     }
     let scope = match state
         .debug
