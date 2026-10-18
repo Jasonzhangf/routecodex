@@ -216,6 +216,8 @@ pub struct V3Server16HttpFrame {
     pub error_node: &'static str,
     pub error_chain: Vec<&'static str>,
     pub error_body: Option<Value>,
+    pub diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
     pub node_trace: Vec<&'static str>,
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
