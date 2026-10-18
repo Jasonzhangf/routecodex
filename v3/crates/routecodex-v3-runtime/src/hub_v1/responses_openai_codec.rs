@@ -852,6 +852,7 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
                     | "tool_use_id"
                     | "output"
                     | "content"
+                    | "routecodex_chat_extension"
             ) && !(call_id.is_none() && matches!(key.as_str(), "name" | "namespace"))
         })
         .map(|(key, value)| (key.clone(), value.clone()))
@@ -877,6 +878,7 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
             );
         }
         copy_v3_responses_tool_result_status(item, &mut named_extension)?;
+        copy_v3_anthropic_tool_result_is_error(item, &mut named_extension);
         return Ok(json!({
             "role":"user",
             "content":content,
@@ -884,6 +886,7 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
         }));
     };
     copy_v3_responses_tool_result_status(item, &mut extension)?;
+    copy_v3_anthropic_tool_result_is_error(item, &mut extension);
     Ok(json!({
         "role":"tool",
         "tool_call_id":call_id,
@@ -904,6 +907,20 @@ fn copy_v3_responses_tool_result_status(
         Some(status) => {
             extension.insert("responses_tool_output_status".to_string(), status.clone());
             Ok(())
+        }
+    }
+}
+
+fn copy_v3_anthropic_tool_result_is_error(
+    item: &Map<String, Value>,
+    extension: &mut Map<String, Value>,
+) {
+    if let Some(Value::Object(source)) = item.get("routecodex_chat_extension") {
+        if let Some(is_error) = source.get("anthropic_tool_result_is_error") {
+            extension.insert(
+                "anthropic_tool_result_is_error".to_string(),
+                is_error.clone(),
+            );
         }
     }
 }
