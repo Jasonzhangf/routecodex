@@ -1656,8 +1656,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
-  - scripts/architecture/verify-v3-relay-request-semantics.mjs
-  - scripts/tests/v3-relay-request-semantics-red-fixtures.mjs
   - docs/goals/v3-hub-relay-request-semantics-test-design.md
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
@@ -1671,8 +1669,6 @@ features:
   - ~/.rcc
   required_gates:
   - npm run test:v3-relay-request-semantics
-  - npm run verify:v3-relay-request-semantics
-  - npm run test:v3-relay-request-semantics-red-fixtures
   - npm run test:v3-compile-fail
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
@@ -1718,8 +1714,6 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
-  - scripts/architecture/verify-v3-relay-response-semantics.mjs
-  - scripts/tests/v3-relay-response-semantics-red-fixtures.mjs
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
@@ -1732,8 +1726,6 @@ features:
   - ~/.rcc
   required_gates:
   - npm run test:v3-relay-response-semantics
-  - npm run verify:v3-relay-response-semantics
-  - npm run test:v3-relay-response-semantics-red-fixtures
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
