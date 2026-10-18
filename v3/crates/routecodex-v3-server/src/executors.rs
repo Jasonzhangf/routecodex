@@ -189,6 +189,50 @@ pub(crate) fn openai_chat_relay_output_response(
         .expect("typed V3 OpenAI Chat Relay response")
 }
 
+fn capture_v3_non_responses_direct_client_response(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    frame: &mut V3Server16HttpFrame,
+) -> Option<Response<Body>> {
+    let V3Server16Body::Json(value) = &frame.body else {
+        // SSE Direct bodies are captured from the final projected response so
+        // the client wire (keepalive + framing) is recorded verbatim.
+        return None;
+    };
+    if !state.debug.should_capture_snapshot_stage("client-response")
+        || !v3_codex_sample_scope_allows(state, V3EntryProtocolExecutionMode::Direct)
+    {
+        return None;
+    }
+    let payload = state.debug.project_payload_verbatim(json!({
+        "object": "routecodex.v3.client_response_snapshot",
+        "stage": "client-response",
+        "source": "live_server_direct_response",
+        "status": frame.status,
+        "bodyKind": "json",
+        "rawBody": value,
+        "node_trace": frame.node_trace.clone(),
+        "error_chain": frame.error_chain.clone(),
+        "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
+    }));
+    if let Err(error) = persist_v3_codex_sample_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "response.json",
+        &payload,
+    ) {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3Debug03RawResponseCaptured",
+            V3DebugError::Sink(error),
+        )));
+    }
+    None
+}
+
 /// OpenAI Chat 入口动态绑定：入口协议与出口 provider 同协议（chat wire）
 /// 走统一 direct 骨架（`execute_v3_direct_runtime_kernel_core` + ChatCodec）；
 /// 异协议由骨架返回 RelayHandoff，转 chat relay runtime（入口已归一化到 chat）。
@@ -236,7 +280,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         Ok(duration) => duration.as_millis() as u64,
         Err(_) => 0,
     };
-    let output =
+    let mut output =
         routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<V3ChatDirectCodec, _>(
             (),
             &state.manifest,
@@ -305,6 +349,15 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         let mut trace = relay_trace;
         trace.extend(relay_output.node_trace);
         relay_output.node_trace = trace;
+        if let Some(response) = capture_v3_relay_provider_snapshots(
+            state,
+            "openai_chat",
+            &path,
+            &request_id,
+            &mut relay_output.provider_snapshots,
+        ) {
+            return response;
+        }
         if let Some(response) = capture_v3_openai_chat_relay_response(
             state,
             &V3DebugTraceScope {
@@ -344,12 +397,32 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
                 relay_output.stream_observation.is_none(),
             );
         }
-        return openai_chat_relay_output_response(
+        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_openai_chat_relay(
+            state,
+            "openai_chat",
+            &path,
+            &request_id,
+            &relay_output,
+        );
+        let response = openai_chat_relay_output_response(
             relay_output,
             stream_console_finalizer,
             Duration::from_millis(state.server.http_sse_keepalive_ms),
             v3_entry_request_wants_sse(request_headers, &console_payload),
         );
+        return match client_response_capture {
+            Some(capture) => capture.observe_response(response),
+            None => response,
+        };
+    }
+    if let Some(foundation_output) = capture_v3_responses_direct_provider_snapshots(
+        state,
+        "openai_chat",
+        &path,
+        &request_id,
+        &mut output,
+    ) {
+        return foundation_output_response(foundation_output);
     }
     persist_v3_chat_failure_evidence_sources(
         state,
@@ -421,10 +494,23 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         );
     }
     if let Some(response) =
-        capture_v3_responses_direct_response(state, "openai_chat", &path, &request_id, &mut frame)
+        capture_v3_non_responses_direct_client_response(
+            state,
+            "openai_chat",
+            &path,
+            &request_id,
+            &mut frame,
+        )
     {
         return response;
     }
+    let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_direct_frame(
+        state,
+        "openai_chat",
+        &path,
+        &request_id,
+        &frame,
+    );
     let stream_console_finalizer =
         emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
     if matches!(&frame.body, V3Server16Body::Sse(_)) {
@@ -457,12 +543,16 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         v3_entry_request_wants_sse(request_headers, &console_payload),
         V3SseClientProtocol::OpenAiChat,
     );
-    responses_direct_output_response_with_console_for_protocol(
+    let response = responses_direct_output_response_with_console_for_protocol(
         frame,
         stream_console_finalizer,
         Some(Duration::from_millis(state.server.http_sse_keepalive_ms)),
         V3SseClientProtocol::OpenAiChat,
-    )
+    );
+    match client_response_capture {
+        Some(capture) => capture.observe_response(response),
+        None => response,
+    }
 }
 
 pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
@@ -523,7 +613,7 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);
-    let output = routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<
+    let mut output = routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<
         routecodex_v3_runtime::V3AnthropicDirectCodec,
         _,
     >(
@@ -539,7 +629,7 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
     )
     .await;
     if let Some(handoff) = output.protocol_relay_handoff {
-        let relay_output = match routecodex_v3_runtime::execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health_and_handoff(
+        let mut relay_output = match routecodex_v3_runtime::execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health_and_handoff(
             &state.manifest,
             V3AnthropicRelayRuntimeInput {
                 server_id: state.server.id.clone(), failure_session_scope,
@@ -565,6 +655,24 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
                 },
             );
         }
+        if let Some(response) = capture_v3_relay_provider_snapshots(
+            state,
+            "anthropic",
+            &path,
+            &request_id,
+            &mut relay_output.provider_snapshots,
+        ) {
+            return response;
+        }
+        if let Some(response) = capture_v3_anthropic_relay_response(
+            state,
+            "anthropic",
+            &path,
+            &request_id,
+            &mut relay_output,
+        ) {
+            return response;
+        }
         if let Some(observability) = relay_output.observability.as_ref() {
             emit_v3_observability_console_lines(
                 &console_context,
@@ -575,7 +683,27 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
                 true,
             );
         }
-        return anthropic_relay_output_response(relay_output, requested_stream);
+        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(
+            state,
+            "anthropic",
+            &path,
+            &request_id,
+            &relay_output,
+        );
+        let response = anthropic_relay_output_response(relay_output, requested_stream);
+        return match client_response_capture {
+            Some(capture) => capture.observe_response(response),
+            None => response,
+        };
+    }
+    if let Some(foundation_output) = capture_v3_responses_direct_provider_snapshots(
+        state,
+        "anthropic",
+        &path,
+        &request_id,
+        &mut output,
+    ) {
+        return foundation_output_response(foundation_output);
     }
     persist_v3_chat_failure_evidence_sources(
         state,
@@ -610,18 +738,40 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
     );
     frame.observability = output.observability;
     frame.stream_observation = output.stream_observation;
+    if let Some(response) =
+        capture_v3_non_responses_direct_client_response(
+            state,
+            "anthropic",
+            &path,
+            &request_id,
+            &mut frame,
+        )
+    {
+        return response;
+    }
+    let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_direct_frame(
+        state,
+        "anthropic",
+        &path,
+        &request_id,
+        &frame,
+    );
     let finalizer = emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
     let frame = project_v3_protocol_stream_error_frame_if_requested(
         frame,
         requested_stream,
         V3SseClientProtocol::Anthropic,
     );
-    responses_direct_output_response_with_console_for_protocol(
+    let response = responses_direct_output_response_with_console_for_protocol(
         frame,
         finalizer,
         Some(Duration::from_millis(state.server.http_sse_keepalive_ms)),
         V3SseClientProtocol::Anthropic,
-    )
+    );
+    match client_response_capture {
+        Some(capture) => capture.observe_response(response),
+        None => response,
+    }
 }
 
 pub(crate) async fn execute_v3_gemini_direct_server_outcome(
@@ -670,7 +820,7 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);
-    let output = routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<
+    let mut output = routecodex_v3_runtime::execute_v3_direct_runtime_kernel_core::<
         routecodex_v3_runtime::V3GeminiDirectCodec,
         _,
     >(
@@ -686,7 +836,7 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
     )
     .await;
     if let Some(handoff) = output.protocol_relay_handoff {
-        let relay_output = match routecodex_v3_runtime::execute_v3_gemini_relay_runtime_with_default_transport_provider_health_and_handoff(
+        let mut relay_output = match routecodex_v3_runtime::execute_v3_gemini_relay_runtime_with_default_transport_provider_health_and_handoff(
             &state.manifest,
             V3GeminiRelayRuntimeInput {
                 server_id: state.server.id.clone(), failure_session_scope,
@@ -710,6 +860,24 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
                     request_id: &request_id,
                 },
             );
+        }
+        if let Some(response) = capture_v3_relay_provider_snapshots(
+            state,
+            "gemini",
+            &path,
+            &request_id,
+            &mut relay_output.provider_snapshots,
+        ) {
+            return response;
+        }
+        if let Some(response) = capture_v3_gemini_relay_response(
+            state,
+            "gemini",
+            &path,
+            &request_id,
+            &mut relay_output,
+        ) {
+            return response;
         }
         let finalizer = match (
             relay_output.stream_observation.clone(),
@@ -735,12 +903,32 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
                 relay_output.stream_observation.is_none(),
             );
         }
-        return gemini_relay_output_response(
+        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_gemini_relay(
+            state,
+            "gemini",
+            &path,
+            &request_id,
+            &relay_output,
+        );
+        let response = gemini_relay_output_response(
             relay_output,
             finalizer,
             Duration::from_millis(state.server.http_sse_keepalive_ms),
             requested_stream,
         );
+        return match client_response_capture {
+            Some(capture) => capture.observe_response(response),
+            None => response,
+        };
+    }
+    if let Some(foundation_output) = capture_v3_responses_direct_provider_snapshots(
+        state,
+        "gemini",
+        &path,
+        &request_id,
+        &mut output,
+    ) {
+        return foundation_output_response(foundation_output);
     }
     persist_v3_chat_failure_evidence_sources(
         state,
@@ -775,18 +963,40 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
     );
     frame.observability = output.observability;
     frame.stream_observation = output.stream_observation;
+    if let Some(response) =
+        capture_v3_non_responses_direct_client_response(
+            state,
+            "gemini",
+            &path,
+            &request_id,
+            &mut frame,
+        )
+    {
+        return response;
+    }
+    let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_direct_frame(
+        state,
+        "gemini",
+        &path,
+        &request_id,
+        &frame,
+    );
     let finalizer = emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
     let frame = project_v3_protocol_stream_error_frame_if_requested(
         frame,
         requested_stream,
         V3SseClientProtocol::Gemini,
     );
-    responses_direct_output_response_with_console_for_protocol(
+    let response = responses_direct_output_response_with_console_for_protocol(
         frame,
         finalizer,
         Some(Duration::from_millis(state.server.http_sse_keepalive_ms)),
         V3SseClientProtocol::Gemini,
-    )
+    );
+    match client_response_capture {
+        Some(capture) => capture.observe_response(response),
+        None => response,
+    }
 }
 
 pub(crate) fn gemini_relay_output_response(

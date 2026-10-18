@@ -1104,7 +1104,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         }
         let provider_status = provider_raw.status();
         trace.push("V3ProviderResp14Raw");
+        let mut provider_response_snapshot = None;
         if let Some(body) = provider_raw.json_body() {
+            provider_response_snapshot = Some(json!({
+                "status": provider_raw.status(),
+                "providerId": provider_raw.provider_id(),
+                "bodyKind": "json",
+                "body": serde_json::from_slice::<serde_json::Value>(body)
+                    .unwrap_or_else(|_| json!({"rawBody": String::from_utf8_lossy(body)})),
+            }));
             // The real upstream response is retained even when it is not
             // eligible for client projection (bug `705d624` keeps HTTP 502 out
             // of any client response). Evidence capture is decoupled from that
@@ -1718,7 +1726,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             stream_observation: response_projection.stream_observation.clone(),
             client_payload,
             provider_request_snapshot,
-            provider_response_snapshot: None,
+            provider_response_snapshot,
             node_trace: trace,
             error_chain: None,
             protocol_relay_handoff: None,

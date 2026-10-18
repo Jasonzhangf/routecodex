@@ -3,13 +3,16 @@
 use axum::{
     body::Body,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, Uri},
     response::Response,
     routing::post,
     Router,
 };
 use futures_util::{future::join_all, SinkExt, StreamExt};
-use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+use routecodex_v3_config::{
+    compile_v3_config_05_manifest, parse_v3_config_02_authoring,
+    V3EntryProtocolExecutionMode,
+};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
 use std::os::unix::fs::PermissionsExt;
@@ -469,10 +472,14 @@ impl TestHomeGuard {
     }
 
     fn codex_samples_root(&self, port: u16) -> PathBuf {
+        self.codex_samples_root_for("openai-responses", port)
+    }
+
+    fn codex_samples_root_for(&self, endpoint: &str, port: u16) -> PathBuf {
         self.path
             .join(".rcc")
             .join("codex-samples")
-            .join("openai-responses")
+            .join(endpoint)
             .join("ports")
             .join(port.to_string())
     }
@@ -597,6 +604,160 @@ fn read_responses_sample_response_by_request_marker(
         }
     }
     panic!("no Codex sample request contains marker {request_marker}");
+}
+
+fn read_snapall_sample_dir(
+    samples_root: &std::path::Path,
+    request_marker: &str,
+) -> PathBuf {
+    let entries = fs::read_dir(samples_root)
+        .unwrap_or_else(|error| panic!("sample root must exist at {samples_root:?}: {error}"))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    for entry in entries {
+        let request = fs::read_to_string(entry.path().join("request.json")).unwrap_or_default();
+        if request.contains(request_marker) {
+            return entry.path();
+        }
+    }
+    panic!("no Codex sample request contains marker {request_marker}");
+}
+
+fn assert_snapall_four_stage_artifacts(label: &str, sample_dir: &std::path::Path) {
+    let mut persisted = fs::read_dir(sample_dir)
+        .unwrap_or_else(|error| panic!("sample directory {sample_dir:?} must exist: {error}"))
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    persisted.sort();
+    for artifact in [
+        "request.json",
+        "provider-request.json",
+        "provider-response.json",
+        "response.json",
+    ] {
+        let path = sample_dir.join(artifact);
+        assert!(
+            path.is_file(),
+            "snapall {label} must persist {artifact} under {sample_dir:?}; persisted={persisted:?}"
+        );
+        serde_json::from_slice::<Value>(&fs::read(&path).unwrap())
+            .unwrap_or_else(|error| panic!("{path:?} must be complete JSON: {error}"));
+    }
+}
+
+fn read_snapall_json(sample_dir: &std::path::Path, file_name: &str) -> Value {
+    serde_json::from_slice(&fs::read(sample_dir.join(file_name)).unwrap()).unwrap()
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn assert_snapall_protocol_json_and_sse(
+    handle: &routecodex_v3_server::V3ServerAggregateHandle,
+    home_guard: &TestHomeGuard,
+    client: &reqwest::Client,
+    endpoint_name: &str,
+    json_url: &str,
+    sse_url: &str,
+    json_payload: Value,
+    sse_payload: Value,
+    json_marker: &str,
+    sse_marker: &str,
+    provider_json_marker: &str,
+    provider_sse_marker: &str,
+) {
+    eprintln!("snapall matrix protocol start endpoint={endpoint_name}");
+    let json_response = client
+        .post(json_url)
+        .json(&json_payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(json_response.status(), StatusCode::OK);
+    let client_json: Value = json_response.json().await.unwrap();
+    eprintln!("snapall matrix protocol json complete endpoint={endpoint_name}");
+
+    let sse_response = client
+        .post(sse_url)
+        .json(&sse_payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sse_response.status(), StatusCode::OK);
+    let client_sse = sse_response.text().await.unwrap();
+    eprintln!("snapall matrix protocol sse complete endpoint={endpoint_name}");
+
+    handle
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("accepted snapall samples must finish before disk inspection");
+    let samples_root = home_guard.codex_samples_root_for(
+        endpoint_name,
+        handle.listeners[0].addr.port(),
+    );
+    let json_dir = read_snapall_sample_dir(&samples_root, json_marker);
+    let sse_dir = read_snapall_sample_dir(&samples_root, sse_marker);
+    assert_snapall_four_stage_artifacts("JSON request", &json_dir);
+    assert_snapall_four_stage_artifacts("SSE request", &sse_dir);
+
+    let json_request = read_snapall_json(&json_dir, "request.json");
+    assert!(
+        json_request.to_string().contains(json_marker),
+        "request.json must preserve the complete JSON client request"
+    );
+    let json_provider_request = read_snapall_json(&json_dir, "provider-request.json");
+    assert!(
+        json_provider_request.to_string().contains(json_marker),
+        "provider-request.json must preserve the provider-bound JSON request"
+    );
+    let json_provider_response = read_snapall_json(&json_dir, "provider-response.json");
+    assert!(
+        json_provider_response.to_string().contains(provider_json_marker),
+        "provider-response.json must preserve the genuine provider JSON body: {json_provider_response}"
+    );
+    assert!(
+        !json_provider_response
+            .to_string()
+            .contains("\"bodyKind\":\"sse\""),
+        "a JSON provider response must not be recorded as SSE: {json_provider_response}"
+    );
+    let json_response_sample = read_snapall_json(&json_dir, "response.json");
+    if json_response_sample.get("bodyKind").is_some() {
+        assert_eq!(json_response_sample["bodyKind"], "json");
+        assert_eq!(json_response_sample["rawBody"], client_json);
+    } else {
+        assert_eq!(
+            json_response_sample, client_json,
+            "persisted JSON response must equal the exact JSON body received by the client"
+        );
+    }
+
+    let sse_request = read_snapall_json(&sse_dir, "request.json");
+    assert!(
+        sse_request.to_string().contains(sse_marker),
+        "request.json must preserve the complete SSE client request"
+    );
+    let sse_provider_request = read_snapall_json(&sse_dir, "provider-request.json");
+    assert!(
+        sse_provider_request.to_string().contains(sse_marker),
+        "provider-request.json must preserve the provider-bound SSE request"
+    );
+    let sse_provider_response = read_snapall_json(&sse_dir, "provider-response.json");
+    assert!(
+        sse_provider_response
+            .to_string()
+            .contains("\"bodyKind\":\"sse\""),
+        "an SSE provider response must stay genuine SSE: {sse_provider_response}"
+    );
+    assert!(
+        sse_provider_response.to_string().contains(provider_sse_marker),
+        "provider-response.json must preserve the genuine provider SSE wire: {sse_provider_response}"
+    );
+    let sse_response_sample = read_snapall_json(&sse_dir, "response.json");
+    assert_eq!(sse_response_sample["bodyKind"], "sse");
+    assert_eq!(
+        sse_response_sample["rawSse"].as_str(),
+        Some(client_sse.as_str()),
+        "persisted rawSse must equal the exact wire received by the client"
+    );
 }
 
 const HUB_V1_TEST_DECLARATION: &str = r#"
@@ -1079,6 +1240,274 @@ fn responses_direct_binding_openai_chat_provider_direct_only_manifest(
         "http://127.0.0.1:9/v1",
         r#""direct""#,
     )
+}
+
+fn snapall_openai_chat_direct_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["openai_chat"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["openai_chat"]
+{hub_v1_server_execution}
+[providers.chat]
+type = "openai_chat"
+base_url = "{provider_base_url}"
+default_model = "chat-test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_TEST_KEY" }}] }}
+[providers.chat.models.chat-test]
+wire_name = "chat-test"
+aliases = ["client-test"]
+capabilities = ["text"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+[debug]
+log_console = false
+snapshots = true
+dry_run = false
+retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "provider_model", provider = "chat", model = "chat-test", key = "key", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "chat", model = "chat-test", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn set_snapall_entry_protocol_modes(
+    manifest: &mut routecodex_v3_config::V3Config05ManifestPublished,
+    mode: V3EntryProtocolExecutionMode,
+) {
+    let hub = manifest
+        .hub_v1
+        .as_mut()
+        .expect("snapall matrix requires the Hub V1 pipeline");
+    for binding in &mut hub.entry_protocol_bindings {
+        binding.execution_mode = mode;
+    }
+}
+
+fn enable_snapall_full_sampling(manifest: &mut routecodex_v3_config::V3Config05ManifestPublished) {
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+}
+
+fn snapall_all_protocols_manifest(
+    port_a: u16,
+    port_b: u16,
+    upstream_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
+{hub_v1_server_execution}
+[providers.responses_ok]
+type = "responses"
+base_url = "{upstream_base_url}/ok/v1"
+default_model = "responses-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.responses_ok.models.responses-wire]
+wire_name = "responses-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.chat_ok]
+type = "openai_chat"
+base_url = "{upstream_base_url}/ok/v1"
+default_model = "chat-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.chat_ok.models.chat-wire]
+wire_name = "chat-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.anthropic_ok]
+type = "anthropic"
+base_url = "{upstream_base_url}/ok"
+default_model = "anthropic-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.anthropic_ok.models.anthropic-wire]
+wire_name = "anthropic-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.gemini_ok]
+type = "gemini"
+base_url = "{upstream_base_url}/ok/v1beta"
+default_model = "gemini-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.gemini_ok.models.gemini-wire]
+wire_name = "gemini-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[debug]
+log_console = false
+snapshots = true
+dry_run = false
+retention = {{ raw_requests = 64, raw_responses = 64, events = 128 }}
+[route_groups.default.pools.responses]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "responses", models = ["responses-wire"] }}
+targets = [{{ kind = "provider_model", provider = "responses_ok", model = "responses-wire", key = "key", priority = 1 }}]
+[route_groups.default.pools.chat]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "openai_chat", models = ["chat-wire"] }}
+targets = [{{ kind = "provider_model", provider = "chat_ok", model = "chat-wire", key = "key", priority = 1 }}]
+[route_groups.default.pools.anthropic]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "anthropic", models = ["anthropic-wire"] }}
+targets = [{{ kind = "provider_model", provider = "anthropic_ok", model = "anthropic-wire", key = "key", priority = 1 }}]
+[route_groups.default.pools.gemini]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "gemini" }}
+targets = [{{ kind = "provider_model", provider = "gemini_ok", model = "gemini-wire", key = "key", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "responses_ok", model = "responses-wire", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn snapall_handoff_manifest(
+    port_a: u16,
+    port_b: u16,
+    upstream_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
+{hub_v1_server_execution}
+[providers.chat_alpha]
+type = "openai_chat"
+base_url = "{upstream_base_url}/fail/v1"
+default_model = "chat-alpha-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.chat_alpha.models.chat-alpha-wire]
+wire_name = "chat-alpha-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.responses_ok]
+type = "responses"
+base_url = "{upstream_base_url}/ok/v1"
+default_model = "responses-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.responses_ok.models.responses-wire]
+wire_name = "responses-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.anthropic_alpha]
+type = "anthropic"
+base_url = "{upstream_base_url}/fail"
+default_model = "anthropic-alpha-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.anthropic_alpha.models.anthropic-alpha-wire]
+wire_name = "anthropic-alpha-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.chat_ok]
+type = "openai_chat"
+base_url = "{upstream_base_url}/ok/v1"
+default_model = "chat-ok-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.chat_ok.models.chat-ok-wire]
+wire_name = "chat-ok-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.gemini_alpha]
+type = "gemini"
+base_url = "{upstream_base_url}/fail/v1beta"
+default_model = "gemini-alpha-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.gemini_alpha.models.gemini-alpha-wire]
+wire_name = "gemini-alpha-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[debug]
+log_console = false
+snapshots = true
+dry_run = false
+retention = {{ raw_requests = 64, raw_responses = 64, events = 128 }}
+[route_groups.default.pools.chat_handoff]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "openai_chat", models = ["chat-alpha-wire"] }}
+targets = [
+  {{ kind = "provider_model", provider = "chat_alpha", model = "chat-alpha-wire", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "responses_ok", model = "responses-wire", key = "key", priority = 1 }}
+]
+[route_groups.default.pools.anthropic_handoff]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "anthropic", models = ["anthropic-alpha-wire"] }}
+targets = [
+  {{ kind = "provider_model", provider = "anthropic_alpha", model = "anthropic-alpha-wire", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "chat_ok", model = "chat-ok-wire", key = "key", priority = 1 }}
+]
+[route_groups.default.pools.gemini_handoff]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "gemini", models = ["gemini-alpha-wire"] }}
+targets = [
+  {{ kind = "provider_model", provider = "gemini_alpha", model = "gemini-alpha-wire", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "chat_ok", model = "chat-ok-wire", key = "key", priority = 1 }}
+]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "responses_ok", model = "responses-wire", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
 fn responses_relay_nested_protocol_handoff_manifest(
@@ -2188,6 +2617,222 @@ async fn start_controlled_anthropic_wire_upstream() -> (
             .unwrap();
     });
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+async fn controlled_openai_chat_upstream(
+    State(state): State<Arc<ProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body.clone()))
+        .unwrap();
+
+    if body.get("stream").and_then(Value::as_bool) == Some(true) {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(
+                "data: {\"id\":\"chatcmpl_sse\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"controlled chat SSE\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl_sse\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+            ))
+            .unwrap()
+    } else {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"id":"chatcmpl_json","object":"chat.completion","created":1,"model":"chat-test","choices":[{"index":0,"message":{"role":"assistant","content":"controlled chat JSON"},"finish_reason":"stop"}]}"#,
+            ))
+            .unwrap()
+    }
+}
+
+async fn start_controlled_openai_chat_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/chat/completions", post(controlled_openai_chat_upstream))
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+fn controlled_snapall_json_response(
+    provider: &str,
+    text: &str,
+) -> Response<Body> {
+    let value = match provider {
+        "responses" => json!({
+            "id": "resp_json",
+            "object": "response",
+            "status": "completed",
+            "output_text": text,
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": text}]
+            }]
+        }),
+        "chat" => json!({
+            "id": "chatcmpl_json",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "chat-wire",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": text},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
+        }),
+        "anthropic" => json!({
+            "id": "msg_snapall_json",
+            "type": "message",
+            "role": "assistant",
+            "model": "anthropic-wire",
+            "content": [{"type": "text", "text": text}],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "usage": {"input_tokens": 3, "output_tokens": 2}
+        }),
+        "gemini" => json!({
+            "candidates": [{
+                "index": 0,
+                "content": {"role": "model", "parts": [{"text": text}]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 3,
+                "candidatesTokenCount": 2,
+                "totalTokenCount": 5
+            }
+        }),
+        _ => unreachable!("controlled snapall provider"),
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&value).unwrap()))
+        .unwrap()
+}
+
+fn controlled_snapall_sse_response(provider: &str, text: &str) -> Response<Body> {
+    let body = match provider {
+        "responses" => format!(
+            "event: response.created\ndata: {{\"type\":\"response.created\",\"response\":{{\"id\":\"resp_sse\",\"status\":\"in_progress\"}}}}\n\nevent: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"resp_sse\",\"status\":\"completed\",\"output\":[{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{text}\"}}]}}],\"output_text\":\"{text}\"}}}}\n\ndata: [DONE]\n\n"
+        ),
+        "chat" => format!(
+            "data: {{\"id\":\"chatcmpl_sse\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-wire\",\"choices\":[{{\"index\":0,\"delta\":{{\"role\":\"assistant\",\"content\":\"{text}\"}},\"finish_reason\":null}}]}}\n\ndata: {{\"id\":\"chatcmpl_sse\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-wire\",\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n"
+        ),
+        "anthropic" => format!(
+            "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg_snapall_sse\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"anthropic-wire\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{{\"input_tokens\":3,\"output_tokens\":0}}}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n\nevent: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"{text}\"}}}}\n\nevent: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":0}}\n\nevent: message_delta\ndata: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"end_turn\",\"stop_sequence\":null}},\"usage\":{{\"output_tokens\":2}}}}\n\nevent: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
+        ),
+        "gemini" => format!(
+            "data: {{\"candidates\":[{{\"index\":0,\"content\":{{\"role\":\"model\",\"parts\":[{{\"text\":\"{text}\"}}]}},\"finishReason\":null}}]}}\n\ndata: {{\"candidates\":[{{\"index\":0,\"content\":{{\"role\":\"model\",\"parts\":[{{\"text\":\"\"}}]}},\"finishReason\":\"STOP\"}}],\"usageMetadata\":{{\"promptTokenCount\":3,\"candidatesTokenCount\":2,\"totalTokenCount\":5}}}}\n\n"
+        ),
+        _ => unreachable!("controlled snapall provider"),
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from(body))
+        .unwrap()
+}
+
+async fn controlled_snapall_upstream(
+    State(state): State<Arc<ProviderState>>,
+    headers: HeaderMap,
+    uri: Uri,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body.clone()))
+        .unwrap();
+    let path = uri.path();
+    if path.starts_with("/fail/") {
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"error":{"type":"api_error","message":"controlled snapall alpha failure"}}"#,
+            ))
+            .unwrap();
+    }
+    let provider = if path.ends_with("/v1/responses") {
+        "responses"
+    } else if path.ends_with("/v1/chat/completions") {
+        "chat"
+    } else if path.ends_with("/v1/messages") {
+        "anthropic"
+    } else if path.contains(":generateContent") || path.contains(":streamGenerateContent") {
+        "gemini"
+    } else {
+        return Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap();
+    };
+    let stream = body.get("stream").and_then(Value::as_bool) == Some(true)
+        || uri.query() == Some("alt=sse")
+        || path.ends_with(":streamGenerateContent");
+    let text = match (provider, stream) {
+        ("responses", false) => "controlled responses JSON",
+        ("responses", true) => "controlled responses SSE",
+        ("chat", false) => "controlled chat JSON",
+        ("chat", true) => "controlled chat SSE",
+        ("anthropic", false) => "controlled anthropic JSON",
+        ("anthropic", true) => "controlled anthropic SSE",
+        ("gemini", false) => "controlled gemini JSON",
+        ("gemini", true) => "controlled gemini SSE",
+        _ => unreachable!("controlled snapall provider"),
+    };
+    if stream {
+        controlled_snapall_sse_response(provider, text)
+    } else {
+        controlled_snapall_json_response(provider, text)
+    }
+}
+
+async fn start_controlled_snapall_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .fallback(controlled_snapall_upstream)
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}"), captures_rx, shutdown_tx)
 }
 
 #[allow(clippy::result_large_err)]
@@ -11560,6 +12205,397 @@ async fn codex_sample_retention_failure_keeps_declared_listeners_serving_blackbo
     // Restore the scan permission so the test home can be removed.
     fs::set_permissions(&unreadable_port_dir, fs::Permissions::from_mode(0o700)).unwrap();
     handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapall_openai_chat_direct_persists_complete_four_stage_wire() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("snapall-openai-chat-direct");
+    let (base_url, mut captures, shutdown) = start_controlled_openai_chat_upstream().await;
+    std::env::set_var("V3_SNAPALL_TEST_KEY", "secret-key");
+    let mut manifest = snapall_openai_chat_direct_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!(
+        "http://{}/v1/chat/completions",
+        handle.listeners[0].addr
+    );
+    let client = reqwest::Client::new();
+    let large_marker = format!("snapall-chat-direct-{}", "x".repeat(200_000));
+
+    let json_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test",
+            "messages": [{"role": "user", "content": large_marker}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(json_response.status(), 200);
+    let json_body = json_response.json::<Value>().await.unwrap();
+    assert_eq!(json_body["id"], "chatcmpl_json");
+
+    let sse_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test",
+            "messages": [{"role": "user", "content": "snapall chat direct sse"}],
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sse_response.status(), 200);
+    let sse_wire = sse_response.text().await.unwrap();
+    assert!(
+        sse_wire.contains("controlled chat SSE"),
+        "client must receive the provider SSE business text: {sse_wire}"
+    );
+
+    handle
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("accepted snapall samples must finish before disk inspection");
+    let samples_root = home_guard.codex_samples_root_for(
+        "openai-chat-completions",
+        handle.listeners[0].addr.port(),
+    );
+    let mut json_sample_dir = None;
+    let mut sse_sample_dir = None;
+    for entry in fs::read_dir(&samples_root)
+        .unwrap_or_else(|error| panic!("sample root must exist at {samples_root:?}: {error}"))
+    {
+        let path = entry.unwrap().path();
+        let request = fs::read_to_string(path.join("request.json")).unwrap_or_default();
+        if request.contains("snapall-chat-direct-") {
+            json_sample_dir = Some(path);
+        } else if request.contains("snapall chat direct sse") {
+            sse_sample_dir = Some(path);
+        }
+    }
+    let json_sample_dir = json_sample_dir.expect("JSON request sample directory");
+    let sse_sample_dir = sse_sample_dir.expect("SSE request sample directory");
+    for sample_dir in [&json_sample_dir, &sse_sample_dir] {
+        for artifact in [
+            "request.json",
+            "provider-request.json",
+            "provider-response.json",
+            "response.json",
+        ] {
+            assert!(
+                sample_dir.join(artifact).is_file(),
+                "snapall must persist {artifact} under {sample_dir:?}"
+            );
+        }
+    }
+
+    let json_request: Value =
+        serde_json::from_str(&fs::read_to_string(json_sample_dir.join("request.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        json_request["messages"][0]["content"].as_str(),
+        Some(large_marker.as_str()),
+        "request.json must preserve the complete large client payload"
+    );
+    let json_provider_request: Value = serde_json::from_str(
+        &fs::read_to_string(json_sample_dir.join("provider-request.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(json_provider_request["body"]["model"], "chat-test");
+    assert_eq!(
+        json_provider_request["body"]["messages"][0]["content"].as_str(),
+        Some(large_marker.as_str()),
+        "provider-request.json must preserve the complete provider-bound request"
+    );
+    let json_provider_response: Value = serde_json::from_str(
+        &fs::read_to_string(json_sample_dir.join("provider-response.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(json_provider_response["bodyKind"], "json");
+    assert_eq!(json_provider_response["body"]["id"], "chatcmpl_json");
+    let json_response_sample: Value =
+        serde_json::from_str(&fs::read_to_string(json_sample_dir.join("response.json")).unwrap())
+            .unwrap();
+    assert_eq!(json_response_sample["bodyKind"], "json");
+    assert_eq!(json_response_sample["rawBody"], json_body);
+
+    let sse_provider_response: Value = serde_json::from_str(
+        &fs::read_to_string(sse_sample_dir.join("provider-response.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(sse_provider_response["bodyKind"], "sse");
+    assert!(sse_provider_response["rawSse"]
+        .as_str()
+        .is_some_and(|raw| raw.contains("controlled chat SSE")));
+    let sse_response_sample: Value =
+        serde_json::from_str(&fs::read_to_string(sse_sample_dir.join("response.json")).unwrap())
+            .unwrap();
+    assert_eq!(sse_response_sample["bodyKind"], "sse");
+    assert_eq!(
+        sse_response_sample["rawSse"].as_str(),
+        Some(sse_wire.as_str()),
+        "persisted rawSse must equal the exact wire received by the client"
+    );
+    assert!(captures.recv().await.is_some());
+    assert!(captures.recv().await.is_some());
+
+    let failures = handle.shutdown().await;
+    assert!(failures.is_empty(), "sample writes failed: {failures:?}");
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_SNAPALL_TEST_KEY");
+}
+
+#[tokio::test]
+async fn snapall_direct_matrix_persists_four_stage_exact_wire_for_all_protocols() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("snapall-direct-matrix");
+    let (upstream_base, _captures, shutdown) = start_controlled_snapall_upstream().await;
+    std::env::set_var("V3_SNAPALL_MATRIX_KEY", "snapall-matrix-secret");
+    let mut manifest = snapall_all_protocols_manifest(free_port(), free_port(), &upstream_base);
+    set_snapall_entry_protocol_modes(&mut manifest, V3EntryProtocolExecutionMode::Direct);
+    enable_snapall_full_sampling(&mut manifest);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let base = format!("http://{}", handle.listeners[0].addr);
+
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "openai-responses",
+        &format!("{base}/v1/responses"),
+        &format!("{base}/v1/responses"),
+        json!({"model":"responses_ok.responses-wire","input":"snapall direct responses json","stream":false}),
+        json!({"model":"responses_ok.responses-wire","input":"snapall direct responses sse","stream":true}),
+        "snapall direct responses json",
+        "snapall direct responses sse",
+        "controlled responses JSON",
+        "controlled responses SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "openai-chat-completions",
+        &format!("{base}/v1/chat/completions"),
+        &format!("{base}/v1/chat/completions"),
+        json!({"model":"chat_ok.chat-wire","messages":[{"role":"user","content":"snapall direct chat json"}],"stream":false}),
+        json!({"model":"chat_ok.chat-wire","messages":[{"role":"user","content":"snapall direct chat sse"}],"stream":true}),
+        "snapall direct chat json",
+        "snapall direct chat sse",
+        "controlled chat JSON",
+        "controlled chat SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "anthropic-messages",
+        &format!("{base}/v1/messages"),
+        &format!("{base}/v1/messages"),
+        json!({"model":"anthropic_ok.anthropic-wire","max_tokens":32,"messages":[{"role":"user","content":"snapall direct anthropic json"}],"stream":false}),
+        json!({"model":"anthropic_ok.anthropic-wire","max_tokens":32,"messages":[{"role":"user","content":"snapall direct anthropic sse"}],"stream":true}),
+        "snapall direct anthropic json",
+        "snapall direct anthropic sse",
+        "controlled anthropic JSON",
+        "controlled anthropic SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "gemini-generate-content",
+        &format!("{base}/v1beta/models/gemini_ok.gemini-wire:generateContent"),
+        &format!("{base}/v1beta/models/gemini_ok.gemini-wire:streamGenerateContent?alt=sse"),
+        json!({"contents":[{"role":"user","parts":[{"text":"snapall direct gemini json"}]}]}),
+        json!({"contents":[{"role":"user","parts":[{"text":"snapall direct gemini sse"}]}]}),
+        "snapall direct gemini json",
+        "snapall direct gemini sse",
+        "controlled gemini JSON",
+        "controlled gemini SSE",
+    )
+    .await;
+
+    let failures = handle.shutdown().await;
+    assert!(failures.is_empty(), "sample writes failed: {failures:?}");
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_SNAPALL_MATRIX_KEY");
+}
+
+#[tokio::test]
+async fn snapall_relay_matrix_persists_four_stage_exact_wire_for_all_protocols() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("snapall-relay-matrix");
+    let (upstream_base, _captures, shutdown) = start_controlled_snapall_upstream().await;
+    std::env::set_var("V3_SNAPALL_MATRIX_KEY", "snapall-matrix-secret");
+    let mut manifest = snapall_all_protocols_manifest(free_port(), free_port(), &upstream_base);
+    set_snapall_entry_protocol_modes(&mut manifest, V3EntryProtocolExecutionMode::Relay);
+    enable_snapall_full_sampling(&mut manifest);
+    manifest.debug.retention.insert("raw_requests".to_string(), 0);
+    manifest.debug.retention.insert("raw_responses".to_string(), 0);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let base = format!("http://{}", handle.listeners[0].addr);
+
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "openai-responses",
+        &format!("{base}/v1/responses"),
+        &format!("{base}/v1/responses"),
+        json!({"model":"responses_ok.responses-wire","input":"snapall relay responses json","stream":false}),
+        json!({"model":"responses_ok.responses-wire","input":"snapall relay responses sse","stream":true}),
+        "snapall relay responses json",
+        "snapall relay responses sse",
+        "controlled responses JSON",
+        "controlled responses SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "openai-chat-completions",
+        &format!("{base}/v1/chat/completions"),
+        &format!("{base}/v1/chat/completions"),
+        json!({"model":"chat_ok.chat-wire","messages":[{"role":"user","content":"snapall relay chat json"}],"stream":false}),
+        json!({"model":"chat_ok.chat-wire","messages":[{"role":"user","content":"snapall relay chat sse"}],"stream":true}),
+        "snapall relay chat json",
+        "snapall relay chat sse",
+        "controlled chat JSON",
+        "controlled chat SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "anthropic-messages",
+        &format!("{base}/v1/messages"),
+        &format!("{base}/v1/messages"),
+        json!({"model":"anthropic_ok.anthropic-wire","max_tokens":32,"messages":[{"role":"user","content":"snapall relay anthropic json"}],"stream":false}),
+        json!({"model":"anthropic_ok.anthropic-wire","max_tokens":32,"messages":[{"role":"user","content":"snapall relay anthropic sse"}],"stream":true}),
+        "snapall relay anthropic json",
+        "snapall relay anthropic sse",
+        "controlled anthropic JSON",
+        "controlled anthropic SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "gemini-generate-content",
+        &format!("{base}/v1beta/models/gemini_ok.gemini-wire:generateContent"),
+        &format!("{base}/v1beta/models/gemini_ok.gemini-wire:streamGenerateContent?alt=sse"),
+        json!({"contents":[{"role":"user","parts":[{"text":"snapall relay gemini json"}]}]}),
+        json!({"contents":[{"role":"user","parts":[{"text":"snapall relay gemini sse"}]}]}),
+        "snapall relay gemini json",
+        "snapall relay gemini sse",
+        "controlled gemini JSON",
+        "controlled gemini SSE",
+    )
+    .await;
+
+    let failures = handle.shutdown().await;
+    assert!(failures.is_empty(), "sample writes failed: {failures:?}");
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_SNAPALL_MATRIX_KEY");
+}
+
+#[tokio::test]
+async fn snapall_direct_relay_handoffs_persist_four_stage_exact_wire() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("snapall-handoff-matrix");
+    let (upstream_base, mut captures, shutdown) = start_controlled_snapall_upstream().await;
+    std::env::set_var("V3_SNAPALL_MATRIX_KEY", "snapall-matrix-secret");
+    let mut manifest = snapall_handoff_manifest(free_port(), free_port(), &upstream_base);
+    set_snapall_entry_protocol_modes(&mut manifest, V3EntryProtocolExecutionMode::Direct);
+    enable_snapall_full_sampling(&mut manifest);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let base = format!("http://{}", handle.listeners[0].addr);
+
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "openai-chat-completions",
+        &format!("{base}/v1/chat/completions"),
+        &format!("{base}/v1/chat/completions"),
+        json!({"model":"chat-alpha-wire","messages":[{"role":"user","content":"snapall handoff chat json"}],"stream":false}),
+        json!({"model":"chat-alpha-wire","messages":[{"role":"user","content":"snapall handoff chat sse"}],"stream":true}),
+        "snapall handoff chat json",
+        "snapall handoff chat sse",
+        "controlled responses JSON",
+        "controlled responses SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "anthropic-messages",
+        &format!("{base}/v1/messages"),
+        &format!("{base}/v1/messages"),
+        json!({"model":"anthropic-alpha-wire","max_tokens":32,"messages":[{"role":"user","content":"snapall handoff anthropic json"}],"stream":false}),
+        json!({"model":"anthropic-alpha-wire","max_tokens":32,"messages":[{"role":"user","content":"snapall handoff anthropic sse"}],"stream":true}),
+        "snapall handoff anthropic json",
+        "snapall handoff anthropic sse",
+        "controlled chat JSON",
+        "controlled chat SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "gemini-generate-content",
+        &format!("{base}/v1beta/models/gemini-alpha-wire:generateContent"),
+        &format!("{base}/v1beta/models/gemini-alpha-wire:streamGenerateContent?alt=sse"),
+        json!({"contents":[{"role":"user","parts":[{"text":"snapall handoff gemini json"}]}]}),
+        json!({"contents":[{"role":"user","parts":[{"text":"snapall handoff gemini sse"}]}]}),
+        "snapall handoff gemini json",
+        "snapall handoff gemini sse",
+        "controlled chat JSON",
+        "controlled chat SSE",
+    )
+    .await;
+
+    for (marker, direct_model, relay_model) in [
+        ("snapall handoff chat json", Some("chat-alpha-wire"), "responses-wire"),
+        ("snapall handoff chat sse", Some("chat-alpha-wire"), "responses-wire"),
+        ("snapall handoff anthropic json", Some("anthropic-alpha-wire"), "chat-ok-wire"),
+        ("snapall handoff anthropic sse", Some("anthropic-alpha-wire"), "chat-ok-wire"),
+        ("snapall handoff gemini json", None, "chat-ok-wire"),
+        ("snapall handoff gemini sse", None, "chat-ok-wire"),
+    ] {
+        let direct = captures.try_recv().expect("the failing Direct provider must be attempted");
+        let relay = captures.try_recv().expect("the Relay provider must recover that request");
+        assert!(direct.body.to_string().contains(marker), "Direct attempt must preserve its request: {direct:?}");
+        assert!(relay.body.to_string().contains(marker), "Relay attempt must preserve the same request: {relay:?}");
+        if let Some(model) = direct_model {
+            assert_eq!(direct.body["model"], model);
+        } else {
+            assert!(direct.body["contents"].is_array(), "the first Gemini attempt must use the actual Gemini wire");
+        }
+        assert_eq!(relay.body["model"], relay_model);
+    }
+    assert!(captures.try_recv().is_err(), "handoff must not create extra provider attempts");
+
+    let failures = handle.shutdown().await;
+    assert!(failures.is_empty(), "sample writes failed: {failures:?}");
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_SNAPALL_MATRIX_KEY");
 }
 
 /// F5: a configured debug `log_file` that cannot be opened must degrade the
