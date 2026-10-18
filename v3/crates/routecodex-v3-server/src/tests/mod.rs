@@ -841,6 +841,107 @@ async fn responses_direct_policy_failure_consumer_preserves_cause_and_transport_
 }
 
 #[tokio::test]
+async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-protocol-plan-fault-consumer-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+
+    // Runtime's real-rejection test proves this fault is the contract emitted by
+    // the Error operator. SDK rejection has no public HTTP injection path, so this
+    // test begins at that typed output and exercises the actual Server consumer.
+    let original_source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3Execution11ProtocolDecision",
+        "protocol_plan_runtime_failure",
+        "protocol plan failed before dispatch",
+    );
+    let fault = routecodex_v3_runtime::V3RelayErrorOperatorFault {
+        policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "relay_error_operator_sdk_failure",
+            "Error06 SDK rejected the source projection",
+        ),
+        original_source: Some(original_source.clone()),
+    };
+    let response = crate::endpoint_handlers::finish_v3_protocol_execution_plan_failure(
+        &state,
+        None,
+        "responses",
+        "/v1/responses",
+        "protocol-plan-operator-fault",
+        true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "responses",
+            endpoint: "/v1/responses",
+            request_id: "protocol-plan-operator-fault",
+        },
+        Err(fault.clone()),
+    )
+    .expect_err("the consumer must not turn an operator fault into Error06 success");
+    sample_worker.wait_until_idle().await.unwrap();
+
+    let sample_dir =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/protocol-plan-operator-fault");
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(sample_dir.join("provider-failed-attempts.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        evidence["terminal_source"],
+        serde_json::to_value(&fault.policy_failure).unwrap()
+    );
+    assert_eq!(
+        evidence["terminal_cause"],
+        serde_json::to_value(&original_source).unwrap()
+    );
+    assert_eq!(evidence["attempts"], json!([]));
+
+    let terminal: Value = serde_json::from_str(
+        &fs::read_to_string(sample_dir.join("provider-terminal.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(terminal["kind"], "no_response");
+    assert_eq!(terminal["status"], Value::Null);
+    assert_eq!(terminal["body"], Value::Null);
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let mut client = response.into_body().into_data_stream();
+    let mut wire = Vec::new();
+    let terminal_error = loop {
+        match client.next().await {
+            Some(Ok(chunk)) => wire.extend_from_slice(chunk.as_ref()),
+            Some(Err(error)) => break error,
+            None => panic!("operator fault must break the client transport"),
+        }
+    };
+    let wire = String::from_utf8(wire).unwrap();
+    assert_eq!(wire, ":\n\n");
+    assert!(!wire.contains("event:"), "{wire}");
+    assert!(!wire.contains("data:"), "{wire}");
+    assert!(!wire.contains("protocol_plan_runtime_failure"), "{wire}");
+    assert!(!wire.contains("relay_error_operator_sdk_failure"), "{wire}");
+    assert!(terminal_error
+        .to_string()
+        .contains("SSE transport unavailable"));
+    assert!(
+        client.next().await.is_none(),
+        "operator fault must close the body after the transport break"
+    );
+
+    sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn direct_sse_http_projection_injects_keepalive_and_preserves_provider_bytes() {
     let provider_bytes = b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec();
     let frame = V3Server16HttpFrame {

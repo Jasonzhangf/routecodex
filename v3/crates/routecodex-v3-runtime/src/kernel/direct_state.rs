@@ -396,11 +396,11 @@ pub struct V3ResponsesProtocolExecutionPlanFailure {
 
 pub fn project_v3_protocol_execution_plan_failure(
     failure: V3ResponsesProtocolExecutionPlanFailure,
-) -> V3Error06ClientProjected {
-    V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-        source: failure.source,
-        action_scope: V3ErrorActionScope::None,
-        candidates_remaining: 0,
-        source_status: None,
-    })
+) -> Result<V3Error06ClientProjected, crate::V3RelayErrorOperatorFault> {
+    crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+        failure.source,
+        V3ErrorActionScope::None,
+        0,
+        None,
+    )
 }

@@ -1,6 +1,56 @@
 include!("../../tests/support/kernel_unit.rs");
 
 #[test]
+fn protocol_plan_failure_preserves_source_status_and_pool_exhausted() {
+    let routing_group = "protocol_plan_failure";
+    let mut manifest = scoped_test_manifest(responses_process_chat_manifest(), routing_group);
+    manifest
+        .servers
+        .get_mut("test")
+        .expect("test server")
+        .execution
+        .as_mut()
+        .expect("test execution policy")
+        .allowed_modes = vec!["direct".to_string()];
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        test_plan_http_request(
+            routing_group,
+            "protocol-plan-failure-producer",
+            "protocol-plan-failure-producer-execution",
+        ),
+        provider_health,
+        100,
+    )
+    .expect_err("process=chat with Direct-only policy must produce a real protocol-plan failure");
+
+    let original_source = failure.source.clone();
+    let projected = project_v3_protocol_execution_plan_failure(failure)
+        .expect("a normal protocol-plan source must finish through Error02..06");
+
+    assert_eq!(
+        original_source.source_kind,
+        V3ErrorSourceKind::RuntimeFailure
+    );
+    assert_eq!(
+        original_source.source_stage,
+        "V3Execution11ProtocolDecision"
+    );
+    assert_eq!(
+        original_source.code,
+        "responses_process_chat_relay_not_allowed"
+    );
+    assert_eq!(projected.diagnostic_source, original_source);
+    assert_eq!(projected.status, 598);
+    assert_eq!(projected.pool_exhausted, false);
+    assert_eq!(
+        projected.chain,
+        routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+    );
+}
+
+#[test]
 fn residence_expiry_is_not_a_local_store_598_and_never_commits_an_error() {
     let source = direct_attempt_store_error_source(
         crate::nodes::V3AttemptStoreError::ResidenceDeadlineExceeded("expired".into()),

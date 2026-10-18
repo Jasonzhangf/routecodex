@@ -43,6 +43,43 @@ fn persist_responses_direct_frame_error_evidence(
     );
 }
 
+pub(crate) fn finish_v3_protocol_execution_plan_failure(
+    state: &Arc<V3ListenerState>,
+    front_connection_identity: Option<V3FrontConnectionIdentity>,
+    entry_protocol: &str,
+    path: &str,
+    request_id: &str,
+    requested_stream: bool,
+    terminal_evidence: V3ProviderTerminalEvidence<'_>,
+    projected: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        routecodex_v3_runtime::V3RelayErrorOperatorFault,
+    >,
+) -> Result<routecodex_v3_error::V3Error06ClientProjected, Response<Body>> {
+    let projected = match projected {
+        Ok(projected) => projected,
+        Err(fault) => {
+            persist_v3_chat_failure_evidence_sources(
+                state,
+                entry_protocol,
+                path,
+                request_id,
+                &[],
+                Some(&fault.policy_failure),
+                fault.original_source.as_ref(),
+            );
+            return Err(provider_terminal_response(
+                state,
+                front_connection_identity,
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                requested_stream,
+                terminal_evidence,
+            ));
+        }
+    };
+    Ok(projected)
+}
+
 pub(crate) fn pending_endpoint_after_responses_admission(
     state: Arc<V3ListenerState>,
     front_connection_identity: Option<V3FrontConnectionIdentity>,
@@ -226,7 +263,19 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             Ok(plan) => plan,
             Err(failure) => {
                 let node_trace = failure.node_trace.clone();
-                let projected = project_v3_protocol_execution_plan_failure(failure);
+                let projected = match finish_v3_protocol_execution_plan_failure(
+                    &state,
+                    front_connection_identity,
+                    &entry_protocol,
+                    &path,
+                    &request_id,
+                    requested_stream,
+                    terminal_evidence,
+                    project_v3_protocol_execution_plan_failure(failure),
+                ) {
+                    Ok(projected) => projected,
+                    Err(response) => return response,
+                };
                 if projected.pool_exhausted {
                     // A selection-time pool exhaustion is a provider terminal:
                     // no candidate was admitted, so there is no upstream
