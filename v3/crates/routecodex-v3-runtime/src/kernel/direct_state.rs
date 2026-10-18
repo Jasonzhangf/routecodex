@@ -392,11 +392,26 @@ impl V3ResponsesProtocolExecutionPlan {
 pub struct V3ResponsesProtocolExecutionPlanFailure {
     pub source: V3Error01SourceRaised,
     pub node_trace: Vec<&'static str>,
+    pub error_operator_fault: Option<crate::V3RelayErrorOperatorFault>,
+}
+
+pub(crate) fn protocol_plan_operator_fault(
+    fault: crate::V3RelayErrorOperatorFault,
+    node_trace: Vec<&'static str>,
+) -> V3ResponsesProtocolExecutionPlanFailure {
+    V3ResponsesProtocolExecutionPlanFailure {
+        source: fault.policy_failure.clone(),
+        node_trace,
+        error_operator_fault: Some(fault),
+    }
 }
 
 pub fn project_v3_protocol_execution_plan_failure(
     failure: V3ResponsesProtocolExecutionPlanFailure,
 ) -> Result<V3Error06ClientProjected, crate::V3RelayErrorOperatorFault> {
+    if let Some(fault) = failure.error_operator_fault {
+        return Err(fault);
+    }
     crate::provider_failure_runtime_policy::project_v3_relay_error_source(
         failure.source,
         V3ErrorActionScope::None,

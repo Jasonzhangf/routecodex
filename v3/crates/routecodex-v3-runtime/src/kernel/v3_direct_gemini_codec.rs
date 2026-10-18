@@ -10,11 +10,10 @@ use crate::kernel::direct_request_key_hooks::{
 };
 use crate::kernel::v3_direct_protocol_codec::V3DirectResponseProjectionFuture;
 use crate::nodes::V3Server03HttpRequestRaw;
+use crate::operation_runner::V3Err01SourceInput;
+use crate::provider_failure_runtime_policy::raise_v3_source_via_err01;
 use crate::{V3DirectProtocolCodec, V3ToolThinkingTurnContext};
-use routecodex_v3_error::{
-    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
-    V3InternalErrorCode,
-};
+use routecodex_v3_error::{V3ErrorSourceKind, V3InternalErrorCode};
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
     v3_provider_auth_secret_handle_from_declaration_fields, V3Provider12ResponsesWirePayload,
@@ -138,7 +137,7 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
         _drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
-    ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
+    ) -> crate::shared::V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
         let candidate = &policy.target.candidate;
         let wire_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
             policy.request_body.clone(),
@@ -146,7 +145,14 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
         )
         .map(crate::selected_provider_model_binding::V3SelectedProviderModelBinding::into_payload)
         .map_err(|reason| {
-            direct_gemini_internal_error("selected_provider_model_binding_failed", reason)
+            raise_v3_source_via_err01(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Req04StandardizedGemini",
+                "selected_provider_model_binding_failed",
+                reason,
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
+            )
+            .map(|(_, source)| source)
         })?;
         let wire_body = apply_gemini_request_key_hook(wire_body, request_key_catalog)?;
         let profile = crate::hub_v1::V3ProviderCompatProfileId::from_config(
@@ -159,7 +165,14 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
             &profile,
         )
         .map_err(|error| {
-            direct_gemini_internal_error("gemini_direct_provider_compat_failed", error.to_string())
+            raise_v3_source_via_err01(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Req04StandardizedGemini",
+                "gemini_direct_provider_compat_failed",
+                error.to_string(),
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
+            )
+            .map(|(_, source)| source)
         })?;
         let secret = v3_provider_auth_secret_handle_from_declaration_fields(
             candidate.oauth_declaration.as_ref(),
@@ -170,7 +183,16 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
             candidate.api_key.as_deref(),
             &candidate.auth_alias,
         )
-        .map_err(|reason| direct_gemini_internal_error("provider_auth_handle_missing", reason))?;
+        .map_err(|reason| {
+            raise_v3_source_via_err01(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Req04StandardizedGemini",
+                "provider_auth_handle_missing",
+                reason,
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
+            )
+            .map(|(_, source)| source)
+        })?;
         let target = V3ResponsesProviderTarget {
             provider_id: candidate.provider_id.clone(),
             interface_id: candidate.interface_id.clone(),
@@ -210,13 +232,20 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
 
     fn run_provider_transport(
         wire: V3Provider12ResponsesWirePayload,
-    ) -> Result<V3Transport13ResponsesHttpRequest, V3Error01SourceRaised> {
+    ) -> crate::shared::V3DirectSourceResult<V3Transport13ResponsesHttpRequest> {
         crate::hub_v1::build_v3_provider_transport_request_for_protocol(
             crate::hub_v1::V3HubProviderWireProtocol::Gemini,
             wire,
         )
         .map_err(|error| {
-            direct_gemini_internal_error("gemini_direct_provider_transport_error", error)
+            raise_v3_source_via_err01(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Req04StandardizedGemini",
+                "gemini_direct_provider_transport_error",
+                error,
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
+            )
+            .map(|(_, source)| source)
         })
     }
 
@@ -264,7 +293,7 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
         _request_id: &str,
         _now_epoch_ms: u64,
         _trace: &mut Vec<&'static str>,
-    ) -> Result<bool, V3Error01SourceRaised> {
+    ) -> crate::shared::V3DirectSourceResult<bool> {
         let enabled = crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id);
         if standardized.tool_thinking_turn_context.enabled_flag() {
             return Ok(true);
@@ -276,10 +305,14 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
                 enabled,
             )
             .map_err(|error| {
-                direct_gemini_internal_error(
+                raise_v3_source_via_err01(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3Req04StandardizedGemini",
                     "direct_tool_thinking_req04_injection_failed",
                     error.to_string(),
+                    V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
                 )
+                .map(|(_, source)| source)
             })?;
         Ok(standardized.tool_thinking_turn_context.enabled_flag())
     }
@@ -295,22 +328,19 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
 fn apply_gemini_request_key_hook(
     body: Value,
     catalog: &V3DirectRequestKeyHookCatalog,
-) -> Result<Value, V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<Value> {
     let mut catalog = *catalog;
-    apply_v3_direct_request_key_hook(body, V3DirectRequestProtocol::Gemini, &mut catalog)
-        .map_err(|error| direct_gemini_internal_error("direct_request_key_hook_failed", error))
-}
-
-fn direct_gemini_internal_error(
-    code: &'static str,
-    message: impl Into<String>,
-) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised_internal(
-        V3ErrorSourceKind::RuntimeFailure,
-        "V3Req04StandardizedGemini",
-        code,
-        message.into(),
-        V3InternalErrorCode::V3Req04StandardizedResponses,
+    apply_v3_direct_request_key_hook(body, V3DirectRequestProtocol::Gemini, &mut catalog).map_err(
+        |error| {
+            raise_v3_source_via_err01(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Req04StandardizedGemini",
+                "direct_request_key_hook_failed",
+                error,
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
+            )
+            .map(|(_, source)| source)
+        },
     )
 }
 

@@ -163,6 +163,9 @@ fn req04_target_preserves_existing_expansion_failure_stage_and_code() {
 
     let source = expand_v3_relay_target_candidates_from_opaque_hit(&different_manifest, hit, 0)
         .expect_err("a real hit expanded against a different manifest must fail");
+    let Ok(source) = source else {
+        panic!("expansion failure must preserve the typed source without an SDK operator fault");
+    };
 
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert_eq!(source.source_stage, "V3Target09CandidateSetExpanded");

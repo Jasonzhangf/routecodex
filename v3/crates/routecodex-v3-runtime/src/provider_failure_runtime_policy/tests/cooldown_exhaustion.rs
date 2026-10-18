@@ -508,6 +508,9 @@ async fn stale_rescue_probe_completion_does_not_abort_reselection_of_next_provid
         V3TargetSelectionAfterRescue::Exhausted(_) => {
             panic!("successful next-provider probe must prevent pool exhaustion")
         }
+        V3TargetSelectionAfterRescue::OperatorFault(fault) => {
+            panic!("stale rescue probe must not raise an SDK operator fault: {fault:?}")
+        }
     }
     tokio::time::timeout(Duration::from_secs(1), probe_server)
         .await

@@ -802,7 +802,10 @@ fn provider_error_consumer_rejects_malformed_json_instead_of_silently_passing() 
 
 #[test]
 fn transport_error_export_enters_the_canonical_error_chain() {
-    let source = build_v3_sse_transport_error_source(SseTransportError::UnterminatedFrame);
+    let source = match build_v3_sse_transport_error_source(SseTransportError::UnterminatedFrame) {
+        Ok(source) => source,
+        Err(fault) => panic!("unexpected SDK fault: {fault:?}"),
+    };
     assert_eq!(source.source_stage, "V3ProviderResp14Raw");
     assert_eq!(source.code, "provider_response_sse_unterminated_frame");
     let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(source);

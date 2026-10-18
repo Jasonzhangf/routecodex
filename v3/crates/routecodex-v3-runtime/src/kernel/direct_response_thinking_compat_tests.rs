@@ -76,7 +76,10 @@ fn direct_sse_thinking_tag_compat_strips_unpaired_open_tag_only() {
 
 #[test]
 fn direct_sse_thinking_tag_compat_strips_orphan_close_tag() {
-    let input = tagged_sse(&["before ", "</thinking>", " after"], "before </thinking> after");
+    let input = tagged_sse(
+        &["before ", "</thinking>", " after"],
+        "before </thinking> after",
+    );
     let output = rewrite_v3_direct_thinking_tag_sse_bytes(&input).unwrap();
     let text = String::from_utf8(output).unwrap();
     assert!(text.contains("response.output_text.delta"), "{text}");
@@ -100,7 +103,10 @@ fn direct_sse_thinking_tag_compat_keeps_ordinary_response_byte_exact() {
 
 #[tokio::test]
 async fn direct_sse_thinking_tag_consumer_buffers_split_transport_chunks_until_terminal() {
-    let input = tagged_sse(&["<thinking>", "inspect", "</thinking>"], "<thinking>inspect</thinking>");
+    let input = tagged_sse(
+        &["<thinking>", "inspect", "</thinking>"],
+        "<thinking>inspect</thinking>",
+    );
     let chunks = input
         .chunks(7)
         .map(|chunk| Ok(chunk.to_vec()))
@@ -111,7 +117,10 @@ async fn direct_sse_thinking_tag_consumer_buffers_split_transport_chunks_until_t
 
     let first = output.next().await.expect("terminal output").unwrap();
     let text = String::from_utf8(first).unwrap();
-    assert!(text.contains("response.reasoning_summary_text.delta"), "{text}");
+    assert!(
+        text.contains("response.reasoning_summary_text.delta"),
+        "{text}"
+    );
     assert!(text.contains("inspect"), "{text}");
     assert!(output.next().await.is_none());
 }
@@ -119,12 +128,17 @@ async fn direct_sse_thinking_tag_consumer_buffers_split_transport_chunks_until_t
 #[tokio::test]
 async fn direct_sse_thinking_tag_consumer_exports_transport_decode_error() {
     let mut output = wrap_v3_direct_responses_thinking_tag_consumer_stream(
-        V3ProviderAttemptSseStream::new(Box::pin(futures_util::stream::iter(vec![Ok(
-            vec![0xff]
-        )]))),
+        V3ProviderAttemptSseStream::new(Box::pin(futures_util::stream::iter(vec![Ok(vec![0xff])]))),
     );
 
-    let error = output.next().await.expect("transport error").unwrap_err();
-    assert_eq!(error.source_stage, "V3DirectResp14ProviderProjectionPrepared");
+    let error = match output.next().await.expect("transport error") {
+        Err(Ok(source)) => source,
+        Err(Err(fault)) => panic!("unexpected SDK fault: {fault:?}"),
+        Ok(_) => panic!("expected transport error"),
+    };
+    assert_eq!(
+        error.source_stage,
+        "V3DirectResp14ProviderProjectionPrepared"
+    );
     assert!(output.next().await.is_none());
 }

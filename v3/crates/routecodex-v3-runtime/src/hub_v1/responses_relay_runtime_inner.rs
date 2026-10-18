@@ -169,21 +169,30 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
             },
         };
         let (target_resolved_request, resolved_target) =
-            crate::operation_runner::run_v3_resolve_target_operator(
+            match crate::operation_runner::run_v3_resolve_target_operator(
                 req02.payload().clone(),
                 resolve_mode,
-            )
-            .map_err(|error| match error {
-                crate::operation_runner::V3ResolveTargetOperatorError::Typed(source) => {
-                    V3ResponsesRelayRuntimeError::Target(format!(
+            ) {
+                Ok(resolved) => resolved,
+                Err(crate::operation_runner::V3ResolveTargetOperatorError::Typed(source)) => {
+                    return Err(V3ResponsesRelayRuntimeError::Target(format!(
                         "{}: {}",
                         source.code, source.message
-                    ))
+                    )));
                 }
-                crate::operation_runner::V3ResolveTargetOperatorError::Runner(error) => {
-                    V3ResponsesRelayRuntimeError::Target(error.to_string())
+                Err(crate::operation_runner::V3ResolveTargetOperatorError::OperatorFault(
+                    fault,
+                )) => {
+                    return Ok(provider_failure_output(
+                        V3ResponsesRelayProviderFailure::from(fault),
+                        trace,
+                        0,
+                    ));
                 }
-            })?;
+                Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
+                    return Err(V3ResponsesRelayRuntimeError::Target(error.to_string()));
+                }
+            };
         route_policy_pending = resolved_target.route_policy_pending;
         let target_source = match initial_expanded.clone() {
             Some(expanded) => V3PlanExecutionTargetSource::Expanded(expanded),
@@ -235,6 +244,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                         source.code, source.message
                     )));
                 }
+                Err(V3PlanExecutionStop::OperatorFault(fault)) => {
+                    return Ok(provider_failure_output(
+                        V3ResponsesRelayProviderFailure::from(fault),
+                        trace,
+                        0,
+                    ));
+                }
                 Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
                     let failure = V3ResponsesRelayProviderFailure {
                         status: 502,
@@ -250,6 +266,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                         terminal_projection: None,
                         terminal_disposition: None,
                         error_operator_fault: None,
+                        failed_attempt_evidence: None,
                         matched_policy: None,
                     };
                     return Ok(provider_failure_output(
@@ -364,6 +381,16 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             source.code, source.message
                         )));
                     }
+                    Err(V3PlanExecutionStop::OperatorFault(fault)) => {
+                        return Ok(provider_failure_output(
+                            terminalize_v3_responses_relay_provider_failure(
+                                V3ResponsesRelayProviderFailure::from(fault),
+                                last_external_http.clone(),
+                            ),
+                            trace,
+                            0,
+                        ));
+                    }
                     Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
                         let failure = V3ResponsesRelayProviderFailure {
                             status: 502,
@@ -379,6 +406,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             terminal_projection: None,
                             terminal_disposition: None,
                             error_operator_fault: None,
+                            failed_attempt_evidence: None,
                             matched_policy: None,
                         };
                         return Ok(provider_failure_output(
@@ -408,20 +436,31 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                 protocol_decision.mode,
                 crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
             ) {
-                let protocol_candidate_keys = handle_error_before_resp03!(
-                    crate::kernel::protocol_candidate_keys_for_decision_mode(
+                let protocol_candidate_keys =
+                    match crate::kernel::protocol_candidate_keys_for_decision_mode(
                         &retained_expanded,
                         "responses",
                         &allowed_execution_modes,
                         protocol_decision.mode,
-                    )
-                    .map_err(|source| {
-                        V3ResponsesRelayRuntimeError::ExecutionControl(format!(
-                            "{}: {}",
-                            source.code, source.message
-                        ))
-                    })
-                );
+                    ) {
+                        Ok(keys) => keys,
+                        Err(Ok(source)) => {
+                            return Err(V3ResponsesRelayRuntimeError::ExecutionControl(format!(
+                                "{}: {}",
+                                source.code, source.message
+                            )))
+                        }
+                        Err(Err(fault)) => {
+                            return Ok(provider_failure_output(
+                                terminalize_v3_responses_relay_provider_failure(
+                                    V3ResponsesRelayProviderFailure::from(fault),
+                                    last_external_http.clone(),
+                                ),
+                                trace,
+                                0,
+                            ));
+                        }
+                    };
                 let mut handoff_trace = trace.clone();
                 handoff_trace.push("V3Target10ConcreteProviderSelected");
                 handoff_trace.push("V3Execution11ProtocolDecision");
@@ -588,6 +627,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                 handle_provider_request_failure!(error);
             }
             trace.push("V3ProviderReqOutbound09TransportRequest");
+            let provider_request_snapshot = transport_request.provider_request_projection();
             if pending_provider_action_recovery.is_some() {
                 drop(selected_admission.take());
             }
@@ -687,7 +727,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                     handle_error_before_resp03!(runtime_timing
                         .finish_external()
                         .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-                    let failure = if let Some(reason) = &response.body_read_failure {
+                    let mut failure = if let Some(reason) = &response.body_read_failure {
                         let mut failure = provider_runtime_failure(
                             V3ProviderError::ResponseBody {
                                 request_id: response.request_id.clone(),
@@ -714,6 +754,16 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             Some(selected_observability.clone()),
                         )
                     };
+                    failure.failed_attempt_evidence = Some(
+                        build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                            provider_send_attempts,
+                            Some(provider_request_snapshot.clone()),
+                            response.status,
+                            &response.headers,
+                            &response.body,
+                            response.body_read_failure.as_deref(),
+                        ),
+                    );
                     drop(_provider_action_permit.take());
                     let terminal_failure = handle_error_before_resp03!(
                         handle_v3_responses_relay_provider_failure(
@@ -748,11 +798,18 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                     {
                         last_external_http = Some(witness);
                     }
-                    let failure = provider_runtime_failure(
+                    let failed_attempt_evidence =
+                        build_v3_runtime_provider_failed_attempt_evidence_from_error(
+                            provider_send_attempts,
+                            Some(provider_request_snapshot.clone()),
+                            &error,
+                        );
+                    let mut failure = provider_runtime_failure(
                         error,
                         &selected_target_provider_id,
                         Some(selected_observability.clone()),
                     );
+                    failure.failed_attempt_evidence = failed_attempt_evidence;
                     drop(_provider_action_permit.take());
                     let terminal_failure = handle_error_before_resp03!(
                         handle_v3_responses_relay_provider_failure(

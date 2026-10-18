@@ -111,13 +111,16 @@ async fn execute_responses_direct_server_outcome_inner(
     ) {
         Ok(scope) => scope,
         Err(message) => {
-            let frame =
-                build_v3_server_16_http_frame_from_v3_error_06(project_v3_server_runtime_failure(
+            let frame = build_v3_server_16_http_frame_from_error_sdk_result(
+                "V3ServerReqChatProcess03Governed",
+                project_v3_server_boundary_error_via_sdk(
+                    V3ErrorSourceKind::RuntimeFailure,
                     "V3ServerReqChatProcess03Governed",
                     "responses_direct_server_tool_scope_incomplete",
                     message,
-                    598,
-                ));
+                    Some(598),
+                ),
+            );
             return V3ResponsesDirectServerOutcome::DirectFrame(
                 project_v3_responses_direct_stream_error_frame_if_requested(
                     frame,
@@ -130,12 +133,14 @@ async fn execute_responses_direct_server_outcome_inner(
         match get_failure_session_scope(&state.server, request_headers, &request_id) {
             Ok(scope) => scope,
             Err(message) => {
-                let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                    project_v3_server_runtime_failure(
+                let frame = build_v3_server_16_http_frame_from_error_sdk_result(
+                    "V3Server03HttpRequestRaw",
+                    project_v3_server_boundary_error_via_sdk(
+                        V3ErrorSourceKind::RuntimeFailure,
                         "V3Server03HttpRequestRaw",
                         "provider_transport_handoff_scope_incomplete",
                         message,
-                        598,
+                        Some(598),
                     ),
                 );
                 return V3ResponsesDirectServerOutcome::DirectFrame(
@@ -149,13 +154,16 @@ async fn execute_responses_direct_server_outcome_inner(
     let pipeline_id = match pipeline_id {
         Some(pipeline_id) if !pipeline_id.trim().is_empty() => pipeline_id,
         _ => {
-            let frame =
-                build_v3_server_16_http_frame_from_v3_error_06(project_v3_server_runtime_failure(
+            let frame = build_v3_server_16_http_frame_from_error_sdk_result(
+                "V3Transport13ResponsesHttpRequest",
+                project_v3_server_boundary_error_via_sdk(
+                    V3ErrorSourceKind::RuntimeFailure,
                     "V3Transport13ResponsesHttpRequest",
                     "provider_transport_handoff_scope_incomplete",
                     "Responses direct handoff is missing pipeline_id",
-                    598,
-                ));
+                    Some(598),
+                ),
+            );
             return V3ResponsesDirectServerOutcome::DirectFrame(
                 project_v3_responses_direct_stream_error_frame_if_requested(
                     frame,
@@ -172,13 +180,16 @@ async fn execute_responses_direct_server_outcome_inner(
         ) {
         Ok(scope) => scope,
         Err(message) => {
-            let frame =
-                build_v3_server_16_http_frame_from_v3_error_06(project_v3_server_runtime_failure(
+            let frame = build_v3_server_16_http_frame_from_error_sdk_result(
+                "V3Transport13ResponsesHttpRequest",
+                project_v3_server_boundary_error_via_sdk(
+                    V3ErrorSourceKind::RuntimeFailure,
                     "V3Transport13ResponsesHttpRequest",
                     "provider_transport_handoff_scope_incomplete",
                     message,
-                    598,
-                ));
+                    Some(598),
+                ),
+            );
             return V3ResponsesDirectServerOutcome::DirectFrame(
                 project_v3_responses_direct_stream_error_frame_if_requested(
                     frame,
@@ -270,12 +281,14 @@ async fn execute_responses_direct_server_outcome_inner(
         ) {
             Ok(scope) => scope,
             Err(message) => {
-                let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                    project_v3_server_runtime_failure(
+                let frame = build_v3_server_16_http_frame_from_error_sdk_result(
+                    "V3ServerReqChatProcess03Governed",
+                    project_v3_server_boundary_error_via_sdk(
+                        V3ErrorSourceKind::RuntimeFailure,
                         "V3ServerReqChatProcess03Governed",
                         "responses_relay_server_tool_scope_incomplete",
                         message,
-                        598,
+                        Some(598),
                     ),
                 );
                 return V3ResponsesDirectServerOutcome::DirectFrame(

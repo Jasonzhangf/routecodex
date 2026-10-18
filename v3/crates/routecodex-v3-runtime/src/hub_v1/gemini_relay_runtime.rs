@@ -1,5 +1,5 @@
+use super::V3ProviderCompatErrorClassification;
 use super::*;
-use super::{provider_compat_boundary_source, V3ProviderCompatErrorClassification};
 use crate::nodes::{V3ClientBody, V3Resp15ClientPayload};
 use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
@@ -537,26 +537,29 @@ pub fn project_v3_gemini_relay_runtime_failure(
             V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
                 super::provider_request_payload_source("ProviderReqCompat06ProviderCompat", &error)
             }
-            V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
+            V3ProviderCompatErrorClassification::Other => crate::shared::direct_plain_error(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3HubRuntime",
                 "gemini_relay_runtime_error",
                 error.to_string(),
             ),
         },
-        error => build_v3_error_01_source_raised(
+        error => crate::shared::direct_plain_error(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",
             "gemini_relay_runtime_error",
             error.to_string(),
         ),
     };
-    let (projected, trace) = error_output(
-        source,
-        if request_payload_invalid { 400 } else { 500 },
-        "none",
-        Vec::new(),
-    );
+    let (projected, trace) = match source {
+        Ok(source) => error_output(
+            source,
+            if request_payload_invalid { 400 } else { 500 },
+            "none",
+            Vec::new(),
+        ),
+        Err(fault) => (Err(fault), Vec::new()),
+    };
     gemini_error_output_from_projection(projected, trace, provider_pool_exhausted)
 }
 
@@ -1048,6 +1051,7 @@ mod tests {
                     terminal_projection: None,
                     terminal_disposition,
                     error_operator_fault: Some(fault.clone()),
+                    failed_attempt_evidence: None,
                     error_type_fn: |_| None,
                     error_message_fn: |_| "unused".to_string(),
                 },
@@ -1136,5 +1140,122 @@ mod tests {
         assert_eq!(policy_failure.source_stage, "V3Error06ClientProjected");
         assert_eq!(policy_failure.code, "relay_error_operator_sdk_failure");
         assert_eq!(original_source, source);
+    }
+
+    #[test]
+    fn provider_compat_source_fault_short_circuits_with_original_cause() {
+        let error = V3ProviderCompatError::new_payload_boundary(
+            "response",
+            "passthrough".to_string(),
+            "ProviderCompatPayloadBoundaryViolation field=metadata value=control".to_string(),
+        );
+        let source = crate::hub_v1::provider_compat_boundary_source(
+            "ProviderRespCompat02ProviderCompat",
+            &error,
+        )
+        .expect("compat boundary source must execute Error01 successfully");
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Ok(None),
+        )
+        .expect_err("missing terminal Error06 is a typed SDK fault");
+        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_cause = fault
+            .original_source
+            .clone()
+            .expect("the SDK fault keeps its original compat source");
+        let trace = vec!["ProviderRespCompat02ProviderCompat"];
+
+        let output = gemini_error_output_from_projection(Err(fault), trace.clone(), false);
+
+        assert_eq!(output.status, 599);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(matches!(
+            &output.client_body,
+            V3GeminiRelayClientBody::Json(value) if value.is_null()
+        ));
+        assert!(output.error_chain.is_none());
+        assert_eq!(output.node_trace, trace);
+        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+        assert_eq!(output.diagnostic_source, Some(diagnostic_source));
+        assert_eq!(output.diagnostic_cause, Some(diagnostic_cause.clone()));
+        assert_eq!(diagnostic_cause, source);
+    }
+
+    #[test]
+    fn other_provider_compat_uses_canonical_plain_error_source() {
+        let error = V3ProviderCompatError::other(
+            "response",
+            "compat:passthrough".to_string(),
+            "provider response compat failed".to_string(),
+        );
+        let expected = crate::shared::direct_plain_error(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3HubRuntime",
+            "gemini_relay_runtime_error",
+            error.to_string(),
+        )
+        .expect("plain Err01 must execute through the canonical Error graph");
+        let output = project_v3_gemini_relay_runtime_failure(
+            V3GeminiRelayRuntimeError::ProviderCompat(error),
+        );
+
+        assert_eq!(output.diagnostic_source, Some(expected));
+        assert!(output.diagnostic_cause.is_none());
+        assert_eq!(
+            output.error_chain,
+            Some(routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS.to_vec())
+        );
+        assert!(output.node_trace.contains(&"V3Error06ClientProjected"));
+    }
+
+    #[test]
+    fn other_provider_compat_source_fault_short_circuits_gemini_projection() {
+        let error = V3ProviderCompatError::other(
+            "response",
+            "compat:passthrough".to_string(),
+            "provider response compat failed".to_string(),
+        );
+        let source = crate::shared::direct_plain_error(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3HubRuntime",
+            "gemini_relay_runtime_error",
+            error.to_string(),
+        )
+        .expect("plain Err01 must execute through the canonical Error graph");
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Ok(None),
+        )
+        .expect_err("missing terminal Error06 must produce a typed SDK fault");
+        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_cause = fault
+            .original_source
+            .clone()
+            .expect("the source fault preserves the canonical plain source");
+        assert_eq!(diagnostic_cause, source);
+
+        let output = gemini_error_output_from_projection(
+            Err(fault),
+            vec!["ProviderRespCompat02ProviderCompat"],
+            false,
+        );
+
+        assert_eq!(output.status, 599);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(matches!(
+            &output.client_body,
+            V3GeminiRelayClientBody::Json(value) if value.is_null()
+        ));
+        assert!(output.error_chain.is_none());
+        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+        assert_eq!(output.diagnostic_source, Some(diagnostic_source));
+        assert_eq!(output.diagnostic_cause, Some(diagnostic_cause));
     }
 }

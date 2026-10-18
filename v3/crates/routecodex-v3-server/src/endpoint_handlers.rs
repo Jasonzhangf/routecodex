@@ -188,11 +188,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     &state.server,
                     &path,
                     &request_id,
-                    project_v3_server_runtime_failure(
+                    project_v3_server_boundary_error_via_sdk(
+                        V3ErrorSourceKind::RuntimeFailure,
                         "V3Server03HttpRequestRaw",
                         "provider_transport_handoff_scope_incomplete",
                         message,
-                        598,
+                        Some(598),
                     ),
                     None,
                 );
@@ -210,11 +211,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 &state.server,
                 &path,
                 &request_id,
-                project_v3_server_runtime_failure(
+                project_v3_server_boundary_error_via_sdk(
+                    V3ErrorSourceKind::RuntimeFailure,
                     "V3Server03HttpRequestRaw",
                     "provider_transport_handoff_scope_incomplete",
                     message,
-                    598,
+                    Some(598),
                 ),
                 None,
             );
@@ -227,11 +229,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 &state.server,
                 &path,
                 &request_id,
-                project_v3_server_runtime_failure(
+                project_v3_server_boundary_error_via_sdk(
+                    V3ErrorSourceKind::RuntimeFailure,
                     "V3OperationRunnerCaptureClientJson",
                     "operation_runner_capture_client_json_failed",
                     error.to_string(),
-                    598,
+                    Some(598),
                 ),
                 None,
             );
@@ -888,10 +891,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         let output = execute_v3_foundation_pending_runtime(
             V3FoundationRuntimeInput {
                 server_id: state.server.id.clone(),
-                request_id,
+                request_id: request_id.clone(),
                 execution_id,
                 method,
-                path,
+                path: path.clone(),
                 payload,
             },
             &state.debug,
@@ -907,8 +910,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             return response;
         }
         pending_binding_output_response(
+            &state,
             output,
             &entry_protocol,
+            &path,
+            &request_id,
             pending_not_implemented,
             &pending_owner,
         )
@@ -1050,6 +1056,15 @@ fn execute_v3_provider_request_dry_run_branch<'a>(
             ) {
                 return response;
             }
+            persist_v3_chat_failure_evidence_sources(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &[],
+                output.diagnostic_source.as_ref(),
+                output.diagnostic_cause.as_ref(),
+            );
             return foundation_output_response(output);
         }
         if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -1158,6 +1173,15 @@ fn execute_v3_provider_request_dry_run_branch<'a>(
             ) {
                 return response;
             }
+            persist_v3_chat_failure_evidence_sources(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &[],
+                output.diagnostic_source.as_ref(),
+                output.diagnostic_cause.as_ref(),
+            );
             return foundation_output_response(output);
         }
         if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -1208,6 +1232,15 @@ fn execute_v3_provider_request_dry_run_branch<'a>(
             ) {
                 return response;
             }
+            persist_v3_chat_failure_evidence_sources(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &[],
+                output.diagnostic_source.as_ref(),
+                output.diagnostic_cause.as_ref(),
+            );
             return foundation_output_response(output);
         }
         unreachable!("provider-request dry-run branch requires a supported protocol")

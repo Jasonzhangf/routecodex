@@ -1,5 +1,15 @@
 use super::*;
 
+fn expect_ordinary_source<T>(
+    result: crate::shared::V3DirectSourceResult<T>,
+) -> V3Error01SourceRaised {
+    match result {
+        Err(Ok(source)) => source,
+        Err(Err(fault)) => panic!("unexpected SDK fault: {fault:?}"),
+        Ok(_) => panic!("expected an ordinary source"),
+    }
+}
+
 #[tokio::test]
 async fn compact_direct_projected_stream_reaches_collector_without_loopback() {
     let expected = serde_json::json!({"id":"compact-response","object":"response",
@@ -89,13 +99,14 @@ async fn empty_direct_attempt_keeps_original_error_and_timing_open_for_recovery(
         )]))), observation.clone(), timing.clone(), false, false,
         V3HubProviderWireProtocol::Responses,
     );
-    let source = collect_direct_sse_attempt_after_terminal(
-        projected,
-        V3HubProviderWireProtocol::Responses,
-        crate::nodes::V3AttemptBudget::process_default(),
-    )
-    .await
-    .expect_err("empty attempt must enter Error recovery");
+    let source = expect_ordinary_source(
+        collect_direct_sse_attempt_after_terminal(
+            projected,
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+        )
+        .await,
+    );
     assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);
     assert_eq!(source.code, "provider_response_empty");
     timing
@@ -121,13 +132,17 @@ async fn direct_sse_provider_error_after_partial_attempt_is_recoverable_by_resid
                 "provider stream failed after the first semantic item",
             )),
         ]));
-    let error = collect_direct_sse_attempt_after_terminal(
-        test_direct_sse_attempt_stream(source, crate::hub_v1::V3HubProviderWireProtocol::Responses),
-        crate::hub_v1::V3HubProviderWireProtocol::Responses,
-        crate::nodes::V3AttemptBudget::process_default(),
-    )
-    .await
-    .expect_err("partial attempt must return its provider failure to the resident owner");
+    let error = expect_ordinary_source(
+        collect_direct_sse_attempt_after_terminal(
+            test_direct_sse_attempt_stream(
+                source,
+                crate::hub_v1::V3HubProviderWireProtocol::Responses,
+            ),
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+        )
+        .await,
+    );
     assert_eq!(error.code, "provider_response_sse_stream");
 
     let replacement: V3ClientSseStream = Box::pin(stream::iter([Ok(
@@ -265,16 +280,17 @@ async fn openai_chat_direct_sse_rejects_done_before_finish_reason() {
     let source = Box::pin(stream::iter([
             Ok(b"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\ndata: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n".to_vec()),
         ]));
-    let error = collect_direct_sse_attempt_after_terminal(
-        test_direct_sse_attempt_stream(
-            Box::pin(source),
+    let error = expect_ordinary_source(
+        collect_direct_sse_attempt_after_terminal(
+            test_direct_sse_attempt_stream(
+                Box::pin(source),
+                crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            ),
             crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
-        ),
-        crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
-        crate::nodes::V3AttemptBudget::process_default(),
-    )
-    .await
-    .expect_err("pre-terminal [DONE] must not release a client frame");
+            crate::nodes::V3AttemptBudget::process_default(),
+        )
+        .await,
+    );
     assert_eq!(error.code, "provider_response_sse_stream");
     assert!(error
         .message
@@ -776,6 +792,51 @@ async fn direct_chat_sse_seals_at_terminal_when_done_splits_before_late_transpor
 }
 
 #[tokio::test]
+async fn direct_sse_collector_never_swallows_post_terminal_sdk_fault_as_success() {
+    let original = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3DirectResp14ProviderProjectionPrepared",
+        "seeded_post_terminal_original",
+        "seeded post-terminal original source",
+    );
+    let policy_failure = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3Error01SourceRaised",
+        "seeded_post_terminal_sdk_fault",
+        "seeded post-terminal SDK fault",
+    );
+    let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
+        policy_failure: policy_failure.clone(),
+        original_source: Some(original.clone()),
+    };
+    let source: V3SseAttemptStream = Box::pin(stream::iter(vec![
+        Ok(V3SseAttemptFrame::new(
+            br#"data: {"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}
+
+"#
+            .to_vec(),
+            V3SseFrameDisposition::SemanticTerminal,
+        )),
+        Err(Err(fault.clone())),
+    ]));
+    let result = collect_direct_sse_attempt_after_terminal(
+        source,
+        crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await;
+
+    match result {
+        Err(Err(returned)) => {
+            assert_eq!(returned.policy_failure, policy_failure);
+            assert_eq!(returned.original_source, Some(original));
+        }
+        Err(Ok(source)) => panic!("fault was collapsed into an ordinary source: {source:?}"),
+        Ok(_) => panic!("post-terminal SDK fault was incorrectly sealed as success"),
+    }
+}
+
+#[tokio::test]
 async fn direct_chat_sse_seals_at_terminal_with_unterminated_tail_bytes() {
     // Trailing partial bytes after the chat terminal leave the incremental
     // decoder unterminated; that post-terminal tail must not fail the attempt.
@@ -859,16 +920,17 @@ async fn direct_sse_empty_complete_anthropic_terminal_is_provider_failure() {
         .as_bytes()
         .to_vec(),
     )]));
-    let error = collect_direct_sse_attempt_after_terminal(
-        test_direct_sse_attempt_stream(
-            provider,
+    let error = expect_ordinary_source(
+        collect_direct_sse_attempt_after_terminal(
+            test_direct_sse_attempt_stream(
+                provider,
+                crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
+            ),
             crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
-        ),
-        crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
-        crate::nodes::V3AttemptBudget::process_default(),
-    )
-    .await
-    .expect_err("an empty complete Direct SSE attempt must become a provider failure");
+            crate::nodes::V3AttemptBudget::process_default(),
+        )
+        .await,
+    );
     assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
     assert_eq!(error.code, "provider_response_empty");
 }

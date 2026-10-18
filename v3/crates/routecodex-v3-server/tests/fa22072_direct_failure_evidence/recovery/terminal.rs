@@ -82,6 +82,7 @@ async fn fa22072_seeded_relay_terminal_failure_evidence_public_entry() {
         let (_dirs, artifact) = read_case_artifact(case.port, &marker, &mut controls, &label);
         match artifact {
             Some(artifact) => {
+                check_failed_wire_pair(&artifact, &marker, &mut diagnostics);
                 if artifact_sources(&artifact) != expected_pair()
                     || artifact["attempts"][0]["provider_status"] != 503
                     || artifact["attempts"][1]["provider_status"] != 503

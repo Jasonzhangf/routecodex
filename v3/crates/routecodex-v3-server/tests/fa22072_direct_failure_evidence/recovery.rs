@@ -122,6 +122,41 @@ fn source_json(event: &V3RuntimeProviderFailureObservation) -> Value {
     serde_json::to_value(&event.diagnostic_source).unwrap()
 }
 
+fn check_failed_wire_pair(artifact: &Value, marker: &str, diagnostics: &mut Vec<String>) {
+    for (index, (wire, body)) in [
+        (ALPHA_WIRE, owned_a_503_body()),
+        (BETA_WIRE, owned_b_503_body()),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let evidence = &artifact["attempts"][index]["failed_attempt_evidence"];
+        let request = &evidence["provider_request"];
+        let response = &evidence["provider_response"];
+        let bytes: Option<Vec<u8>> = response["body"]["bytes"].as_array().and_then(|bytes| {
+            bytes
+                .iter()
+                .map(|byte| byte.as_u64().and_then(|byte| u8::try_from(byte).ok()))
+                .collect()
+        });
+        let actual_body = bytes
+            .as_deref()
+            .and_then(|bytes| serde_json::from_slice::<Value>(bytes).ok());
+        if evidence["attempt"].as_u64() != Some(index as u64 + 1)
+            || request["method"] != "POST"
+            || request["body"]["model"] != wire
+            || !request["body"].to_string().contains(marker)
+            || response["kind"] != "external_http"
+            || response["status"] != 503
+            || actual_body.as_ref() != Some(&body)
+        {
+            diagnostics.push(format!(
+                "failed wire pair {index} lost its ordinal, request, or response"
+            ));
+        }
+    }
+}
+
 /// The authoritative ordered failure sources the receiving Relay consumer
 /// carries, whether it completed or exhausted.
 fn relay_ordered_sources(outcome: &RelayOutcome) -> Vec<Value> {

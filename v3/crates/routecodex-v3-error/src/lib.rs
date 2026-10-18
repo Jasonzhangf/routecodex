@@ -1168,10 +1168,9 @@ pub enum V3HttpBoundaryErrorKind {
     WebSocketBetaRequired,
 }
 
-pub fn project_v3_http_boundary_error(
+pub const fn v3_http_boundary_error_spec(
     kind: V3HttpBoundaryErrorKind,
-    detail: impl Into<String>,
-) -> V3Error06ClientProjected {
+) -> (V3ErrorSourceKind, &'static str, &'static str) {
     let (source_kind, code) = match kind {
         V3HttpBoundaryErrorKind::MalformedJson => {
             (V3ErrorSourceKind::InvalidRequest, "malformed_json")
@@ -1207,14 +1206,7 @@ pub fn project_v3_http_boundary_error(
             (V3ErrorSourceKind::InvalidRequest, "websocket_beta_required")
         }
     };
-    let source =
-        build_v3_error_01_source_raised(source_kind, "V3Server03HttpRequestRaw", code, detail);
-    V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-        source,
-        action_scope: V3ErrorActionScope::None,
-        candidates_remaining: 0,
-        source_status: None,
-    })
+    (source_kind, "V3Server03HttpRequestRaw", code)
 }
 
 fn project_v3_server_boundary_error(
@@ -1263,19 +1255,21 @@ pub fn project_v3_server_runtime_failure(
     )
 }
 
-pub fn project_v3_server_websocket_error(
+pub fn v3_server_websocket_error_spec(
     code: &'static str,
-    detail: impl Into<String>,
-) -> V3Error06ClientProjected {
+) -> (V3ErrorSourceKind, &'static str, u16) {
     if code == "invalid_client_event" {
-        return project_v3_server_invalid_request(
+        return (
+            V3ErrorSourceKind::InvalidRequest,
             "V3ServerRespOutbound06ClientFrame",
-            code,
-            detail,
             400,
         );
     }
-    project_v3_server_runtime_failure("V3ServerRespOutbound06ClientFrame", code, detail, 500)
+    (
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3ServerRespOutbound06ClientFrame",
+        500,
+    )
 }
 
 pub fn raise_v3_sse_provider_failure(
@@ -1324,27 +1318,6 @@ pub fn is_v3_sse_recoverable_disconnect_source(source: &V3Error01SourceRaised) -
     matches!(
         crate::sse_disposition::v3_sse_post_commit_disposition(source),
         crate::sse_disposition::V3SsePostCommitDisposition::CloseEof
-    )
-}
-
-pub fn raise_v3_debug_artifact_failure(message: impl Into<String>) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised_internal(
-        V3ErrorSourceKind::RuntimeFailure,
-        "V3DebugArtifact",
-        "codex_sample_persistence_failed",
-        message,
-        V3InternalErrorCode::V3DebugArtifact,
-    )
-}
-
-pub fn raise_v3_runtime_observability_contract_failure(
-    message: impl Into<String>,
-) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised(
-        V3ErrorSourceKind::RuntimeFailure,
-        "V3RuntimeObservability",
-        "runtime_observability_contract",
-        message,
     )
 }
 

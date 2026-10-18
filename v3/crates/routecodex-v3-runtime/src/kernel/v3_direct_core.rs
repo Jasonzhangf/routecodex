@@ -112,8 +112,9 @@ where
         Ok(standardized) => standardized,
         Err(error) => {
             trace.push(C::STANDARDIZED_STAGE);
-            return error_output(
+            return direct_runtime_helpers_stream::source_failure_output(
                 runtime_source(C::STANDARDIZED_STAGE, error),
+                None,
                 trace,
                 &crate::hooks::register_responses_direct_hooks(),
             );
@@ -126,8 +127,9 @@ where
     ) {
         Ok(control) => control,
         Err(error) => {
-            return error_output(
+            return direct_runtime_helpers_stream::source_failure_output(
                 runtime_source("V3ExecutionAttemptBudget", error),
+                None,
                 trace,
                 &crate::hooks::register_responses_direct_hooks(),
             )
@@ -166,9 +168,17 @@ where
                 &crate::hooks::register_responses_direct_hooks(),
             );
         }
+        Err(crate::operation_runner::V3ResolveTargetOperatorError::OperatorFault(fault)) => {
+            return direct_runtime_helpers_stream::operator_fault_output(
+                fault,
+                trace,
+                &crate::hooks::register_responses_direct_hooks(),
+            );
+        }
         Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
-            return error_output(
+            return direct_runtime_helpers_stream::source_failure_output(
                 runtime_source("V3Router07OpaqueTargetHitOnce", error),
+                None,
                 trace,
                 &crate::hooks::register_responses_direct_hooks(),
             );
@@ -232,6 +242,13 @@ where
                     &crate::hooks::register_responses_direct_hooks(),
                 );
             }
+            Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::OperatorFault(fault)) => {
+                return direct_runtime_helpers_stream::operator_fault_output(
+                    fault,
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                );
+            }
             Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Exhausted { exhaustion: error, .. }) => {
                 // 可观测性：exhausted 时带全部候选明细（provider:alias:model:
                 // 原因），否则 console 只有 "N candidates unavailable" 无法诊断
@@ -251,7 +268,7 @@ where
                     ..V3RuntimeObservability::default()
                 };
                 return direct_runtime_helpers_stream::target_exhausted_output_with_observability(
-                    build_v3_error_01_source_raised(
+                    crate::shared::direct_plain_error(
                         V3ErrorSourceKind::TargetPoolExhausted,
                         "V3Target10ConcreteProviderSelected",
                         "selected_target_exhausted",
@@ -343,9 +360,10 @@ where
             &mut trace,
         ) {
             Ok(enabled) => enabled,
-            Err(source) => {
-                return error_output(
-                    source,
+            Err(failure) => {
+                return direct_runtime_helpers_stream::source_failure_output(
+                    failure,
+                    last_external_http.clone(),
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                 )
@@ -371,8 +389,9 @@ where
             {
                 Ok(value) => value,
                 Err(source) => {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         source,
+                        last_external_http.clone(),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
                     )
@@ -396,8 +415,9 @@ where
         let transport_request = match C::run_provider_transport(wire) {
             Ok(value) => value,
             Err(source) => {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     source,
+                    last_external_http.clone(),
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                 )
@@ -408,8 +428,9 @@ where
             {
                 Ok(protocol) => protocol,
                 Err(error) => {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3Transport13ResponsesHttpRequest", error),
+                        last_external_http.clone(),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
                     )
@@ -423,8 +444,9 @@ where
         ) {
             Ok(request) => request,
             Err(error) => {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     runtime_source("V3Transport13ResponsesHttpRequest", error),
+                    last_external_http.clone(),
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                 )
@@ -433,8 +455,9 @@ where
         let handoff_scope = match C::provider_transport_handoff_scope(&standardized) {
             Ok(scope) => scope,
             Err(error) => {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     runtime_source("V3Transport13ResponsesHttpRequest", error),
+                    last_external_http.clone(),
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                 )
@@ -443,8 +466,9 @@ where
         let transport_request = match transport_request.with_handoff_scope(handoff_scope) {
             Ok(request) => request,
             Err(error) => {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     runtime_source("V3Transport13ResponsesHttpRequest", error),
+                    last_external_http.clone(),
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                 )
@@ -473,8 +497,9 @@ where
                             continue;
                         }
                         V3AdmitAfterRecovery::Failed(reason) => {
-                            return error_output(
+                            return direct_runtime_helpers_stream::source_failure_output(
                                 runtime_source("V3Target10ConcreteProviderSelected", reason),
+                                last_external_http.clone(),
                                 trace,
                                 &crate::hooks::register_responses_direct_hooks(),
                             )
@@ -486,8 +511,9 @@ where
                     pending_provider_action_recovery = match ticket.recovery_witness() {
                         Ok(witness) => Some(witness),
                         Err(error) => {
-                            return error_output(
+                            return direct_runtime_helpers_stream::source_failure_output(
                                 runtime_source("V3ProviderActionGateAdmission", error),
+                                last_external_http.clone(),
                                 trace,
                                 &crate::hooks::register_responses_direct_hooks(),
                             )
@@ -501,8 +527,9 @@ where
                     pending_provider_action_recovery = match ticket.recovery_witness() {
                         Ok(witness) => Some(witness),
                         Err(error) => {
-                            return error_output(
+                            return direct_runtime_helpers_stream::source_failure_output(
                                 runtime_source("V3ProviderActionGateAdmission", error),
+                                last_external_http.clone(),
                                 trace,
                                 &crate::hooks::register_responses_direct_hooks(),
                             )
@@ -519,8 +546,9 @@ where
                     continue;
                 }
                 Err(error) => {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3ProviderActionGateAdmission", error),
+                        last_external_http.clone(),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
                     )
@@ -544,16 +572,18 @@ where
                         &crate::hooks::register_responses_direct_hooks(),
                     );
                 }
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     direct_runtime_helpers_stream::direct_attempt_budget_error_source(error),
+                    last_external_http.clone(),
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                 );
             }
         };
         if let Err(error) = runtime_timing.start_external() {
-            return error_output(
+            return direct_runtime_helpers_stream::source_failure_output(
                 runtime_source("V3RuntimeTimingExternal", error),
+                last_external_http.clone(),
                 trace,
                 &crate::hooks::register_responses_direct_hooks(),
             );
@@ -568,8 +598,9 @@ where
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
                 if let Err(error) = runtime_timing.finish_external() {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3RuntimeTimingExternal", error),
+                        last_external_http.clone(),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
                     );
@@ -580,20 +611,59 @@ where
                 continue;
             }
             Err(error) => {
+                let failed_attempt_evidence =
+                    crate::hub_v1::build_v3_runtime_provider_failed_attempt_evidence_from_error(
+                        total_attempts(&accumulator, send_attempts),
+                        provider_request_snapshot.clone(),
+                        &error,
+                    );
                 if let Some(witness) =
                     crate::hub_v1::external_http_witness_from_provider_error(&error)
                 {
                     last_external_http = Some(witness);
                 }
                 if let Err(timing_error) = runtime_timing.finish_external() {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3RuntimeTimingExternal", timing_error),
+                        last_external_http.clone(),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
                     );
                 }
-                let source =
-                    build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);
+                let source = match build_v3_provider_error_source(
+                    "V3Transport13ResponsesHttpRequest",
+                    error,
+                ) {
+                    Ok(source) => source,
+                    Err(fault) => {
+                        let mut observability = build_v3_direct_runtime_observability(
+                            C::policy_target(&policy),
+                            C::ENTRY_PROTOCOL,
+                            if C::body(&standardized)
+                                .get("stream")
+                                .and_then(serde_json::Value::as_bool)
+                                .unwrap_or(false)
+                            {
+                                "sse"
+                            } else {
+                                "json"
+                            },
+                            None,
+                            "failed",
+                            provider_failure_events.clone(),
+                        );
+                        observability.attempts = Some(total_attempts(&accumulator, send_attempts));
+                        return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
+                                Err(fault),
+                                last_external_http,
+                                trace,
+                                &crate::hooks::register_responses_direct_hooks(),
+                                Some(observability),
+                                provider_request_snapshot,
+                                None,
+                            );
+                    }
+                };
                 if source.source_kind != V3ErrorSourceKind::ProviderFailure {
                     drop(provider_action_permit.take());
                     return error_output(
@@ -634,6 +704,8 @@ where
                     }
                 };
                 if let Some(event) = policy_result.event.clone() {
+                    let mut event = event;
+                    event.failed_attempt_evidence = failed_attempt_evidence;
                     provider_failure_events.push(event.clone());
                     publish_v3_direct_provider_failure_event(
                         provider_failure_event_sink,
@@ -707,11 +779,12 @@ where
                         );
                     }
                     V3Error05ExecutionAction::RejectNonProviderError => {
-                        return error_output(
+                        return direct_runtime_helpers_stream::source_failure_output(
                             runtime_source(
                                 "V3Error05ExecutionDecision",
                                 "provider failure entered a non-provider Error05 lane",
                             ),
+                            last_external_http.clone(),
                             trace,
                             &crate::hooks::register_responses_direct_hooks(),
                         )
@@ -772,8 +845,9 @@ where
                     })
             });
             if let Err(timing_error) = runtime_timing.finish_external() {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     runtime_source("V3RuntimeTimingExternal", timing_error),
+                    last_external_http.clone(),
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                 );
@@ -915,8 +989,9 @@ where
             ) {
                 Ok(context) => context,
                 Err(error) => {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3DirectResp14ProviderCompat", error),
+                        last_external_http.clone(),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
                     )
@@ -934,22 +1009,41 @@ where
         .await
         {
             Ok(projection) => projection,
-            Err(source) => {
+            Err(Err(fault)) => {
+                return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
+                    Err(fault),
+                    last_external_http.clone(),
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                    None,
+                    provider_request_snapshot,
+                    provider_response_snapshot,
+                );
+            }
+            Err(Ok(source)) => {
                 if let Err(error) = runtime_timing.finish_external() {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
                         runtime_source("V3RuntimeTimingExternal", error),
+                        last_external_http.clone(),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
+                        None,
+                        provider_request_snapshot,
+                        provider_response_snapshot,
                     );
                 }
                 if !matches!(
                     source.source_kind,
                     routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
                 ) {
-                    return error_output(
-                        source,
+                    return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
+                        Ok(source),
+                        last_external_http.clone(),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
+                        None,
+                        provider_request_snapshot,
+                        provider_response_snapshot,
                     );
                 }
                 drop(provider_action_permit.take());
@@ -1104,25 +1198,47 @@ where
                 .await
                 {
                     Ok(committed) => committed,
-                    Err(source) if source.source_kind != V3ErrorSourceKind::ProviderFailure => {
+                    Err(Err(fault)) => {
                         if let Err(error) = runtime_timing.finish_external_if_active() {
-                            return error_output(
+                            return direct_runtime_helpers_stream::source_failure_output(
                                 runtime_source("V3RuntimeTimingExternal", error),
+                                last_external_http.clone(),
                                 trace,
                                 &crate::hooks::register_responses_direct_hooks(),
                             );
                         }
                         drop(provider_action_permit.take());
-                        return error_output(
-                            source,
+                        return direct_runtime_helpers_stream::source_failure_output(
+                            Err(fault),
+                            last_external_http.clone(),
                             trace,
                             &crate::hooks::register_responses_direct_hooks(),
                         );
                     }
-                    Err(source) => {
+                    Err(Ok(source))
+                        if source.source_kind != V3ErrorSourceKind::ProviderFailure =>
+                    {
                         if let Err(error) = runtime_timing.finish_external_if_active() {
-                            return error_output(
+                            return direct_runtime_helpers_stream::source_failure_output(
                                 runtime_source("V3RuntimeTimingExternal", error),
+                                last_external_http.clone(),
+                                trace,
+                                &crate::hooks::register_responses_direct_hooks(),
+                            );
+                        }
+                        drop(provider_action_permit.take());
+                        return direct_runtime_helpers_stream::source_failure_output(
+                            Ok(source),
+                            last_external_http.clone(),
+                            trace,
+                            &crate::hooks::register_responses_direct_hooks(),
+                        );
+                    }
+                    Err(Ok(source)) => {
+                        if let Err(error) = runtime_timing.finish_external_if_active() {
+                            return direct_runtime_helpers_stream::source_failure_output(
+                                runtime_source("V3RuntimeTimingExternal", error),
+                                last_external_http.clone(),
                                 trace,
                                 &crate::hooks::register_responses_direct_hooks(),
                             );
@@ -1249,8 +1365,9 @@ where
                         {
                             Ok(completion) => completion,
                             Err(source) => {
-                                return error_output(
+                                return direct_runtime_helpers_stream::source_failure_output(
                                     source,
+                                    last_external_http.clone(),
                                     trace,
                                     &crate::hooks::register_responses_direct_hooks(),
                                 )
@@ -1305,8 +1422,9 @@ where
             match crate::route_policy::compile_route_policies(manifest, &route_policy_group_id) {
                 Ok(policies) => policies,
                 Err(error) => {
-                    return error_output(
+                    return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3Router06RoutePoolResolved", error),
+                        last_external_http.clone(),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
                     )
@@ -1317,8 +1435,9 @@ where
             .map(|pending| pending.commit(&policies, now_epoch_ms))
             .transpose()
         {
-            return error_output(
+            return direct_runtime_helpers_stream::source_failure_output(
                 runtime_source("V3Router06RoutePoolResolved", error),
+                last_external_http.clone(),
                 trace,
                 &crate::hooks::register_responses_direct_hooks(),
             );
@@ -1331,8 +1450,9 @@ where
                 C::policy_target(&policy),
                 now_epoch_ms,
             ) {
-                return error_output(
+                return direct_runtime_helpers_stream::source_failure_output(
                     error,
+                    last_external_http.clone(),
                     trace,
                     &crate::hooks::register_responses_direct_hooks(),
                 );
@@ -1352,8 +1472,9 @@ where
                 Some(observation) => match observation.snapshot() {
                     Ok(snapshot) => snapshot.timing,
                     Err(error) => {
-                        return error_output(
+                        return direct_runtime_helpers_stream::source_failure_output(
                             runtime_source("V3RuntimeTimingObservation", error),
+                            last_external_http.clone(),
                             trace,
                             &crate::hooks::register_responses_direct_hooks(),
                         )

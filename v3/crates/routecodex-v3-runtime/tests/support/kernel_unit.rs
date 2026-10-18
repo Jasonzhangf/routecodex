@@ -21,6 +21,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::V3_PROVIDER_ACTION_ISOLATED_DELAY_MS;
 
+fn expect_ordinary_source<T, F: std::fmt::Debug>(
+    result: Result<T, Result<routecodex_v3_error::V3Error01SourceRaised, F>>,
+) -> routecodex_v3_error::V3Error01SourceRaised {
+    match result {
+        Err(Ok(source)) => source,
+        Err(Err(fault)) => panic!("unexpected SDK fault: {fault:?}"),
+        Ok(_) => panic!("expected an ordinary source"),
+    }
+}
+
 #[path = "../../src/kernel/tests/exact_pin.rs"]
 mod exact_pin;
 #[path = "../../src/kernel/tests/fixtures.rs"]
@@ -1958,13 +1968,14 @@ async fn direct_sse_full_attempt_commit_reselects_after_partial_network_failure(
             "network failure after partial provider output",
         )),
     ]));
-    let error = collect_direct_sse_attempt_after_terminal(
-        test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
-        V3HubProviderWireProtocol::Responses,
-        crate::nodes::V3AttemptBudget::process_default(),
-    )
-    .await
-    .expect_err("resident owner must receive the partial attempt failure");
+    let error = expect_ordinary_source(
+        collect_direct_sse_attempt_after_terminal(
+            test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+        )
+        .await,
+    );
     assert_eq!(error.code, "provider_response_sse_stream");
     let replacement: V3ClientSseStream = Box::pin(stream::iter([Ok(
         b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"recovered\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"recovered\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
@@ -2152,13 +2163,14 @@ async fn direct_sse_full_attempt_commit_rejects_eof_without_terminal() {
     let source: V3ClientSseStream = Box::pin(stream::iter([Ok(
         b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
     )]));
-    let error = collect_direct_sse_attempt_after_terminal(
-        test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
-        V3HubProviderWireProtocol::Responses,
-        crate::nodes::V3AttemptBudget::process_default(),
-    )
-    .await
-    .expect_err("EOF without terminal must be an error");
+    let error = expect_ordinary_source(
+        collect_direct_sse_attempt_after_terminal(
+            test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+        )
+        .await,
+    );
     assert_eq!(error.code, "provider_response_sse_stream");
 }
 
@@ -2175,13 +2187,14 @@ async fn direct_sse_full_attempt_commit_does_not_mix_failed_attempt_bytes() {
             "provider A disconnected",
         )),
     ]));
-    let error = collect_direct_sse_attempt_after_terminal(
-        test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
-        V3HubProviderWireProtocol::Responses,
-        crate::nodes::V3AttemptBudget::process_default(),
-    )
-    .await
-    .expect_err("provider A must fail before any bytes are committed");
+    let error = expect_ordinary_source(
+        collect_direct_sse_attempt_after_terminal(
+            test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+        )
+        .await,
+    );
     assert_eq!(error.code, "provider_response_sse_stream");
     let replacement: V3ClientSseStream = Box::pin(stream::iter([Ok(
         b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider-b\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-b-only\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider-b\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),

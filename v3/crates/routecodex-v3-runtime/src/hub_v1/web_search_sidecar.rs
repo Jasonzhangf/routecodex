@@ -3,10 +3,7 @@ use super::web_search_hook_request::{
 };
 use super::{V3ResponsesRelayRuntimeError, V3WebSearchCenterPhase, V3WebSearchCenterState};
 use crate::V3RequestExecutionControl;
-use routecodex_v3_error::{
-    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
-    V3InternalErrorCode,
-};
+use routecodex_v3_error::{V3ErrorSourceKind, V3InternalErrorCode};
 use routecodex_v3_hooks::{ControlRequest, ControlResponse, PROTOCOL};
 use serde_json::json;
 use servertool_core::web_search_contract::{
@@ -42,8 +39,8 @@ pub(crate) fn web_search_sidecar_failure_source(
     call_id: &str,
     code: impl Into<String>,
     message: &str,
-) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised_internal(
+) -> crate::shared::V3DirectSourceError {
+    crate::shared::direct_internal_error(
         V3ErrorSourceKind::RuntimeFailure,
         "V3DirectResp15ClientPayloadReady",
         code,
@@ -689,7 +686,8 @@ targets = [{ kind = "provider_model", provider = "test", model = "test-model", p
             "call-web-search-1",
             "search_unavailable",
             "controlled failure",
-        );
+        )
+        .expect("sidecar source must execute Error01");
         assert_eq!(source.source_stage, "V3DirectResp15ClientPayloadReady");
         assert_eq!(source.code, "search_unavailable");
         assert_eq!(
