@@ -139,6 +139,8 @@ impl Operator for Err01SourceRaisedOperator {
     }
 
     fn execute(&self, _input: Value, _: &OperatorContext) -> Result<Value, String> {
+        #[cfg(test)]
+        super::ERR01_EXECUTIONS.with(|count| count.set(count.get() + 1));
         let typed = self.raise();
         let output = match &typed {
             Ok(source) => serde_json::to_value(source)

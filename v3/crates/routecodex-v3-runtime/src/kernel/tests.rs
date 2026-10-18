@@ -1,6 +1,64 @@
 include!("../../tests/support/kernel_unit.rs");
 
 #[test]
+fn protocol_candidate_keys_raise_only_actual_failures() {
+    let manifest = test_manifest();
+    let raw = crate::nodes::build_v3_server_03_http_request_raw(
+        "test".into(),
+        test_failure_session_scope("default"),
+        "protocol-candidate-errors".into(),
+        "protocol-candidate-errors-exec".into(),
+        "POST".into(),
+        "/v1/responses".into(),
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        raw,
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        0,
+    )
+    .expect("baseline plan");
+    let mut expanded = plan.expanded;
+    let mut relay_only = expanded.candidates[0].clone();
+    relay_only.model_id = "relay-only".into();
+    relay_only.responses_process = Some("chat".into());
+    expanded.candidates.push(relay_only);
+    let allowed_modes = vec!["direct".to_string()];
+    let count = crate::operation_runner::err01_execution_count_for_test;
+    let before = count();
+    let keys = protocol_candidate_keys_for_decision_mode(
+        &expanded,
+        "responses",
+        &allowed_modes,
+        V3Execution11ProtocolDecisionMode::SameProtocolDirect,
+    )
+    .expect("retain the compatible candidate");
+    assert_eq!(keys.len(), 1);
+    assert_eq!(count() - before, 0, "candidate exclusions are not failures");
+
+    let before = count();
+    let source = expect_ordinary_source(protocol_candidate_keys_for_decision_mode(
+        &expanded,
+        "unsupported",
+        &allowed_modes,
+        V3Execution11ProtocolDecisionMode::SameProtocolDirect,
+    ));
+    assert_eq!(source.code, "entry_protocol_unresolved");
+    assert_eq!(count() - before, 1);
+
+    let before = count();
+    let source = expect_ordinary_source(protocol_candidate_keys_for_decision_mode(
+        &expanded,
+        "gemini",
+        &allowed_modes,
+        V3Execution11ProtocolDecisionMode::SameProtocolDirect,
+    ));
+    assert_eq!(source.code, "protocol_mode_candidate_set_empty");
+    assert_eq!(count() - before, 1, "only the empty-set outcome is raised");
+}
+
+#[test]
 fn direct_source_fault_preserves_http_witness_observability_and_snapshots() {
     let source = routecodex_v3_error::build_v3_error_01_source_raised(
         V3ErrorSourceKind::RuntimeFailure,

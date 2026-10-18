@@ -10361,6 +10361,80 @@ async fn responses_direct_binding_protocol_mismatch_without_relay_allowed_fails_
 }
 
 #[tokio::test]
+async fn error01_protocol_decision_normal_http_failure_no_client_error() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home = TestHomeGuard::new("protocol-decision-http");
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let sends = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = sends.clone();
+    let app = Router::new().fallback(move |request: axum::http::Request<Body>| {
+        if request.method() == axum::http::Method::POST {
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        async { StatusCode::OK }
+    });
+    let (stop, stopped) = oneshot::channel();
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(upstream, app)
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await
+            .unwrap();
+    });
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "secret-key");
+    let log = home.path.join("protocol-decision.log");
+    let mut manifest = responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "openai_chat",
+        &format!("http://{upstream_addr}/v1"),
+        r#""direct""#,
+    );
+    manifest.debug.log_file = Some(log.to_string_lossy().into_owned());
+    manifest.debug.log_console = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let address = handle.listeners[0].addr;
+    let response = client
+        .post(format!("http://{address}/v1/responses"))
+        .json(&json!({"model":"client-test","input":"protocol decision control","stream":false}))
+        .send()
+        .await;
+    let health = client.get(format!("http://{address}/health")).send().await;
+    handle.shutdown().await;
+    let _ = stop.send(());
+    upstream_task.await.unwrap();
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+    let diagnostic = fs::read_to_string(&log).unwrap_or_default();
+    assert!(
+        response.is_err(),
+        "failure must end transport without a client response"
+    );
+    assert!(
+        !response.unwrap_err().is_timeout(),
+        "the request must end detectably before timeout"
+    );
+    assert_eq!(sends.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(health
+        .expect("listener remains available")
+        .status()
+        .is_success());
+    assert!(
+        diagnostic.contains("V3Execution11ProtocolDecision"),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("protocol_mismatch_relay_not_allowed"),
+        "{diagnostic}"
+    );
+}
+
+#[tokio::test]
 async fn responses_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send(
 ) {
     let _test_guard = TEST_LOCK.lock().await;

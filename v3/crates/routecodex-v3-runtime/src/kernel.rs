@@ -665,11 +665,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 "responses",
                 &allowed_modes,
             )
+            .map_err(crate::nodes::raise_v3_execution_11_protocol_decision_failure)
         }) {
             Ok(decision) => decision,
             Err(source) => {
                 trace.push("V3Execution11ProtocolDecision");
-                return error_output(source, trace, &hook_registry);
+                return direct_runtime_helpers_stream::source_failure_output(
+                    source,
+                    last_external_http.clone(),
+                    trace,
+                    &hook_registry,
+                );
             }
         };
         trace.push("V3Execution11ProtocolDecision");

@@ -10,6 +10,8 @@ use std::sync::OnceLock;
 
 mod error_decision;
 mod operators;
+#[cfg(test)]
+pub(crate) use operators::err01_execution_count_for_test;
 pub(crate) mod plan_execution;
 mod resolve_target;
 mod single_node;
