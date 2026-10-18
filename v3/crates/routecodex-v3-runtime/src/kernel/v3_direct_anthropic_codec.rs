@@ -558,7 +558,6 @@ targets = [{ kind = "forwarder", id = "anthropic", priority = 1 }]
             candidate_count: 1,
             unavailable_candidates: Vec::new(),
             attempts: 1,
-            default_floor_protected: false,
         }
     }
 
