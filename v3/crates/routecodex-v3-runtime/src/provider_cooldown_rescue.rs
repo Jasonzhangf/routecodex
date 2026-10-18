@@ -533,8 +533,7 @@ pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
                     }
                     Err(reason) => {
                         return V3AdmittedTargetSelectionAfterRescue::Failed(
-                            build_v3_error_01_source_raised(
-                                V3ErrorSourceKind::RuntimeFailure,
+                            target_resolution_source(
                                 "V3Target10ConcreteProviderSelected",
                                 "provider_concurrency_admission_invalid_budget",
                                 reason,
