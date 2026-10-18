@@ -157,10 +157,7 @@ mod tests {
             policy_failure.source_kind,
             routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
         );
-        assert_eq!(
-            policy_failure.source_stage,
-            "V3Error06ClientProjected"
-        );
+        assert_eq!(policy_failure.source_stage, "V3Error06ClientProjected");
         assert_eq!(policy_failure.code, "relay_error_operator_sdk_failure");
         assert_eq!(original_source, source);
     }
