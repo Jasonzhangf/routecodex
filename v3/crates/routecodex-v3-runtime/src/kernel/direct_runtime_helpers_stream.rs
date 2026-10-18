@@ -983,6 +983,27 @@ pub(crate) fn error_output_with_observability(
     output
 }
 
+pub(crate) fn policy_failure_output_with_observability(
+    failure: DirectPolicyFailure,
+    last_external_http: Option<V3ExternalHttpWitness>,
+    node_trace: Vec<&'static str>,
+    hook_registry: &V3HookRegistry,
+    observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesDirectRuntimeOutput {
+    let mut output = error_output_with_observability(
+        failure.policy_failure,
+        node_trace,
+        hook_registry,
+        observability,
+    );
+    output.diagnostic_cause = Some(failure.original_source);
+    output.terminal_disposition = Some(match last_external_http {
+        Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
+        None => V3ProviderTerminalDisposition::NoResponse,
+    });
+    output
+}
+
 pub(crate) fn target_exhausted_output_with_observability(
     source: V3Error01SourceRaised,
     witness: Option<V3ExternalHttpWitness>,
@@ -1028,6 +1049,7 @@ pub(crate) fn projected_error_output_with_observability_and_snapshots(
         observability,
         terminal_disposition: None,
         diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         stream_observation: None,
         provider_request_snapshot,
         provider_response_snapshot,
@@ -1204,6 +1226,7 @@ pub(crate) fn relay_handoff_output(
         observability: None,
         terminal_disposition: None,
         diagnostic_source: None,
+        diagnostic_cause: None,
         stream_observation: None,
         provider_request_snapshot: None,
         provider_response_snapshot: None,

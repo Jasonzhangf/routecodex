@@ -211,24 +211,6 @@ impl V3DirectProtocolCodec for V3AnthropicDirectCodec {
         })
     }
 
-    fn run_error(
-        source: V3Error01SourceRaised,
-        scope: routecodex_v3_error::V3ErrorActionScope,
-        candidates_remaining: usize,
-        default_pool_available: bool,
-        same_provider_retry_available: bool,
-        recovery: Option<routecodex_v3_error::V3Error05RecoveryAdmissionWitness>,
-    ) -> routecodex_v3_error::V3Error05ExecutionDecision {
-        crate::hooks::responses_direct_error_hook(
-            source,
-            scope,
-            candidates_remaining,
-            default_pool_available,
-            same_provider_retry_available,
-            recovery,
-        )
-    }
-
     fn prepare_before_send(
         control: &mut Self::Control,
         _manifest: &routecodex_v3_config::V3Config05ManifestPublished,

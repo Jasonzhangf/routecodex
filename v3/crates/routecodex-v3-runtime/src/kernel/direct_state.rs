@@ -311,6 +311,7 @@ pub struct V3ResponsesDirectRuntimeOutput {
     pub client_payload: V3Resp15ClientPayload,
     pub terminal_disposition: Option<V3ProviderTerminalDisposition>,
     pub diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
     pub provider_request_snapshot: Option<serde_json::Value>,
     pub provider_response_snapshot: Option<serde_json::Value>,
     pub node_trace: Vec<&'static str>,
