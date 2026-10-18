@@ -168,13 +168,17 @@ pub(crate) fn required_dry_run_string(
 #[derive(Clone, Debug)]
 pub(crate) struct V3ModelClientNoResponse {
     pub(crate) streaming: bool,
+    pub(crate) diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub(crate) diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
 }
 
 pub(crate) fn model_no_response_output(streaming: bool) -> Response<Body> {
     let mut response = Response::new(Body::empty());
-    response
-        .extensions_mut()
-        .insert(V3ModelClientNoResponse { streaming });
+    response.extensions_mut().insert(V3ModelClientNoResponse {
+        streaming,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+    });
     response
 }
 
@@ -184,6 +188,7 @@ pub(crate) fn commit_model_transport_outcome(
     response: Response<Body>,
 ) -> Response<Body> {
     if let Some(outcome) = response.extensions().get::<V3ModelClientNoResponse>() {
+        append_v3_model_no_response_diagnostic(state, outcome);
         // A model-entry outcome with no client payload breaks the client transport
         // without a fabricated error. It carries no provider response head, so it has
         // no provider-terminal witness to record.
@@ -197,8 +202,44 @@ pub(crate) fn commit_model_transport_outcome(
     response
 }
 
+fn append_v3_model_no_response_diagnostic(
+    state: &V3ListenerState,
+    outcome: &V3ModelClientNoResponse,
+) {
+    let (Some(source), cause) = (
+        outcome.diagnostic_source.as_ref(),
+        outcome.diagnostic_cause.as_ref(),
+    ) else {
+        return;
+    };
+    let cause = cause
+        .map(|cause| {
+            format!(
+                " cause_kind={:?} cause_stage={} cause_code={} cause_message={}",
+                cause.source_kind, cause.source_stage, cause.code, cause.message
+            )
+        })
+        .unwrap_or_default();
+    let line = format!(
+        "[{}] v3 model transport terminal source_kind={:?} source_stage={} code={} message={}{}",
+        state.server.port,
+        source.source_kind,
+        source.source_stage,
+        source.code,
+        source.message,
+        cause
+    );
+    if let Err(error) = state.debug.append_human_console_line(&line) {
+        emit_v3_debug_sink_console_failure(state, &error);
+    }
+}
+
 pub(crate) fn foundation_output_response(output: V3FoundationRuntimeOutput) -> Response<Body> {
-    let failure = !output.error_chain.is_empty();
+    let diagnostic_source = output.diagnostic_source.clone();
+    let diagnostic_cause = output.diagnostic_cause.clone();
+    let failure = !output.error_chain.is_empty()
+        || output.diagnostic_source.is_some()
+        || output.status >= 400;
     let frame = build_v3_server_16_http_frame_from_v3_foundation_output(output);
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
@@ -223,9 +264,11 @@ pub(crate) fn foundation_output_response(output: V3FoundationRuntimeOutput) -> R
     // Control APIs retain diagnostic errors. The model-entry owner consumes
     // this typed outcome before any response is committed to its transport.
     if failure {
-        response
-            .extensions_mut()
-            .insert(V3ModelClientNoResponse { streaming: false });
+        response.extensions_mut().insert(V3ModelClientNoResponse {
+            streaming: false,
+            diagnostic_source,
+            diagnostic_cause,
+        });
     }
     response
 }
