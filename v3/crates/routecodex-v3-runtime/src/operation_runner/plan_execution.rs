@@ -174,7 +174,7 @@ impl PlanExecutionOperator {
     fn decide_execution_mode(
         &self,
         selected: V3Target10ConcreteProviderSelected,
-    ) -> Result<crate::nodes::V3Execution11ProtocolDecision, V3Error01SourceRaised> {
+    ) -> crate::shared::V3DirectSourceResult<crate::nodes::V3Execution11ProtocolDecision> {
         let (entry_protocol, allowed_modes) = match &self.mode_policy {
             V3PlanExecutionModePolicy::RelayOnly { entry_protocol } => {
                 (*entry_protocol, vec!["relay".to_string()])
@@ -195,6 +195,7 @@ impl PlanExecutionOperator {
             entry_protocol,
             &allowed_modes,
         )
+        .map_err(crate::nodes::raise_v3_execution_11_protocol_decision_failure)
     }
 
     fn execute_plan(&self) -> PlanExecutionOperatorOutput {
@@ -240,7 +241,8 @@ impl PlanExecutionOperator {
                         .request_local_excluded_candidates
                         .clone(),
                 },
-                Err(source) => PlanExecutionOperatorOutput::Failed(source),
+                Err(Ok(source)) => PlanExecutionOperatorOutput::Failed(source),
+                Err(Err(fault)) => PlanExecutionOperatorOutput::OperatorFault(fault),
             };
         }
         let step = step_v3_target_planning_with_admission_sync(V3SynchronousTargetPlanningInput {
@@ -267,7 +269,8 @@ impl PlanExecutionOperator {
                     admission: selected.admission,
                     request_local_excluded_candidates,
                 },
-                Err(source) => PlanExecutionOperatorOutput::Failed(source),
+                Err(Ok(source)) => PlanExecutionOperatorOutput::Failed(source),
+                Err(Err(fault)) => PlanExecutionOperatorOutput::OperatorFault(fault),
             },
             V3SynchronousTargetAdmissionStep::NeedPreExhaustionProbes {
                 expanded,
@@ -1143,6 +1146,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             false,
             Arc::clone(&side_output),
         );
+        let err01_before = crate::operation_runner::operators::err01_execution_count_for_test();
         assert!(
             run_v3_single_node_operator(
                 V3OperationGraph::Request,
@@ -1152,6 +1156,11 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             )
             .is_err(),
             "a typed planning failure must not be an SDK success"
+        );
+        assert_eq!(
+            crate::operation_runner::operators::err01_execution_count_for_test() - err01_before,
+            1,
+            "a real protocol decision failure must execute Error01 once"
         );
         let Some(PlanExecutionOperatorOutput::Failed(source)) = side_output.lock().unwrap().take()
         else {
@@ -1164,6 +1173,29 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             "same protocol selected target requires direct or relay mode but neither is allowed",
         );
         assert_eq!(source, expected);
+        let before_preplan = crate::operation_runner::operators::err01_execution_count_for_test();
+        let preplan = run_v3_plan_execution_preplan_operator(
+            request.clone(),
+            manifest.clone(),
+            V3PlanExecutionTargetSource::Expanded(expanded.clone()),
+            scope.clone(),
+            health.clone(),
+            BTreeSet::new(),
+            now_ms,
+            0,
+            V3PlanExecutionModePolicy::DirectEntry {
+                entry_protocol: V3HubEntryProtocol::Responses,
+                allowed_modes: vec![],
+            },
+        );
+        let Err(V3PlanExecutionStop::Failed(preplan_source)) = preplan else {
+            panic!("preplanning must retain the original typed failure");
+        };
+        assert_eq!(preplan_source, expected);
+        assert_eq!(
+            crate::operation_runner::operators::err01_execution_count_for_test() - before_preplan,
+            1,
+        );
         let outcome = run_v3_plan_execution_operator(
             request,
             manifest,

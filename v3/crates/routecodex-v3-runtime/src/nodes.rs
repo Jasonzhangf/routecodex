@@ -715,6 +715,17 @@ pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
     }
 }
 
+pub(crate) fn raise_v3_execution_11_protocol_decision_failure(
+    source: V3Error01SourceRaised,
+) -> crate::shared::V3DirectSourceError {
+    crate::shared::direct_plain_error(
+        source.source_kind,
+        source.source_stage,
+        source.code,
+        source.message,
+    )
+}
+
 pub fn build_v3_execution_11_protocol_decision_from_v3_target_10(
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     entry_protocol: &str,
