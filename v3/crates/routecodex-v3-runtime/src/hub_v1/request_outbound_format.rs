@@ -1385,11 +1385,22 @@ fn chat_assistant_reasoning_to_responses_input_item(row: &Map<String, Value>) ->
         .get("reasoning_content")
         .or_else(|| row.get("reasoning_text"))
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())?;
-    Some(json!({
-        "type": "reasoning",
-        "summary": [{"type": "summary_text", "text": text}]
-    }))
+        .filter(|value| !value.trim().is_empty());
+    let signature = row
+        .get("reasoning")
+        .and_then(|value| value.get("encrypted_content"))
+        .and_then(Value::as_str);
+    if text.is_none() && signature.is_none() {
+        return None;
+    }
+    let mut item = json!({"type":"reasoning", "summary":[]});
+    if let Some(text) = text {
+        item["summary"] = json!([{"type":"summary_text","text":text}]);
+    }
+    if let Some(signature) = signature {
+        item["encrypted_content"] = json!(signature);
+    }
+    Some(item)
 }
 
 /// 返回 (投影值, 丢弃记录) 的 non-error carrier 版本；丢弃记录同时来自

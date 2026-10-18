@@ -178,7 +178,10 @@ pub(crate) fn build_v3_responses_reasoning_item_from_openai_chat_message(
                     .map(v3_reasoning_summary_text_entry)
                     .collect();
             }
-            encrypted_content = read_v3_trimmed_string(reasoning_row.get("encrypted_content"));
+            encrypted_content = reasoning_row
+                .get("encrypted_content")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
         } else if let Some(text) = flatten_v3_reasoning_text(reasoning) {
             summary.push(v3_reasoning_summary_text_entry(text));
         }

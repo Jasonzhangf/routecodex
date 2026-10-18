@@ -524,6 +524,9 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
     if let Some(source_content) = source.get("content") {
         merge_v3_openai_chat_message_content(target, source_content);
     }
+    if let Some(reasoning) = source.get("reasoning") {
+        target.insert("reasoning".to_string(), reasoning.clone());
+    }
     if let Some(source_reasoning) = source
         .get("reasoning_content")
         .and_then(Value::as_str)
@@ -703,11 +706,15 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
         collect_v3_openai_chat_reasoning_segments(Some(&Value::Object(item.clone()))).as_slice(),
     )
     .unwrap_or_default();
-    Some(json!({
+    let mut message = json!({
         "role":"assistant",
         "content":"",
         "reasoning_content":reasoning_content
-    }))
+    });
+    if let Some(signature) = item.get("encrypted_content").and_then(Value::as_str) {
+        message["reasoning"] = json!({"encrypted_content":signature});
+    }
+    Some(message)
 }
 
 fn build_v3_openai_chat_assistant_tool_call_message(

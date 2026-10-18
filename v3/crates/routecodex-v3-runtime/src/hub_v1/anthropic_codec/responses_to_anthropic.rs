@@ -492,19 +492,13 @@ pub(crate) fn project_v3_responses_reasoning_item_as_anthropic_content(
     };
     let encrypted_content = match object.get("encrypted_content") {
         None | Some(Value::Null) => None,
-        Some(value) => {
-            let value = value
+        Some(value) => Some(
+            value
                 .as_str()
                 .ok_or(V3AnthropicCodecError::MalformedField {
                     field: "reasoning item",
-                })?;
-            if value.trim().is_empty() {
-                return Err(V3AnthropicCodecError::MalformedField {
-                    field: "reasoning item",
-                });
-            }
-            Some(value)
-        }
+                })?,
+        ),
     };
     if !thinking.is_empty() {
         let mut block = json!({

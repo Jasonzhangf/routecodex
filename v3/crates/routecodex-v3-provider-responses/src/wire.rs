@@ -497,7 +497,8 @@ fn ensure_v3_official_deepseek_reasoning_text(
 
 /// 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）。
 ///
-/// 密文剥离对所有非 gpt 目标统一执行；DeepSeek/opencode 目标（deepseek_compat）
+/// 非 GPT 目标仅剥离已识别的 Codex 密文；Anthropic signature 原样保留。
+/// DeepSeek/opencode 目标（deepseek_compat）
 /// 额外做统一重写：opencode/DeepSeek 网关把 Responses reasoning 转 Chat 时只认
 /// `content:[{type:"reasoning_text",text}]`（对应官方 `reasoning_content` 回传
 /// 规则），`summary`、顶层 `text`、`encrypted_content` 形态都会让上游 400
@@ -514,7 +515,11 @@ fn strip_v3_request_encrypted_reasoning(body: &mut Value, deepseek_compat: bool)
         if obj.get("type").and_then(Value::as_str) != Some("reasoning") {
             continue;
         }
-        obj.remove("encrypted_content");
+        if obj.get("encrypted_content").is_some_and(Value::is_null) {
+            obj.remove("encrypted_content");
+        } else {
+            strip_v3_cipher_field(obj);
+        }
         if deepseek_compat {
             let plain = join_v3_reasoning_plain_text(obj);
             let text = if plain.is_empty() {

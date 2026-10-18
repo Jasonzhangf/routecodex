@@ -30,6 +30,8 @@ mod test_ports;
 
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
+#[path = "namespace_cross_protocol_public/anthropic_empty_signature.rs"]
+mod anthropic_empty_signature;
 #[path = "namespace_cross_protocol_public/anthropic_invalid.rs"]
 mod anthropic_invalid;
 #[path = "support/gemini_signature_filter_public.rs"]
@@ -43,6 +45,11 @@ async fn anthropic_custom_invalid_input_preserves_declared_identity_and_paired_c
 #[tokio::test]
 async fn anthropic_custom_unrecognized_reason_wrapper_preserves_complete_roundtrip() {
     anthropic_invalid::run_reason_wrapper().await;
+}
+
+#[tokio::test]
+async fn anthropic_empty_signature_responses_tool_roundtrip_public() {
+    anthropic_empty_signature::run().await;
 }
 
 const ORDINARY_NAMESPACE: &str = "plain_namespace";

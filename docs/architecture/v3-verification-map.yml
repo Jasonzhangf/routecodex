@@ -851,6 +851,9 @@ features:
   owner_scope: Generic Anthropic protocol codec characterization across client input, Hub request semantic, provider wire, provider raw, Hub response semantic, and client projection
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/message_encoding.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs
   - v3/scripts/architecture/verify-v3-anthropic-codec-characterization.mjs
   - v3/scripts/tests/v3-anthropic-codec-characterization-red-fixtures.mjs
@@ -1873,6 +1876,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/signature_target_projection_tests.rs
   - v3/crates/routecodex-v3-server/tests/namespace_cross_protocol_public.rs
   - v3/crates/routecodex-v3-server/tests/namespace_cross_protocol_public/anthropic_invalid.rs
+  - v3/crates/routecodex-v3-server/tests/namespace_cross_protocol_public/anthropic_empty_signature.rs
   - v3/crates/routecodex-v3-server/tests/support/gemini_signature_filter_public.rs
   - v3/crates/routecodex-v3-server/tests/gemini_sse_attempt_public.rs
   - v3/crates/routecodex-v3-server/tests/gemini_terminal_public.rs
@@ -2000,6 +2004,8 @@ features:
   - Source-level controlled runtime tests capture provider wire and client projection for the three supported paths.
   - responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect
   - responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect
+  - anthropic_empty_signature_responses_tool_roundtrip_public
+  - responses_reasoning_signature_survives_canonical_tool_coalescing
   - responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input
   - chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input
   - anthropic_malformed_function_wrapper_restores_exact_raw_arguments

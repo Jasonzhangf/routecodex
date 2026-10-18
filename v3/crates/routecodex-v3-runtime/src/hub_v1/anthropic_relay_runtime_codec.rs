@@ -407,8 +407,6 @@ fn optional_anthropic_reasoning_string<'a>(
     };
     value
         .as_str()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
         .map(Some)
         .ok_or(V3AnthropicCodecError::MalformedField {
             field: "reasoning content",
@@ -496,6 +494,37 @@ fn responses_stop_reason_as_anthropic_stop_reason(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anthropic_sse_signature_preserves_empty_whitespace_and_absence() {
+        for signature in [
+            None,
+            Some(""),
+            Some("sig-opaque"),
+            Some(" padded signature "),
+        ] {
+            let mut reasoning = json!({
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"inspect the tool result"}]
+            });
+            if let Some(signature) = signature {
+                reasoning["encrypted_content"] = json!(signature);
+            }
+            let events = project_v3_responses_json_as_anthropic_events(&json!({
+                "id":"resp_signature_sse",
+                "status":"completed",
+                "output":[reasoning]
+            }))
+            .expect("representable signatures must reach Anthropic SSE unchanged");
+            let actual: Vec<Value> = events
+                .iter()
+                .filter(|event| event["data"]["delta"]["type"] == "signature_delta")
+                .map(|event| event["data"]["delta"]["signature"].clone())
+                .collect();
+            let expected: Vec<Value> = signature.into_iter().map(Value::from).collect();
+            assert_eq!(actual, expected);
+        }
+    }
 
     #[test]
     fn anthropic_tool_arguments_keep_complete_objects_and_original_unrepresentable_values() {

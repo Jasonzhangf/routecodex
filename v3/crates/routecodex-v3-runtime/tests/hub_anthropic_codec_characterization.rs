@@ -965,6 +965,49 @@ fn anthropic_assistant_thinking_history_normalizes_to_ordered_responses_reasonin
 }
 
 #[test]
+fn anthropic_assistant_thinking_history_preserves_present_empty_and_nonempty_signatures() {
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"assistant",
+            "content":[
+                {"type":"thinking","thinking":"empty signature","signature":""},
+                {"type":"thinking","thinking":"nonempty signature","signature":"sig-nonempty"},
+                {"type":"thinking","thinking":"absent signature"}
+            ]
+        }]
+    }))
+    .expect("present empty signatures are representable Responses encrypted_content");
+
+    let input = semantic["input"].as_array().expect("Responses input items");
+    assert_eq!(input[0]["encrypted_content"], "");
+    assert_eq!(input[1]["encrypted_content"], "sig-nonempty");
+    assert!(
+        input[2].get("encrypted_content").is_none(),
+        "absent signature must stay absent: {semantic}"
+    );
+}
+
+#[test]
+fn anthropic_thinking_history_rejects_non_string_signature() {
+    let error = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"assistant",
+            "content":[{"type":"thinking","thinking":"visible thought","signature":42}]
+        }]
+    }))
+    .expect_err("a non-string signature is not representable");
+
+    assert!(matches!(
+        error,
+        V3AnthropicCodecError::MalformedField {
+            field: "reasoning content"
+        }
+    ));
+}
+
+#[test]
 fn anthropic_malformed_thinking_history_fails_instead_of_disappearing() {
     let error = encode_v3_anthropic_request_as_responses_semantic(json!({
         "model":"claude-sonnet",
@@ -1099,6 +1142,41 @@ fn responses_replay_reasoning_restores_anthropic_thinking_and_redacted_blocks() 
 }
 
 #[test]
+fn responses_replay_reasoning_preserves_present_empty_and_nonempty_signatures() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream":false,
+        "input":[
+            {
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"empty signature"}],
+                "encrypted_content":""
+            },
+            {
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"nonempty signature"}],
+                "encrypted_content":"sig-nonempty"
+            },
+            {
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"absent signature"}]
+            }
+        ]
+    }))
+    .expect("present empty encrypted_content is representable Anthropic signature");
+
+    let messages = provider_request["messages"]
+        .as_array()
+        .expect("Anthropic request messages");
+    assert_eq!(messages[0]["content"][0]["signature"], "");
+    assert_eq!(messages[1]["content"][0]["signature"], "sig-nonempty");
+    assert!(
+        messages[2]["content"][0].get("signature").is_none(),
+        "absent encrypted_content must not become a signature: {provider_request}"
+    );
+}
+
+#[test]
 fn responses_reasoning_rejects_content_and_summary_dual_truth() {
     let error = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
@@ -1151,7 +1229,7 @@ fn responses_reasoning_null_encrypted_content_is_absent_identity() {
 
 #[test]
 fn responses_reasoning_rejects_malformed_encrypted_content() {
-    for encrypted_content in [json!(42), json!({}), json!("")] {
+    for encrypted_content in [json!(42), json!({})] {
         let error = encode_v3_responses_semantic_as_anthropic_request(json!({
             "model":"MiniMax-M3",
             "stream":false,
@@ -2091,6 +2169,30 @@ fn response_characterization_preserves_anthropic_redacted_reasoning_as_encrypted
 }
 
 #[test]
+fn response_characterization_preserves_present_empty_and_absent_thinking_signatures() {
+    let response = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_signature_identity",
+        "type":"message",
+        "role":"assistant",
+        "content":[
+            {"type":"thinking","thinking":"empty signature","signature":""},
+            {"type":"thinking","thinking":"nonempty signature","signature":"sig-nonempty"},
+            {"type":"thinking","thinking":"absent signature"},
+            {"type":"text","text":"visible answer"}
+        ],
+        "stop_reason":"end_turn"
+    }))
+    .expect("present empty signatures must survive Anthropic response characterization");
+
+    assert_eq!(response["output"][0]["encrypted_content"], "");
+    assert_eq!(response["output"][1]["encrypted_content"], "sig-nonempty");
+    assert!(
+        response["output"][2].get("encrypted_content").is_none(),
+        "absent signature must stay absent: {response}"
+    );
+}
+
+#[test]
 fn responses_reasoning_encrypted_content_projects_to_anthropic_thinking_identity() {
     let projected = routecodex_v3_runtime::project_v3_responses_json_as_anthropic_message(&json!({
         "id":"resp_reasoning_identity",
@@ -2123,6 +2225,32 @@ fn responses_reasoning_encrypted_content_projects_to_anthropic_thinking_identity
                 "data":"redacted-payload"
             }
         ])
+    );
+}
+
+#[test]
+fn responses_reasoning_empty_encrypted_content_projects_to_present_empty_signature() {
+    let projected = routecodex_v3_runtime::project_v3_responses_json_as_anthropic_message(&json!({
+        "id":"resp_empty_reasoning_identity",
+        "status":"completed",
+        "output":[
+            {
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"empty signature"}],
+                "encrypted_content":""
+            },
+            {
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"absent signature"}]
+            }
+        ]
+    }))
+    .expect("present empty encrypted_content must project to a present empty signature");
+
+    assert_eq!(projected["content"][0]["signature"], "");
+    assert!(
+        projected["content"][1].get("signature").is_none(),
+        "absent encrypted_content must stay absent: {projected}"
     );
 }
 

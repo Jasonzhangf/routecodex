@@ -1531,3 +1531,31 @@ fn anthropic_system_extension_consumes_text_without_replaying_or_dropping_residu
         assert_eq!(source, original);
     }
 }
+#[test]
+fn responses_reasoning_signature_survives_canonical_tool_coalescing() {
+    for signature in [None, Some(""), Some("sig-opaque"), Some(" padded ")] {
+        let mut reasoning =
+            json!({"type":"reasoning","summary":[{"type":"summary_text","text":"calculate"}]});
+        if let Some(signature) = signature {
+            reasoning["encrypted_content"] = json!(signature);
+        }
+        let source = json!({"model":"test","input":[
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"working"}]},
+            reasoning,
+            {"type":"function_call","call_id":"call_1","name":"add","arguments":"{}"}
+        ]});
+        let canonical = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(&source).unwrap();
+        let wire =
+            build_v3_openai_responses_standard_request_from_chat_canonical(&canonical).unwrap();
+        let item = wire["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "reasoning")
+            .unwrap();
+        assert_eq!(
+            item.get("encrypted_content"),
+            signature.map(|value| json!(value)).as_ref()
+        );
+    }
+}
