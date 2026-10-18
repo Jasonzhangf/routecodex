@@ -57,6 +57,7 @@ modules:
       - node:child_process
       - node:fs
       - node:path
+      - node:readline
       - node:url
     forbidden_paths:
       - v3/crates

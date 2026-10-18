@@ -28,11 +28,9 @@ Keep the steady-state allocated size of `v3/target/debug` at or below 2 GiB. Eve
 - When a restricted environment denies process-start inspection for another live PID, the lock remains conservative only for a bounded lease and cannot become permanent.
 - A relative `CARGO_TARGET_DIR` is resolved against the repo root, then the wrapper appends `routecodex-v3-test` and passes that isolated absolute namespace to Cargo.
 - An explicit shared `CARGO_TARGET_DIR` keeps unrelated workspace artifacts outside the RouteCodex cleanup namespace.
-- An over-budget directory with another active V3 builder fails explicitly instead of racing cleanup against compilation.
-- Builder detection uses the untruncated `ps ucomm` executable identity; macOS `comm`
-  path truncation cannot hide a real `cargo` or `rustc`, while a parent `sh -c` or npm
-  command that merely contains a later `cargo` argument is not itself a builder and
-  cannot deadlock the wrapper's own post-test cleanup.
+- An over-budget directory with another active V3 builder defers cache maintenance and preserves the completed test result instead of racing cleanup against compilation.
+- Builder detection first inventories PID and untruncated `ps ucomm` executable identity, then streams the full command only for candidate `cargo` or `rustc` PIDs. Unrelated process command lines never enter the wrapper buffer, so a large unrelated argv cannot fail terminal cleanup. macOS `comm` path truncation cannot hide a real `cargo` or `rustc`, while a parent `sh -c` or npm command that merely contains a later `cargo` argument is not itself a builder and cannot deadlock the wrapper's own post-test cleanup.
+- A builder inventory or selected-command query failure fails cleanup explicitly and never proceeds to profile eviction.
 - A real `cargo` or `rustc` executable targeting V3 remains an active builder even
   when its parent command is the current build pipeline.
 - A post-eviction directory above 2 GiB fails explicitly; it must not silently report success.

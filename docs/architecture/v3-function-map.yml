@@ -4206,7 +4206,6 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:v3-mainline-caller-flow
   - npm run verify:v3-architecture-docs
-  - npm run verify:servertool-rust-only
   - npm run build:v3-cli
   runtime_status: design_only_not_implemented
 - feature_id: v3.console_request_count_visibility

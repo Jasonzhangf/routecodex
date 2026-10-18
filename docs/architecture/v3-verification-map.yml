@@ -2677,7 +2677,6 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:v3-mainline-caller-flow
   - npm run verify:v3-architecture-docs
-  - npm run verify:servertool-rust-only
   - npm run build:v3-cli
   source_evidence:
   - docs/architecture/evidence/v3-web-search-servertool-source.json
@@ -3123,7 +3122,9 @@ features:
   required_negative:
   - Raw package-script V3 Cargo tests cannot bypass the wrapper.
   - Cleanup cannot touch runtime source, installed releases, payloads, control resources, or unrelated dependency artifacts.
-  - Active external V3 builders prevent cache eviction and produce an explicit failure.
+  - Active external V3 builders prevent cache eviction and defer cache maintenance while preserving the completed test result.
+  - Builder detection inventories PID and executable identity first, then streams full commands only for candidate Cargo or rustc PIDs, so unrelated long argv cannot fail terminal cleanup.
+  - A builder inventory or selected-command query failure fails cleanup explicitly and never proceeds to profile eviction.
   - PID reuse cannot preserve a stale canonical-test lock because ownership also requires the recorded process-start identity.
   - Post-eviction allocation above 2 GiB fails explicitly.
   required_gates:

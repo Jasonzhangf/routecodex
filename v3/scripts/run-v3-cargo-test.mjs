@@ -19,6 +19,7 @@ import {
   resolve,
   sep,
 } from 'node:path';
+import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 export const MAX_DEBUG_BYTES = 2147483648;
@@ -171,18 +172,77 @@ export function verifyV3DebugBudget({
   return bytes;
 }
 
-function activeV3BuilderCommands() {
-  const result = spawnSync('ps', ['-axo', 'pid=,ucomm=,command='], { encoding: 'utf8' });
-  if (result.error || result.status !== 0) {
-    throw new Error(`unable to inspect active V3 builders: ${result.error?.message ?? result.stderr ?? `exit ${result.status}`}`);
+function streamProcessLines(command, args, handleLine) {
+  return new Promise((resolveCompletion, reject) => {
+    let child;
+    try {
+      child = spawn(command, args, { stdio: ['ignore', 'pipe', 'inherit'] });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    let settled = false;
+    const finish = (error, completion) => {
+      if (settled) return;
+      settled = true;
+      lines.close();
+      if (error) {
+        try { child.kill('SIGKILL'); } catch {}
+        reject(error);
+        return;
+      }
+      resolveCompletion(completion);
+    };
+    lines.on('line', (line) => {
+      if (settled) return;
+      try {
+        handleLine(line.trim());
+      } catch (error) {
+        finish(error);
+      }
+    });
+    child.once('error', (error) => finish(error));
+    child.once('close', (code, signal) => finish(null, { code, signal }));
+  });
+}
+
+async function activeV3BuilderCommands() {
+  const ownPid = process.pid;
+  const candidates = new Set();
+  try {
+    const inventory = await streamProcessLines('ps', ['-axo', 'pid=,ucomm='], (line) => {
+      if (!line) return;
+      const processInfo = parseV3BuilderProcessLine(line);
+      if (processInfo && processInfo.pid !== ownPid) candidates.add(processInfo.pid);
+    });
+    if (inventory.signal) throw new Error(`ps terminated by ${inventory.signal}`);
+    if (inventory.code !== 0) throw new Error(`ps exit ${inventory.code}`);
+  } catch (error) {
+    throw new Error(`unable to inspect active V3 builders: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const ownPid = String(process.pid);
-  return result.stdout
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !line.startsWith(`${ownPid} `))
-    .filter((line) => builderCommandUsesOwnedV3Domain(line));
+  const builders = [];
+  for (const pid of candidates) {
+    let lineCount = 0;
+    try {
+      const selected = await streamProcessLines(
+        'ps',
+        ['-ww', '-p', String(pid), '-o', 'pid=,ucomm=,command='],
+        (line) => {
+          if (!line) return;
+          lineCount += 1;
+          if (builderCommandUsesOwnedV3Domain(line)) builders.push(line);
+        },
+      );
+      if (selected.signal) throw new Error(`ps terminated by ${selected.signal}`);
+      if (selected.code !== 0 && !(lineCount === 0 && !processExists(pid))) {
+        throw new Error(`ps exit ${selected.code}`);
+      }
+    } catch (error) {
+      throw new Error(`unable to inspect active V3 builders: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return builders;
 }
 
 export function parseV3BuilderProcessLine(line) {
@@ -248,20 +308,20 @@ function cleanV3TestProfile() {
   if (result.stderr) process.stderr.write(result.stderr);
 }
 
-export function enforceV3DebugBudget({
+export async function enforceV3DebugBudget({
   debugDir: ownedDebugDir = debugDir,
   maxBytes = MAX_DEBUG_BYTES,
   activeBuilders = activeV3BuilderCommands,
   cleanTestProfile = cleanV3TestProfile,
 } = {}) {
-  if (activeBuilders().length > 0) {
+  if ((await activeBuilders()).length > 0) {
     process.stderr.write('[v3-cargo-test] refusing cache eviction while V3 builders are active; cache maintenance deferred\n');
     return null;
   }
   try {
     return verifyV3DebugBudget({ debugDir: ownedDebugDir, maxBytes });
   } catch (budgetError) {
-    if (activeBuilders().length > 0) {
+    if ((await activeBuilders()).length > 0) {
       process.stderr.write('[v3-cargo-test] refusing cache eviction while V3 builders are active; cache maintenance deferred\n');
       return null;
     }
@@ -457,7 +517,7 @@ export async function runV3CargoTest(args) {
   } finally {
     try {
       await releaseOwnedTestArtifacts({ executables });
-      const bytes = enforceV3DebugBudget();
+      const bytes = await enforceV3DebugBudget();
       if (bytes !== null) {
         process.stdout.write(`[v3-cargo-test] debug allocation after cleanup: ${bytes} bytes\n`);
       }
