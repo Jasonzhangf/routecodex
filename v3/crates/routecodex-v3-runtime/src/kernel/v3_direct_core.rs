@@ -1365,8 +1365,9 @@ where
                         {
                             Ok(completion) => completion,
                             Err(source) => {
-                                return error_output(
+                                return direct_runtime_helpers_stream::source_failure_output(
                                     source,
+                                    last_external_http.clone(),
                                     trace,
                                     &crate::hooks::register_responses_direct_hooks(),
                                 )
