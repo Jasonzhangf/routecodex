@@ -17,7 +17,6 @@ export function collectV3BuildTestArtifactBudgetFailures(sources) {
   requireMatch(sources.wrapper, /function verifyV3DebugBudget|export function verifyV3DebugBudget/u, 'V3 test wrapper must verify the post-test budget');
   requireMatch(sources.wrapper, /function enforceV3DebugBudget|export function enforceV3DebugBudget/u, 'V3 test wrapper must own over-budget cache eviction');
   requireMatch(sources.wrapper, /refusing cache eviction while V3 builders are active/u, 'V3 test wrapper must refuse cache eviction during another active build');
-  requireMatch(sources.wrapper, /spawnSync\('ps',\s*\['-axo',\s*'pid=,ucomm=,command='\]/u, 'V3 builder scan must use the untruncated executable name separately from command arguments');
   requireMatch(sources.wrapper, /function parseV3BuilderProcessLine|export function parseV3BuilderProcessLine/u, 'V3 builder scan must parse executable identity before classifying Cargo or rustc work');
   requireMatch(sources.wrapper, /basename\(match\[2\]\)[\s\S]*executable !== 'cargo' && executable !== 'rustc'/u, 'V3 builder scan must reject shell commands that merely mention cargo or rustc');
   requireMatch(sources.wrapper, /'clean',[\s\S]*'--profile',[\s\S]*'test'/u, 'V3 test wrapper must use Cargo test-profile cleanup for over-budget eviction');
@@ -40,6 +39,9 @@ export function collectV3BuildTestArtifactBudgetFailures(sources) {
   }
   if (/unable to inspect process/u.test(sources.wrapper)) {
     failures.push('V3 test wrapper must not fail Cargo tests when ps inspection is unavailable');
+  }
+  if (/spawnSync\('ps',\s*\['-axo'/u.test(sources.wrapper)) {
+    failures.push('V3 builder scan must not buffer every process command line synchronously');
   }
   requireMatch(sources.runner, /runV3CargoTest/u, 'The canonical V3 test entry must delegate to runV3CargoTest');
   requireMatch(sources.moduleRegistry, /^status:\s*active$/mu, 'V3 build-tool module registry must be active');
