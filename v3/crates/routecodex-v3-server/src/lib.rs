@@ -81,8 +81,8 @@ use routecodex_v3_debug::{
     V3DebugTraceScope, V3DryRunFixture, V3RedactionPolicy,
 };
 use routecodex_v3_error::{
-    is_v3_client_disconnect_source, raise_v3_debug_artifact_failure, V3Error01SourceRaised,
-    V3ErrorSourceKind, V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
+    is_v3_client_disconnect_source, V3Error01SourceRaised, V3ErrorSourceKind,
+    V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw, build_v3_server_03_http_request_raw_with_purpose,

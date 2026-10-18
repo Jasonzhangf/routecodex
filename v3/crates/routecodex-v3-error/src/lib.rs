@@ -1321,16 +1321,6 @@ pub fn is_v3_sse_recoverable_disconnect_source(source: &V3Error01SourceRaised) -
     )
 }
 
-pub fn raise_v3_debug_artifact_failure(message: impl Into<String>) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised_internal(
-        V3ErrorSourceKind::RuntimeFailure,
-        "V3DebugArtifact",
-        "codex_sample_persistence_failed",
-        message,
-        V3InternalErrorCode::V3DebugArtifact,
-    )
-}
-
 pub fn project_v3_post_commit_sse_source(
     source: V3Error01SourceRaised,
     status: u16,

@@ -349,12 +349,9 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
                     match stream.next().await {
                         Some(Ok(bytes)) => {
                             if let Err(error) = recorder.append_chunk(&bytes) {
-                                return Some((
-                                    Err(raise_v3_debug_artifact_failure(format!(
-                                        "client response capture failed: {error}"
-                                    ))),
-                                    (stream, true),
-                                ));
+                                eprintln!(
+                                    "[v3-sse-snapshot] client response capture failed: {error}"
+                                );
                             }
                             Some((Ok(bytes), (stream, false)))
                         }
@@ -363,12 +360,9 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
                                 Some(error.message.as_str()),
                                 V3RecorderPersistPhase::Terminal,
                             ) {
-                                return Some((
-                                    Err(raise_v3_debug_artifact_failure(format!(
-                                        "client response finalize failed: {capture_error}"
-                                    ))),
-                                    (stream, true),
-                                ));
+                                eprintln!(
+                                    "[v3-sse-snapshot] client response finalize failed: {capture_error}"
+                                );
                             }
                             Some((Err(error), (stream, true)))
                         }
@@ -376,12 +370,9 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
                             if let Err(error) =
                                 recorder.persist_current(None, V3RecorderPersistPhase::Terminal)
                             {
-                                return Some((
-                                    Err(raise_v3_debug_artifact_failure(format!(
-                                        "client response finalize failed: {error}"
-                                    ))),
-                                    (stream, true),
-                                ));
+                                eprintln!(
+                                    "[v3-sse-snapshot] client response finalize failed: {error}"
+                                );
                             }
                             None
                         }
@@ -393,6 +384,15 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
 
     pub(crate) fn persist_initial(&self) -> Result<(), String> {
         self.core.persist_initial()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn poison_raw_sse_capture_for_test(&self) {
+        let raw_sse = Arc::clone(&self.core.raw_sse);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = raw_sse.lock().expect("test capture lock");
+            panic!("poison V3 live snapshot capture mutex for test");
+        }));
     }
 }
 
