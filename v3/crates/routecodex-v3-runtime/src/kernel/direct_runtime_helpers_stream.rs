@@ -925,47 +925,22 @@ pub(crate) fn sdk_fault_leaf_source(
 pub(crate) fn compat_source(
     stage: &'static str,
     error: &crate::hub_v1::V3ProviderCompatError,
-) -> V3Error01SourceRaised {
+) -> crate::shared::V3DirectSourceError {
     use crate::hub_v1::V3ProviderCompatErrorClassification;
     match error.classification() {
         V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
-            let field = extract_v3_provider_compat_boundary_field(&error.reason)
-                .unwrap_or("control_like_top_level_field");
-            routecodex_v3_error::raise_v3_provider_compat_payload_boundary_violation(
-                stage,
-                field,
-                error.reason.as_str(),
-            )
+            crate::hub_v1::provider_compat_boundary_source(stage, error)
         }
         V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
             crate::hub_v1::provider_request_payload_source(stage, error)
         }
-        // Pending-R: shared provider-compat helpers still return Source-only.
-        // Keep this ordinary source wrapper until those producers migrate.
-        V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            stage,
-            "v3_route_target_runtime_failure",
-            error.to_string(),
-        ),
-    }
-}
-
-fn extract_v3_provider_compat_boundary_field(reason: &str) -> Option<&'static str> {
-    let marker = "ProviderCompatPayloadBoundaryViolation field=";
-    let start = reason.find(marker)? + marker.len();
-    let rest = &reason[start..];
-    let end = rest
-        .find(|c: char| c.is_whitespace() || c == '\0')
-        .unwrap_or(rest.len());
-    match &rest[..end] {
-        "metadata" => Some("metadata"),
-        "client_metadata" => Some("client_metadata"),
-        "context" => Some("context"),
-        "routing" => Some("routing"),
-        "continuation" => Some("continuation"),
-        "provider" => Some("provider"),
-        _ => Some("control_like_top_level_field"),
+        V3ProviderCompatErrorClassification::Other => {
+            crate::shared::raise_v3_runtime_failure_source(
+                stage,
+                "v3_route_target_runtime_failure",
+                error.to_string(),
+            )
+        }
     }
 }
 
@@ -982,7 +957,8 @@ mod request_invalid_compat_tests {
             "UnmappedOutboundFields target_protocol=anthropic paths=$.tools[0].parameters"
                 .to_string(),
         );
-        let source = compat_source("V3HubReqOutbound07ProviderSemantic", &error);
+        let source = compat_source("V3HubReqOutbound07ProviderSemantic", &error)
+            .expect("compat source must execute Error01 successfully");
         assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
         assert_eq!(source.code, "provider_request_payload_invalid");
     }
@@ -995,7 +971,8 @@ mod request_invalid_compat_tests {
             &profile,
             "Anthropic codec malformed tools[].format".to_string(),
         );
-        let source = compat_source("V3ProviderRespInbound01Raw", &error);
+        let source = compat_source("V3ProviderRespInbound01Raw", &error)
+            .expect("compat source must execute Error01 successfully");
         assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     }
 }

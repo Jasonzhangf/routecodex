@@ -171,10 +171,10 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
     let source = match error {
         V3AnthropicRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
-        } => provider_pool_exhausted_source(
+        } => Ok(provider_pool_exhausted_source(
             "V3Target10ConcreteProviderSelected",
             &attempted_candidates,
-        ),
+        )),
         V3AnthropicRelayRuntimeError::ProviderCompat(error) => match error.classification() {
             V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
                 super::provider_compat_boundary_source("ProviderRespCompat02ProviderCompat", &error)
@@ -182,32 +182,32 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
             V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
                 super::provider_request_payload_source("ProviderReqCompat06ProviderCompat", &error)
             }
-            V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
+            V3ProviderCompatErrorClassification::Other => Ok(build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3HubRuntime",
                 "anthropic_relay_runtime_error",
                 error.to_string(),
-            ),
+            )),
         },
-        V3AnthropicRelayRuntimeError::ExecutionControlRequest(message) => {
+        V3AnthropicRelayRuntimeError::ExecutionControlRequest(message) => Ok(
             build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ProviderReqOutbound09TransportRequest",
                 "anthropic_relay_request_execution_control_error",
                 message,
-            )
-        }
+            ),
+        ),
         V3AnthropicRelayRuntimeError::ExecutionControlResponse(message) => {
-            build_v3_error_01_source_raised(
+            Ok(build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ServerRespOutbound06ClientFrame",
                 "anthropic_relay_response_execution_control_error",
                 message,
-            )
+            ))
         }
         V3AnthropicRelayRuntimeError::Codec(
             V3AnthropicCodecError::UnrepresentableToolArguments { arguments, reason },
-        ) => build_v3_error_01_source_raised(
+        ) => Ok(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3ServerRespOutbound06ClientFrame",
             "anthropic_unrepresentable_tool_arguments",
@@ -219,20 +219,20 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
                     None => "<absent>".to_string(),
                 }
             ),
-        ),
-        error => build_v3_error_01_source_raised(
+        )),
+        error => Ok(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",
             "anthropic_relay_runtime_error",
             error.to_string(),
-        ),
+        )),
     };
-    let mut output = error_output(
-        source,
-        internal_status.unwrap_or(if request_payload_invalid { 400 } else { 500 }),
-        "none",
-        trace,
-    );
+    let status = internal_status.unwrap_or(if request_payload_invalid { 400 } else { 500 });
+    let (projected, trace) = match source {
+        Ok(source) => crate::hub_v1::error_output(source, status, "none", trace),
+        Err(fault) => (Err(fault), trace),
+    };
+    let mut output = error_output_from_projection(projected, trace);
     // Both terminals carry no client payload: the provider pool is exhausted, or
     // a successful business response cannot be represented in the client
     // protocol. Either way the client observes a true transport break, and the
@@ -287,22 +287,24 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
                 "V3ProviderRespInbound01Raw"
             }
         };
+        let fallback_message = error.to_string();
         let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
-        let source_message = source.message.clone();
         let (status, message, terminal_projection, error_operator_fault) =
-            match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
-                source,
-                V3ErrorActionScope::None,
-                0,
-                None,
-            ) {
+            match source.and_then(|source| {
+                crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+                    source,
+                    V3ErrorActionScope::None,
+                    0,
+                    None,
+                )
+            }) {
                 Ok(projected) => (
                     projected.status,
                     projected.error_detail.clone(),
                     Some(projected),
                     None,
                 ),
-                Err(fault) => (599, source_message, None, Some(fault)),
+                Err(fault) => (599, fallback_message, None, Some(fault)),
             };
         return V3RelayProviderFailure {
             status,
@@ -410,16 +412,6 @@ fn provider_failure_output(
         stream_observation: None,
         provider_snapshots: None,
     }
-}
-
-fn error_output(
-    source: routecodex_v3_error::V3Error01SourceRaised,
-    status: u16,
-    provider_id: &str,
-    mut trace: Vec<&'static str>,
-) -> V3AnthropicRelayRuntimeOutput {
-    let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
-    error_output_from_projection(projected, trace)
 }
 
 fn error_output_from_projection(
@@ -911,5 +903,55 @@ mod tests {
         );
         assert_eq!(diagnostic_source.code, "relay_error_operator_sdk_failure");
         assert_eq!(original_source.code, "local_error_projection_nonterminal");
+    }
+
+    #[test]
+    fn provider_compat_source_fault_preserves_terminal_disposition_and_cause() {
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Provider12ResponsesWirePayload",
+            "seeded_compat_source",
+            "seeded compat source",
+        );
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Ok(None),
+        )
+        .expect_err("missing terminal Error06 is a typed SDK fault");
+        let diagnostic_source = fault.policy_failure.clone();
+        let diagnostic_cause = fault
+            .original_source
+            .clone()
+            .expect("the SDK fault keeps its original source");
+        assert_eq!(diagnostic_cause, source);
+
+        let output = provider_failure_output(
+            V3RelayProviderFailure {
+                status: 599,
+                provider_status: None,
+                client_response: Value::Null,
+                source_stage: "ProviderRespCompat02ProviderCompat",
+                terminal_projection: None,
+                terminal_disposition: Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                ),
+                error_operator_fault: Some(fault),
+                error_type_fn: extract_error_type_style,
+                error_message_fn: extract_message_type_style,
+            },
+            vec!["ProviderRespCompat02ProviderCompat"],
+            Vec::new(),
+        );
+
+        assert_eq!(output.status, 599);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(output.client_response.is_null());
+        assert!(output.error_chain.is_none());
+        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+        assert_eq!(output.diagnostic_source, Some(diagnostic_source));
+        assert_eq!(output.diagnostic_cause, Some(diagnostic_cause));
     }
 }

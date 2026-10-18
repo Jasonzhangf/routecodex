@@ -17,8 +17,7 @@ use crate::shared::{
     V3DirectSourceResult, V3ProviderAttemptBody, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3Error05ExecutionDecision,
+    build_v3_error_01_source_raised, V3Error01SourceRaised, V3Error05ExecutionDecision,
     V3Error05RecoveryAdmissionWitness, V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind,
     V3ExternalErrorLink, V3InternalErrorCode,
 };
@@ -643,7 +642,6 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
     )
     .map(|wire| wire.with_custom_tool_function_binding(custom_tool_function_binding))
     .map_err(provider_error_source("V3Provider12ResponsesWirePayload"))
-    .map_err(Ok)
 }
 
 pub(crate) fn responses_direct_provider_transport_hook(
@@ -790,7 +788,7 @@ pub(crate) fn chat_direct_response_projection_hook(
 
 fn provider_error_source(
     stage: &'static str,
-) -> impl FnOnce(V3ProviderError) -> V3Error01SourceRaised {
+) -> impl FnOnce(V3ProviderError) -> crate::shared::V3DirectSourceError {
     move |error| build_v3_provider_error_source(stage, error)
 }
 
@@ -948,7 +946,6 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
         wire_body,
     )
     .map_err(provider_error_source("V3Provider12ResponsesWirePayload"))
-    .map_err(Ok)
 }
 
 pub(crate) fn chat_direct_provider_transport_hook(
@@ -975,44 +972,48 @@ pub(crate) fn chat_direct_provider_transport_hook(
 pub(crate) fn build_v3_provider_error_source(
     stage: &'static str,
     error: V3ProviderError,
-) -> V3Error01SourceRaised {
+) -> crate::shared::V3DirectSourceError {
     let message = error.to_string();
     match error {
         V3ProviderError::InvalidWireBody { .. }
         | V3ProviderError::InvalidStreamIntent { .. }
         | V3ProviderError::InvalidDataImage { .. }
         | V3ProviderError::NamespaceToolFlattenFailed { .. }
-        | V3ProviderError::FunctionToolShapeFailed { .. } => build_v3_error_01_source_raised(
+        | V3ProviderError::FunctionToolShapeFailed { .. } => crate::shared::direct_plain_error(
             V3ErrorSourceKind::InvalidRequest,
             stage,
             "invalid_provider_request_payload",
             message,
         ),
-        V3ProviderError::ProviderModelBindingMismatch { .. } => {
-            build_v3_error_01_source_raised_internal(
-                V3ErrorSourceKind::RuntimeFailure,
+        V3ProviderError::ProviderModelBindingMismatch { .. } => crate::shared::direct_source_error(
+            V3ErrorSourceKind::RuntimeFailure,
+            stage,
+            "provider_model_binding_mismatch",
+            message,
+            crate::operation_runner::V3Err01SourceInput::Internal(internal_error_code_for_stage(
                 stage,
-                "provider_model_binding_mismatch",
-                message,
-                internal_error_code_for_stage(stage),
-            )
-        }
-        V3ProviderError::ControlFieldInWireBody { .. } => build_v3_error_01_source_raised_internal(
+            )),
+        ),
+        V3ProviderError::ControlFieldInWireBody { .. } => crate::shared::direct_source_error(
             V3ErrorSourceKind::RuntimeFailure,
             stage,
             "provider_wire_control_field_leaked",
             message,
-            internal_error_code_for_stage(stage),
+            crate::operation_runner::V3Err01SourceInput::Internal(internal_error_code_for_stage(
+                stage,
+            )),
         ),
         V3ProviderError::InvalidBaseUrl { .. }
         | V3ProviderError::MissingAuthSecret { .. }
         | V3ProviderError::AuthSecretRead { .. }
-        | V3ProviderError::OAuthCredential { .. } => build_v3_error_01_source_raised_internal(
+        | V3ProviderError::OAuthCredential { .. } => crate::shared::direct_source_error(
             V3ErrorSourceKind::RuntimeFailure,
             stage,
             "provider_local_runtime_error",
             message,
-            internal_error_code_for_stage(stage),
+            crate::operation_runner::V3Err01SourceInput::Internal(internal_error_code_for_stage(
+                stage,
+            )),
         ),
         V3ProviderError::InternalTransport { lane, .. } => {
             let stage = match lane {
@@ -1023,21 +1024,23 @@ pub(crate) fn build_v3_provider_error_source(
                     "V3ProviderResp14Raw"
                 }
             };
-            build_v3_error_01_source_raised_internal(
+            crate::shared::direct_source_error(
                 V3ErrorSourceKind::RuntimeFailure,
                 stage,
                 "provider_internal_transport_error",
                 message,
-                internal_error_code_for_stage(stage),
+                crate::operation_runner::V3Err01SourceInput::Internal(
+                    internal_error_code_for_stage(stage),
+                ),
             )
         }
-        V3ProviderError::ConcurrencyBusy { .. } => build_v3_error_01_source_raised(
+        V3ProviderError::ConcurrencyBusy { .. } => crate::shared::direct_plain_error(
             V3ErrorSourceKind::TargetPoolExhausted,
             stage,
             "provider_concurrency_busy",
             message,
         ),
-        V3ProviderError::ClientDisconnect { .. } => build_v3_error_01_source_raised(
+        V3ProviderError::ClientDisconnect { .. } => crate::shared::direct_plain_error(
             V3ErrorSourceKind::ClientDisconnect,
             stage,
             "client_disconnect",
@@ -1046,7 +1049,7 @@ pub(crate) fn build_v3_provider_error_source(
         error => {
             let external_error = external_link_for_provider_error(&error);
             let code = source_code_for_external_provider_error(&error);
-            build_v3_error_01_source_raised_external(
+            crate::shared::direct_external_error(
                 V3ErrorSourceKind::ProviderFailure,
                 stage,
                 code,

@@ -1,6 +1,67 @@
 include!("../../tests/support/kernel_unit.rs");
 
 #[test]
+fn direct_source_fault_preserves_http_witness_observability_and_snapshots() {
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3Provider12ResponsesWirePayload",
+        "seeded_direct_source",
+        "seeded direct source",
+    );
+    let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+        source.clone(),
+        Ok(None),
+    )
+    .expect_err("missing terminal Error06 is a typed SDK fault");
+    let diagnostic_source = fault.policy_failure.clone();
+    let diagnostic_cause = fault
+        .original_source
+        .clone()
+        .expect("the SDK fault keeps its original source");
+    assert_eq!(diagnostic_cause, source);
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        429,
+        vec![("retry-after".to_string(), b"3".to_vec())],
+        br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
+    );
+    let observability = V3RuntimeObservability {
+        entry_protocol: "responses".to_string(),
+        execution_mode: "direct".to_string(),
+        transport: "sse".to_string(),
+        attempts: Some(2),
+        ..Default::default()
+    };
+    let request_snapshot = json!({"model":"route-alias","tools":[{"name":"echo"}]});
+    let trace = vec!["V3Target10ConcreteProviderSelected"];
+
+    let output = source_failure_output_with_observability_and_snapshots(
+        Err(fault),
+        Some(witness.clone()),
+        trace.clone(),
+        &crate::hooks::register_responses_direct_hooks(),
+        Some(observability.clone()),
+        Some(request_snapshot.clone()),
+        None,
+    );
+
+    assert_eq!(output.observability, Some(observability));
+    assert_eq!(
+        output.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
+    );
+    assert_eq!(output.provider_request_snapshot, Some(request_snapshot));
+    assert!(output.error_chain.is_none());
+    assert_eq!(output.node_trace, trace);
+    assert_eq!(output.diagnostic_source, Some(diagnostic_source));
+    assert_eq!(output.diagnostic_cause, Some(diagnostic_cause));
+    assert_eq!(output.client_payload.status, 599);
+    assert!(matches!(
+        &output.client_payload.body,
+        crate::nodes::V3ClientBody::Json(value) if value.is_null()
+    ));
+}
+
+#[test]
 fn protocol_plan_operator_fault_keeps_original_cause_without_running_error_projection() {
     let original = routecodex_v3_error::build_v3_error_01_source_raised(
         V3ErrorSourceKind::RuntimeFailure,

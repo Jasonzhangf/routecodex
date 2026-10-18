@@ -610,14 +610,16 @@ pub fn provider_runtime_failure(
                 "V3ProviderRespInbound01Raw"
             }
         };
+        let fallback_message = error.to_string();
         let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
-        let fallback_message = source.message.clone();
-        return match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
-            source,
-            V3ErrorActionScope::None,
-            0,
-            None,
-        ) {
+        return match source.and_then(|source| {
+            crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+                source,
+                V3ErrorActionScope::None,
+                0,
+                None,
+            )
+        }) {
             Ok(projected) => V3RelayProviderFailure {
                 status: projected.status,
                 // Internal transport handoff failure: no upstream HTTP response exists.

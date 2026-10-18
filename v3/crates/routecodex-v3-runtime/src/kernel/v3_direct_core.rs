@@ -613,7 +613,39 @@ where
                     );
                 }
                 let source =
-                    build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);
+                    match build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error)
+                    {
+                        Ok(source) => source,
+                        Err(fault) => {
+                            let mut observability = build_v3_direct_runtime_observability(
+                                C::policy_target(&policy),
+                                C::ENTRY_PROTOCOL,
+                                if C::body(&standardized)
+                                    .get("stream")
+                                    .and_then(serde_json::Value::as_bool)
+                                    .unwrap_or(false)
+                                {
+                                    "sse"
+                                } else {
+                                    "json"
+                                },
+                                None,
+                                "failed",
+                                provider_failure_events.clone(),
+                            );
+                            observability.attempts =
+                                Some(total_attempts(&accumulator, send_attempts));
+                            return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
+                                Err(fault),
+                                last_external_http,
+                                trace,
+                                &crate::hooks::register_responses_direct_hooks(),
+                                Some(observability),
+                                provider_request_snapshot,
+                                None,
+                            );
+                        }
+                    };
                 if source.source_kind != V3ErrorSourceKind::ProviderFailure {
                     drop(provider_action_permit.take());
                     return error_output(
