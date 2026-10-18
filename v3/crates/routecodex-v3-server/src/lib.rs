@@ -1457,6 +1457,7 @@ pub(crate) fn persist_v3_chat_failure_evidence(
         request_id,
         attempts,
         output.diagnostic_source.as_ref(),
+        None,
     );
 }
 #[cfg(test)]

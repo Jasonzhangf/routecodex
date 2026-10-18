@@ -450,6 +450,112 @@ fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
     sample_runtime.block_on(sample_worker.shutdown());
 }
 
+#[test]
+fn failure_evidence_preserves_distinct_terminal_sources() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-terminal-source-evidence-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let (sample_runtime, mut sample_worker) = start_test_codex_sample_worker(&state);
+
+    let provider_source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "V3Transport13ResponsesHttpRequest",
+        "provider_http_429",
+        "provider returned HTTP 429",
+        routecodex_v3_error::V3ExternalErrorLink {
+            kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+            status: Some(429),
+            code: Some("rate_limit".to_string()),
+            provider_id: Some("alpha".to_string()),
+            upstream_request_id: Some("upstream-cause".to_string()),
+            message: Some("rate limited".to_string()),
+        },
+    );
+    let runtime_source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3Error05ExecutionDecision",
+        "sdk_error",
+        "SDK policy decision failed",
+    );
+    let attempts = vec![V3RuntimeProviderFailureObservation {
+        external_error_status: provider_source
+            .external_error
+            .as_ref()
+            .and_then(|link| link.status),
+        diagnostic_source: Some(provider_source.clone()),
+        ..test_provider_failure_observation()
+    }];
+
+    persist_v3_chat_failure_evidence_sources(
+        &state,
+        "responses",
+        "/v1/responses",
+        "terminal-source-preserved",
+        &attempts,
+        Some(&runtime_source),
+        Some(&provider_source),
+    );
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
+
+    let evidence_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/\
+         terminal-source-preserved/provider-failed-attempts.json",
+    );
+    let evidence: Value =
+        serde_json::from_str(&fs::read_to_string(&evidence_path).unwrap()).unwrap();
+    assert_eq!(
+        evidence["terminal_source"],
+        serde_json::to_value(&runtime_source).unwrap()
+    );
+    assert_eq!(
+        evidence["terminal_cause"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert_eq!(
+        evidence["attempts"][0]["diagnostic_source"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert_eq!(evidence["attempts"][0]["provider_status"], json!(429));
+
+    persist_v3_chat_failure_evidence_sources(
+        &state,
+        "responses",
+        "/v1/responses",
+        "terminal-source-absent",
+        &[],
+        Some(&provider_source),
+        None,
+    );
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
+    let legacy_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/\
+         terminal-source-absent/provider-failed-attempts.json",
+    );
+    let legacy: Value = serde_json::from_str(&fs::read_to_string(&legacy_path).unwrap()).unwrap();
+    assert_eq!(
+        legacy["terminal_source"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert!(
+        legacy.get("terminal_cause").is_none(),
+        "absence of a separate cause must preserve the existing artifact shape: {legacy}"
+    );
+    sample_runtime.block_on(sample_worker.shutdown());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[tokio::test]
 async fn direct_sse_http_projection_injects_keepalive_and_preserves_provider_bytes() {
     let provider_bytes = b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec();
