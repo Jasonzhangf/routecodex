@@ -59,6 +59,12 @@ struct Peer {
 }
 
 fn check_wire(body: &Value, peer: &Peer, stage: usize) -> Result<(), String> {
+    if body.get("verbosity").is_some() {
+        return Err("unsupported verbosity".into());
+    }
+    if body["prompt_cache_key"] != "zen-verbosity-cache" {
+        return Err("prompt cache key lost".into());
+    }
     if peer.image {
         let messages = body["messages"].as_array().ok_or("messages missing")?;
         let images: Vec<_> = messages
@@ -178,7 +184,11 @@ async fn provider(State(peer): State<Peer>, Json(body): Json<Value>) -> Response
         eprintln!("validating peer rejected stage={stage}: {error}");
         peer.errors.lock().await.push(error.clone());
         return (
-            StatusCode::FORBIDDEN,
+            if error == "unsupported verbosity" {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::FORBIDDEN
+            },
             Json(json!({"error":{"message":error,"type":"FreeTierError"}})),
         )
             .into_response();
@@ -240,7 +250,7 @@ compatibilityProfile = "chat:opencode-zen-tcm"
 type = "apikey"
 entries = [{{alias="key",apiKey="test-only-key"}}]
 [provider.models.model]
-wireName = "peer-model"
+wireName = "deepseek-v4.1-flash"
 capabilities = ["text","tools"]
 maxTokens = 4096
 maxContextTokens = 128000
@@ -426,6 +436,8 @@ async fn roundtrip_with_image(
         decl["tools"][0]["tools"][0]["format"]["definition"] = json!("start: 'restricted'");
     }
     let mut body = json!({"model":"zenpeer.model","stream":stream,"tool_choice":"auto","input":[decl,{"role":"user","content":"execute the declared safe fixture operation"}]});
+    body["text"] = json!({"verbosity":"high"});
+    body["prompt_cache_key"] = json!("zen-verbosity-cache");
     if image {
         body["model"] = json!("image-route-alias");
         let input = body["input"].as_array_mut().unwrap();

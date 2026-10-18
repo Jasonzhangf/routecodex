@@ -165,6 +165,21 @@ pub fn run_req_outbound_stage3_compat(
         return Ok(build_compat_result(payload, None));
     };
 
+    // Fireworks DeepSeek rejects Chat verbosity; preserve the Zen tool/cache contract.
+    if profile_matches(profile_id, opencode_zen_tcm::PROFILE)
+        && adapter_context
+            .original_model_id
+            .as_deref()
+            .or(adapter_context.model_id.as_deref())
+            == Some("deepseek-v4.1-flash")
+        && provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-chat")
+    {
+        if let Some(root) = payload.as_object_mut() {
+            root.remove("verbosity");
+        }
+        return Ok(build_compat_result(payload, Some(profile_id.to_string())));
+    }
+
     if is_responses_temperature_unsupported_profile(profile_id) {
         if provider_protocol_matches(
             adapter_context.provider_protocol.as_ref(),
