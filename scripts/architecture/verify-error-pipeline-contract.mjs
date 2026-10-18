@@ -63,7 +63,6 @@ if (!ERROR_PIPELINE_CONTRACT_FEATURE_ID || ERROR_PIPELINE_CONTRACT_BUILDERS.leng
 
 const v3Server = read('v3/crates/routecodex-v3-server/src/lib.rs')
   + '\n' + read('v3/crates/routecodex-v3-server/src/websocket.rs');
-const v3Error = read('v3/crates/routecodex-v3-error/src/lib.rs');
 for (const bypass of [
   'json!({"error":{"message":"forbidden","code":"forbidden"}})',
   'json!({"error":{"message":message,"code":"virtual_router_diagnostics_failed"}})',
@@ -72,17 +71,6 @@ for (const bypass of [
   if (v3Server.includes(bypass)) {
     failures.push(`V3 Server must not bypass ErrorErr01-06 with direct error JSON: ${bypass}`);
   }
-}
-if (!v3Server.includes('let projected = project_v3_server_websocket_error(')) {
-  failures.push('V3 WebSocket event projection must call the routecodex-v3-error owned helper');
-}
-if (
-  !v3Error.includes('pub fn project_v3_server_websocket_error(')
-  || !v3Error.includes('project_v3_server_invalid_request(')
-  || !v3Error.includes('project_v3_server_runtime_failure(')
-  || !v3Error.includes('V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {')
-) {
-  failures.push('V3 WebSocket errors must enter the shared ErrorErr01-06 center before event projection');
 }
 
 if (failures.length > 0) {

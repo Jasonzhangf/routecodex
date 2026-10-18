@@ -188,13 +188,14 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
     let payload = match routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(payload) {
         Ok(captured) => captured,
         Err(error) => {
-            let projected = project_v3_server_runtime_failure(
+            let result = routecodex_v3_runtime::project_v3_server_boundary_error_via_sdk(
+                routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
                 "V3OperationRunnerCaptureClientJson",
                 "operation_runner_capture_client_json_failed",
                 error.to_string(),
-                598,
+                Some(598),
             );
-            let _ = send_responses_websocket_projected_error(socket, projected).await;
+            let _ = send_responses_websocket_error_sdk_result(socket, result).await;
             return Err(());
         }
     };
@@ -621,6 +622,13 @@ pub(crate) async fn send_responses_relay_websocket_output(
     socket: &mut WebSocket,
     output: V3ResponsesRelayRuntimeOutput,
 ) -> Result<(), ()> {
+    persist_v3_responses_relay_failure_sources(
+        state,
+        "responses",
+        "/v1/responses",
+        request_id,
+        &output,
+    );
     if let Some(disposition) = output.terminal_disposition.as_ref() {
         // A provider terminal never projects onto the client: close the socket
         // without a payload, exactly like the HTTP/SSE transport break. The
@@ -752,8 +760,71 @@ pub(crate) async fn send_responses_websocket_error(
     code: &'static str,
     message: impl Into<String>,
 ) -> Result<(), ()> {
-    let projected = project_v3_server_websocket_error(code, message);
-    send_responses_websocket_projected_error(socket, projected).await
+    let result = routecodex_v3_runtime::project_v3_server_websocket_error_via_sdk(code, message);
+    send_responses_websocket_error_sdk_result(socket, result).await
+}
+
+pub(crate) async fn send_responses_websocket_error_sdk_result(
+    socket: &mut WebSocket,
+    result: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        routecodex_v3_runtime::V3RelayErrorOperatorFault,
+    >,
+) -> Result<(), ()> {
+    match result {
+        Ok(projected) => send_responses_websocket_projected_error(socket, projected).await,
+        Err(fault) => {
+            send_responses_websocket_sdk_fault_diagnostic(fault);
+            Err(())
+        }
+    }
+}
+
+fn send_responses_websocket_sdk_fault_diagnostic(
+    fault: routecodex_v3_runtime::V3RelayErrorOperatorFault,
+) {
+    let policy = &fault.policy_failure;
+    let original = fault
+        .original_source
+        .as_ref()
+        .map(|source| {
+            format!(
+                "original_kind={:?} original_stage={} original_code={} original_message={:?}",
+                source.source_kind, source.source_stage, source.code, source.message
+            )
+        })
+        .unwrap_or_else(|| "original=<none>".to_string());
+    let message = format!(
+        "[v3-websocket-internal-error] class=runtime_failure policy_kind={:?} policy_stage={} policy_code={} policy_message={:?} {}",
+        policy.source_kind, policy.source_stage, policy.code, policy.message, original
+    );
+    #[cfg(test)]
+    record_responses_websocket_sdk_fault_diagnostic(&message);
+    eprintln!("{message}");
+}
+
+#[cfg(test)]
+static RESPONSES_WEBSOCKET_SDK_FAULT_DIAGNOSTICS: std::sync::OnceLock<
+    std::sync::Mutex<Vec<String>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+fn record_responses_websocket_sdk_fault_diagnostic(message: &str) {
+    RESPONSES_WEBSOCKET_SDK_FAULT_DIAGNOSTICS
+        .get_or_init(|| std::sync::Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(message.to_string());
+}
+
+#[cfg(test)]
+pub(crate) fn take_responses_websocket_sdk_fault_diagnostics() -> Vec<String> {
+    RESPONSES_WEBSOCKET_SDK_FAULT_DIAGNOSTICS
+        .get_or_init(|| std::sync::Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .drain(..)
+        .collect()
 }
 
 async fn send_responses_websocket_projected_error(

@@ -1342,6 +1342,8 @@ features:
   - routecodex-v3-error six adjacent builders, taxonomy, action scope, target exhaustion, client projection
   - routecodex-v3-provider-responses server/routing-group/session/provider-runtime scoped failure health state and read-only availability
   - routecodex-v3-runtime foundation pending and dry-run kernels
+  - routecodex-v3-runtime foundation::tests::websocket_error_sdk_classification_matches_existing_parity executes all six SDK nodes with the existing WebSocket source kind, stage, code and internal status
+  - routecodex-v3-server tests::websocket_sdk_fault::websocket_sdk_fault_consumer_breaks_transport_and_retains_both_diagnostics uses a real WebSocket and the production consumer diagnostic point; dropping the original cause must fail without a test-only persistence shortcut
   - Responses response dry-run consumes captured provider JSON or SSE through the registered Direct response hook and materializes the resulting client payload without provider network access
   - Responses response dry-run rejects malformed captured provider-response envelopes and does not fabricate toolreason projection when reason is absent
   - Anthropic Relay response dry-run consumes captured provider JSON or SSE through RespInbound and Resp03, then materializes the Anthropic client projection without provider network access

@@ -1255,19 +1255,21 @@ pub fn project_v3_server_runtime_failure(
     )
 }
 
-pub fn project_v3_server_websocket_error(
+pub fn v3_server_websocket_error_spec(
     code: &'static str,
-    detail: impl Into<String>,
-) -> V3Error06ClientProjected {
+) -> (V3ErrorSourceKind, &'static str, u16) {
     if code == "invalid_client_event" {
-        return project_v3_server_invalid_request(
+        return (
+            V3ErrorSourceKind::InvalidRequest,
             "V3ServerRespOutbound06ClientFrame",
-            code,
-            detail,
             400,
         );
     }
-    project_v3_server_runtime_failure("V3ServerRespOutbound06ClientFrame", code, detail, 500)
+    (
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3ServerRespOutbound06ClientFrame",
+        500,
+    )
 }
 
 pub fn raise_v3_sse_provider_failure(
