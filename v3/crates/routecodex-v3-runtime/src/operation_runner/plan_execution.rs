@@ -4,8 +4,8 @@ use crate::nodes::V3Execution11ProtocolDecisionMode;
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_candidates_from_opaque_hit,
     initiate_v3_target_pre_exhaustion_rescue_probes, select_v3_target_with_session_then_global,
-    step_v3_target_planning_with_admission_sync, V3ProviderFailureRuntimeHealth,
-    V3SynchronousTargetAdmissionStep, V3SynchronousTargetPlanningInput,
+    step_v3_target_planning_sync, V3ProviderFailureRuntimeHealth, V3SynchronousTargetPlanningInput,
+    V3SynchronousTargetPlanningStep,
 };
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -44,14 +44,13 @@ pub(crate) enum V3PlanExecutionModePolicy {
 
 #[derive(Clone, Copy)]
 enum V3PlanExecutionPhase {
-    AdmitAtExecution,
-    PreplanWithoutAdmission,
+    Execution,
+    Preplan,
 }
 
 pub(crate) struct V3PlanExecutionCompleted {
     pub(crate) expanded: V3Target09CandidateSetExpanded,
     pub(crate) selected: V3Target10ConcreteProviderSelected,
-    pub(crate) admission: crate::provider_failure_runtime_policy::V3RuntimeProviderAdmission,
     pub(crate) request_local_excluded_candidates: BTreeSet<String>,
     pub(crate) execution_mode: V3HubExecutionMode,
     pub(crate) protocol_decision: crate::nodes::V3Execution11ProtocolDecision,
@@ -96,7 +95,6 @@ enum PlanExecutionOperatorOutput {
     Selected {
         expanded: V3Target09CandidateSetExpanded,
         decision: crate::nodes::V3Execution11ProtocolDecision,
-        admission: crate::provider_failure_runtime_policy::V3RuntimeProviderAdmission,
         request_local_excluded_candidates: BTreeSet<String>,
     },
     Exhausted {
@@ -208,7 +206,7 @@ impl PlanExecutionOperator {
                 }
             }
         };
-        if matches!(self.phase, V3PlanExecutionPhase::PreplanWithoutAdmission) {
+        if matches!(self.phase, V3PlanExecutionPhase::Preplan) {
             let selected = match select_v3_target_with_session_then_global(
                 &routecodex_v3_target::V3TargetInterpreter::default(),
                 expanded.clone(),
@@ -239,7 +237,7 @@ impl PlanExecutionOperator {
                 Err(source) => PlanExecutionOperatorOutput::Failed(source),
             };
         }
-        let step = step_v3_target_planning_with_admission_sync(V3SynchronousTargetPlanningInput {
+        let step = step_v3_target_planning_sync(V3SynchronousTargetPlanningInput {
             manifest: &self.manifest,
             expanded: expanded.clone(),
             failure_session_scope: &self.failure_session_scope,
@@ -253,19 +251,19 @@ impl PlanExecutionOperator {
             exhaustion_probes_completed: self.exhaustion_probes_completed,
         });
         match step {
-            V3SynchronousTargetAdmissionStep::Selected {
-                selected,
-                request_local_excluded_candidates,
-            } => match self.decide_execution_mode(selected.selected) {
-                Ok(decision) => PlanExecutionOperatorOutput::Selected {
-                    expanded,
-                    decision,
-                    admission: selected.admission,
-                    request_local_excluded_candidates,
-                },
-                Err(source) => PlanExecutionOperatorOutput::Failed(source),
-            },
-            V3SynchronousTargetAdmissionStep::NeedPreExhaustionProbes {
+            V3SynchronousTargetPlanningStep::Selected(selected) => {
+                match self.decide_execution_mode(selected) {
+                    Ok(decision) => PlanExecutionOperatorOutput::Selected {
+                        expanded,
+                        decision,
+                        request_local_excluded_candidates: self
+                            .request_local_excluded_candidates
+                            .clone(),
+                    },
+                    Err(source) => PlanExecutionOperatorOutput::Failed(source),
+                }
+            }
+            V3SynchronousTargetPlanningStep::NeedPreExhaustionProbes {
                 expanded,
                 rescue_candidates,
                 request_local_excluded_candidates,
@@ -274,7 +272,7 @@ impl PlanExecutionOperator {
                 rescue_candidates,
                 request_local_excluded_candidates,
             },
-            V3SynchronousTargetAdmissionStep::NeedExhaustionProbes {
+            V3SynchronousTargetPlanningStep::NeedExhaustionProbes {
                 expanded,
                 exhaustion,
                 request_local_excluded_candidates,
@@ -283,13 +281,13 @@ impl PlanExecutionOperator {
                 exhaustion,
                 request_local_excluded_candidates,
             },
-            V3SynchronousTargetAdmissionStep::Exhausted(exhaustion) => {
+            V3SynchronousTargetPlanningStep::Exhausted(exhaustion) => {
                 PlanExecutionOperatorOutput::Exhausted {
                     expanded,
                     exhaustion,
                 }
             }
-            V3SynchronousTargetAdmissionStep::Failed(source) => {
+            V3SynchronousTargetPlanningStep::Failed(source) => {
                 PlanExecutionOperatorOutput::Failed(source)
             }
         }
@@ -348,7 +346,7 @@ pub(crate) fn run_v3_plan_execution_operator(
 ) -> Result<V3PlanExecutionOutcome, OperationRunnerError> {
     let side_output = Arc::new(Mutex::new(None));
     let operator = PlanExecutionOperator::new(
-        V3PlanExecutionPhase::AdmitAtExecution,
+        V3PlanExecutionPhase::Execution,
         manifest,
         target_source,
         failure_session_scope,
@@ -391,14 +389,12 @@ pub(crate) fn run_v3_plan_execution_operator(
         PlanExecutionOperatorOutput::Selected {
             expanded,
             decision,
-            admission,
             request_local_excluded_candidates,
         } => V3PlanExecutionOutcome::Selected {
             execution_planned_request,
             plan: V3PlanExecutionCompleted {
                 expanded,
                 selected: decision.target.clone(),
-                admission,
                 request_local_excluded_candidates,
                 execution_mode: match decision.mode {
                     V3Execution11ProtocolDecisionMode::SameProtocolDirect => {
@@ -457,7 +453,7 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
 ) -> Result<V3PlanExecutionPreplan, V3PlanExecutionStop> {
     let side_output = Arc::new(Mutex::new(None));
     let operator = PlanExecutionOperator::new(
-        V3PlanExecutionPhase::PreplanWithoutAdmission,
+        V3PlanExecutionPhase::Preplan,
         manifest,
         target_source,
         failure_session_scope,
@@ -708,7 +704,6 @@ pub(crate) async fn run_v3_plan_execution_operator_with_probes(
 mod tests {
     use super::*;
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-    use routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController;
     use routecodex_v3_target::V3TargetInterpreter;
     use serde_json::json;
     use std::time::Duration;
@@ -750,7 +745,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
     }
 
     #[test]
-    fn plan_execution_operator_expands_selects_admits_and_decides_mode_inside_sdk() {
+    fn plan_execution_operator_expands_selects_and_decides_mode_inside_sdk() {
         let manifest = test_manifest("r05_sdk_success");
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = V3ProviderFailureSessionScope::new("test", "default", "plan-execution")
@@ -765,16 +760,6 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         )
         .expect("opaque hit");
         let request = json!({"model": "client-model", "input": "opaque"});
-        let controller = V3AdaptiveConcurrencyController::process_shared();
-        let controller_key =
-            crate::provider_failure_runtime_policy::v3_provider_concurrency_key_parts(
-                "r05_sdk_success",
-                "key1",
-            );
-        let before = controller
-            .snapshot(&controller_key)
-            .map(|value| value.in_flight)
-            .unwrap_or(0);
         let now_ms =
             crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
                 .expect("clock");
@@ -809,21 +794,6 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         assert!(plan.selected.candidate_count > 0);
         assert_eq!(plan.selected.candidate.provider_id, "r05_sdk_success");
         assert_eq!(plan.execution_mode, V3HubExecutionMode::Direct);
-        assert_eq!(
-            controller
-                .snapshot(&controller_key)
-                .expect("admission snapshot")
-                .in_flight,
-            before + 1
-        );
-        drop(plan);
-        assert_eq!(
-            controller
-                .snapshot(&controller_key)
-                .expect("released admission snapshot")
-                .in_flight,
-            before
-        );
     }
 
     fn preplan_test_input(
@@ -850,29 +820,14 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
     }
 
     #[test]
-    fn preplan_ignores_occupied_provider_capacity_while_admission_excludes_it() {
-        let manifest = test_manifest("r05_preplan_capacity");
+    fn execution_and_preplan_do_not_use_provider_capacity_admission() {
+        let manifest = test_manifest("r05_preplan_no_capacity");
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-        let scope = V3ProviderFailureSessionScope::new("test", "default", "r05-preplan-capacity")
-            .expect("session scope");
+        let scope =
+            V3ProviderFailureSessionScope::new("test", "default", "r05-preplan-no-capacity")
+                .expect("session scope");
         let request = json!({"model": "client-model", "input": "opaque"});
         let (hit, expanded) = preplan_test_input(&manifest, &scope, &request);
-        let controller = V3AdaptiveConcurrencyController::process_shared();
-        let provider_key =
-            crate::provider_failure_runtime_policy::v3_provider_concurrency_key_parts(
-                "r05_preplan_capacity",
-                "key1",
-            );
-        controller
-            .ensure_initial_budget(&provider_key, 1)
-            .expect("initial budget");
-        let occupied = controller
-            .try_acquire_business(&provider_key)
-            .expect("occupy sole provider permit");
-        let cleanup = TestLeaseCleanup {
-            controller: controller.clone(),
-            permit: Arc::new(std::sync::Mutex::new(Some(occupied.into_permit()))),
-        };
         let now_ms =
             crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
                 .expect("clock");
@@ -903,18 +858,11 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         });
         assert_eq!(
             preplan.protocol_decision.target.candidate.provider_id,
-            "r05_preplan_capacity"
+            "r05_preplan_no_capacity"
         );
         assert!(preplan.request_local_excluded_candidates.is_empty());
-        assert_eq!(
-            controller
-                .snapshot(&provider_key)
-                .expect("occupied snapshot")
-                .in_flight,
-            1
-        );
 
-        let admission = run_v3_plan_execution_operator(
+        let execution = run_v3_plan_execution_operator(
             request,
             manifest,
             V3PlanExecutionTargetSource::Expanded(expanded),
@@ -932,24 +880,13 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             false,
             false,
         )
-        .expect("admission path run");
-        let V3PlanExecutionOutcome::Exhausted { .. } = admission else {
-            panic!("occupied sole-provider capacity must exclude admission");
+        .expect("execution path run");
+        let V3PlanExecutionOutcome::Selected { plan, .. } = execution else {
+            panic!("execution must not depend on local capacity admission");
         };
         assert_eq!(
-            controller
-                .snapshot(&provider_key)
-                .expect("post-admission snapshot")
-                .in_flight,
-            1
-        );
-        drop(cleanup);
-        assert_eq!(
-            controller
-                .snapshot(&provider_key)
-                .expect("released snapshot")
-                .in_flight,
-            0
+            plan.selected.candidate.provider_id,
+            "r05_preplan_no_capacity"
         );
     }
 
@@ -1047,7 +984,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
                 .unwrap();
         let side_output = Arc::new(Mutex::new(None));
         let operator = PlanExecutionOperator::new(
-            V3PlanExecutionPhase::AdmitAtExecution,
+            V3PlanExecutionPhase::Execution,
             manifest.clone(),
             V3PlanExecutionTargetSource::Expanded(expanded.clone()),
             scope.clone(),
@@ -1378,21 +1315,6 @@ targets = [
                 )
                 .expect("cooldown setup");
         }
-        let controller = V3AdaptiveConcurrencyController::process_shared();
-        let busy_key = crate::provider_failure_runtime_policy::v3_provider_concurrency_key_parts(
-            "r05_busy", "key1",
-        );
-        controller.ensure_initial_budget(&busy_key, 1).unwrap();
-        let busy_lease = controller
-            .try_acquire_business(&busy_key)
-            .expect("busy lease");
-        let busy_permit = Arc::new(std::sync::Mutex::new(Some(busy_lease.into_permit())));
-        let cleanup_permit = busy_permit.clone();
-        let cleanup = TestLeaseCleanup {
-            controller: controller.clone(),
-            permit: cleanup_permit,
-        };
-
         let (arrivals_tx, mut arrivals_rx) = mpsc::unbounded_channel();
         let (release_tx, release_rx) = oneshot::channel();
         let probe_server = tokio::spawn(serve_gated_probe(listener, arrivals_tx, release_rx));
@@ -1405,8 +1327,8 @@ targets = [
                 expanded
                     .candidates
                     .iter()
-                    .find(|candidate| candidate.provider_id == "r05_later")
-                    .expect("later candidate"),
+                    .find(|candidate| candidate.provider_id == "r05_busy")
+                    .expect("busy candidate"),
             ),
         ]);
         let request = json!({"model": "client-model", "input": "opaque"});
@@ -1438,13 +1360,6 @@ targets = [
             !run.is_finished(),
             "exhaustion rescue must await the gated HTTP response"
         );
-        busy_permit
-            .lock()
-            .expect("busy permit holder")
-            .take()
-            .map(|permit| controller.release(permit))
-            .expect("busy permit")
-            .expect("release busy lease");
         release_tx.send(()).expect("release probe response");
 
         let outcome = tokio::time::timeout(Duration::from_secs(2), run)
@@ -1470,32 +1385,8 @@ targets = [
                 Some("gpt-test"),
             ),
         ));
-        assert_eq!(
-            controller
-                .snapshot(&busy_key)
-                .expect("busy snapshot")
-                .in_flight,
-            0
-        );
         drop(plan);
-        drop(cleanup);
         probe_server.await.expect("probe server");
         std::env::remove_var("ROUTECODEX_V3_PLAN_RESUME_KEY");
-    }
-
-    struct TestLeaseCleanup {
-        controller: V3AdaptiveConcurrencyController,
-        permit:
-            Arc<std::sync::Mutex<Option<routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyPermit>>>,
-    }
-
-    impl Drop for TestLeaseCleanup {
-        fn drop(&mut self) {
-            if let Some(permit) = self.permit.lock().expect("cleanup permit holder").take() {
-                self.controller
-                    .release(permit)
-                    .expect("cleanup release busy lease");
-            }
-        }
     }
 }

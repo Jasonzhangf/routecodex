@@ -35,9 +35,6 @@ static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 #[path = "support/image_input_blackbox.rs"]
 mod image_input_blackbox;
 
-#[path = "support/pool_empty_recovery_blackbox.rs"]
-mod pool_empty_recovery_blackbox;
-
 #[path = "multi_listener_server/issue127_disabled_health.rs"]
 mod issue127_disabled_health;
 
@@ -656,6 +653,21 @@ allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
 "#;
+
+fn with_attempt_budget(
+    mut manifest: routecodex_v3_config::V3Config05ManifestPublished,
+    attempts: usize,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    for server in manifest.servers.values_mut() {
+        server
+            .execution
+            .as_mut()
+            .unwrap()
+            .attempt_store
+            .request_max_attempts = attempts;
+    }
+    manifest
+}
 
 fn manifest(port_a: u16, port_b: u16) -> routecodex_v3_config::V3Config05ManifestPublished {
     manifest_with_debug(port_a, port_b, true, true)
@@ -1514,6 +1526,12 @@ async fn controlled_held_responses_upstream(
     headers: HeaderMap,
     axum::Json(body): axum::Json<Value>,
 ) -> Response<Body> {
+    let complete_independently = body.get("input").and_then(Value::as_str)
+        == Some("concurrent-fast")
+        || body
+            .pointer("/input/0/content/0/text")
+            .and_then(Value::as_str)
+            == Some("concurrent-fast");
     state
         .captures
         .send(ProviderCapture::from_http(&headers, body))
@@ -1526,7 +1544,7 @@ async fn controlled_held_responses_upstream(
         )
     })
     .chain(futures_util::stream::once(async move {
-        let _permit = release.acquire_owned().await.unwrap();
+        let _permit = if complete_independently { None } else { Some(release.acquire_owned().await.unwrap()) };
         Ok::<_, std::io::Error>(
             b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_held\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"held response released\"}]}]}}\n\ndata: [DONE]\n\n"
                 .to_vec(),
@@ -2763,10 +2781,9 @@ async fn responses_websocket_provider_429_is_recorded_as_provider_private_eviden
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429-evidence");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        responses_relay_manifest(free_port(), free_port(), &provider_base_url),
+        1,
     ))
     .await
     .unwrap();
@@ -5299,7 +5316,16 @@ fn p6_manifest_with_isolated_provider_capacity(
     provider_base_url: &str,
     max_in_flight: u32,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
-    let mut manifest = p6_manifest(free_port(), free_port(), provider_base_url);
+    manifest_with_isolated_provider_capacity(
+        p6_manifest(free_port(), free_port(), provider_base_url),
+        max_in_flight,
+    )
+}
+
+fn manifest_with_isolated_provider_capacity(
+    mut manifest: routecodex_v3_config::V3Config05ManifestPublished,
+    max_in_flight: u32,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let alias = format!("capacity-{}", manifest.servers["a"].port);
     let provider = manifest.providers.get_mut("test").unwrap();
     provider.auth.entries[0].alias = alias.clone();
@@ -5406,11 +5432,11 @@ fn spawn_concurrency_client(
 }
 
 #[tokio::test]
-async fn responses_provider_concurrency_full_switches_without_queueing() {
+async fn responses_same_provider_concurrency_preserves_route_priority() {
     let _test_guard = TEST_LOCK.lock().await;
     let (first_url, mut first_captures, first_release, first_shutdown) =
         start_controlled_held_upstream().await;
-    let (second_url, mut second_captures, second_release, second_shutdown) =
+    let (second_url, mut second_captures, _second_release, second_shutdown) =
         start_controlled_held_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-switch");
     let handle = spawn_v3_server_aggregate(concurrency_switch_manifest(&first_url, &second_url))
@@ -5423,20 +5449,19 @@ async fn responses_provider_concurrency_full_switches_without_queueing() {
         .unwrap()
         .unwrap();
     let second = spawn_concurrency_client(&endpoint, "concurrency-second");
-    timeout(Duration::from_millis(500), second_captures.recv())
+    timeout(Duration::from_millis(500), first_captures.recv())
         .await
-        .expect("a full first provider must immediately switch to the second provider")
+        .expect("another in-flight request must not exclude the preferred healthy provider")
         .unwrap();
     assert!(
         !first.is_finished(),
         "the first provider must still be held"
     );
     assert!(
-        first_captures.try_recv().is_err(),
-        "the full provider must receive no extra request"
+        second_captures.try_recv().is_err(),
+        "local capacity must not cause an unrequested provider switch"
     );
-    first_release.add_permits(1);
-    second_release.add_permits(1);
+    first_release.add_permits(2);
     for task in [first, second] {
         let (status, body) = timeout(Duration::from_secs(2), task)
             .await
@@ -5449,7 +5474,7 @@ async fn responses_provider_concurrency_full_switches_without_queueing() {
     let third = spawn_concurrency_client(&endpoint, "concurrency-after-release");
     timeout(Duration::from_millis(500), first_captures.recv())
         .await
-        .expect("released capacity must restore the first provider's priority")
+        .expect("provider priority must stay unchanged after requests complete")
         .unwrap();
     assert!(second_captures.try_recv().is_err());
     first_release.add_permits(1);
@@ -5467,144 +5492,168 @@ async fn responses_provider_concurrency_full_switches_without_queueing() {
 }
 
 #[tokio::test]
-async fn responses_provider_concurrency_all_full_exhausts_without_queueing() {
+async fn responses_same_provider_cross_port_requests_exceed_local_capacity() {
     let _test_guard = TEST_LOCK.lock().await;
-    let (first_url, mut first_captures, first_release, first_shutdown) =
-        start_controlled_held_upstream().await;
-    let (second_url, mut second_captures, second_release, second_shutdown) =
-        start_controlled_held_upstream().await;
-    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-exhaustion");
-    let handle = spawn_v3_server_aggregate(concurrency_switch_manifest(&first_url, &second_url))
-        .await
-        .unwrap();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    let first = spawn_concurrency_client(&endpoint, "concurrency-held-first");
-    timeout(Duration::from_secs(2), first_captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let second = spawn_concurrency_client(&endpoint, "concurrency-held-second");
-    timeout(Duration::from_millis(500), second_captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let exhausted = timeout(
-        Duration::from_millis(500),
-        reqwest::Client::new()
-            .post(&endpoint)
-            .header("session-id", "concurrency-exhausted")
-            .header("thread-id", "concurrency-exhausted")
-            .json(&json!({"model":"client-test","input":"no-capacity","stream":false}))
-            .send(),
-    )
-    .await
-    .expect("all full must exhaust without waiting for capacity");
-    assert!(
-        exhausted.is_err(),
-        "selection exhaustion must preserve the existing transport-break boundary"
-    );
-    assert!(first_captures.try_recv().is_err());
-    assert!(second_captures.try_recv().is_err());
-    assert!(!first.is_finished() && !second.is_finished());
-    first_release.add_permits(1);
-    second_release.add_permits(1);
-    for task in [first, second] {
-        let (status, body) = timeout(Duration::from_secs(2), task)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(status, StatusCode::OK);
-        assert!(body.contains("response.completed"), "{body}");
+    for relay in [false, true] {
+        let (provider_url, mut captures, release, shutdown) =
+            start_controlled_held_upstream().await;
+        std::env::set_var("V3_P6_TEST_KEY", "secret-request-independence-capacity");
+        let manifest = if relay {
+            responses_relay_manifest(free_port(), free_port(), &provider_url)
+        } else {
+            p6_manifest(free_port(), free_port(), &provider_url)
+        };
+        let handle =
+            spawn_v3_server_aggregate(manifest_with_isolated_provider_capacity(manifest, 8))
+                .await
+                .unwrap();
+        let mut tasks = Vec::new();
+        for index in 0..10 {
+            let endpoint = format!("http://{}/v1/responses", handle.listeners[index % 2].addr);
+            tasks.push(spawn_concurrency_client(
+                &endpoint,
+                "shared-capacity-session",
+            ));
+        }
+        let mut entered = 0;
+        for _ in 0..10 {
+            if matches!(
+                timeout(Duration::from_secs(2), captures.recv()).await,
+                Ok(Some(_))
+            ) {
+                entered += 1;
+            } else {
+                break;
+            }
+        }
+        release.add_permits(10);
+        let mut delivered = 0;
+        for task in tasks {
+            if let Ok(Ok((status, body))) = timeout(Duration::from_secs(5), task).await {
+                if status == StatusCode::OK && body.contains("response.completed") {
+                    assert_responses_sse_delivered_business_text(&body, "held response released");
+                    delivered += 1;
+                }
+            }
+        }
+        handle.shutdown().await;
+        shutdown.send(()).unwrap();
+        std::env::remove_var("V3_P6_TEST_KEY");
+        assert_eq!(
+            entered, 10,
+            "every request must enter upstream before releasing any response"
+        );
+        assert_eq!(
+            delivered, 10,
+            "every independent request must deliver real business content"
+        );
     }
-    assert!(first_captures.try_recv().is_err());
-    assert!(second_captures.try_recv().is_err());
-    handle.shutdown().await;
-    first_shutdown.send(()).unwrap();
-    second_shutdown.send(()).unwrap();
-    std::env::remove_var("V3_P6_TEST_KEY");
 }
 
 #[tokio::test]
-async fn responses_same_listener_same_session_waits_for_release_then_returns_ok() {
+async fn responses_same_listener_same_session_completes_independently() {
     let _test_guard = TEST_LOCK.lock().await;
-    let (provider_base_url, mut captures, release, shutdown) =
-        start_controlled_held_upstream().await;
-    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-admission");
-    let handle =
-        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
-            .await
-            .unwrap();
-    let client = reqwest::Client::new();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    let request = json!({"model":"client-test","input":"held","stream":true});
+    for (relay, second_session, second_conversation) in [
+        (false, "session-overlap", "conversation-overlap"),
+        (false, "session-overlap", "conversation-other"),
+        (false, "session-other", "conversation-overlap"),
+        (true, "session-overlap", "conversation-overlap"),
+        (true, "session-overlap", "conversation-other"),
+        (true, "session-other", "conversation-overlap"),
+    ] {
+        let (provider_base_url, mut captures, release, shutdown) =
+            start_controlled_held_upstream().await;
+        std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-admission");
+        let manifest = if relay {
+            responses_relay_manifest(free_port(), free_port(), &provider_base_url)
+        } else {
+            p6_manifest(free_port(), free_port(), &provider_base_url)
+        };
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+        let client = reqwest::Client::new();
+        let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+        let request = json!({"model":"client-test","input":"held","stream":true});
 
-    let first_client = client.clone();
-    let first_endpoint = endpoint.clone();
-    let first_request = request.clone();
-    let first_task = tokio::spawn(async move {
-        first_client
-            .post(first_endpoint)
-            .header("accept", "text/event-stream")
+        let first_client = client.clone();
+        let first_endpoint = endpoint.clone();
+        let first_request = request.clone();
+        let first_task = tokio::spawn(async move {
+            first_client
+                .post(first_endpoint)
+                .header("accept", "text/event-stream")
+                .header("session-id", "session-overlap")
+                .header("thread-id", "conversation-overlap")
+                .json(&first_request)
+                .send()
+                .await
+                .unwrap()
+        });
+        captures.recv().await.expect("first provider request");
+
+        let second_client = client.clone();
+        let second_endpoint = endpoint.clone();
+        let second_request = json!({"model":"client-test","input":"concurrent-fast","stream":true});
+        let mut second_task = tokio::spawn(async move {
+            let response = second_client
+                .post(second_endpoint)
+                .header("accept", "text/event-stream")
+                .header("session-id", second_session)
+                .header("thread-id", second_conversation)
+                .json(&second_request)
+                .send()
+                .await
+                .unwrap();
+            let status = response.status();
+            let body = response.text().await.unwrap();
+            (status, body)
+        });
+        timeout(Duration::from_secs(2), captures.recv())
+            .await
+            .expect("same-session request must reach the provider while the first is held")
+            .expect("second capture");
+        let (status, body) = timeout(Duration::from_secs(2), &mut second_task)
+            .await
+            .expect("same-session request must complete without releasing the first")
+            .expect("second request task");
+        assert_eq!(status, StatusCode::OK);
+        assert_responses_sse_delivered_business_text(&body, "held response released");
+
+        let other_port = client
+            .post(format!("http://{}/v1/responses", handle.listeners[1].addr))
             .header("session-id", "session-overlap")
             .header("thread-id", "conversation-overlap")
-            .json(&first_request)
-            .send()
+            .json(&json!({"model":"client-test","input":"concurrent-fast","stream":true}));
+        let other_response = timeout(Duration::from_secs(2), other_port.send())
+            .await
+            .expect("the other listener must remain independent")
+            .unwrap();
+        assert_eq!(other_response.status(), StatusCode::OK);
+        let other_body = timeout(Duration::from_secs(2), other_response.text())
             .await
             .unwrap()
-    });
-    captures.recv().await.expect("first provider request");
-
-    let second_client = client.clone();
-    let second_endpoint = endpoint.clone();
-    let second_request = request.clone();
-    let mut second_task = tokio::spawn(async move {
-        let response = second_client
-            .post(second_endpoint)
-            .header("accept", "text/event-stream")
-            .header("session-id", "session-overlap")
-            .header("thread-id", "conversation-overlap")
-            .json(&second_request)
-            .send()
-            .await
             .unwrap();
-        let status = response.status();
-        let body = response.text().await.unwrap();
-        (status, body)
-    });
-    assert!(timeout(Duration::from_millis(100), captures.recv())
-        .await
-        .is_err());
-    assert!(timeout(Duration::from_millis(100), &mut second_task)
-        .await
-        .is_err());
+        assert_responses_sse_delivered_business_text(&other_body, "held response released");
+        captures
+            .recv()
+            .await
+            .expect("other listener provider capture");
 
-    release.add_permits(1);
-    let first = timeout(Duration::from_secs(2), first_task)
-        .await
-        .expect("first response headers must arrive after provider release")
-        .expect("first request task must not panic");
-    assert_eq!(first.status(), StatusCode::OK);
-    let first_body = first.text().await.unwrap();
-    assert_responses_sse_delivered_business_text(&first_body, "held response released");
-    timeout(Duration::from_secs(2), captures.recv())
-        .await
-        .expect("second provider request must start after the first body releases")
-        .expect("second provider capture must remain open");
-    release.add_permits(1);
-    let (status, body) = timeout(Duration::from_secs(2), second_task)
-        .await
-        .expect("second request must complete after admission release")
-        .expect("second request task must not panic");
-    assert_eq!(status, StatusCode::OK);
-    assert!(!body.contains("request_in_flight"));
-    assert_responses_sse_delivered_business_text(&body, "held response released");
-    handle.shutdown().await;
-    shutdown.send(()).unwrap();
-    std::env::remove_var("V3_P6_TEST_KEY");
+        release.add_permits(1);
+        let first = timeout(Duration::from_secs(2), first_task)
+            .await
+            .expect("first response headers must arrive after provider release")
+            .expect("first request task must not panic");
+        assert_eq!(first.status(), StatusCode::OK);
+        let first_body = first.text().await.unwrap();
+        assert_responses_sse_delivered_business_text(&first_body, "held response released");
+        handle.shutdown().await;
+        shutdown.send(()).unwrap();
+        std::env::remove_var("V3_P6_TEST_KEY");
+    }
 }
 
 #[tokio::test]
-async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finishes() {
+async fn responses_maintenance_waits_for_active_body_then_resumes_request() {
     let _test_guard = TEST_LOCK.lock().await;
     let _home = TestHomeGuard::new("maintenance-session-waiter");
     let (base_url, mut captures, release, shutdown) = start_controlled_held_upstream().await;
@@ -5633,6 +5682,10 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
         .await
         .unwrap()
         .unwrap();
+    let mut preparation = Box::pin(handle.prepare_exec_attempt());
+    assert!(timeout(Duration::from_millis(100), &mut preparation)
+        .await
+        .is_err());
     let mut queued = Box::pin(async {
         let response = client
             .post(&endpoint)
@@ -5647,10 +5700,6 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
     assert!(timeout(Duration::from_millis(100), &mut queued)
         .await
         .is_err());
-    let mut preparation = Box::pin(handle.prepare_exec_attempt());
-    assert!(timeout(Duration::from_millis(100), &mut preparation)
-        .await
-        .is_err());
     release.add_permits(1);
     let first_body = timeout(Duration::from_secs(5), first)
         .await
@@ -5662,8 +5711,7 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
         .await
         .unwrap()
         .unwrap();
-    // The session permit has now dropped. The queued request must still wait
-    // at the aggregate maintenance gate rather than entering Runtime.
+    // The active body has finished; maintenance still owns dispatch.
     assert!(timeout(Duration::from_millis(100), &mut queued)
         .await
         .is_err());
@@ -5850,7 +5898,7 @@ async fn responses_same_listener_different_session_remains_concurrent() {
 }
 
 #[tokio::test]
-async fn responses_client_drop_releases_same_session_before_provider_eof() {
+async fn responses_same_session_cancellation_does_not_cancel_sibling() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, release, shutdown) =
         start_controlled_held_upstream().await;
@@ -5870,9 +5918,6 @@ async fn responses_client_drop_releases_same_session_before_provider_eof() {
     socket.write_all(request_head.as_bytes()).await.unwrap();
     socket.write_all(&request_body).await.unwrap();
     captures.recv().await.expect("first provider request");
-    drop(socket);
-    sleep(Duration::from_millis(100)).await;
-
     let retry = reqwest::Client::new()
         .post(format!("http://{listener_addr}/v1/responses"))
         .header("accept", "text/event-stream")
@@ -5882,10 +5927,20 @@ async fn responses_client_drop_releases_same_session_before_provider_eof() {
     let retry_task = tokio::spawn(async move { retry.send().await.unwrap() });
     timeout(Duration::from_secs(2), captures.recv())
         .await
-        .expect("client drop must release admission before provider EOF")
+        .expect("sibling must reach provider before cancelling the first request")
         .unwrap();
+    drop(socket);
+    sleep(Duration::from_millis(100)).await;
     release.add_permits(1);
-    assert_eq!(retry_task.await.unwrap().status(), StatusCode::OK);
+    let response = timeout(Duration::from_secs(5), retry_task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_responses_sse_delivered_business_text(
+        &response.text().await.unwrap(),
+        "held response released",
+    );
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -6661,10 +6716,9 @@ async fn responses_inbound_websocket_transport_failure_closes_without_fabricated
         format!("ws://{addr}/v1/responses")
     };
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6-inbound-ws-provider-error");
-    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
-        free_port(),
-        free_port(),
-        &closed_websocket_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        p6_remote_continuation_manifest(free_port(), free_port(), &closed_websocket_url),
+        1,
     ))
     .await
     .unwrap();
@@ -6736,10 +6790,9 @@ async fn responses_inbound_websocket_provider_429_never_reaches_the_client() {
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        responses_relay_manifest(free_port(), free_port(), &provider_base_url),
+        1,
     ))
     .await
     .unwrap();
@@ -6772,10 +6825,9 @@ async fn responses_inbound_websocket_upstream_502_closes_without_fabricated_even
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_terminal_upstream(StatusCode::BAD_GATEWAY).await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-502");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        responses_relay_manifest(free_port(), free_port(), &provider_base_url),
+        1,
     ))
     .await
     .unwrap();
@@ -6820,10 +6872,9 @@ async fn responses_inbound_websocket_binary_provider_error_body_never_reaches_th
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-binary-error");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        responses_relay_manifest(free_port(), free_port(), &provider_base_url),
+        1,
     ))
     .await
     .unwrap();
@@ -7357,10 +7408,12 @@ async fn responses_direct_provider_http_error_never_reaches_the_client() {
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_capturing_failure_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-key");
-    let handle =
-        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
-            .await
-            .unwrap();
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        p6_manifest(free_port(), free_port(), &provider_base_url),
+        1,
+    ))
+    .await
+    .unwrap();
     let client = reqwest::Client::new();
 
     // The last real upstream HTTP error is provider-side evidence only. The
@@ -7485,7 +7538,7 @@ async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
                     server.endpoints.push("anthropic".to_owned());
                     server.endpoints.push("gemini".to_owned());
                 }
-                let handle = spawn_v3_server_aggregate(config).await.unwrap();
+                let handle = spawn_v3_server_aggregate(with_attempt_budget(config, 1)).await.unwrap();
                 let addr = handle.listeners[0].addr;
                 let payload = if endpoint.starts_with("/v1/responses") {
                     json!({"model":"client-test", "input":"hello", "stream":streaming})
@@ -7563,10 +7616,9 @@ async fn responses_inbound_websocket_sse_decode_failure_never_sends_client_error
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "controlled-ws-sse-decode-error");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        responses_relay_manifest(free_port(), free_port(), &provider_url),
+        1,
     ))
     .await
     .unwrap();
@@ -7786,10 +7838,9 @@ async fn anthropic_messages_provider_failure_never_reaches_the_client() {
         .expect("controlled provider base URL must end in /v1")
         .to_string();
     std::env::set_var("V3_P6_ANTHROPIC_KEY", "secret-anthropic");
-    let handle = spawn_v3_server_aggregate(anthropic_failure_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
+    let handle = spawn_v3_server_aggregate(with_attempt_budget(
+        anthropic_failure_manifest(free_port(), free_port(), &provider_base_url),
+        1,
     ))
     .await
     .unwrap();
@@ -7811,10 +7862,9 @@ async fn anthropic_messages_provider_failure_never_reaches_the_client() {
     assert_incomplete_sse_or_no_response(response).await;
 
     handle.shutdown().await;
-    let json_handle = spawn_v3_server_aggregate(anthropic_failure_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
+    let json_handle = spawn_v3_server_aggregate(with_attempt_budget(
+        anthropic_failure_manifest(free_port(), free_port(), &provider_base_url),
+        1,
     ))
     .await
     .unwrap();

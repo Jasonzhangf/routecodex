@@ -109,6 +109,24 @@ pub(crate) fn verify_published_declaration(
     Ok(())
 }
 
+pub(crate) fn verify_published_declaration_for_status(
+    instance_dir: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<V3ManagedInstanceDeclaration, V3LifecycleError> {
+    let path = instance_dir.join("instance.json");
+    if !path.exists() {
+        return Err(V3LifecycleError::NotRunning(expected.instance_id.clone()));
+    }
+    let actual: V3ManagedInstanceDeclaration = read_json(&path)?;
+    if actual == *expected || same_instance_declaration_except_executable_path(&actual, expected) {
+        Ok(actual)
+    } else {
+        Err(V3LifecycleError::IdentityMismatch(
+            "published instance declaration differs from current config/executable".to_string(),
+        ))
+    }
+}
+
 pub(crate) fn acquire_operation_lock(
     instance_dir: &Path,
     operation: &str,

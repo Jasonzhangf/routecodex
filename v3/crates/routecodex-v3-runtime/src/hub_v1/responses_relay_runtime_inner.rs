@@ -7,10 +7,7 @@ use crate::operation_runner::plan_execution::{
     run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
     V3PlanExecutionTargetSource,
 };
-use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
-use crate::provider_failure_runtime_policy::{
-    admit_v3_selected_target_after_recovery, V3AdmitAfterRecovery,
-};
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 
 fn construct_responses_relay_transport_request(
@@ -261,11 +258,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
         let initial_execution_mode = initial_plan.execution_mode;
         let retained_expanded = initial_plan.expanded;
         failed_candidates.extend(initial_plan.request_local_excluded_candidates);
-        let mut initial_admitted = Some((
-            initial_plan.selected,
-            initial_plan.admission,
-            initial_plan.protocol_decision,
-        ));
+        let mut initial_selected = Some((initial_plan.selected, initial_plan.protocol_decision));
         let mut req02 = req02;
         req02.previous.payload.0 = std::sync::Arc::new(execution_planned_request);
         let request_outcome = {
@@ -324,72 +317,69 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
             deterministic_sample,
         };
         loop {
-            let (selected, mut selected_admission, protocol_decision): (
-                routecodex_v3_target::V3Target10ConcreteProviderSelected,
-                Option<V3RuntimeProviderAdmission>,
-                crate::nodes::V3Execution11ProtocolDecision,
-            ) = if let Some((selected, admission, protocol_decision)) = initial_admitted.take() {
-                (selected, Some(admission), protocol_decision)
-            } else {
-                let preferred_selected = retry_selected.take();
-                match run_v3_plan_execution_operator_with_probes(
-                    (*req05.previous.previous.previous.payload.0).clone(),
-                    manifest,
-                    V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
-                    &input.failure_session_scope,
-                    &provider_health,
-                    &failed_candidates,
-                    v3_relay_provider_policy_now_epoch_ms()
-                        .map_err(V3ResponsesRelayRuntimeError::Target)?,
-                    deterministic_sample,
-                    allow_exhaustion_rescue_probe,
-                    preferred_selected,
-                    V3PlanExecutionModePolicy::DirectEntry {
-                        entry_protocol: V3HubEntryProtocol::Responses,
-                        allowed_modes: allowed_execution_modes.clone(),
-                    },
-                )
-                .await
-                {
-                    Ok((execution_planned_request, plan)) => {
-                        req05.previous.previous.previous.payload.0 =
-                            std::sync::Arc::new(execution_planned_request);
-                        failed_candidates.extend(plan.request_local_excluded_candidates);
-                        (plan.selected, Some(plan.admission), plan.protocol_decision)
+            let (selected, protocol_decision) =
+                if let Some((selected, protocol_decision)) = initial_selected.take() {
+                    (selected, protocol_decision)
+                } else {
+                    let preferred_selected = retry_selected.take();
+                    match run_v3_plan_execution_operator_with_probes(
+                        (*req05.previous.previous.previous.payload.0).clone(),
+                        manifest,
+                        V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
+                        &input.failure_session_scope,
+                        &provider_health,
+                        &failed_candidates,
+                        v3_relay_provider_policy_now_epoch_ms()
+                            .map_err(V3ResponsesRelayRuntimeError::Target)?,
+                        deterministic_sample,
+                        allow_exhaustion_rescue_probe,
+                        preferred_selected,
+                        V3PlanExecutionModePolicy::DirectEntry {
+                            entry_protocol: V3HubEntryProtocol::Responses,
+                            allowed_modes: allowed_execution_modes.clone(),
+                        },
+                    )
+                    .await
+                    {
+                        Ok((execution_planned_request, plan)) => {
+                            req05.previous.previous.previous.payload.0 =
+                                std::sync::Arc::new(execution_planned_request);
+                            failed_candidates.extend(plan.request_local_excluded_candidates);
+                            (plan.selected, plan.protocol_decision)
+                        }
+                        Err(V3PlanExecutionStop::Failed(source)) => {
+                            return Err(V3ResponsesRelayRuntimeError::Target(format!(
+                                "{}: {}",
+                                source.code, source.message
+                            )));
+                        }
+                        Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
+                            let failure = V3ResponsesRelayProviderFailure {
+                                status: 502,
+                                provider_status: None,
+                                policy_error_type: "selected_target_exhausted".to_string(),
+                                policy_error_message: format!(
+                                    "selected target exhausted after {:?}",
+                                    exhaustion.attempted_candidates
+                                ),
+                                provider_id: "none".to_string(),
+                                source_stage: "V3Target10ConcreteProviderSelected",
+                                observability: None,
+                                terminal_projection: None,
+                                terminal_disposition: None,
+                                matched_policy: None,
+                            };
+                            return Ok(provider_failure_output(
+                                terminalize_v3_responses_relay_provider_failure(
+                                    failure,
+                                    last_external_http.clone(),
+                                ),
+                                trace,
+                                0,
+                            ));
+                        }
                     }
-                    Err(V3PlanExecutionStop::Failed(source)) => {
-                        return Err(V3ResponsesRelayRuntimeError::Target(format!(
-                            "{}: {}",
-                            source.code, source.message
-                        )));
-                    }
-                    Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
-                        let failure = V3ResponsesRelayProviderFailure {
-                            status: 502,
-                            provider_status: None,
-                            policy_error_type: "selected_target_exhausted".to_string(),
-                            policy_error_message: format!(
-                                "selected target exhausted after {:?}",
-                                exhaustion.attempted_candidates
-                            ),
-                            provider_id: "none".to_string(),
-                            source_stage: "V3Target10ConcreteProviderSelected",
-                            observability: None,
-                            terminal_projection: None,
-                            terminal_disposition: None,
-                            matched_policy: None,
-                        };
-                        return Ok(provider_failure_output(
-                            terminalize_v3_responses_relay_provider_failure(
-                                failure,
-                                last_external_http.clone(),
-                            ),
-                            trace,
-                            0,
-                        ));
-                    }
-                }
-            };
+                };
             if provider_action_permit_target
                 .as_ref()
                 .is_some_and(|target| {
@@ -401,7 +391,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                 drop(_provider_action_permit.take());
                 provider_action_permit_target = None;
             }
-            attempt_budget.set_transport_attempt_limit(selected.candidate_count);
             if matches!(
                 protocol_decision.mode,
                 crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
@@ -498,6 +487,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             selected,
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
+                                attempt_budget: &attempt_budget,
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
@@ -572,33 +562,24 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                 handle_provider_request_failure!(error);
             }
             trace.push("V3ProviderReqOutbound09TransportRequest");
-            if pending_provider_action_recovery.is_some() {
-                drop(selected_admission.take());
+            if pending_provider_action_recovery.is_none() && _provider_action_permit.is_none() {
+                pending_provider_action_recovery = provider_health
+                    .recovery_for_selected_provider(&input.failure_session_scope, &selected)
+                    .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)?;
             }
             if let Some(recovery) = pending_provider_action_recovery.take() {
                 match handle_error_before_resp03!(provider_health
-                    .wait_for_error05_recovery(&recovery, &selected)
+                    .wait_for_error05_recovery(
+                        &recovery,
+                        &selected,
+                        attempt_budget.residence_deadline(),
+                    )
                     .await
                     .map_err(V3ResponsesRelayRuntimeError::ProviderHealth))
                 {
                     V3ProviderActionRecoveryTransition::Admitted(mut admission) => {
                         _provider_action_permit = admission.take_permit();
                         provider_action_permit_target = Some(selected.candidate.clone());
-                        match admit_v3_selected_target_after_recovery(&selected) {
-                            V3AdmitAfterRecovery::Admitted(admission) => {
-                                selected_admission = Some(admission)
-                            }
-                            V3AdmitAfterRecovery::Busy => {
-                                failed_candidates
-                                    .insert(v3_relay_provider_candidate_key(&selected.candidate));
-                                drop(_provider_action_permit.take());
-                                provider_action_permit_target = None;
-                                continue;
-                            }
-                            V3AdmitAfterRecovery::Failed(reason) => {
-                                return Err(V3ResponsesRelayRuntimeError::Target(reason))
-                            }
-                        }
                         trace.push("V3ProviderActionGateAdmission");
                     }
                     V3ProviderActionRecoveryTransition::Superseded(ticket) => {
@@ -634,12 +615,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
             handle_error_before_resp03!(runtime_timing
                 .start_external()
                 .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-            let transport_request = match selected_admission.take() {
-                Some(admission) => {
-                    transport_request.with_pre_acquired_admission(admission.into_lease())
-                }
-                None => transport_request,
-            };
             let transport_result = match tokio::time::timeout(
                 v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
                 transport.send(transport_request),
@@ -655,15 +630,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
             };
             let provider_raw = match transport_result {
                 Ok(raw) => raw,
-                Err(V3ProviderError::ConcurrencyBusy { .. }) => {
-                    handle_error_before_resp03!(runtime_timing
-                        .finish_external()
-                        .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-                    failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
-                    drop(_provider_action_permit.take());
-                    provider_action_permit_target = None;
-                    continue;
-                }
                 Err(V3ProviderError::HttpStatus { response }) => {
                     last_external_http = Some(
                         crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
@@ -705,6 +671,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             selected,
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
+                                attempt_budget: &attempt_budget,
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
@@ -744,6 +711,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             selected,
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
+                                attempt_budget: &attempt_budget,
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
@@ -802,6 +770,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                                     selected,
                                     failure,
                                     &mut V3ResponsesRelayProviderRetryState {
+                                        attempt_budget: &attempt_budget,
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
                                         retry_selected: &mut retry_selected,
@@ -868,6 +837,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                                 selected,
                                 failure,
                                 &mut V3ResponsesRelayProviderRetryState {
+                                    attempt_budget: &attempt_budget,
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,
                                     retry_selected: &mut retry_selected,
@@ -945,6 +915,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                                         selected,
                                         failure,
                                         &mut V3ResponsesRelayProviderRetryState {
+                                            attempt_budget: &attempt_budget,
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
                                             retry_selected: &mut retry_selected,
@@ -1130,6 +1101,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                                     selected,
                                     failure.clone(),
                                     &mut V3ResponsesRelayProviderRetryState {
+                                        attempt_budget: &attempt_budget,
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
                                         retry_selected: &mut retry_selected,
@@ -1239,6 +1211,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                                         selected,
                                         failure,
                                         &mut V3ResponsesRelayProviderRetryState {
+                                            attempt_budget: &attempt_budget,
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
                                             retry_selected: &mut retry_selected,

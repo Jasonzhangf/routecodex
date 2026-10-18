@@ -168,7 +168,6 @@ impl V3RequestExecutionControl {
 
 struct V3AttemptBudgetInner {
     limits: V3AttemptStoreLimits,
-    transport_attempt_limit: AtomicUsize,
     transport_attempts: AtomicUsize,
     request_resident_bytes: AtomicUsize,
     process_resident_bytes: V3ProcessResidentBytes,
@@ -239,7 +238,6 @@ impl V3AttemptBudget {
                 limits,
                 // Zero means no Target10 candidate plan has been installed;
                 // admission then uses the configured request ceiling.
-                transport_attempt_limit: AtomicUsize::new(0),
                 transport_attempts: AtomicUsize::new(0),
                 request_resident_bytes: AtomicUsize::new(0),
                 process_resident_bytes,
@@ -272,14 +270,16 @@ impl V3AttemptBudget {
         self.inner.deadline
     }
 
+    pub(crate) fn can_retry_after_ms(&self, delay_ms: u64) -> bool {
+        self.transport_attempts() < self.inner.limits.request_max_attempts
+            && Instant::now()
+                .checked_add(Duration::from_millis(delay_ms))
+                .is_some_and(|next| next < self.inner.deadline)
+    }
+
     pub(crate) fn admit_transport_attempt(&self) -> Result<usize, V3AttemptStoreError> {
         self.ensure_resident()?;
-        let planned_limit = self.inner.transport_attempt_limit.load(Ordering::Acquire);
-        let limit = if planned_limit == 0 {
-            self.inner.limits.request_max_attempts
-        } else {
-            planned_limit.min(self.inner.limits.request_max_attempts)
-        };
+        let limit = self.inner.limits.request_max_attempts;
         self.inner
             .transport_attempts
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
@@ -292,12 +292,6 @@ impl V3AttemptBudget {
                     limit
                 ))
             })
-    }
-
-    pub(crate) fn set_transport_attempt_limit(&self, candidate_count: usize) {
-        self.inner
-            .transport_attempt_limit
-            .fetch_max(candidate_count.max(1), Ordering::AcqRel);
     }
 
     pub(crate) fn transport_attempts(&self) -> usize {

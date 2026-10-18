@@ -9,42 +9,6 @@ fn v3_direct_retired_continuation_error(body: &Value) -> Option<V3Error01SourceR
         })
 }
 
-fn v3_direct_admit_pinned_target(
-    selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    last_external_http: &Option<V3ExternalHttpWitness>,
-    trace: &[&'static str],
-    hook_registry: &V3HookRegistry,
-) -> Result<
-    (
-        routecodex_v3_target::V3Target10ConcreteProviderSelected,
-        Option<V3RuntimeProviderAdmission>,
-    ),
-    V3ResponsesDirectRuntimeOutput,
-> {
-    match try_admit_v3_selected_target(&selected) {
-        Ok(Some(admission)) => Ok((selected, Some(admission))),
-        Ok(None) => Err(
-            direct_runtime_helpers_stream::target_exhausted_output_with_observability(
-                build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::TargetPoolExhausted,
-                    "V3Target10ConcreteProviderSelected",
-                    "provider_concurrency_busy",
-                    "pinned provider concurrency is full",
-                ),
-                last_external_http.clone(),
-                trace.to_vec(),
-                hook_registry,
-                None,
-            ),
-        ),
-        Err(reason) => Err(error_output(
-            runtime_source("V3Target10ConcreteProviderSelected", reason),
-            trace.to_vec(),
-            hook_registry,
-        )),
-    }
-}
-
 fn v3_direct_selected_available_for_send(
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
@@ -106,9 +70,18 @@ pub(crate) struct V3DirectProviderFailurePolicyResult {
 
 impl V3DirectProviderFailurePolicyResult {
     fn exhaust_if_residence_expired(&mut self, budget: &V3AttemptBudget) {
-        if std::time::Instant::now() < budget.residence_deadline()
-            || self.decision.action.is_terminal()
-        {
+        let delay_ms = if matches!(
+            self.decision.action,
+            V3Error05ExecutionAction::WaitThenRetrySame { .. }
+        ) {
+            self.event
+                .as_ref()
+                .and_then(|event| event.wait_ms)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        if budget.can_retry_after_ms(delay_ms) || self.decision.action.is_terminal() {
             return;
         }
         // Retain Error01-03 provenance and the exact attempted-provider action.
@@ -137,6 +110,7 @@ pub(crate) struct V3DirectProviderFailurePolicyContext<
     expanded: Option<&'ctx routecodex_v3_target::V3Target09CandidateSetExpanded>,
     provider_pinned: bool,
     now_epoch_ms: u64,
+    attempt_budget: &'ctx V3AttemptBudget,
 }
 
 pub(crate) type ErrorDecisionFn = fn(
@@ -256,6 +230,20 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     status: u16,
     state: &mut V3DirectProviderFailurePolicyState<'_>,
 ) -> Result<V3DirectProviderFailurePolicyResult, V3Error01SourceRaised> {
+    let mut result =
+        run_v3_direct_provider_failure_policy_inner(context, selected, source, status, state)
+            .await?;
+    result.exhaust_if_residence_expired(context.attempt_budget);
+    Ok(result)
+}
+
+async fn run_v3_direct_provider_failure_policy_inner<R: V3ProviderAvailabilityReader>(
+    context: &V3DirectProviderFailurePolicyContext<'_, R>,
+    selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    source: V3Error01SourceRaised,
+    status: u16,
+    state: &mut V3DirectProviderFailurePolicyState<'_>,
+) -> Result<V3DirectProviderFailurePolicyResult, V3Error01SourceRaised> {
     if matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect) {
         let decision = (context.run_error)(
             source,
@@ -289,24 +277,47 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 .and_then(|error| error.code.as_deref()),
         );
     let failed_key = candidate_key(&selected.candidate);
-    let health_record = if is_request_local_compat_failure {
-        V3ProviderFailureRecord {
-            scope_label: failed_key.clone(),
-            provider_key: failed_key.clone(),
-            state: "request_local_provider_compat".to_string(),
-            failure_count: 0,
-            cooldown_until_ms: None,
-            reason: (!source.message.trim().is_empty()).then(|| source.message.clone()),
+    let record_failure = || {
+        if is_request_local_compat_failure {
+            Ok(V3ProviderFailureRecord {
+                scope_label: failed_key.clone(),
+                provider_key: failed_key.clone(),
+                state: "request_local_provider_compat".to_string(),
+                failure_count: 0,
+                cooldown_until_ms: None,
+                reason: (!source.message.trim().is_empty()).then(|| source.message.clone()),
+            })
+        } else {
+            record_v3_direct_provider_failure_record(
+                context.provider_health,
+                context.failure_session_scope,
+                selected,
+                &source,
+                context.now_epoch_ms,
+            )
+            .map_err(|error| error.message)
         }
+    };
+    let (last_routable, health_record) = if is_request_local_compat_failure {
+        record_failure().map(|record| (false, record))
     } else {
-        record_v3_direct_provider_failure_record(
-            context.provider_health,
+        context.provider_health.record_candidate_failure(
             context.failure_session_scope,
             selected,
-            &source,
+            if context.provider_pinned {
+                &[]
+            } else {
+                context
+                    .expanded
+                    .map_or(&[], |expanded| expanded.candidates.as_slice())
+            },
+            state.failed_candidates,
             context.now_epoch_ms,
-        )?
-    };
+            Some(&source.message),
+            record_failure,
+        )
+    }
+    .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))?;
     let expanded_candidates = match (context.expanded, context.provider_pinned) {
         (Some(expanded), _) => Some(&expanded.candidates),
         (None, true) => None,
@@ -318,10 +329,13 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         }
     };
     let request_local_excluded = BTreeSet::from([failed_key.clone()]);
-    state
-        .failed_candidates
-        .extend(request_local_excluded.clone());
-    let failed_with_current = state.failed_candidates.clone();
+    if !last_routable {
+        state
+            .failed_candidates
+            .extend(request_local_excluded.clone());
+    }
+    let mut failed_with_current = state.failed_candidates.clone();
+    failed_with_current.insert(failed_key.clone());
     let mut remaining = expanded_candidates.map_or(0, |expanded_candidates| {
         remaining_available_candidates(
             expanded_candidates,
@@ -381,7 +395,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         auth_alias: selected.candidate.auth_alias.clone(),
         model_id: selected.candidate.model_id.clone(),
     };
-    let recovery_record = if remaining > 0 && !is_request_local_compat_failure {
+    let recovery_record = if last_routable || (remaining > 0 && !is_request_local_compat_failure) {
         Some(
             context
                 .provider_health
@@ -420,7 +434,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         provider_key_model_scope,
         remaining,
         false,
-        false,
+        last_routable,
         recovery_witness,
     );
     state
@@ -457,10 +471,23 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         decision.action,
         V3Error05ExecutionAction::WaitThenRetrySame { .. }
     ) {
-        return Err(runtime_source(
-            "V3Error05ExecutionDecision",
-            "retry_same is not a production provider failure action",
+        let event = Some(build_v3_direct_provider_failure_observation(
+            selected,
+            observed_status,
+            &source,
+            &health_record,
+            "retry_last_routable",
+            Some(failed_key),
+            recovery_record
+                .as_ref()
+                .map(|record| record.minimum_delay_ms),
         ));
+        return Ok(V3DirectProviderFailurePolicyResult {
+            decision,
+            retry_selected: Some(Box::new(selected.clone())),
+            event,
+            retryable_transient: false,
+        });
     }
     if !matches!(decision.action, V3Error05ExecutionAction::ProjectTerminal) {
         return Err(runtime_source(

@@ -20,6 +20,15 @@ use crate::provider_failure_runtime_policy::{
     V3RelayProviderFailurePolicyState,
 };
 use futures_util::StreamExt;
+
+pub(crate) enum V3RelayAttemptCollectFailure {
+    EmptyProviderAttempt,
+    ProviderResponseBody(String),
+    ProviderTransport(String),
+    LocalStore(crate::nodes::V3AttemptStoreError),
+    Observation(String),
+}
+
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
@@ -304,6 +313,7 @@ pub(crate) fn bind_v3_selected_business_auth_kind(
 /// （retry_selected / pending_recovery 已更新，主循环 continue）。
 pub async fn handle_provider_failure(
     context: &V3RelayProviderFailurePolicyContext<'_>,
+    attempt_budget: &crate::nodes::V3AttemptBudget,
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     mut failure: V3RelayProviderFailure,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
@@ -326,28 +336,15 @@ pub async fn handle_provider_failure(
     )
     .await
     .map_err(|error| error.to_string())?;
+    result.enforce_retry_budget(attempt_budget, state.last_external_http.clone());
     result.event.provider_status = failure.provider_status;
     provider_failure_events
         .push(build_v3_runtime_provider_failure_observation_from_policy_event(&result.event));
     match result.decision.action {
-        V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+        V3Error05ExecutionAction::WaitThenReselect { recovery }
+        | V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
             *retry_selected = result.retry_selected.map(|selected| *selected);
-            if result.event.wait_ms.is_some() {
-                *pending_recovery = Some(recovery);
-            } else {
-                *pending_recovery = None;
-            }
-            Ok(None)
-        }
-        V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
-            *retry_selected = result.retry_selected.map(|selected| *selected);
-            // 瞬态重试（request-local recovery witness，wait_ms=None）不经过
-            // provider action gate：无 health 记录/lane 可等，立即重发。
-            if result.event.wait_ms.is_some() {
-                *pending_recovery = Some(recovery);
-            } else {
-                *pending_recovery = None;
-            }
+            *pending_recovery = Some(recovery);
             Ok(None)
         }
         V3Error05ExecutionAction::ProjectTerminal => {
@@ -948,15 +945,14 @@ pub(crate) async fn resolve_v3_relay_entry_target(
     allow_exhaustion_rescue_probe: bool,
     preferred_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     captured_expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
-) -> crate::provider_failure_runtime_policy::V3RelayProviderAdmittedTargetResolution {
+) -> crate::provider_failure_runtime_policy::V3RelayProviderTargetResolution {
     use crate::provider_failure_runtime_policy::{
-        resolve_v3_relay_target_outcome_with_admission_rescue,
-        select_v3_expanded_target_with_admission_rescue, V3AdmittedTargetSelectionAfterRescue,
-        V3RelayProviderAdmittedTargetResolution,
+        resolve_v3_relay_target_outcome_with_rescue, select_v3_expanded_target_with_rescue,
+        V3RelayProviderTargetResolution, V3TargetSelectionAfterRescue,
     };
 
     let Some(expanded) = captured_expanded else {
-        return resolve_v3_relay_target_outcome_with_admission_rescue(
+        return resolve_v3_relay_target_outcome_with_rescue(
             input,
             allow_exhaustion_rescue_probe,
             preferred_selected,
@@ -964,7 +960,7 @@ pub(crate) async fn resolve_v3_relay_entry_target(
         .await;
     };
 
-    match select_v3_expanded_target_with_admission_rescue(
+    match select_v3_expanded_target_with_rescue(
         input.manifest,
         expanded.clone(),
         input.failure_session_scope,
@@ -977,16 +973,16 @@ pub(crate) async fn resolve_v3_relay_entry_target(
     )
     .await
     {
-        V3AdmittedTargetSelectionAfterRescue::Selected(selected) => {
-            V3RelayProviderAdmittedTargetResolution::Selected(selected)
+        V3TargetSelectionAfterRescue::Selected(selected) => {
+            V3RelayProviderTargetResolution::Selected(selected)
         }
-        V3AdmittedTargetSelectionAfterRescue::Exhausted(exhausted) => {
-            V3RelayProviderAdmittedTargetResolution::Exhausted {
+        V3TargetSelectionAfterRescue::Exhausted(exhausted) => {
+            V3RelayProviderTargetResolution::Exhausted {
                 attempted_candidates: exhausted.attempted_candidates,
             }
         }
-        V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
-            V3RelayProviderAdmittedTargetResolution::Failed(source)
+        V3TargetSelectionAfterRescue::Failed(source) => {
+            V3RelayProviderTargetResolution::Failed(source)
         }
     }
 }

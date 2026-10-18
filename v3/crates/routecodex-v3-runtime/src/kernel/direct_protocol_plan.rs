@@ -176,7 +176,6 @@ pub(crate) fn protocol_candidate_keys_for_decision_mode(
             candidate_count: expanded.candidates.len(),
             unavailable_candidates: Vec::new(),
             attempts: 1,
-            default_floor_protected: false,
         };
         match build_v3_execution_11_protocol_decision_from_v3_target_10(
             selected,

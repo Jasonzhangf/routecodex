@@ -1299,8 +1299,8 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
         [primary.as_str(), secondary.as_str()]
     );
     assert!(
-        started.elapsed() >= Duration::from_millis(1_000),
-        "the first provider failure must block the reselected provider action for at least one second"
+        started.elapsed() < Duration::from_millis(800),
+        "healthy reselected provider must not wait for failed provider backoff"
     );
     assert_eq!(output.status, 200);
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
@@ -2507,7 +2507,16 @@ async fn terminal_sse_attempt_commits_after_eof_and_releases_a_fresh_request() {
     use futures_util::StreamExt;
     let server_id = "openai_chat_terminal_commit";
     const FAILURE_SESSION_ID: &str = "openai-chat-terminal-commit-session";
-    let manifest = manifest_with_identity(server_id);
+    let mut manifest = manifest_with_identity(server_id);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .request_max_attempts = 1;
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let success_health =
@@ -2520,8 +2529,8 @@ async fn terminal_sse_attempt_commits_after_eof_and_releases_a_fresh_request() {
         V3OpenAiChatRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 FAILURE_SESSION_ID,
             )
             .expect("test provider failure session scope"),
@@ -2542,6 +2551,22 @@ async fn terminal_sse_attempt_commits_after_eof_and_releases_a_fresh_request() {
         failed.client_body,
         V3OpenAiChatRelayClientBody::Json(_)
     ));
+    assert!(
+        provider_health
+            .store()
+            .availability(
+                server_id,
+                Some(server_id),
+                Some("chat-wire-model"),
+                u64::MAX
+            )
+            .available
+    );
+    assert!(provider_health
+        .store()
+        .provider_cooldown_probe_keys_due(u64::MAX)
+        .unwrap()
+        .is_empty());
 
     let (terminal_sender, terminal_receiver) = tokio::sync::mpsc::channel(2);
     terminal_sender
@@ -2565,8 +2590,8 @@ data: [DONE]
         V3OpenAiChatRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 FAILURE_SESSION_ID,
             )
             .expect("test provider failure session scope"),
@@ -2582,10 +2607,14 @@ data: [DONE]
     );
     tokio::pin!(runtime);
     assert!(
-        tokio::time::timeout(Duration::from_millis(100), &mut runtime)
+        tokio::time::timeout(Duration::from_millis(1_400), &mut runtime)
             .await
             .is_err(),
         "terminal syntax alone must not commit before provider EOF"
+    );
+    assert!(
+        terminal.receiver.lock().unwrap().is_none(),
+        "the provider send must begin before the EOF buffering assertion"
     );
     drop(terminal_sender);
     let successful = tokio::time::timeout(Duration::from_secs(1), &mut runtime)
@@ -2615,8 +2644,8 @@ data: [DONE]
             V3OpenAiChatRelayRuntimeInput {
                 server_id: server_id.into(),
                 failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
+                    server_id,
+                    server_id,
                     FAILURE_SESSION_ID,
                 )
                 .expect("test provider failure session scope"),
@@ -2638,10 +2667,11 @@ data: [DONE]
         fresh.status == 200,
         "fresh request must proceed after the committed attempt"
     );
+    assert!(!fresh.node_trace.contains(&"V3ProviderActionGateAdmission"));
 }
 
 #[tokio::test]
-async fn active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds() {
+async fn active_recovery_sse_does_not_block_a_healthy_alternative_request() {
     use futures_util::StreamExt;
     let server_id = "openai_chat_active_recovery";
     const FAILURE_SESSION_ID: &str = "openai-chat-active-recovery-session";
@@ -2675,8 +2705,8 @@ data: [DONE]
             V3OpenAiChatRelayRuntimeInput {
                 server_id: server_id.into(),
                 failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
+                    server_id,
+                    server_id,
                     FAILURE_SESSION_ID,
                 )
                 .expect("test provider failure session scope"),
@@ -2704,13 +2734,16 @@ data: [DONE]
     let waiting_manifest = manifest.clone();
     let waiting_health = waiting_health.runtime_health();
     let waiter = tokio::spawn(async move {
-        execute_v3_openai_chat_relay_runtime_with_provider_health(
+        let transport = ReselectTransport {
+            provider_ids: Mutex::new(Vec::new()),
+        };
+        let result = execute_v3_openai_chat_relay_runtime_with_provider_health(
             &waiting_manifest,
             V3OpenAiChatRelayRuntimeInput {
                 server_id: server_id.into(),
                 failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
+                    server_id,
+                    server_id,
                     FAILURE_SESSION_ID,
                 )
                 .expect("test provider failure session scope"),
@@ -2721,17 +2754,36 @@ data: [DONE]
                     "stream":false
                 }),
             },
-            &ReselectTransport {
-                provider_ids: Mutex::new(Vec::new()),
-            },
+            &transport,
             waiting_health,
         )
-        .await
+        .await;
+        let attempts = transport.provider_ids.lock().unwrap().clone();
+        (result, attempts)
     });
-    tokio::time::sleep(Duration::from_millis(5_200)).await;
+    let (released, attempts) = tokio::time::timeout(Duration::from_secs(2), waiter)
+        .await
+        .expect("healthy secondary must complete before the first request's EOF")
+        .expect("competing request must not panic");
+    let released = released.expect("healthy alternative must complete the competing request");
+    assert_eq!(released.status, 200);
+    assert_eq!(
+        attempts,
+        vec![
+            format!("{server_id}_primary"),
+            format!("{server_id}_secondary")
+        ]
+    );
+    let V3OpenAiChatRelayClientBody::Json(body) = released.client_body else {
+        panic!("competing request must return actual JSON business content");
+    };
+    assert_eq!(
+        body["choices"][0]["message"]["content"],
+        "secondary success"
+    );
     assert!(
-        !waiter.is_finished(),
-        "active recovery permit expired by wall clock before terminal success"
+        !first.is_finished(),
+        "first request must remain buffered until its own provider EOF"
     );
 
     drop(terminal_sender);
@@ -2740,10 +2792,7 @@ data: [DONE]
         .expect("validated provider EOF did not finish the first Broker attempt")
         .expect("first recovery task panicked")
         .expect("first recovery action failed");
-    assert!(
-        first.node_trace.contains(&"V3ProviderActionGateAdmission"),
-        "the first request must enter Error05 recovery"
-    );
+    assert_eq!(first.status, 200);
     let first_stream = match first.client_body {
         V3OpenAiChatRelayClientBody::Sse(stream) => stream,
         V3OpenAiChatRelayClientBody::Json(_) => panic!("expected committed SSE"),
@@ -2755,18 +2804,7 @@ data: [DONE]
         .map(|frame| String::from_utf8(frame).unwrap())
         .collect::<String>();
     assert!(first_text.contains("done"), "{first_text}");
-    let released = tokio::time::timeout(Duration::from_secs(6), waiter)
-        .await
-        .expect("clean EOF did not release the queued recovery action")
-        .expect("queued recovery task panicked")
-        .expect("queued recovery action failed");
-    assert_eq!(released.status, 200);
-    assert!(
-        released
-            .node_trace
-            .contains(&"V3ProviderActionGateAdmission"),
-        "the competing request must also enter Error05 recovery"
-    );
+    assert!(first_text.contains("[DONE]"), "{first_text}");
 }
 
 #[tokio::test]

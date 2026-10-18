@@ -627,14 +627,14 @@ resources:
     owner_node: V3AdaptiveConcurrencyController
     identity: [providerId, authAlias, lease]
     semantic_contract:
-      capacity: business leases are bounded by the provider+authAlias adaptive budget and hard maximum; scheduled probes remain independently bounded
-      acquisition: Runtime immediately skips a full provider+authAlias and selects the next eligible candidate without waiting or changing provider health
-      websocket_order: WebSocketV2 preserves a granted lease for an immediately available session slot and releases it before an actual slot wait; readmission after that wait is immediate and a losing capacity race returns typed ConcurrencyBusy to Runtime for reselect
-      handoff: Provider consumes a matching Runtime lease exactly once; a mismatched lease is released and rejected
-      release: Runtime admission drop, pre-acquired transport request drop, and Provider permit-guard drop release the lease exactly once on early exit, cancellation, transport failure, response completion, or stream drop
+      capacity: only health probes acquire bounded control capacity; business requests never acquire or wait for it
+      acquisition: probe control saturation cannot exclude a healthy business target
+      websocket_order: WebSocketV2 owns its real shared connection without business capacity admission or readmission
+      handoff: health probe transport consumes its own matching probe lease exactly once
+      release: probe request drop and probe guard drop release control capacity exactly once on completion, cancellation or failure
       boundary: lease and capacity state remain typed process-local control state and never enter request, provider, client, MetadataCenter, or Debug payloads
-    allowed_writers: [V3AdaptiveConcurrencyController::ensure_initial_budget, V3AdaptiveConcurrencyController::try_acquire_business, V3AdaptiveConcurrencyController::try_acquire_scheduled_probe, V3AdaptiveConcurrencyController::release, V3AdaptiveConcurrencyController::complete_probe, V3AdaptiveConcurrencyController::observe_business_success, V3RuntimeProviderAdmission::drop, V3PreAcquiredProviderAdmission::release, V3AdaptiveConcurrencyPermitGuard::drop]
-    allowed_readers: [V3AdaptiveConcurrencyController::snapshot, select_v3_expanded_target_with_admission_rescue, V3ProviderResponsesTransport::send]
+    allowed_writers: [V3AdaptiveConcurrencyController::ensure_initial_budget, V3AdaptiveConcurrencyController::try_acquire, V3AdaptiveConcurrencyController::try_acquire_scheduled_probe, V3AdaptiveConcurrencyController::release, V3AdaptiveConcurrencyController::complete_probe, V3PreAcquiredProviderAdmission::release, V3AdaptiveConcurrencyPermitGuard::drop]
+    allowed_readers: [V3AdaptiveConcurrencyController::snapshot, ProviderResponsesTransport::send_probe]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-error, request.normal_payload, provider.wire_payload, response.client_payload, MetadataCenter.payload, Debug.payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1300,7 +1300,7 @@ resources:
     lifecycle: v3.debug_error_foundation.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStateMutated
-    identity: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
+    identity: [listenerPort, serverId, routingGroup, sessionId, providerRuntimeIdentity]
     allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::cancel_provider_cooldown_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderSessionAvailabilityReader::availability, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target]
@@ -1313,7 +1313,7 @@ resources:
     owner_feature_id: v3.provider_key_health_model_granularity
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStore
-    identity: [providerId, interfaceId, authAlias, modelId]
+    identity: [listenerPort, providerId, interfaceId, authAlias, modelId]
     semantic_contract:
       score_baseline: every configured or unseen identity starts at score 100
       score_contract: clamp(score + delta, 0, 150) with no hidden credit above the cap
@@ -1334,7 +1334,7 @@ resources:
     lifecycle: v3.provider_cooldown_rescue_probe
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderCooldownProbeState
-    identity: [providerId, interfaceId, authAlias, modelId]
+    identity: [listenerPort, providerId, interfaceId, authAlias, modelId]
     semantic_contract:
       score_baseline: every configured or unseen identity starts at score 100
       score_contract: clamp(score + delta, 0, 150) with no hidden credit above the cap
@@ -1365,7 +1365,7 @@ resources:
     lifecycle: v3.debug_error_foundation.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStore
-    identity: [providerId, authAlias, modelId]
+    identity: [listenerPort, providerId, interfaceId, authAlias, modelId]
     allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error, V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_key_success, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-server]
@@ -1378,7 +1378,7 @@ resources:
     owner_feature_id: v3.provider_global_subscription_probe
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStore
-    identity: [providerId, authAlias, modelId]
+    identity: [listenerPort, providerId, interfaceId, authAlias, modelId]
     semantic_contract:
       policy_scope: automatic matched cooldown directives resolve to the exact selected provider+authAlias+modelId; explicit manual auth_key actions retain their declared administrative scope
       cross_session: shared
@@ -1401,9 +1401,9 @@ resources:
     lifecycle: v3.server.startup_and_provider_failure.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderGlobalCooldownPersistence
-    identity: [providerId, authAlias, modelId, failureClass, cooldownUntilMs, nextProbeAtMs]
+    identity: [listenerPort, providerId, interfaceId, authAlias, modelId, failureClass, cooldownUntilMs, nextProbeAtMs]
     allowed_writers: [V3ProviderCooldownCoordinator::load, V3ProviderCooldownCoordinator::record_failure, V3ProviderCooldownCoordinator::replace_entries, V3ProviderCooldownCoordinator::persist]
-    allowed_readers: [V3ProviderHealthStore::from_manifest, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys_due]
+    allowed_readers: [V3ProviderHealthStore::from_manifest, V3ProviderHealthStore::from_manifest_for_listener, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys_due]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -2205,29 +2205,14 @@ resources:
     binding_status: anchored
     required_gates: [npm run verify:v3-resource-map]
 
-  - resource_id: v3.server.responses_session_admission
-    resource_kind: listener_scoped_concurrency_gate
-    lifecycle: v3.responses_session_admission
-    owner_feature_id: v3.responses_session_inflight_admission
-    owner_crate: routecodex-v3-server
-    owner_node: V3Server03ResponsesSessionAdmissionBlock
-    identity: [serverId, endpoint, explicitSessionId, explicitConversationId, permitToken]
-    allowed_writers: [V3ResponsesSessionAdmissionGate::admit, <V3ResponsesSessionAdmissionPermit as Drop>::drop]
-    allowed_readers: [admit_v3_responses_session_after_json_parse, pending_endpoint, hold_response_body_admission_permit]
-    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, provider_action_gate]
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    contention_policy: wait_on_listener_local_predicate_without_client_error_projection
-    release_point: V3ServerRespOutbound06ClientFrameBodyEofErrorOrDrop
-    binding_status: anchored
-
   - resource_id: v3.error.provider_action_gate
     resource_kind: process_local_control_side_channel
     lifecycle: v3.provider_action_gate.mainline
     owner_crate: routecodex-v3-runtime
     owner_node: V3ProviderActionGateAdmission
     identity:
-      - provider_action_scope
+      - listener_server_id_bound_to_port
+      - provider_runtime_identity_interface_provider_model_key
       - generation
       - waiter_ticket
     allowed_writers:

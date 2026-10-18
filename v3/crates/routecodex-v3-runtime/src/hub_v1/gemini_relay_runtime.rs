@@ -672,26 +672,13 @@ pub(crate) struct V3GeminiSseProviderOutcome {
 }
 
 impl V3GeminiSseProviderOutcome {
-    async fn record_failure(&mut self, reason: &str) -> Result<(), String> {
+    async fn record_failure(&mut self, _reason: &str) -> Result<(), String> {
         if self.recorded {
             return Ok(());
         }
         drop(self._provider_action_permit.take());
-        let source = build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_response_sse_stream",
-            reason,
-        );
-        self.provider_health
-            .record_post_commit_provider_stream_failure_from_source_for_interface(
-                &self.failure_session_scope,
-                &self.provider_id,
-                &self.interface_id,
-                Some(&self.auth_alias),
-                Some(&self.model_id),
-                &source,
-            )?;
+        // The buffered attempt enters the shared candidate failure policy.
+        // Codec observation must not cool the identity before that decision.
         self.recorded = true;
         Ok(())
     }

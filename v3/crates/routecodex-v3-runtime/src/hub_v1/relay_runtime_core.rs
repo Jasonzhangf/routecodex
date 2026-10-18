@@ -10,21 +10,20 @@
 //! 里程碑 2：trait + 骨架。SSE 状态机（协议特定）经 [`V3RelayProtocolCodec::project_sse`]
 //! 收敛；JSON 响应链（resp01->02->03->04->05->06）经 `project_json_response` 收敛。
 
-use super::relay_runtime_shared::{relay_handoff_entry_state, relay_request_execution_control};
+use super::relay_runtime_shared::{
+    relay_handoff_entry_state, relay_request_execution_control, V3RelayAttemptCollectFailure,
+};
 use super::*;
-use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder};
+use crate::nodes::V3CommittedClientSseBuilder;
 use crate::operation_runner::plan_execution::{
     run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
     V3PlanExecutionTargetSource,
 };
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
-use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
-    admit_v3_selected_target_after_recovery, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample, V3AdmitAfterRecovery,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
-    V3RuntimeProviderAdmission,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
@@ -35,14 +34,6 @@ use routecodex_v3_provider_responses::{
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
-
-enum V3RelayAttemptCollectFailure {
-    EmptyProviderAttempt,
-    ProviderResponseBody(String),
-    ProviderTransport(String),
-    LocalStore(V3AttemptStoreError),
-    Observation(String),
-}
 
 /// Relay SSE 首帧守卫：provider 返回 SSE 后、投影前 await 首帧。首帧错误/空流/
 /// 挂起超时 -> V3ProviderError，走 provider 失败策略(reselect 切 provider)。
@@ -567,7 +558,7 @@ where
     let retained_expanded = initial_plan.expanded;
     failed_candidates.extend(initial_plan.request_local_excluded_candidates);
     let planned_execution_mode = initial_plan.execution_mode;
-    let mut initial_admitted = Some((initial_plan.selected, initial_plan.admission));
+    let mut initial_selected = Some(initial_plan.selected);
     let request_outcome = compile_v3_hub_relay_request_hooks()
         .run_from_normalized(req02, &request_hook_profile)
         .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
@@ -598,11 +589,8 @@ where
     };
     loop {
         let preferred_selected = retry_selected.take();
-        let (selected, mut selected_admission): (
-            routecodex_v3_target::V3Target10ConcreteProviderSelected,
-            Option<V3RuntimeProviderAdmission>,
-        ) = if let Some((selected, admission)) = initial_admitted.take() {
-            (selected, Some(admission))
+        let selected = if let Some(selected) = initial_selected.take() {
+            selected
         } else {
             let target_resolution = run_v3_plan_execution_operator_with_probes(
                 (*req05.previous.previous.previous.payload.0).clone(),
@@ -625,7 +613,7 @@ where
                     req05.previous.previous.previous.payload.0 =
                         std::sync::Arc::new(execution_planned_request);
                     failed_candidates.extend(plan.request_local_excluded_candidates);
-                    (plan.selected, Some(plan.admission))
+                    plan.selected
                 }
                 Err(V3PlanExecutionStop::Failed(source)) => {
                     return Err(V3RelayCoreError::Target(format!(
@@ -660,7 +648,6 @@ where
             drop(provider_action_permit.take());
             provider_action_permit_target = None;
         }
-        attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_interface_id = selected.candidate.interface_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
@@ -680,6 +667,7 @@ where
             Err(error) => {
                 let terminal_failure = handle_provider_failure(
                     &failure_context,
+                    &attempt_budget,
                     selected,
                     C::request_failure_builder(
                         "V3ProviderTarget06WireProtocol",
@@ -720,6 +708,7 @@ where
             ($stage:expr, $kind:expr, $error:expr) => {{
                 let terminal_failure = handle_provider_failure(
                     &failure_context,
+                    &attempt_budget,
                     selected,
                     C::request_failure_builder($stage, $kind, $error),
                     &mut V3RelayProviderFailurePolicyState {
@@ -839,33 +828,24 @@ where
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let provider_request_snapshot = transport_request.provider_request_projection();
-        if pending_provider_action_recovery.is_some() {
-            drop(selected_admission.take());
+        if pending_provider_action_recovery.is_none() && provider_action_permit.is_none() {
+            pending_provider_action_recovery = provider_health
+                .recovery_for_selected_provider(&failure_session_scope, &selected)
+                .map_err(V3RelayCoreError::Target)?;
         }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
-                .wait_for_error05_recovery(&recovery, &selected)
+                .wait_for_error05_recovery(
+                    &recovery,
+                    &selected,
+                    attempt_budget.residence_deadline(),
+                )
                 .await
                 .map_err(|error| V3RelayCoreError::Target(error.to_string()))?
             {
                 V3ProviderActionRecoveryTransition::Admitted(mut admission) => {
                     provider_action_permit = admission.take_permit();
                     provider_action_permit_target = Some(selected.candidate.clone());
-                    match admit_v3_selected_target_after_recovery(&selected) {
-                        V3AdmitAfterRecovery::Admitted(admission) => {
-                            selected_admission = Some(admission)
-                        }
-                        V3AdmitAfterRecovery::Busy => {
-                            failed_candidates
-                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
-                            drop(provider_action_permit.take());
-                            provider_action_permit_target = None;
-                            continue;
-                        }
-                        V3AdmitAfterRecovery::Failed(reason) => {
-                            return Err(V3RelayCoreError::Target(reason))
-                        }
-                    }
                     trace.push("V3ProviderActionGateAdmission");
                 }
                 V3ProviderActionRecoveryTransition::Superseded(ticket) => {
@@ -904,12 +884,6 @@ where
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3RelayCoreError::Target(timing_error));
         }
-        let transport_request = match selected_admission.take() {
-            Some(admission) => {
-                transport_request.with_pre_acquired_admission(admission.into_lease())
-            }
-            None => transport_request,
-        };
         let attempt_timeout =
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id);
         let attempt_deadline = tokio::time::Instant::now() + attempt_timeout;
@@ -927,15 +901,6 @@ where
                     })
                 }) {
                 Ok(raw) => raw,
-                Err(V3ProviderError::ConcurrencyBusy { .. }) => {
-                    runtime_timing
-                        .finish_external()
-                        .map_err(V3RelayCoreError::Target)?;
-                    failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
-                    drop(provider_action_permit.take());
-                    provider_action_permit_target = None;
-                    continue;
-                }
                 Err(V3ProviderError::HttpStatus { response }) => {
                     last_external_http = Some(
                         crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
@@ -956,6 +921,7 @@ where
                     drop(provider_action_permit.take());
                     if let Some(failure) = handle_provider_failure(
                         &failure_context,
+                        &attempt_budget,
                         selected,
                         failure,
                         &mut V3RelayProviderFailurePolicyState {
@@ -990,6 +956,7 @@ where
                     drop(provider_action_permit.take());
                     if let Some(failure) = handle_provider_failure(
                         &failure_context,
+                        &attempt_budget,
                         selected,
                         failure,
                         &mut V3RelayProviderFailurePolicyState {
@@ -1041,6 +1008,7 @@ where
                         drop(provider_action_permit.take());
                         let terminal_failure = handle_provider_failure(
                             &failure_context,
+                            &attempt_budget,
                             selected,
                             failure.clone(),
                             &mut V3RelayProviderFailurePolicyState {
@@ -1125,6 +1093,7 @@ where
                         drop(provider_action_permit.take());
                         if let Some(failure) = handle_provider_failure(
                             &failure_context,
+                            &attempt_budget,
                             selected,
                             failure,
                             &mut V3RelayProviderFailurePolicyState {
@@ -1258,6 +1227,7 @@ where
                         drop(provider_action_permit.take());
                         let terminal_failure = handle_provider_failure(
                             &failure_context,
+                            &attempt_budget,
                             selected,
                             failure.clone(),
                             &mut V3RelayProviderFailurePolicyState {
@@ -1422,6 +1392,7 @@ where
                             drop(provider_action_permit.take());
                             if let Some(failure) = handle_provider_failure(
                                 &failure_context,
+                                &attempt_budget,
                                 selected,
                                 failure,
                                 &mut V3RelayProviderFailurePolicyState {
@@ -1529,6 +1500,7 @@ where
                         drop(provider_action_permit.take());
                         if let Some(failure) = handle_provider_failure(
                             &failure_context,
+                            &attempt_budget,
                             selected,
                             failure,
                             &mut V3RelayProviderFailurePolicyState {
@@ -1675,6 +1647,7 @@ where
                     drop(provider_action_permit.take());
                     let terminal_failure = handle_provider_failure(
                         &failure_context,
+                        &attempt_budget,
                         selected,
                         failure.clone(),
                         &mut V3RelayProviderFailurePolicyState {

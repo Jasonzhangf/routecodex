@@ -50,7 +50,17 @@ async fn spawn_sample_persistence_failure_server(
     let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state)
         .with_snapshots_enabled(true)
         .with_direct_snapshots_enabled(true);
-    let (declaration, manifest) = lifecycle.declaration(&executable).unwrap();
+    let (declaration, mut manifest) = lifecycle.declaration(&executable).unwrap();
+    // This fixture tests diagnostic shutdown after one failed attempt to port 9.
+    // Last-candidate recovery is covered by the provider recovery consumers.
+    for server in manifest.servers.values_mut() {
+        server
+            .execution
+            .as_mut()
+            .unwrap()
+            .attempt_store
+            .request_max_attempts = 1;
+    }
     let handle = routecodex_v3_server::spawn_v3_server_aggregate(manifest)
         .await
         .unwrap();

@@ -296,7 +296,7 @@ pub(crate) fn previous_owner_matches_restart_declaration(
             || listener_sets_exactly_match(&published.listeners, &expected.listeners))
 }
 
-fn listener_sets_exactly_match(
+pub(crate) fn listener_sets_exactly_match(
     left: &[V3ManagedListenerDeclaration],
     right: &[V3ManagedListenerDeclaration],
 ) -> bool {
@@ -313,6 +313,38 @@ fn listener_sets_exactly_match(
             .collect::<BTreeSet<_>>()
     };
     declarations(left) == declarations(right)
+}
+
+pub(crate) fn find_same_config_drift_candidates(
+    state_root: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<Vec<(PathBuf, V3ManagedInstanceDeclaration)>, V3LifecycleError> {
+    let instances_root = state_root.join("instances");
+    if !instances_root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(instances_root)? {
+        let instance_dir = entry?.path();
+        if !instance_dir.is_dir() {
+            continue;
+        }
+        let declaration_path = instance_dir.join("instance.json");
+        if !declaration_path.exists() {
+            continue;
+        }
+        let Ok(published) = read_json::<V3ManagedInstanceDeclaration>(&declaration_path) else {
+            continue;
+        };
+        if published.instance_id != expected.instance_id
+            && published.config_path == expected.config_path
+            && listener_sets_exactly_match(&published.listeners, &expected.listeners)
+        {
+            candidates.push((instance_dir, published));
+        }
+    }
+    candidates.sort_by(|(_, left), (_, right)| left.instance_id.cmp(&right.instance_id));
+    Ok(candidates)
 }
 
 pub(crate) fn previous_owner_has_live_control_truth(

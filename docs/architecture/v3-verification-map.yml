@@ -285,7 +285,7 @@ features:
   - p0_restart_pending_hooks_cleanup_survives_declaration_changes covers configured hooks identity rejection, A-to-B-to-B-to-C retained cleanup ownership, no duplicate hooks, continued real Responses completion, and recovery to one replacement hooks group.
   - p0_restart_success_with_hooks_drains_inflight_json_and_sse_then_serves_new_requests covers healthy public JSON/SSE held beyond five seconds, complete client bodies before exec, exact replacement identity, unique hooks cleanup, and complete requests after restart.
   - p0_restart_operation_budget_cancels_drain_and_resumes_queued_dispatch covers control-budget cancellation retaining pending SSE, queued dispatch recovery, unchanged PID/nonce/hooks owner, and complete Responses after cancellation.
-  - responses_same_session_waiter_obeys_maintenance_after_active_body_finishes and responses_keepalive_next_request_waits_for_maintenance_cancellation cover session waiter dispatch after body completion and the next business request on the exact same HTTP keepalive socket; both run in npm run test:v3-server-maintenance-admission, included by npm run test:v3-responses-session-admission.
+  - responses_maintenance_waits_for_active_body_then_resumes_request and responses_keepalive_next_request_waits_for_maintenance_cancellation cover restart dispatch coordination after body completion and the next request on the same HTTP keepalive socket; both run in npm run test:v3-server-maintenance-admission.
   - p0_restart_recovers_historical_sample_failure_and_retains_native_rejection_worker covers real failed diagnostic persistence, repaired filesystem, exact native exec rejection preserving the original connection and identity, resumed sample writes, and subsequent successful official restart.
   - responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker and responses_direct_exec_sample_drain_timeout_keeps_listener_and_admission cover real HTTP samples bracketed by an OS retention lock, complete accepted artifacts, maintenance-queued dispatch without diagnostics refusal, and original-worker recovery after guard release or timeout.
   - responses_direct_historical_sample_failure_does_not_reject_exec_preparation covers real HTTP persistence failure history retained as diagnostic evidence without blocking completed exec drain.
@@ -303,7 +303,9 @@ features:
   - RouteCodex managed start/stop owns the installed hooks supervisor process without broad kill
   - lifecycle state, argv, log, and evidence contain no resolved secret
   - live managed 5555 restart with concurrent V2 health and real JSON/SSE Responses
+  - status_reconciliation integration suite (status_does_not_mask_corrupted_control_with_stale_stopped_record, status_does_not_mask_corrupted_control_across_same_config_digest_drift, status_reports_live_owner_across_executable_copy, status_reports_live_owner_across_same_config_digest_drift, status_skips_confirmed_dead_candidate_and_reports_later_live_candidate, status_does_not_adopt_foreign_config_with_same_ports) proves truthful read-only status without error masking across stale stopped records, corrupted control channels, copied executables, and config digest drift
   required_gates:
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test managed_lifecycle status_reconciliation:: -- --test-threads=1 --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test managed_restart_control_budget_blackbox -- --nocapture
   - npm run verify:v3-dagpipe-feature-graphs
   - npm run test:v3-managed-server-lifecycle
@@ -1116,7 +1118,7 @@ features:
   - pending business endpoints route their typed failure through Debug/Error and break the model client transport instead of returning a structured not_implemented payload
   required_blackbox:
   - fa22072_error_decoupling exercises request-stage, response decode, Provider recovery/exhaustion and Responses WS close with no client error or fabricated business completion.
-  - Failed requests release activity and session admission; a concurrent sibling and the same provider/model/key/session follow-up complete through the real listener.
+  - Failed requests release only their own activity; a concurrent sibling and the same provider/model/key/session follow-up complete through the real listener.
   required_gates:
   - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling -- --test-threads=1 --nocapture
   - npm run verify:v3-architecture-docs
@@ -1277,10 +1279,10 @@ features:
   - Provider HTTP transport rejects text/event-stream raw responses for JSON-intent requests instead of silently switching provider response kind
   - Provider transport dispatches by selected provider_type; Anthropic targets use /v1/messages, x-api-key, anthropic-version, Anthropic wire, and Responses client projection
   - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
-  - 'Adaptive provider concurrency is keyed by providerId plus authAlias: admission is atomic and a full candidate is skipped immediately for this request'
-  - 'Configured maxInFlight bounds business admission without queuing; Direct and Relay select the next eligible candidate and all-full pools exhaust immediately'
-  - 'Concurrency exclusions remain request-local and never mutate provider failure health or cooldown; scheduled probes remain separately bounded'
-  - 'WebSocketV2 preserves a granted lease for an available session slot, releases it before an actual slot wait, and returns typed ConcurrencyBusy on a losing readmission race for Runtime reselect'
+  - 'Independent business requests are not excluded by local in-flight capacity; Direct and Relay preserve healthy target priority across listeners'
+  - 'Requests exceeding the former maxInFlight capacity all reach the selected healthy provider and deliver business responses'
+  - 'Scheduled recovery probes retain their own bounded control resources without imposing business admission'
+  - 'WebSocketV2 preserves real per-connection execution ownership without a separate business capacity rejection or readmission race'
   - 'When a cooled preceding-tier candidate already has a rescue probe in flight, selection skips it without waiting and continues to an eligible later tier; probe success can restore it for subsequent requests'
   - 'Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini preserve the target-specific acquireTimeoutMs; they do not fall back to the builder default when a typed target is available'
   - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
@@ -1364,6 +1366,7 @@ features:
   - All model entry errors stay internal even on pool exhaustion; multi_listener_server model_entries_never_deliver_provider_or_sse_decode_errors_blackbox captures real HTTP bytes for Chat, Responses including compact, Messages, and Gemini JSON/SSE with upstream503 and malformed SSE; responses_inbound_websocket_sse_decode_failure_never_sends_client_error and the provider429/binary/502, malformed input, pool exhaustion, session isolation, and successful tool tests are mandatory in test:v3-server-debug-error-blackbox and the V3 cargo workspace CI run
   - multi_listener_server malformed_http_framing_never_sends_client_error_blackbox proves fresh, reused and pipelined HTTP parse failures terminate with zero new bytes; front_http_framing_preserves_authorized_responses_blackbox preserves control errors, opaque/multi-flush bodies and Expect/100-continue; hyper_default_error_policy_preserves_upstream_behavior_blackbox proves the dependency default and explicit true preserve native 400/431; existing success gates preserve SSE and WebSocket
   - Server model pending endpoint emits internal Debug/Error evidence and returns only complete success or a typed incomplete transport outcome
+  - Direct response decode failure and request residence timeout retain the existing complete Error01-06 chain in public diagnostics before transport termination; no provider or proxy error bytes reach the model client.
   - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
   - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
   - Debug response dry-run replays captured provider-response SSE through RespInbound and Resp03, exposes the client projection as a diagnostic artifact, and strips reason only when a valid toolreason was harvested
@@ -1378,6 +1381,7 @@ features:
   - npm run test:v3-provider-health-contract
   - npm run test:v3-foundation-runtime-contract
   - npm run test:v3-server-debug-error-blackbox
+  - npm run test:v3-direct-terminal-diagnostics
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-resource-map
@@ -2809,32 +2813,24 @@ features:
   completion_rule:
     source: Positive/negative Rust tests plus the active Runtime timing verifier pass; retired red-fixture coverage is not part of the gate.
     runtime: After global install and managed restart, same-entry live Direct SSE sample completes without duplicate external attempt panic and prints numeric timing.
-- feature_id: v3.responses_session_inflight_admission
+- feature_id: v3.http_request_isolation
   status: source_pending_live_replay
   change_risk: high
   owner_kind: rust_v3_server_http_boundary
-  owner_scope: Listener-local Responses request admission and exact HTTP response-body lifetime release; no Runtime, Virtual Router, provider, or codec ownership.
+  owner_scope: Independent HTTP dispatch without session serialization or local provider capacity exclusion; restart activity accounting remains separate.
   owner_modules:
-  - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
-  - v3/crates/routecodex-v3-error/src/lib.rs
   design:
-  - docs/goals/v3-responses-session-admission-and-sse-keepalive-test-design.md
-  - docs/architecture/wiki/v3-responses-session-admission.md
-  - docs/architecture/manifests/v3.responses_session_admission.mainline.yml
+  - docs/architecture/dagpipe/graphs/http-request-isolation.graph.json
+  - docs/architecture/wiki/v3-http-request-isolation.md
+  - docs/architecture/manifests/v3.http_request_isolation.mainline.yml
   required_unit:
-  - Same listener plus same explicit session or conversation blocks the second request
-    inside the admission owner until the exact active permit releases, then admits it
-    without a client-visible overlap error.
-  - Different session on one listener and the same session on different listeners remain concurrently admissible.
-  - Missing explicit scope does not invent a cross-request key.
-  - Response EOF, stream error, and client body drop release only the exact permit.
-  - Permit release wakes every predicate waiter so a waiter for an unrelated active
-    scope cannot strand the waiter whose scope became available.
+  - A held request does not prevent a request with the same session, conversation, or both from reaching provider and completing.
+  - Different sessions and different listeners retain independent execution.
+  - Cancelling a request does not cancel or serialize another request with the same headers.
+  - Concurrent requests across listeners exceeding the former local provider capacity all reach upstream before any held response is released.
   required_gates:
-  - npm run verify:v3-responses-session-admission
-  - npm run test:v3-responses-session-admission
-  - npm run test:v3-responses-session-admission-red-fixtures
+  - npm run test:v3-http-request-isolation
   - git diff --check
 - feature_id: v3.sse_http_keepalive_boundary
   status: source_pending_live_replay
@@ -2846,7 +2842,6 @@ features:
   - v3/crates/routecodex-v3-config/src/lib.rs
   - v3/crates/routecodex-v3-sse/src/lib.rs
   design:
-  - docs/goals/v3-responses-session-admission-and-sse-keepalive-test-design.md
   - docs/architecture/wiki/v3-sse-http-keepalive.md
   - docs/architecture/manifests/v3.sse.http_keepalive.mainline.yml
   required_unit:
@@ -2994,6 +2989,9 @@ features:
   - Terminal provider HTTP errors reach the public `/v1/responses` failure boundary without waiting for provider action admission.
   required_gates:
   - npm run test:v3-provider-action-gate
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test provider_last_routable -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_session_isolation_contract -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib listener_persistence_does_not_restore_another_ports_cooldown -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_contract isolated_terminal_projection_commits_without_waiting_for_provider_action_admission -- --exact --nocapture
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-provider-action-gate-red-fixtures
@@ -3292,8 +3290,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   required_symbols:
-  - select_v3_expanded_target_with_admission_rescue
-  - resolve_v3_relay_target_outcome_with_admission_rescue
+  - select_v3_expanded_target_with_rescue
+  - resolve_v3_relay_target_outcome_with_rescue
   required_positive:
   - issue231_responses_relay_stale_probe_public_blackbox proves current Responses Relay delivers the real healthy later-tier payload while a preferred probe is held, then both stale completion branches preserve newer failure state and release their owner; exhausted requests close transport without an empty success while a healthy sibling continues
   - issue245_permission_11128_search_continuation_public_blackbox proves genuine HTTP400 permission_error cools the exact identity, preserves paired function-search and executed nonce history through Relay, remains excluded beyond the original deadline after a failed probe, restores only after a matching successful probe, and closes exhausted transport while explicit current-turn native hosted search continues; it does not replay or resolve the historical upstream/channel cause
@@ -3303,7 +3301,7 @@ features:
   - newer_business_generation_shutdown_releases_held_probe_owner, newer_business_generation_exec_releases_held_probe_owner, and newer_business_generation_drop_releases_held_probe_owner prove authenticated held probe release after genuine same-identity earlier business403, while healthy business completes before cancellation; an already accepted read-only public HTTP connection observes original in-memory state after listener exit
   - public Chat HTTP proves cooldown-only failed rescue closes the exhausted request without client status, error payload or fabricated success, preserves exact-identity cooldown and permits healthy sibling progress
   - rejected, cancelled or dropped reversible exec preparation restores the sole aggregate probe owner before business admission resumes; restored scheduling preserves future due deadlines and an authenticated due probe restores only its exact cooled identity before subsequent successful business
-  - fair scheduling reaches an independently available fifth due identity while four earlier identities retain real business transport leases; capacity rejection remains health-neutral and the four manager slots stay bounded
+  - Real recovery probes for all five identities complete independently of four held sibling business transports; the Runtime probe-fairness consumer separately proves control-capacity busy-prefix skipping, unchanged due times, and bounded four-slot probe ownership.
   - each health-excluded provider+auth_alias+model identity stays visible in the cooldown pool; due waiting and in-flight probes are cooldown substates until exact HTTP 2xx probe recovery
   - 429 cooldown and HTTP 2xx recovery cases exercise the public managed listener, exact-key business failures, stalled probe visibility, spare-key routing, and automatically recovered same-key business dispatch
   - Responses, OpenAI Chat, Anthropic, and Gemini probes send a simple ping and accept every HTTP 2xx response without reading the success body or validating content type, JSON, embedded errors, terminal status, or pong text
@@ -3318,10 +3316,10 @@ features:
   - private-profile probes preserve provider-specific request compatibility and accept HTTP 2xx before a successful next business request
   - a provider-declared terminal that carries a legal business result is forwarded as-is and never becomes a provider failure even without visible text: Responses incomplete content_filter, Anthropic refusal, and the OpenAI Chat empty-content content_filter finish; a complete attempt with no deliverable business content at all (empty end_turn/stop terminal with no text/tool/refusal/reasoning) is instead classified as an internal typed 502 for the Error chain
   - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
-  - Public `/v1/responses` switches to a spare provider while the first provider remains held; all-full pools terminate promptly without an extra upstream request
-  - Concurrency exclusions are request-local and health-neutral; reselect stays inside the captured Target09 candidate set without Router reentry
-  - A full preferred candidate does not disable the caller-authorized semantic recovery of another eligible cooled candidate in Direct or Relay
-  - Business leases remain bounded and release after completion, error, cancellation, or stream drop; due scheduled probes retain their separate bounded admission
+  - Public Direct and Relay requests preserve preferred provider and key selection while sibling business requests remain held; business traffic does not acquire probe-control capacity.
+  - Provider failure reselection stays inside the captured target plan without Router reentry and preserves exact identity and listener isolation.
+  - Held business requests do not prevent caller-authorized recovery probes for cooled identities in Direct or Relay.
+  - Scheduled probes retain bounded control capacity and release it after completion, cancellation, or drop; business request lifecycles remain independent.
   required_negative:
   - stale successful or failed probe generations cannot mutate newer provider health state
   - Non-2xx probe responses and connection failures preserve cooldown; business response parsing is unaffected by status-only probes
@@ -3329,7 +3327,7 @@ features:
   - zero or greater-than-30-minute provider health probe_interval_ms values fail config compilation
   - automatic model-less cooldown state never blocks other complete identities or enters provider/client payload or MetadataCenter; explicit manual administration retains its declared scope
   - Crossing the adaptive budget cannot record provider failure health, auth-key cooldown, model cooldown, MetadataCenter state, or provider/client payload truth
-  - Capacity saturation cannot trigger health rescue probes for the full candidate, provider-action waits, oversubscription, or escape from an explicit provider.model pin
+  - Probe-control capacity saturation cannot exclude, delay, reselect, or fail business candidates, or escape from an explicit provider.model pin.
   - WebSocketV2 session-slot contention cannot retain provider capacity, starve another request that owns the session, or leak its session slot or provider lease on cancellation
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue231_responses_relay_stale_probe_public_blackbox -- --nocapture

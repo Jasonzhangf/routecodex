@@ -275,7 +275,6 @@ where
                 expanded.clone(),
             );
         let selected = plan.selected;
-        let mut selected_admission = Some(plan.admission);
         let decision = plan.protocol_decision;
         if expands_target {
             trace.extend(["V3Target08KindClassified", "V3Target09CandidateSetExpanded"]);
@@ -291,7 +290,6 @@ where
             drop(provider_action_permit.take());
             provider_action_permit_target = None;
         }
-        attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         trace.push("V3Target10ConcreteProviderSelected");
         if let Some(sink) = route_selection_event_sink.as_ref() {
             let transport_label = if C::body(&standardized)
@@ -440,34 +438,20 @@ where
         };
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());
-        if pending_provider_action_recovery.is_some() {
-            drop(selected_admission.take());
+        if pending_provider_action_recovery.is_none() && provider_action_permit.is_none() {
+            pending_provider_action_recovery = match provider_health.recovery_for_selected_provider(&direct_failure_session_scope, &selected) {
+                Ok(witness) => witness,
+                Err(error) => return error_output(runtime_source("V3ProviderActionGateAdmission", error), trace, &crate::hooks::register_responses_direct_hooks()),
+            };
         }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
-                .wait_for_error05_recovery(&recovery, &selected)
+                .wait_for_error05_recovery(&recovery, &selected, attempt_budget.residence_deadline())
                 .await
             {
                 Ok(V3ProviderActionRecoveryTransition::Admitted(mut admission)) => {
                     provider_action_permit = admission.take_permit();
                     provider_action_permit_target = Some(selected.candidate.clone());
-                    selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
-                        V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
-                        V3AdmitAfterRecovery::Busy => {
-                            failed_candidates
-                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
-                            drop(provider_action_permit.take());
-                            provider_action_permit_target = None;
-                            continue;
-                        }
-                        V3AdmitAfterRecovery::Failed(reason) => {
-                            return error_output(
-                                runtime_source("V3Target10ConcreteProviderSelected", reason),
-                                trace,
-                                &crate::hooks::register_responses_direct_hooks(),
-                            )
-                        }
-                    };
                     trace.push("V3ProviderActionGateAdmission");
                 }
                 Ok(V3ProviderActionRecoveryTransition::Superseded(ticket)) => {
@@ -546,27 +530,8 @@ where
                 &crate::hooks::register_responses_direct_hooks(),
             );
         }
-        let transport_request = match selected_admission.take() {
-            Some(admission) => {
-                transport_request.with_pre_acquired_admission(admission.into_lease())
-            }
-            None => transport_request,
-        };
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
-            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
-                if let Err(error) = runtime_timing.finish_external() {
-                    return error_output(
-                        runtime_source("V3RuntimeTimingExternal", error),
-                        trace,
-                        &crate::hooks::register_responses_direct_hooks(),
-                    );
-                }
-                failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
-                drop(provider_action_permit.take());
-                provider_action_permit_target = None;
-                continue;
-            }
             Err(error) => {
                 if let Some(witness) =
                     crate::hub_v1::external_http_witness_from_provider_error(&error)
@@ -600,6 +565,7 @@ where
                         expanded: Some(&expanded),
                         provider_pinned: false,
                         now_epoch_ms,
+                        attempt_budget: &attempt_budget,
                     },
                     C::policy_target(&policy),
                     source,
@@ -646,11 +612,6 @@ where
                     }
                     V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
                         retry_selected = policy_result.retry_selected.map(|selected| *selected);
-                        if policy_result.retryable_transient {
-                            // 瞬态失败重试同一 provider：不经过 provider action
-                            // gate（无 lane 可等），立即重发。
-                            continue;
-                        }
                         pending_provider_action_recovery = Some(recovery.clone());
                         continue;
                     }
@@ -798,6 +759,7 @@ where
                     expanded: Some(&expanded),
                     provider_pinned: false,
                     now_epoch_ms,
+                    attempt_budget: &attempt_budget,
                 },
                 C::policy_target(&policy),
                 source,
@@ -844,11 +806,6 @@ where
                 }
                 V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
                     retry_selected = policy_result.retry_selected.map(|selected| *selected);
-                    if policy_result.retryable_transient {
-                        // 瞬态失败重试同一 provider：不经过 provider action
-                        // gate（无 lane 可等），立即重发。
-                        continue;
-                    }
                     pending_provider_action_recovery = Some(recovery.clone());
                     continue;
                 }
@@ -946,6 +903,7 @@ where
                             expanded: Some(&expanded),
                             provider_pinned: false,
                             now_epoch_ms,
+                            attempt_budget: &attempt_budget,
                         },
                         C::policy_target(&policy),
                         source,
@@ -1121,6 +1079,7 @@ where
                                 expanded: Some(&expanded),
                                 provider_pinned: false,
                                 now_epoch_ms,
+                                attempt_budget: &attempt_budget,
                             },
                             C::policy_target(&policy),
                             source,
@@ -1142,7 +1101,6 @@ where
                                 )
                             }
                         };
-                        policy_result.exhaust_if_residence_expired(&attempt_budget);
                         if let Some(event) = policy_result.event.clone() {
                             provider_failure_events.push(event.clone());
                             publish_v3_direct_provider_failure_event(
@@ -1167,9 +1125,7 @@ where
                             V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
                                 retry_selected =
                                     policy_result.retry_selected.map(|selected| *selected);
-                                if !policy_result.retryable_transient {
-                                    pending_provider_action_recovery = Some(recovery.clone());
-                                }
+                                pending_provider_action_recovery = Some(recovery.clone());
                                 continue;
                             }
                             _ => {

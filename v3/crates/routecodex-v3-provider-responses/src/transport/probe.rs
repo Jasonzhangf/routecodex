@@ -31,15 +31,17 @@ impl ProviderResponsesTransport {
                 lane: V3ProviderInternalTransportLane::Request,
                 reason,
             })?;
-        let (guard, was_probe, _) = websocket::acquire_admission_and_connection_slot(
-            &self.websocket_sessions,
-            &mut request,
-            &self.handoff,
-            None,
-            controller,
+        let lease = take_or_acquire_provider_admission(
+            request.pre_acquired_probe.take(),
+            controller.clone(),
             provider_key,
+            current_epoch_ms(),
         )
-        .await?;
+        .map_err(|error| {
+            provider_admission_error(error, request.request_id(), request.provider_id())
+        })?;
+        let was_probe = lease.is_probe();
+        let guard = V3AdaptiveConcurrencyPermitGuard::new(controller, lease.into_permit());
         let V3Transport13ResponsesRequestKind::Http {
             request_id,
             provider_id,

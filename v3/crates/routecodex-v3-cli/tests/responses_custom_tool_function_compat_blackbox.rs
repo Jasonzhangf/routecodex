@@ -1829,10 +1829,18 @@ async fn responses_custom_tool_function_compat_rejects_malformed_provider_sse_pu
         Some(ORDINARY_PREFIX_FUNCTION),
     )
     .await;
-    let server =
-        spawn_v3_server_aggregate(manifest(free_port(), &upstream, "always", false, "direct"))
-            .await
-            .unwrap();
+    // This case checks terminal projection after one malformed attempt, not
+    // recovery of the sole candidate under the default attempt budget.
+    let mut test_manifest = manifest(free_port(), &upstream, "always", false, "direct");
+    for server in test_manifest.servers.values_mut() {
+        server
+            .execution
+            .as_mut()
+            .unwrap()
+            .attempt_store
+            .request_max_attempts = 1;
+    }
+    let server = spawn_v3_server_aggregate(test_manifest).await.unwrap();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -1850,7 +1858,7 @@ async fn responses_custom_tool_function_compat_rejects_malformed_provider_sse_pu
         ),
         Err(error) => {
             assert!(
-                error.is_body() || error.is_decode(),
+                !error.is_timeout() && (error.is_body() || error.is_decode()),
                 "malformed provider SSE must break the client body transport instead of returning success: {error}"
             );
         }

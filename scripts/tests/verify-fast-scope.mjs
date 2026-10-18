@@ -230,7 +230,7 @@ if (docsOnlyPlan.status !== 0
 }
 const independentGateScopes = {
   'Fallback and internal policy hardcode gate': 'v3',
-  'V3 Responses session admission behavior': 'v3_session',
+  'V3 HTTP request independence behavior': 'v3_session',
   'V3 provider action gate': 'v3_provider',
   'V3 provider action architecture gate': 'v3_provider',
   'V3 provider action red fixtures': 'v3_provider',

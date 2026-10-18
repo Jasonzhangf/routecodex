@@ -171,13 +171,13 @@ const cases = [
     diagnostic: /missing active Rust test failed_terminal_sse_attempt_never_commits_partial_bytes_and_exhausts_to_error06/u,
   },
   {
-    name: 'Responses Relay terminal-missing loses fresh-request isolation coverage',
+    name: 'Responses Relay terminal-missing loses last-identity backoff coverage',
     path: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
     mutate: (source) => source.replace(
-      'responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery',
-      'responses_relay_terminal_missing_has_no_fresh_request_isolation_contract',
+      'responses_relay_terminal_missing_keeps_last_identity_routable_with_backoff',
+      'responses_relay_terminal_missing_has_no_last_identity_backoff_contract',
     ),
-    diagnostic: /missing active Rust test responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery/u,
+    diagnostic: /missing active Rust test responses_relay_terminal_missing_keeps_last_identity_routable_with_backoff/u,
   },
   {
     name: 'Responses Relay content_filter terminal loses faithful-forward coverage',
@@ -243,19 +243,19 @@ const cases = [
     name: 'V3 unrelated failure revokes an already-owned group permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      'if !active_admission_owned {',
+      'if state.admitted_generation.is_none() {',
       'if true {',
     ),
-    diagnostic: /missing if !active_admission_owned \{/u,
+    diagnostic: /missing if state.admitted_generation.is_none\(\) \{/u,
   },
   {
     name: 'V3 unrelated same-group provider success releases another provider permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      'key.provider_scope == *provider_scope\n                        || state.admitted_action_scope.as_ref() == Some(provider_scope)',
-      'key.provider_scope.server_id == provider_scope.server_id\n                        && key.provider_scope.routing_group == provider_scope.routing_group',
+      /\(key\.provider_scope\.server_id == provider_scope\.server_id\s*&& key\.provider_scope\.provider_runtime_identity\s*== provider_scope\.provider_runtime_identity\)/u,
+      '(key.provider_scope.server_id == provider_scope.server_id\n                        && key.provider_scope.routing_group == provider_scope.routing_group)',
     ),
-    diagnostic: /provider success may release only its exact provider scope or the permit-owned action scope/u,
+    diagnostic: /provider success may release only its complete runtime identity/u,
   },
   {
     name: 'Direct fresh requests enter the recovery gate by default',
@@ -267,10 +267,10 @@ const cases = [
     diagnostic: /must not retain bool-only provider action recovery state/u,
   },
   {
-    name: 'provider change restarts isolated delay',
+    name: 'cyclic failure ladder loses the 16-second step',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replaceAll('sustained_delay_ms()', 'bypassed_sustained_delay_ms()'),
-    diagnostic: /missing state\.next_admission_at/u,
+    mutate: (source) => source.replace('[1_000, 3_000, 5_000, 16_000, 30_000]', '[1_000, 3_000, 5_000, 5_000, 30_000]'),
+    diagnostic: /missing \[1_000, 3_000, 5_000, 16_000, 30_000\]/u,
   },
   {
     name: 'Direct mutates health before client disconnect classification',
@@ -552,8 +552,8 @@ const cases = [
     name: 'Responses Relay failure handler returns before shared provider failure policy',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     mutate: (source) => source.replace(
-      'if failure.terminal_projection.is_some() {\n        return Ok(Some(failure));\n    }\n    let result = run_v3_relay_provider_failure_policy(',
-      'if failure.terminal_projection.is_some() {\n        return Ok(Some(failure));\n    }\n    return Ok(None);\n    let result = run_v3_relay_provider_failure_policy(',
+      'if failure.terminal_projection.is_some() {\n        return Ok(Some(failure));\n    }\n    let mut result = run_v3_relay_provider_failure_policy(',
+      'if failure.terminal_projection.is_some() {\n        return Ok(Some(failure));\n    }\n    return Ok(None);\n    let mut result = run_v3_relay_provider_failure_policy(',
     ),
     diagnostic: /must enter run_v3_relay_provider_failure_policy immediately after its existing terminal projection guard/u,
   },
