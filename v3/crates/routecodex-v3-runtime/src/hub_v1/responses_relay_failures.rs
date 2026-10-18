@@ -85,32 +85,36 @@ pub(crate) fn provider_runtime_failure(
             }
         };
         let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
-        let projected =
-            V3ErrorHandlingCenter::project_terminal(V3ErrorHandlingCenter::decide_provider(
-                V3ErrorHandlingCenterInput {
-                    source,
-                    action_scope: V3ErrorActionScope::None,
-                    candidates_remaining: 0,
-                    source_status: None,
-                },
-                false,
-                false,
+        let source_message = source.message.clone();
+        let (status, policy_error_message, terminal_projection, error_operator_fault) =
+            match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+                source,
+                V3ErrorActionScope::None,
+                0,
                 None,
-            ));
+            ) {
+                Ok(projected) => (
+                    projected.status,
+                    projected.error_detail.clone(),
+                    Some(projected),
+                    None,
+                ),
+                Err(fault) => (599, source_message, None, Some(fault)),
+            };
         return V3ResponsesRelayProviderFailure {
-            status: projected.status,
+            status,
             // Internal transport handoff failure: no upstream HTTP response exists.
             provider_status: None,
             policy_error_type: "provider_internal_transport_error".to_string(),
-            policy_error_message: projected.error_detail.clone(),
+            policy_error_message,
             provider_id: provider_id.to_string(),
             source_stage,
             observability,
-            terminal_projection: Some(projected),
+            terminal_projection,
             terminal_disposition: Some(
                 routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
             ),
-            error_operator_fault: None,
+            error_operator_fault,
             matched_policy: None,
         };
     }
@@ -599,6 +603,45 @@ fn local_error_output_from_projection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn internal_transport_projection_preserves_response_source() {
+        let expected_source = crate::hooks::build_v3_provider_error_source(
+            "V3ProviderRespInbound01Raw",
+            V3ProviderError::InternalTransport {
+                request_id: "req-internal-sdk".to_string(),
+                provider_id: "goaichat".to_string(),
+                lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
+                reason: "provider frame sequence mismatch".to_string(),
+            },
+        );
+        let success = provider_runtime_failure(
+            V3ProviderError::InternalTransport {
+                request_id: "req-internal-sdk".to_string(),
+                provider_id: "goaichat".to_string(),
+                lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
+                reason: "provider frame sequence mismatch".to_string(),
+            },
+            "goaichat",
+            None,
+        );
+        let projected = success
+            .terminal_projection
+            .as_ref()
+            .expect("successful InternalTransport must carry Error06");
+        assert_eq!(
+            projected.chain,
+            routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+        );
+        assert_eq!(projected.diagnostic_source, expected_source);
+        assert_eq!(success.source_stage, "V3ProviderRespInbound01Raw");
+        assert_eq!(success.policy_error_message, expected_source.message);
+        assert_eq!(
+            success.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        assert!(success.error_operator_fault.is_none());
+    }
 
     #[test]
     fn local_error_sdk_fault_survives_consumer() {
