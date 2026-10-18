@@ -1246,23 +1246,34 @@ message_mode = "code_only"
     assert_eq!(result.event.action, "retry_last_routable");
     assert_eq!(result.event.wait_ms, Some(1_000));
     assert!(result.terminal_projection.is_none());
-    let terminal = build_v3_relay_provider_error_05_decision(
-        result
-            .retry_selected
-            .as_ref()
-            .expect("last candidate retained"),
+    let selected = result
+        .retry_selected
+        .as_ref()
+        .expect("last candidate retained");
+    let (source_projection, _) = build_v3_relay_provider_attempt_source(
+        selected,
+        result.event.diagnostic_source.source_stage,
+        Some(&result.event.diagnostic_source.code),
+        &result.event.diagnostic_source.message,
+    )
+    .expect("source projection must use the current Error01 operator");
+    let (decision_projection, terminal) = build_v3_relay_provider_error_05_decision(
+        selected,
+        source_projection,
         result.event.diagnostic_source.clone(),
-        429,
         0,
         false,
         false,
         None,
-    );
+    )
+    .expect("terminal decision must execute through the current Error chain");
     let projection = terminal_projection_for(
+        decision_projection,
         &terminal,
         manifest.error.provider_error_action_policy.first(),
     )
-    .expect("budget exhaustion must retain internal terminal semantics");
+    .expect("budget exhaustion must retain internal terminal semantics")
+    .expect("internal terminal diagnostic must remain present");
     assert_eq!(
         projection.status, 502,
         "terminal pool exhaustion must use the declared public network error"
