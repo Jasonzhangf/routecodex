@@ -8,9 +8,24 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
+mod error_decision;
 mod operators;
+pub(crate) mod plan_execution;
+mod resolve_target;
+mod single_node;
+pub(crate) use error_decision::{
+    run_v3_error_02_to_05_decision_operators, run_v3_error_06_terminal_projection_operator,
+};
 use operators::CaptureClientJsonOperator;
 use operators::ProjectStandardProviderRequestOperator;
+pub(crate) use operators::{
+    run_v3_err01_source_raised_operator, run_v3_err02_classified_operator, V3Err01SourceInput,
+};
+pub(crate) use resolve_target::{
+    run_v3_resolve_target_operator, V3ResolveTargetExecutionMode, V3ResolveTargetOperatorError,
+    V3ResolveTargetSideOutput,
+};
+pub(crate) use single_node::{run_v3_single_node_operator, V3OperationGraph};
 
 const REQUEST_GRAPH_JSON: &str =
     include_str!("../../../../../docs/architecture/dagpipe/v3.operation_runner.request.graph.json");

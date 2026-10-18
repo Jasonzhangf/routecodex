@@ -59,6 +59,8 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
     type Control = ();
 
     const ENTRY_PROTOCOL: &'static str = "gemini";
+    const HUB_ENTRY_PROTOCOL: crate::hub_v1::V3HubEntryProtocol =
+        crate::hub_v1::V3HubEntryProtocol::Gemini;
     const STANDARDIZED_STAGE: &'static str = "V3Req04StandardizedGemini";
     const POLICY_STAGE: &'static str = "V3GeminiDirect11Policy";
 
@@ -108,6 +110,9 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
     fn body(standardized: &Self::Standardized) -> &Value {
         &standardized.body
     }
+    fn body_mut(standardized: &mut Self::Standardized) -> &mut Value {
+        &mut standardized.body
+    }
 
     fn tool_thinking_turn_context(standardized: &Self::Standardized) -> &V3ToolThinkingTurnContext {
         &standardized.tool_thinking_turn_context
@@ -115,19 +120,6 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
 
     fn policy_target(policy: &Self::Policy) -> &V3Target10ConcreteProviderSelected {
         &policy.target
-    }
-
-    fn router_facts(
-        standardized: &Self::Standardized,
-        manifest: &routecodex_v3_config::V3Config05ManifestPublished,
-    ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-        crate::nodes::build_v3_router_request_facts_for_entry_and_endpoint(
-            &standardized.body,
-            "gemini",
-            &standardized.endpoint,
-            crate::configured_v3_longcontext_threshold_tokens(manifest, &standardized.server_id),
-            Some(manifest),
-        )
     }
 
     fn run_route(

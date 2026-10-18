@@ -947,7 +947,7 @@ pub(crate) async fn resolve_v3_relay_entry_target(
     input: crate::provider_failure_runtime_policy::V3RelayProviderTargetResolutionInput<'_>,
     allow_exhaustion_rescue_probe: bool,
     preferred_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    handoff: Option<&crate::V3ResponsesProtocolRelayHandoff>,
+    captured_expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
 ) -> crate::provider_failure_runtime_policy::V3RelayProviderAdmittedTargetResolution {
     use crate::provider_failure_runtime_policy::{
         resolve_v3_relay_target_outcome_with_admission_rescue,
@@ -955,7 +955,7 @@ pub(crate) async fn resolve_v3_relay_entry_target(
         V3RelayProviderAdmittedTargetResolution,
     };
 
-    let Some(handoff) = handoff else {
+    let Some(expanded) = captured_expanded else {
         return resolve_v3_relay_target_outcome_with_admission_rescue(
             input,
             allow_exhaustion_rescue_probe,
@@ -966,7 +966,7 @@ pub(crate) async fn resolve_v3_relay_entry_target(
 
     match select_v3_expanded_target_with_admission_rescue(
         input.manifest,
-        handoff.expanded.clone(),
+        expanded.clone(),
         input.failure_session_scope,
         input.provider_health,
         input.request_local_excluded_candidates,

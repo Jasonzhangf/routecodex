@@ -224,10 +224,24 @@ try {
   assert.equal(readFileSync(foreignObject, 'utf8'), 'foreign-object');
   assert.equal(readFileSync(dependency, 'utf8'), 'dependency');
   assert.throws(() => verifyV3DebugBudget({ debugDir: fixture, maxBytes: 1 }), /exceeds/u);
-  assert.throws(
-    () => enforceV3DebugBudget({ debugDir: fixture, maxBytes: 1, activeBuilders: () => ['123 cargo test --manifest-path v3/Cargo.toml'] }),
-    /refusing cache eviction while V3 builders are active/u,
-  );
+  let activeBuildCleanupCalled = false;
+  assert.equal(enforceV3DebugBudget({
+    debugDir: fixture,
+    maxBytes: 1,
+    activeBuilders: () => ['123 cargo test --manifest-path v3/Cargo.toml'],
+    cleanTestProfile: () => { activeBuildCleanupCalled = true; },
+  }), null, 'active builds defer cache maintenance without changing a completed test result');
+  assert.equal(activeBuildCleanupCalled, false);
+  assert.equal(readFileSync(dependency, 'utf8'), 'dependency');
+  let builderObservations = 0;
+  assert.equal(enforceV3DebugBudget({
+    debugDir: fixture,
+    maxBytes: 1,
+    activeBuilders: () => ++builderObservations === 1 ? [] : ['123 cargo build'],
+    cleanTestProfile: () => { activeBuildCleanupCalled = true; },
+  }), null, 'a builder starting during measurement must prevent eviction');
+  assert.equal(activeBuildCleanupCalled, false);
+  assert.equal(readFileSync(dependency, 'utf8'), 'dependency');
   let cleaned = false;
   const postCleanupBytes = enforceV3DebugBudget({
     debugDir: fixture,

@@ -438,21 +438,20 @@ fn project_json_response(
     trace.push("V3ProviderRespInbound01Raw");
     let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)?;
     trace.push("ProviderRespCompat02ProviderCompat");
-    let mut resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request(
-        compat,
-        Some(chat_request),
-    )
-    .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
     if provider_protocol == V3HubProviderWireProtocol::Gemini {
-        let request_id = request_id.ok_or_else(|| {
+        request_id.ok_or_else(|| {
             V3OpenAiChatRelayRuntimeError::Target(
                 "Gemini response normalization requires the runtime request ID".to_string(),
             )
         })?;
-        resp02
-            .normalize_gemini_business_response(request_id)
-            .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
     }
+    let resp02 =
+        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id(
+            compat,
+            Some(chat_request),
+            request_id,
+        )
+        .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
     trace.push("V3HubRespInbound02Normalized");
     let hooks = compile_v3_hub_relay_response_hooks();
     let mut response_profile = V3HubRelayResponseHookProfile::empty()
@@ -483,21 +482,17 @@ fn project_json_response(
     if web_search_transition.is_some() {
         return Err(V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected);
     }
-    let client_payload = if resp03
-        .provider_payload()
-        .get("output")
-        .and_then(Value::as_array)
-        .is_some()
-    {
-        project_v3_openai_chat_client_response_from_canonical(resp03.provider_payload())
-            .map_err(V3OpenAiChatRelayRuntimeError::Target)?
-    } else {
-        resp03.provider_payload().clone()
-    };
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(
+    let resp05 = try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
         resp03,
-        client_payload,
-    );
+        move |payload| {
+            if payload.get("output").and_then(Value::as_array).is_some() {
+                project_v3_openai_chat_client_response_from_canonical(&payload)
+            } else {
+                Ok(payload)
+            }
+        },
+    )
+    .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?;
     trace.push("V3HubRespOutbound05ClientSemantic");
     let client = resp05.client_payload().clone();
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
@@ -1376,43 +1371,6 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
 
     fn validate_client_payload(payload: &Value) -> Result<(), V3RelayCoreError> {
         validate_v3_openai_chat_client_input_payload(payload, V3HubEntryProtocol::OpenAiChat)
-            .map_err(|error| V3RelayCoreError::Target(error.to_string()))
-    }
-
-    fn routing_payload(
-        standardized: &std::sync::Arc<Value>,
-        _requested_model: &str,
-    ) -> Result<std::sync::Arc<Value>, V3RelayCoreError> {
-        // openai_chat 的 VR body 就是 canonical payload 本身（无 model 注入）。
-        Ok(std::sync::Arc::clone(standardized))
-    }
-
-    fn build_transport_request(
-        request_id: &str,
-        target: V3ResponsesProviderTarget,
-        transport_intent: V3HubTransportIntent,
-        body: Value,
-        _provider_header_overrides: Vec<V3ProviderRequestHeader>,
-    ) -> Result<V3Transport13ResponsesHttpRequest, V3RelayCoreError> {
-        // wire protocol 从 target.provider_type 推断（与 selected candidate 推断一致）。
-        let wire_protocol =
-            provider_wire_protocol_for_provider_type(&target.provider_id, &target.provider_type)
-                .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
-        let wire = build_v3_provider_12_responses_wire_payload(request_id, target, body)
-            .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
-        let wire = if wire_protocol == V3HubProviderWireProtocol::Gemini {
-            wire.with_stream_intent(match transport_intent {
-                V3HubTransportIntent::Json => {
-                    routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json
-                }
-                V3HubTransportIntent::Sse => {
-                    routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse
-                }
-            })
-        } else {
-            wire
-        };
-        build_v3_provider_transport_request_for_protocol(wire_protocol, wire)
             .map_err(|error| V3RelayCoreError::Target(error.to_string()))
     }
 

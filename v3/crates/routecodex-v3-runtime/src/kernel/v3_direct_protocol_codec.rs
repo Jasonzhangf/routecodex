@@ -72,6 +72,7 @@ pub trait V3DirectProtocolCodec {
     type Control;
 
     const ENTRY_PROTOCOL: &'static str;
+    const HUB_ENTRY_PROTOCOL: crate::hub_v1::V3HubEntryProtocol;
     const STANDARDIZED_STAGE: &'static str;
     const POLICY_STAGE: &'static str;
 
@@ -83,15 +84,11 @@ pub trait V3DirectProtocolCodec {
     fn endpoint(standardized: &Self::Standardized) -> &str;
     fn request_id(standardized: &Self::Standardized) -> &str;
     fn body(standardized: &Self::Standardized) -> &serde_json::Value;
+    fn body_mut(standardized: &mut Self::Standardized) -> &mut serde_json::Value;
     fn tool_thinking_turn_context(
         standardized: &Self::Standardized,
     ) -> &crate::hub_v1::V3ToolThinkingTurnContext;
     fn policy_target(policy: &Self::Policy) -> &V3Target10ConcreteProviderSelected;
-
-    fn router_facts(
-        standardized: &Self::Standardized,
-        manifest: &routecodex_v3_config::V3Config05ManifestPublished,
-    ) -> routecodex_v3_virtual_router::V3RouterRequestFacts;
 
     fn run_route(
         selected: V3Target10ConcreteProviderSelected,
@@ -228,6 +225,8 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
     type Control = ();
 
     const ENTRY_PROTOCOL: &'static str = "responses";
+    const HUB_ENTRY_PROTOCOL: crate::hub_v1::V3HubEntryProtocol =
+        crate::hub_v1::V3HubEntryProtocol::Responses;
     const STANDARDIZED_STAGE: &'static str = "V3Req04StandardizedResponses";
     const POLICY_STAGE: &'static str = "V3ResponsesDirect11Policy";
 
@@ -249,6 +248,9 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
     fn body(standardized: &Self::Standardized) -> &serde_json::Value {
         &standardized.body
     }
+    fn body_mut(standardized: &mut Self::Standardized) -> &mut serde_json::Value {
+        &mut standardized.body
+    }
     fn tool_thinking_turn_context(
         standardized: &Self::Standardized,
     ) -> &crate::hub_v1::V3ToolThinkingTurnContext {
@@ -256,19 +258,6 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
     }
     fn policy_target(policy: &Self::Policy) -> &V3Target10ConcreteProviderSelected {
         &policy.target
-    }
-
-    fn router_facts(
-        standardized: &Self::Standardized,
-        manifest: &routecodex_v3_config::V3Config05ManifestPublished,
-    ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-        crate::nodes::build_v3_router_request_facts_for_entry_and_endpoint(
-            &standardized.body,
-            "responses",
-            &standardized.endpoint,
-            crate::configured_v3_longcontext_threshold_tokens(manifest, &standardized.server_id),
-            Some(manifest),
-        )
     }
 
     fn run_route(
@@ -430,6 +419,8 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
     type Control = ();
 
     const ENTRY_PROTOCOL: &'static str = "openai_chat";
+    const HUB_ENTRY_PROTOCOL: crate::hub_v1::V3HubEntryProtocol =
+        crate::hub_v1::V3HubEntryProtocol::OpenAiChat;
     const STANDARDIZED_STAGE: &'static str = "V3Req04StandardizedChat";
     const POLICY_STAGE: &'static str = "V3ChatDirect11Policy";
 
@@ -451,6 +442,9 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
     fn body(standardized: &Self::Standardized) -> &serde_json::Value {
         &standardized.body
     }
+    fn body_mut(standardized: &mut Self::Standardized) -> &mut serde_json::Value {
+        &mut standardized.body
+    }
     fn tool_thinking_turn_context(
         standardized: &Self::Standardized,
     ) -> &crate::hub_v1::V3ToolThinkingTurnContext {
@@ -458,13 +452,6 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
     }
     fn policy_target(policy: &Self::Policy) -> &V3Target10ConcreteProviderSelected {
         &policy.target
-    }
-
-    fn router_facts(
-        standardized: &Self::Standardized,
-        manifest: &routecodex_v3_config::V3Config05ManifestPublished,
-    ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-        crate::nodes::build_v3_router_request_facts_from_v3_req_04_chat(standardized, manifest)
     }
 
     fn run_route(

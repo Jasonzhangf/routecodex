@@ -401,6 +401,24 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
     wire: V3Provider12ResponsesWirePayload,
 ) -> Result<V3Transport13ResponsesRequest, V3ProviderError> {
     let (request_id, target, stream_intent, endpoint, body) = wire.into_parts();
+    build_v3_transport_13_responses_request_from_wire_parts(
+        request_id,
+        target,
+        stream_intent,
+        endpoint,
+        body,
+    )
+}
+
+/// The wire node has already selected the target and encoded the body. Keep
+/// that typed transport context separate while consuming the data edge body.
+pub fn build_v3_transport_13_responses_request_from_wire_parts(
+    request_id: String,
+    target: crate::V3ResponsesProviderTarget,
+    stream_intent: V3ResponsesStreamIntent,
+    endpoint: crate::V3ResponsesRequestEndpoint,
+    body: Value,
+) -> Result<V3Transport13ResponsesRequest, V3ProviderError> {
     let provider_id = target.provider_id;
     let request_timeout_ms = target.request_timeout_ms;
     let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;

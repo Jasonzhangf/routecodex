@@ -68,12 +68,7 @@ pub(crate) fn run_json_response_hooks(
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
-    let mut resp02 = hooks.normalize(resp01)?;
-    if input.provider_protocol == V3HubProviderWireProtocol::Gemini {
-        resp02
-            .normalize_gemini_business_response(input.request_id)
-            .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-    }
+    let mut resp02 = hooks.normalize_with_context(resp01, None, Some(input.request_id))?;
     trace.push("ProviderRespCompat02ProviderCompat");
     if input.provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
         let converted = build_v3_responses_provider_response_from_openai_chat_payload(
@@ -120,20 +115,21 @@ pub(crate) fn run_json_response_hooks(
         input.provider_semantic_body,
         std::sync::Arc::make_mut(resp03.previous.provider_payload_mut()),
     );
-    let client_payload = project_v3_responses_client_completed_response(resp03.provider_payload());
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(
+    let resp05 = try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
         resp03,
-        client_payload,
-    );
-    let mut finalized_payload = resp05.client_payload().clone();
+        |payload| Ok(project_v3_responses_client_completed_response(&payload)),
+    )
+    .map_err(|error| V3ResponsesRelayRuntimeError::Target(error.to_string()))?;
     trace.push("V3HubRespOutbound05ClientSemantic");
-    crate::direct_response_hooks::apply_v3_memory_raw_capture_json_payload(
-        &mut finalized_payload,
-        input.manifest,
+    let resp06 = super::server_resp_outbound_06_client_frame::
+        try_build_v3_server_resp_outbound_06_with_framer_and_memory_raw_capture(
+        resp05,
+        &input.manifest.memory_raw_capture,
         input.request_id,
-    );
+    )
+    .map_err(V3ResponsesRelayRuntimeError::ExecutionControlResponse)?;
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok((finalized_payload, response_web_search_state))
+    Ok((resp06.into_client_payload(), response_web_search_state))
 }
 
 fn normalize_v3_responses_json_document(

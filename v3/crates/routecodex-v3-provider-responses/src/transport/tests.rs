@@ -250,6 +250,30 @@ fn responses_http_target() -> V3ResponsesProviderTarget {
     }
 }
 
+#[test]
+fn wire_parts_transport_uses_the_supplied_body_and_typed_endpoint() {
+    let mut target = responses_http_target();
+    target.base_url = "http://127.0.0.1:1/v1".into();
+    target
+        .headers
+        .insert("x-test-owner".into(), "transport".into());
+    let body = json!({"model":"glm-5.2","input":"from-sdk","opaque":[null,{"keep":true}]});
+    let request = build_v3_transport_13_responses_request_from_wire_parts(
+        "req-sdk-transport".into(),
+        target,
+        V3ResponsesStreamIntent::Json,
+        crate::V3ResponsesRequestEndpoint::Compact,
+        body.clone(),
+    )
+    .unwrap();
+    assert_eq!(request.body(), &body);
+    assert_eq!(request.url(), "http://127.0.0.1:1/v1/responses/compact");
+    assert!(request
+        .provider_headers()
+        .iter()
+        .any(|header| header.name() == "x-test-owner" && header.value() == "transport"));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn saturated_provider_admission_without_preacquired_lease_does_not_wait() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

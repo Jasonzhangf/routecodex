@@ -305,44 +305,6 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             .map_err(|error| V3RelayCoreError::Target(error.to_string()))
     }
 
-    fn routing_payload(
-        standardized: &std::sync::Arc<Value>,
-        requested_model: &str,
-    ) -> Result<std::sync::Arc<Value>, V3RelayCoreError> {
-        Ok(gemini_routing_payload(standardized, requested_model))
-    }
-
-    fn build_transport_request(
-        request_id: &str,
-        target: V3ResponsesProviderTarget,
-        transport_intent: V3HubTransportIntent,
-        body: Value,
-        _provider_header_overrides: Vec<V3ProviderRequestHeader>,
-    ) -> Result<V3Transport13ResponsesHttpRequest, V3RelayCoreError> {
-        let protocol = super::provider_compat_shared::provider_wire_protocol_for_provider_type(
-            &target.provider_id,
-            &target.provider_type,
-        )
-        .map_err(V3RelayCoreError::Target)?;
-        let wire = routecodex_v3_provider_responses::build_v3_provider_12_responses_wire_payload(
-            request_id, target, body,
-        )
-        .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
-        let stream_intent = match transport_intent {
-            V3HubTransportIntent::Json => {
-                routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json
-            }
-            V3HubTransportIntent::Sse => {
-                routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse
-            }
-        };
-        let wire = wire.with_stream_intent(stream_intent);
-        super::provider_compat_shared::build_v3_provider_transport_request_for_protocol(
-            protocol, wire,
-        )
-        .map_err(V3RelayCoreError::Target)
-    }
-
     fn project_json_response(
         request_id: &str,
         _session_id: &str,
@@ -644,13 +606,8 @@ fn project_json_response_with_source(
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
-    let mut resp02 = hooks.normalize(resp01)?;
+    let mut resp02 = hooks.normalize_with_context(resp01, None, request_id)?;
     match provider_protocol {
-        V3HubProviderWireProtocol::Gemini => {
-            if let Some(request_id) = request_id {
-                resp02.normalize_gemini_business_response(request_id)?;
-            }
-        }
         V3HubProviderWireProtocol::OpenAiChat => {
             let canonical = super::responses_relay_runtime::build_v3_responses_provider_response_from_openai_chat_payload(
                 resp02.provider_payload(), chat_request,
@@ -670,13 +627,16 @@ fn project_json_response_with_source(
     trace.push("V3HubRespChatProcess03Governed");
     let (resp03, _, _) = resp03.into_parts();
     let resp05 = if request_id.is_some() {
-        let client = super::gemini_responses_codec::project_responses_to_gemini_client(
-            resp03.provider_payload(),
-            provider_protocol,
-        )?;
-        build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(
-            resp03, client,
+        try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
+            resp03,
+            move |payload| {
+                super::gemini_responses_codec::project_responses_to_gemini_client(
+                    &payload,
+                    provider_protocol,
+                )
+            },
         )
+        .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?
     } else {
         build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03)
     };
@@ -958,18 +918,4 @@ pub(crate) fn gemini_model_from_endpoint_path(
         .filter(|value| !value.is_empty() && !value.contains('/') && !value.contains(':'))
         .ok_or_else(|| V3GeminiRelayRuntimeError::EndpointPath(endpoint_path.to_string()))?;
     Ok(model.to_string())
-}
-
-fn gemini_routing_payload(
-    body: &std::sync::Arc<Value>,
-    requested_model: &str,
-) -> std::sync::Arc<Value> {
-    let mut routing_body = std::sync::Arc::clone(body);
-    if let Some(object) = Arc::make_mut(&mut routing_body).as_object_mut() {
-        object.insert(
-            "model".to_string(),
-            Value::String(requested_model.to_string()),
-        );
-    }
-    routing_body
 }
