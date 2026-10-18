@@ -933,7 +933,9 @@ fn provider_failure_output(
         return V3GeminiRelayRuntimeOutput {
             status: 599,
             terminal_disposition: Some(
-                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                failure
+                    .terminal_disposition
+                    .unwrap_or(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
             ),
             client_body: V3GeminiRelayClientBody::Json(Value::Null),
             node_trace: trace,
@@ -990,22 +992,6 @@ mod tests {
 
     #[test]
     fn relay_error_operator_fault_projects_internal_599_without_client_error() {
-        let source = routecodex_v3_error::build_v3_error_01_source_raised(
-            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
-            "V3Error06ClientProjected",
-            "relay_error_projection_nonterminal",
-            "Error06 SDK completed without a terminal client projection",
-        );
-        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
-            source.clone(),
-            Ok(None),
-        )
-        .expect_err("Ok(None) must produce a typed operator fault");
-        let diagnostic_source = fault.policy_failure.clone();
-        let diagnostic_cause = fault
-            .original_source
-            .clone()
-            .expect("the real source must remain the fault cause");
         let attempts = vec![
             V3RuntimeProviderFailureObservation {
                 provider_id: "provider-a".to_string(),
@@ -1020,43 +1006,76 @@ mod tests {
                 ..Default::default()
             },
         ];
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "relay_error_projection_nonterminal",
+            "Error06 SDK completed without a terminal client projection",
+        );
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source.clone(),
+            Ok(None),
+        )
+        .expect_err("Ok(None) must produce a typed operator fault");
+        let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+            429,
+            vec![("x-upstream".to_string(), b"rate-limit".to_vec())],
+            b"{\"error\":{\"code\":\"rate_limited\"}}".to_vec(),
+        )
+        .with_body_read_failure("truncated");
+        let cases = [
+            (
+                None,
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+            ),
+            (
+                Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(
+                        witness.clone(),
+                    ),
+                ),
+                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+            ),
+        ];
 
-        let output = provider_failure_output(
-            V3RelayProviderFailure {
-                status: 502,
-                provider_status: None,
-                client_response: Value::Null,
-                source_stage: "V3Error06ClientProjected",
-                terminal_projection: None,
-                terminal_disposition: None,
-                error_operator_fault: Some(fault),
-                error_type_fn: |_| None,
-                error_message_fn: |_| "unused".to_string(),
-            },
-            vec!["V3ProviderRespInbound01Raw"],
-            attempts.clone(),
-        );
+        for (terminal_disposition, expected_disposition) in cases {
+            let output = provider_failure_output(
+                V3RelayProviderFailure {
+                    status: 502,
+                    provider_status: None,
+                    client_response: Value::Null,
+                    source_stage: "V3Error06ClientProjected",
+                    terminal_projection: None,
+                    terminal_disposition,
+                    error_operator_fault: Some(fault.clone()),
+                    error_type_fn: |_| None,
+                    error_message_fn: |_| "unused".to_string(),
+                },
+                vec!["V3ProviderRespInbound01Raw"],
+                attempts.clone(),
+            );
 
-        assert_eq!(output.status, 599);
-        assert_eq!(
-            output.terminal_disposition,
-            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
-        );
-        assert!(matches!(
-            &output.client_body,
-            V3GeminiRelayClientBody::Json(value) if value.is_null()
-        ));
-        assert!(output.error_chain.is_none());
-        assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
-        assert_eq!(output.diagnostic_source, Some(diagnostic_source.clone()));
-        assert_eq!(output.diagnostic_cause, Some(diagnostic_cause.clone()));
-        assert_eq!(
-            diagnostic_source.source_kind,
-            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
-        );
-        assert_eq!(diagnostic_source.code, "relay_error_projection_nonterminal");
-        assert_eq!(diagnostic_cause, source);
-        assert_eq!(output.provider_failure_attempts, attempts);
+            assert_eq!(output.status, 599);
+            assert_eq!(output.terminal_disposition, Some(expected_disposition));
+            assert!(matches!(
+                &output.client_body,
+                V3GeminiRelayClientBody::Json(value) if value.is_null()
+            ));
+            assert!(output.error_chain.is_none());
+            assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
+            assert_eq!(output.diagnostic_source, Some(fault.policy_failure.clone()));
+            assert_eq!(output.diagnostic_cause, fault.original_source.clone());
+            assert_eq!(
+                fault.policy_failure.source_kind,
+                routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+            );
+            assert_eq!(
+                fault.policy_failure.code,
+                "relay_error_projection_nonterminal"
+            );
+            assert_eq!(fault.original_source, Some(source.clone()));
+            assert_eq!(output.provider_failure_attempts, attempts);
+        }
     }
 
     #[test]
