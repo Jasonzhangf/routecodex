@@ -105,24 +105,52 @@ pub(crate) struct V3DirectProviderFailurePolicyResult {
 }
 
 impl V3DirectProviderFailurePolicyResult {
-    fn exhaust_if_residence_expired(&mut self, budget: &V3AttemptBudget) {
+    fn exhaust_if_residence_expired(
+        &mut self,
+        budget: &V3AttemptBudget,
+    ) -> Result<(), DirectPolicyFailure> {
         if std::time::Instant::now() < budget.residence_deadline()
             || self.decision.action.is_terminal()
         {
-            return;
+            return Ok(());
         }
-        // Retain Error01-03 provenance and the exact attempted-provider action.
-        // The expired request has no eligible next attempt, regardless of pool health.
-        let exhaustion = routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-            self.decision.exhaustion.local_action.clone(), 0, false, false,
-        );
-        self.decision = routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
-            exhaustion, None,
-        );
+        let original_source = self
+            .decision
+            .exhaustion
+            .local_action
+            .classified
+            .source
+            .clone();
+        let action_projection = serde_json::to_value(&self.decision.exhaustion.local_action)
+            .map_err(|error| {
+                direct_policy_failure(&original_source, "V3Error04TargetExhaustionDecision", error)
+            })?;
+        let (exhaustion_projection, exhaustion) =
+            crate::operation_runner::run_v3_error_04_target_exhaustion_operator(
+                action_projection,
+                self.decision.exhaustion.local_action.clone(),
+                0,
+                false,
+                false,
+            )
+            .map_err(|error| {
+                direct_policy_failure(&original_source, "V3Error04TargetExhaustionDecision", error)
+            })?;
+        let (_, decision) =
+            crate::operation_runner::execute_v3_operation_runner_error_err05_execution_decision(
+                exhaustion_projection,
+                exhaustion,
+                None,
+            )
+            .map_err(|error| {
+                direct_policy_failure(&original_source, "V3Error05ExecutionDecision", error)
+            })?;
+        self.decision = decision;
         if let Some(event) = self.event.as_mut() {
             event.action = "terminal_no_response".to_owned();
             event.next_provider_key = None;
         }
+        Ok(())
     }
 }
 
@@ -248,6 +276,91 @@ fn record_v3_direct_provider_success(
 mod external_http_witness_tests {
     use super::*;
     use crate::hub_v1::external_http_witness_from_provider_error;
+    use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+    use std::time::Duration;
+
+    fn attempt_budget_with_residence_timeout_ms(residence_timeout_ms: u64) -> V3AttemptBudget {
+        let source = format!(
+            r#"
+version = 3
+[pipelines.hub_v1]
+skeleton = "hub_v1"
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+attempt_store = {{ residence_timeout_ms = {residence_timeout_ms} }}
+[providers.test]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "test-model"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "TEST_KEY" }}] }}
+[providers.test.models.test-model]
+capabilities = ["text"]
+[route_groups.default.pools.default]
+targets = [{{ kind = "provider_model", provider = "test", model = "test-model", priority = 1 }}]
+"#
+        );
+        let manifest = compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(&source).expect("residence test authoring"),
+        )
+        .expect("residence test manifest");
+        V3AttemptBudget::from_manifest(&manifest, "test").expect("residence test budget")
+    }
+
+    fn nonterminal_policy_result() -> V3DirectProviderFailurePolicyResult {
+        let source = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderRespInbound01Raw",
+            "provider_http_502",
+            "provider failure with another candidate",
+        );
+        let witness = routecodex_v3_error::V3Error05RecoveryAdmissionWitness::new(
+            V3ProviderFailureSessionScope::new("server", "group", "session")
+                .expect("failure session scope"),
+            "provider-a:key-a:model-a",
+            "provider_http_502",
+            1,
+        )
+        .expect("recovery witness");
+        let decision = run_v3_direct_policy_error_02_to_05_decision(
+            &source,
+            V3ErrorActionScope::ProviderKeyModel {
+                provider_id: "provider-a".to_string(),
+                auth_alias: "key-a".to_string(),
+                model_id: "model-a".to_string(),
+            },
+            1,
+            false,
+            false,
+            Some(witness),
+        )
+        .expect("nonterminal policy decision");
+        assert!(matches!(
+            decision.action,
+            V3Error05ExecutionAction::WaitThenReselect { .. }
+        ));
+        V3DirectProviderFailurePolicyResult {
+            decision,
+            retry_selected: None,
+            event: Some(V3RuntimeProviderFailureObservation {
+                provider_key: "provider-a:key-a:model-a".to_string(),
+                provider_id: "provider-a".to_string(),
+                auth_alias: Some("key-a".to_string()),
+                model_id: "model-a".to_string(),
+                status: 502,
+                action: "switch_provider".to_string(),
+                next_provider_key: Some("provider-b:key-b:model-b".to_string()),
+                wait_ms: Some(10),
+                ..Default::default()
+            }),
+            retryable_transient: false,
+        }
+    }
 
     #[test]
     fn direct_retains_exact_real_http_error_including_upstream_502() {
@@ -334,11 +447,11 @@ mod external_http_witness_tests {
             vec![("content-type".into(), b"application/json".to_vec())],
             br#"{"id":"provider-response"}"#.to_vec(),
         );
+        let policy_failure = failure.policy_failure.clone();
         let output = policy_failure_output_with_observability(
             failure.clone(),
             Some(witness.clone()),
             Vec::new(),
-            &crate::hooks::register_responses_direct_hooks(),
             None,
         );
         assert_eq!(
@@ -350,18 +463,72 @@ mod external_http_witness_tests {
             output.terminal_disposition,
             Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
         );
+        assert_eq!(output.error_chain, None);
 
-        let no_response = policy_failure_output_with_observability(
-            failure,
-            None,
-            Vec::new(),
-            &crate::hooks::register_responses_direct_hooks(),
-            None,
-        );
+        let no_response = policy_failure_output_with_observability(failure, None, Vec::new(), None);
         assert_eq!(
             no_response.terminal_disposition,
             Some(V3ProviderTerminalDisposition::NoResponse)
         );
+        assert_eq!(
+            no_response.diagnostic_source.as_ref(),
+            Some(&policy_failure)
+        );
+        assert_eq!(
+            no_response.diagnostic_cause.as_ref(),
+            Some(&original_source)
+        );
+        assert_eq!(no_response.error_chain, None);
+    }
+
+    #[test]
+    fn residence_expiry_converts_nonterminal_decision_to_terminal_no_response() {
+        let mut policy_result = nonterminal_policy_result();
+        let original_source = policy_result
+            .decision
+            .exhaustion
+            .local_action
+            .classified
+            .source
+            .clone();
+        let budget = attempt_budget_with_residence_timeout_ms(1);
+        std::thread::sleep(Duration::from_millis(10));
+
+        policy_result
+            .exhaust_if_residence_expired(&budget)
+            .expect("residence expiry must execute SDK04 and SDK05");
+
+        assert_eq!(
+            policy_result.decision.action,
+            V3Error05ExecutionAction::ProjectTerminal
+        );
+        assert_eq!(
+            policy_result
+                .decision
+                .exhaustion
+                .local_action
+                .classified
+                .source,
+            original_source
+        );
+        let event = policy_result.event.expect("provider failure event");
+        assert_eq!(event.action, "terminal_no_response");
+        assert_eq!(event.next_provider_key, None);
+    }
+
+    #[test]
+    fn unexpired_residence_keeps_nonterminal_decision_and_event() {
+        let mut policy_result = nonterminal_policy_result();
+        let original_decision = policy_result.decision.clone();
+        let original_event = policy_result.event.clone();
+        let budget = attempt_budget_with_residence_timeout_ms(60_000);
+
+        policy_result
+            .exhaust_if_residence_expired(&budget)
+            .expect("unexpired residence must not enter the SDK");
+
+        assert_eq!(policy_result.decision, original_decision);
+        assert_eq!(policy_result.event, original_event);
     }
 }
 
@@ -556,22 +723,23 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         V3Error05ExecutionAction::WaitThenReselect { .. }
     ) {
         state.trace.push("V3TargetLocalReselected");
+        let event = Some(build_v3_direct_provider_failure_observation(
+            selected,
+            observed_status,
+            &source,
+            &health_record,
+            "switch_provider",
+            next_provider_key,
+            Some(
+                recovery_record
+                    .as_ref()
+                    .map_or(0, |record| record.minimum_delay_ms),
+            ),
+        ));
         return Ok(V3DirectProviderFailurePolicyResult {
             decision,
             retry_selected: None,
-            event: Some(build_v3_direct_provider_failure_observation(
-                selected,
-                observed_status,
-                &source,
-                &health_record,
-                "switch_provider",
-                next_provider_key,
-                Some(
-                    recovery_record
-                        .as_ref()
-                        .map_or(0, |record| record.minimum_delay_ms),
-                ),
-            )),
+            event,
             // Candidate-scoped request/provider compatibility failures are
             // health-neutral and must reselect immediately without entering
             // the provider action gate.
@@ -637,20 +805,21 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         )
     };
     state.trace.push("V3Error06ClientProjected");
+    let event = Some(build_v3_direct_provider_failure_observation(
+        selected,
+        observed_status,
+        &source,
+        &health_record,
+        "terminal_default_floor_exhausted",
+        None,
+        admission
+            .as_ref()
+            .map(|admission| admission.minimum_delay_ms),
+    ));
     Ok(V3DirectProviderFailurePolicyResult {
         decision,
         retry_selected: None,
-        event: Some(build_v3_direct_provider_failure_observation(
-            selected,
-            observed_status,
-            &source,
-            &health_record,
-            "terminal_default_floor_exhausted",
-            None,
-            admission
-                .as_ref()
-                .map(|admission| admission.minimum_delay_ms),
-        )),
+        event,
         retryable_transient: false,
     })
 }
