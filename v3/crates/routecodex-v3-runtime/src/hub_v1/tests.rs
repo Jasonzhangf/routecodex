@@ -584,7 +584,10 @@ fn responses_inbound_preserves_reasoning_summary_signature_and_tool_context() {
         "Need to inspect cwd first."
     );
     assert_eq!(messages[1]["tool_calls"][0]["id"], "call-1");
-    assert_eq!(messages[1]["reasoning"], json!({"encrypted_content":"opaque-reasoning"}));
+    assert_eq!(
+        messages[1]["reasoning"],
+        json!({"encrypted_content":"opaque-reasoning"})
+    );
     assert_eq!(messages[2]["role"], "tool");
     assert_eq!(messages[2]["tool_call_id"], "call-1");
     assert_eq!(messages[2]["content"], "/tmp");

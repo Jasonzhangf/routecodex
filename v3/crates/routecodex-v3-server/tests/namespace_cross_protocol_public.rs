@@ -34,6 +34,8 @@ static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 mod anthropic_empty_signature;
 #[path = "namespace_cross_protocol_public/anthropic_invalid.rs"]
 mod anthropic_invalid;
+#[path = "namespace_cross_protocol_public/chat_structured_reasoning.rs"]
+mod chat_structured_reasoning;
 #[path = "support/gemini_signature_filter_public.rs"]
 mod gemini_signature_filter_public;
 
@@ -50,6 +52,16 @@ async fn anthropic_custom_unrecognized_reason_wrapper_preserves_complete_roundtr
 #[tokio::test]
 async fn anthropic_empty_signature_responses_tool_roundtrip_public() {
     anthropic_empty_signature::run().await;
+}
+
+#[tokio::test]
+async fn responses_chat_structured_reasoning_tool_roundtrip_public() {
+    chat_structured_reasoning::run_responses().await;
+}
+
+#[tokio::test]
+async fn anthropic_chat_structured_reasoning_tool_roundtrip_public() {
+    chat_structured_reasoning::run_anthropic().await;
 }
 
 const ORDINARY_NAMESPACE: &str = "plain_namespace";

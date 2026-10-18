@@ -1559,3 +1559,32 @@ fn responses_reasoning_signature_survives_canonical_tool_coalescing() {
         );
     }
 }
+#[test]
+fn chat_wire_serializes_structured_reasoning_without_changing_canonical_values() {
+    for reasoning in [
+        json!({"encrypted_content":""}),
+        json!({"encrypted_content":" padded ","summary":[{"text":"keep"}]}),
+        json!([{"text":"first"},{"text":"second"}]),
+        json!(" already string "),
+        Value::Null,
+        json!(7),
+    ] {
+        let source = json!({"model":"chat-model","messages":[
+            {"role":"assistant","reasoning":reasoning,"reasoning_content":"plaintext"},
+            {"role":"user","content":"continue"}
+        ]});
+        let original = source.clone();
+        let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&source).unwrap();
+        let actual = &wire["messages"][0]["reasoning"];
+        if reasoning.is_object() || reasoning.is_array() {
+            let decoded: Value =
+                serde_json::from_str(actual.as_str().expect("Chat reasoning must be a string"))
+                    .unwrap();
+            assert_eq!(decoded, reasoning);
+        } else {
+            assert_eq!(actual, &reasoning);
+        }
+        assert_eq!(wire["messages"][0]["reasoning_content"], "plaintext");
+        assert_eq!(source, original);
+    }
+}

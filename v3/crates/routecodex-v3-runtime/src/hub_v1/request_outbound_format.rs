@@ -1507,6 +1507,11 @@ fn normalize_openai_chat_messages_payload(
             continue;
         };
         consume_routecodex_chat_extension_for_openai_chat_provider(message_row);
+        if let Some(reasoning) = message_row.get_mut("reasoning") {
+            if reasoning.is_object() || reasoning.is_array() {
+                *reasoning = Value::String(reasoning.to_string());
+            }
+        }
         // Map `developer` role to `system` for OpenAI Chat provider wire
         // compatibility. Many third-party Chat Completions providers (e.g.
         // xmcc2) reject `developer` role with HTTP 400, accepting only

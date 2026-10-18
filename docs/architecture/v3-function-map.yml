@@ -2703,6 +2703,9 @@ features:
   - materialize_gemini_provider_events
   - responses_client_reaches_gemini_and_anthropic_namespace_targets
   - anthropic_empty_signature_responses_tool_roundtrip_public
+  - responses_chat_structured_reasoning_tool_roundtrip_public
+  - chat_wire_serializes_structured_reasoning_without_changing_canonical_values
+  - anthropic_chat_structured_reasoning_tool_roundtrip_public
   - responses_reasoning_signature_survives_canonical_tool_coalescing
   - openai_chat_namespace_wire_aliases
   - project_openai_chat_namespace_wire_names
@@ -2783,6 +2786,7 @@ features:
   - v3/crates/routecodex-v3-server/tests/namespace_cross_protocol_public.rs
   - v3/crates/routecodex-v3-server/tests/namespace_cross_protocol_public/anthropic_invalid.rs
   - v3/crates/routecodex-v3-server/tests/namespace_cross_protocol_public/anthropic_empty_signature.rs
+  - v3/crates/routecodex-v3-server/tests/namespace_cross_protocol_public/chat_structured_reasoning.rs
   - v3/crates/routecodex-v3-server/tests/support/gemini_signature_filter_public.rs
   - v3/crates/routecodex-v3-server/tests/gemini_sse_attempt_public.rs
   - v3/crates/routecodex-v3-server/tests/gemini_terminal_public.rs
