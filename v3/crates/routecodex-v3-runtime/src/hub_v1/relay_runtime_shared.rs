@@ -587,34 +587,48 @@ pub fn provider_runtime_failure(
             }
         };
         let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
-        let projected =
-            V3ErrorHandlingCenter::project_terminal(V3ErrorHandlingCenter::decide_provider(
-                V3ErrorHandlingCenterInput {
-                    source,
-                    action_scope: V3ErrorActionScope::None,
-                    candidates_remaining: 0,
-                    source_status: None,
-                },
-                false,
-                false,
-                None,
-            ));
-        return V3RelayProviderFailure {
-            status: projected.status,
-            // Internal transport handoff failure: no upstream HTTP response exists.
-            provider_status: None,
-            client_response: json!({
-                "error": {
-                    "code": "provider_internal_transport_error",
-                    "message": projected.error_detail
-                }
-            }),
-            source_stage,
-            terminal_projection: Some(projected),
-            terminal_disposition: None,
-            error_operator_fault: None,
-            error_type_fn: extract_error_code_style,
-            error_message_fn: extract_message_code_style,
+        let fallback_message = source.message.clone();
+        return match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+            source,
+            V3ErrorActionScope::None,
+            0,
+            None,
+        ) {
+            Ok(projected) => V3RelayProviderFailure {
+                status: projected.status,
+                // Internal transport handoff failure: no upstream HTTP response exists.
+                provider_status: None,
+                client_response: json!({
+                    "error": {
+                        "code": "provider_internal_transport_error",
+                        "message": projected.error_detail
+                    }
+                }),
+                source_stage,
+                terminal_projection: Some(projected),
+                terminal_disposition: None,
+                error_operator_fault: None,
+                error_type_fn: extract_error_code_style,
+                error_message_fn: extract_message_code_style,
+            },
+            Err(fault) => V3RelayProviderFailure {
+                status: 599,
+                provider_status: None,
+                client_response: json!({
+                    "error": {
+                        "code": "provider_internal_transport_error",
+                        "message": fallback_message
+                    }
+                }),
+                source_stage,
+                terminal_projection: None,
+                terminal_disposition: Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                ),
+                error_operator_fault: Some(fault),
+                error_type_fn: extract_error_code_style,
+                error_message_fn: extract_message_code_style,
+            },
         };
     }
     let error_code = match &error {
@@ -1075,6 +1089,58 @@ mod tests {
             Some(598)
         );
         assert!(terminal.terminal_disposition.is_none());
+    }
+
+    #[test]
+    fn internal_transport_runtime_failure_executes_sdk_error_02_to_06() {
+        for (lane, source_stage, sdk_source_stage, expected_status) in [
+            (
+                routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
+                "V3ProviderReqOutbound09TransportRequest",
+                "V3Transport13ResponsesHttpRequest",
+                598,
+            ),
+            (
+                routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
+                "V3ProviderRespInbound01Raw",
+                "V3ProviderResp14Raw",
+                599,
+            ),
+        ] {
+            let failure = provider_runtime_failure(
+                V3ProviderError::InternalTransport {
+                    request_id: format!("req-internal-{expected_status}"),
+                    provider_id: "provider-a".to_string(),
+                    lane,
+                    reason: format!("internal transport lane {expected_status}"),
+                },
+                "provider-a",
+            );
+            assert_eq!(failure.status, expected_status);
+            assert_eq!(failure.source_stage, source_stage);
+            assert_eq!(failure.provider_status, None);
+            assert!(failure.terminal_disposition.is_none());
+            assert!(failure.error_operator_fault.is_none());
+            let projection = failure
+                .terminal_projection
+                .expect("InternalTransport must retain the SDK Error06 projection");
+            assert_eq!(projection.status, expected_status);
+            assert_eq!(projection.chain, V3_ERROR_CHAIN_NODE_IDS);
+            assert_eq!(
+                projection.diagnostic_source.source_kind,
+                V3ErrorSourceKind::RuntimeFailure
+            );
+            assert_eq!(projection.diagnostic_source.source_stage, sdk_source_stage);
+            assert_eq!(
+                projection.diagnostic_source.code,
+                "provider_internal_transport_error"
+            );
+            assert_eq!(projection.error_class, "runtime_failure");
+            assert_eq!(
+                failure.client_response["error"]["message"],
+                projection.error_detail
+            );
+        }
     }
 
     fn observe_one(
