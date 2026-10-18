@@ -557,6 +557,150 @@ fn failure_evidence_preserves_distinct_terminal_sources() {
 }
 
 #[tokio::test]
+async fn responses_direct_policy_failure_consumer_preserves_cause_and_transport_break() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-direct-policy-terminal-consumer-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+
+    // The Runtime producer test proves the SDK policy fault and its original
+    // cause. SDK failure is not inducible through the Server HTTP entry, so this
+    // consumer starts from that actual output contract and exercises the real
+    // Server persistence and terminal transport owners.
+    let provider_source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_http_200",
+        "provider returned HTTP 200",
+        routecodex_v3_error::V3ExternalErrorLink {
+            kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+            status: Some(200),
+            code: Some("HTTP_200".to_string()),
+            provider_id: Some("provider-a".to_string()),
+            upstream_request_id: Some("upstream-200".to_string()),
+            message: Some("provider returned HTTP 200".to_string()),
+        },
+    );
+    let policy_source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3Error05ExecutionDecision",
+        "v3_route_target_runtime_failure",
+        "SDK policy decision failed",
+    );
+    let mut attempt = test_provider_failure_observation();
+    attempt.diagnostic_source = Some(provider_source.clone());
+    attempt.external_error_status = Some(200);
+    let raw_body = br#"{"id":"provider-response"}"#.to_vec();
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        200,
+        vec![("content-type".to_string(), b"application/json".to_vec())],
+        raw_body.clone(),
+    );
+    let mut output = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
+        client_payload: V3Resp15ClientPayload {
+            status: 502,
+            headers: BTreeMap::new(),
+            body: V3ClientBody::Json(json!({
+                "error": {"code": "must_not_reach_client"}
+            })),
+        },
+        terminal_disposition: Some(
+            routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        ),
+        diagnostic_source: Some(policy_source.clone()),
+        diagnostic_cause: Some(provider_source.clone()),
+        provider_request_snapshot: None,
+        provider_response_snapshot: None,
+        node_trace: vec!["V3Error05ExecutionDecision", "V3Error06ClientProjected"],
+        error_chain: Some(vec![
+            "V3Error05ExecutionDecision",
+            "V3Error06ClientProjected",
+        ]),
+        observability: Some(test_direct_observability(vec![attempt])),
+        stream_observation: None,
+        protocol_relay_handoff: None,
+    };
+
+    let terminal = responses_direct_server_outcome::take_responses_direct_terminal_outcome(
+        &state,
+        "/v1/responses",
+        "direct-policy-failure-consumer",
+        &mut output,
+    )
+    .expect("Direct policy failure must retain its provider terminal disposition");
+    let responses_direct_server_outcome::V3ResponsesDirectServerOutcome::ProviderTerminal(
+        disposition,
+    ) = terminal
+    else {
+        panic!("Direct policy failure must use the provider terminal transport owner");
+    };
+    let response = provider_terminal_response(
+        &state,
+        None,
+        disposition,
+        true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "responses",
+            endpoint: "/v1/responses",
+            request_id: "direct-policy-failure-consumer",
+        },
+    );
+    sample_worker.wait_until_idle().await.unwrap();
+
+    let sample_dir =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/direct-policy-failure-consumer");
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(sample_dir.join("provider-failed-attempts.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        evidence["terminal_source"],
+        serde_json::to_value(&policy_source).unwrap()
+    );
+    assert_eq!(
+        evidence["terminal_cause"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert_eq!(
+        evidence["attempts"][0]["diagnostic_source"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert_eq!(evidence["attempts"][0]["provider_status"], json!(200));
+
+    let terminal: Value = serde_json::from_str(
+        &fs::read_to_string(sample_dir.join("provider-terminal.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(terminal["kind"], "external_http");
+    assert_eq!(terminal["status"], 200);
+    assert_eq!(terminal["body"], json!(raw_body));
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let error = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect_err("Direct policy failure must break the client transport");
+    assert!(
+        error.to_string().contains("provider pool exhausted"),
+        "{error}"
+    );
+    assert!(
+        !error.to_string().contains("must_not_reach_client"),
+        "{error}"
+    );
+    assert!(!error.to_string().contains("provider-response"), "{error}");
+
+    sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn direct_sse_http_projection_injects_keepalive_and_preserves_provider_bytes() {
     let provider_bytes = b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec();
     let frame = V3Server16HttpFrame {
@@ -1088,6 +1232,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         protocol_relay_handoff: None,
         terminal_disposition: None,
         diagnostic_source: None,
+        diagnostic_cause: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1137,6 +1282,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         protocol_relay_handoff: None,
         terminal_disposition: None,
         diagnostic_source: None,
+        diagnostic_cause: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1177,6 +1323,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         protocol_relay_handoff: None,
         terminal_disposition: None,
         diagnostic_source: None,
+        diagnostic_cause: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,

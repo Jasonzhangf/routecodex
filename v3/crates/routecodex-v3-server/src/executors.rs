@@ -258,7 +258,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
                 &request_id,
                 &handoff.provider_failure_events,
                 output.diagnostic_source.as_ref(),
-                None,
+                output.diagnostic_cause.as_ref(),
             );
             return error_output_response_for_server(
                 &state.server,
@@ -362,7 +362,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             .map(|observation| observation.provider_failure_events.as_slice())
             .unwrap_or(&[]),
         output.diagnostic_source.as_ref(),
-        None,
+        output.diagnostic_cause.as_ref(),
     );
     if let Some(disposition) = output.terminal_disposition {
         return provider_terminal_response(
@@ -586,7 +586,7 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
             .map(|observation| observation.provider_failure_events.as_slice())
             .unwrap_or(&[]),
         output.diagnostic_source.as_ref(),
-        None,
+        output.diagnostic_cause.as_ref(),
     );
     if let Some(disposition) = output.terminal_disposition {
         return provider_terminal_response(
@@ -750,7 +750,7 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
             .map(|observation| observation.provider_failure_events.as_slice())
             .unwrap_or(&[]),
         output.diagnostic_source.as_ref(),
-        None,
+        output.diagnostic_cause.as_ref(),
     );
     if let Some(disposition) = output.terminal_disposition {
         return provider_terminal_response(
