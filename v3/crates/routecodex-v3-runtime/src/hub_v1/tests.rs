@@ -538,7 +538,7 @@ fn protocol_data_fields_are_not_misclassified_as_routecodex_control() {
 }
 
 #[test]
-fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encrypted_content() {
+fn responses_inbound_preserves_reasoning_summary_signature_and_tool_context() {
     let request = build_v3_openai_chat_provider_payload_from_responses_payload(&json!({
         "model": "client-responses",
         "input": [
@@ -567,7 +567,7 @@ fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encryp
             }
         ]
     }))
-    .expect("Responses reasoning must normalize into Chat without encrypted replay state");
+    .expect("Responses reasoning must preserve its opaque signature in Chat canonical data");
 
     let messages = request["messages"]
         .as_array()
@@ -584,11 +584,11 @@ fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encryp
         "Need to inspect cwd first."
     );
     assert_eq!(messages[1]["tool_calls"][0]["id"], "call-1");
+    assert_eq!(messages[1]["reasoning"], json!({"encrypted_content":"opaque-reasoning"}));
     assert_eq!(messages[2]["role"], "tool");
     assert_eq!(messages[2]["tool_call_id"], "call-1");
     assert_eq!(messages[2]["content"], "/tmp");
     let serialized = serde_json::to_string(&request).expect("OpenAI Chat request JSON");
-    assert!(!serialized.contains("opaque-reasoning"));
     assert!(!serialized.contains("summary_text"));
 }
 
