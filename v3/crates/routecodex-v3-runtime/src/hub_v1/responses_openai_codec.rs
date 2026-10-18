@@ -542,6 +542,24 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
         };
         target.insert("reasoning_content".to_string(), Value::String(merged));
     }
+    // A reasoning item folded into an existing assistant message must keep its
+    // Responses `encrypted_content` association (the Anthropic thinking
+    // signature). Absent stays absent; present-empty stays distinct from
+    // non-empty.
+    if let Some(source_signature) = source
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+        .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
+    {
+        let target_extension = target
+            .entry("routecodex_chat_extension".to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        if let Some(target_extension) = target_extension.as_object_mut() {
+            target_extension
+                .entry("responses_reasoning_encrypted_content".to_string())
+                .or_insert_with(|| source_signature.clone());
+        }
+    }
     Ok(())
 }
 
@@ -703,11 +721,21 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
         collect_v3_openai_chat_reasoning_segments(Some(&Value::Object(item.clone()))).as_slice(),
     )
     .unwrap_or_default();
-    Some(json!({
+    let mut message = json!({
         "role":"assistant",
         "content":"",
         "reasoning_content":reasoning_content
-    }))
+    });
+    // Preserve the Responses reasoning `encrypted_content` as an opaque business
+    // association so the Anthropic outbound projection can restore the exact
+    // thinking signature. Present-empty and non-empty both pass through; an
+    // absent field leaves the key absent.
+    if let Some(Value::String(signature)) = item.get("encrypted_content") {
+        message["routecodex_chat_extension"] = json!({
+            "responses_reasoning_encrypted_content": signature
+        });
+    }
+    Some(message)
 }
 
 fn build_v3_openai_chat_assistant_tool_call_message(

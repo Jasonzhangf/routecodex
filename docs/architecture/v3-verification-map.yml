@@ -1564,6 +1564,7 @@ features:
   - Anthropic protocol differences remain in the entry and exit codec; Chat Process and Virtual Router contain no provider-specific branch
   - provider HTTP and runtime failures enter Error01 through Error06 and never enter the successful response node chain
   - structured SSE decoding preserves arbitrary chunk boundaries and reasoning tool terminal ordering without a second framing parser
+  - anthropic_empty_signature_tool_followup_reaches_first_provider_attempt preserves native thinking with present empty signature and complete paired Bash history through the public messages entry on its first provider attempt (04c8bc6).
   - side-channel control debug resource and selected-target fields never enter provider or client normal payloads
   - the controlled driver calls the Server-owned wrapper and never reads expected fixture truth
   black_box_regression:
@@ -1579,6 +1580,7 @@ features:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test anthropic_relay_anthropic_provider_wire_integration -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox c8e707e_anthropic_relay_sse_tool_input_delta_executes_and_follows_up -- --exact --nocapture
   - npm run test:v3-anthropic-relay-runtime-integration
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox anthropic_empty_signature_tool_followup_reaches_first_provider_attempt -- --exact --nocapture
   - npm run verify:v3-anthropic-relay-runtime-integration
   - npm run test:v3-anthropic-relay-runtime-integration-red-fixtures
   - node scripts/architecture/verify-v3-anthropic-relay-controlled-replay-harness.mjs

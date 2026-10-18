@@ -99,10 +99,19 @@ pub(super) fn chat_messages_as_anthropic_messages(
         if let Some(reasoning_content) = object.get("reasoning_content") {
             if let Some(reasoning_content) = reasoning_content.as_str() {
                 if !reasoning_content.is_empty() {
-                    content.push(json!({
+                    let mut thinking_block = json!({
                         "type":"thinking",
                         "thinking":reasoning_content
-                    }));
+                    });
+                    // Restore the Anthropic thinking `signature` from the opaque
+                    // business association captured while folding the Responses
+                    // reasoning item into the canonical Chat message. Absent
+                    // stays absent; present-empty and non-empty pass through
+                    // unchanged.
+                    if let Some(signature) = chat_reasoning_encrypted_content(object) {
+                        thinking_block["signature"] = Value::String(signature.to_string());
+                    }
+                    content.push(thinking_block);
                 }
             } else if !reasoning_content.is_null() {
                 return Err(V3AnthropicCodecError::MalformedField {
@@ -127,6 +136,14 @@ pub(super) fn chat_messages_as_anthropic_messages(
         }));
     }
     Ok(output)
+}
+
+fn chat_reasoning_encrypted_content(object: &Map<String, Value>) -> Option<&str> {
+    object
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+        .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
+        .and_then(Value::as_str)
 }
 
 pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(

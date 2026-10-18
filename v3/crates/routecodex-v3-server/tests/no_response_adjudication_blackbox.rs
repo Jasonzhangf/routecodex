@@ -1923,6 +1923,188 @@ async fn tool_parameter_values_and_matching_results_survive_request_projection()
     std::env::remove_var(KEY_ENV);
 }
 
+async fn probe_native_followup_attempt(
+    next_kind: &str,
+    thinking: &str,
+    call_id: &str,
+    input: &Value,
+    signature: Option<&str>,
+) -> Value {
+    let reply = if next_kind == "anthropic" {
+        json!({"id":"msg_followup","type":"message","role":"assistant","model":"wire-test","content":[{"type":"text","text":"CLAUDE_NATIVE_TOOL_PROBE"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}})
+    } else {
+        json!({"id":"chat_followup","object":"chat.completion","model":"wire-test","choices":[{"index":0,"message":{"role":"assistant","content":"CLAUDE_NATIVE_TOOL_PROBE"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}})
+    };
+    let (endpoint, handle, mut captures, shutdown) = start_entry(
+        next_kind,
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        reply.to_string(),
+    )
+    .await;
+    let mut thinking_block = json!({"type":"thinking","thinking":thinking});
+    if let Some(signature) = signature {
+        thinking_block["signature"] = json!(signature);
+    }
+    let request = json!({
+        "model":"test.test","max_tokens":128,"stream":false,
+        "tools":[{"name":"Bash","description":"Execute command","input_schema":{"type":"object","properties":{"command":{"type":"string"},"description":{"type":"string"}}}}],
+        "messages":[
+            {"role":"user","content":"Run the probe once and report its result."},
+            {"role":"assistant","content":[thinking_block,{"type":"tool_use","id":call_id,"name":"Bash","input":input}]},
+            {"role":"user","content":[{"type":"tool_result","tool_use_id":call_id,"content":"CLAUDE_NATIVE_TOOL_PROBE","is_error":false}]}
+        ]
+    });
+    let result = client()
+        .post(endpoint.replace("/v1/responses", "/v1/messages"))
+        .json(&request)
+        .send()
+        .await;
+    let wire = tokio::time::timeout(Duration::from_secs(3), captures.recv()).await;
+    stop_entry(handle, shutdown).await;
+    let wire = wire
+        .unwrap_or_else(|_| {
+            panic!(
+                "signature={signature:?} next_kind={next_kind}: followup must reach its first provider attempt"
+            )
+        })
+        .expect("provider capture");
+    assert!(
+        captures.try_recv().is_err(),
+        "signature={signature:?} next_kind={next_kind}: followup must use exactly one provider attempt"
+    );
+    assert!(
+        result
+            .expect("successful native followup transport")
+            .status()
+            .is_success(),
+        "signature={signature:?} next_kind={next_kind}"
+    );
+    wire
+}
+
+fn assert_native_followup_thinking_and_tool_history(
+    next_kind: &str,
+    wire: &Value,
+    thinking: &str,
+    call_id: &str,
+    input: &Value,
+) {
+    if next_kind == "openai_chat" {
+        let messages = wire["messages"].as_array().expect("Chat history");
+        let assistant = messages
+            .iter()
+            .find(|m| m["tool_calls"].is_array())
+            .expect("paired assistant call");
+        assert_eq!(assistant["reasoning_content"], thinking);
+        assert_eq!(assistant["tool_calls"][0]["id"], call_id);
+        assert_eq!(
+            serde_json::from_str::<Value>(
+                assistant["tool_calls"][0]["function"]["arguments"]
+                    .as_str()
+                    .unwrap()
+            )
+            .unwrap(),
+            *input
+        );
+        assert!(messages.iter().any(|m| {
+            m["role"] == "tool"
+                && m["tool_call_id"] == call_id
+                && m["content"] == "CLAUDE_NATIVE_TOOL_PROBE"
+        }));
+    } else {
+        let messages = wire["messages"].as_array().expect("Anthropic history");
+        let blocks: Vec<&Value> = messages
+            .iter()
+            .filter_map(|m| m["content"].as_array())
+            .flatten()
+            .collect();
+        let thinking_block = blocks
+            .iter()
+            .find(|b| b["type"] == "thinking")
+            .expect("native thinking block");
+        assert_eq!(thinking_block["thinking"], thinking);
+        let tool = blocks
+            .iter()
+            .find(|b| b["type"] == "tool_use")
+            .expect("native tool use");
+        assert_eq!(tool["id"], call_id);
+        assert_eq!(tool["name"], "Bash");
+        assert_eq!(tool["input"], *input, "{wire}");
+        let result = blocks
+            .iter()
+            .find(|b| b["type"] == "tool_result")
+            .expect("native tool result");
+        assert_eq!(result["tool_use_id"], call_id);
+        assert_eq!(result["content"], "CLAUDE_NATIVE_TOOL_PROBE");
+    }
+}
+
+#[tokio::test]
+async fn anthropic_empty_signature_tool_followup_reaches_first_provider_attempt() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let thinking = "We need obey exact once Bash with command. Need commentary tool call. Then report actual output.";
+    let call_id = "call_00_0DgLrsue3mL4JgHTP5rM6075";
+    let input = json!({"command":"/usr/bin/printf CLAUDE_NATIVE_TOOL_PROBE","description":"Print tool probe marker"});
+    for signature in [None, Some(""), Some("sig_nonempty")] {
+        for next_kind in ["openai_chat", "anthropic"] {
+            let wire =
+                probe_native_followup_attempt(next_kind, thinking, call_id, &input, signature).await;
+            assert_native_followup_thinking_and_tool_history(
+                next_kind, &wire, thinking, call_id, &input,
+            );
+            if next_kind == "anthropic" {
+                let messages = wire["messages"].as_array().expect("Anthropic history");
+                let thinking_block = messages
+                    .iter()
+                    .filter_map(|m| m["content"].as_array())
+                    .flatten()
+                    .find(|b| b["type"] == "thinking")
+                    .expect("native thinking block");
+                match signature {
+                    None => assert!(thinking_block.get("signature").is_none(), "{wire}"),
+                    Some(signature) => {
+                        assert_eq!(thinking_block["signature"], signature, "{wire}")
+                    }
+                }
+            }
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+// Independent defect bfd9e2c: the native `tool_result.is_error: false` is an
+// explicit business field and must survive the round trip. This case stays RED
+// until that defect's owner fixes it; the signature scope above is separate.
+#[tokio::test]
+async fn anthropic_tool_result_explicit_false_preserved_on_tool_followup() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let thinking = "We need obey exact once Bash with command. Need commentary tool call. Then report actual output.";
+    let call_id = "call_00_0DgLrsue3mL4JgHTP5rM6075";
+    let input = json!({"command":"/usr/bin/printf CLAUDE_NATIVE_TOOL_PROBE","description":"Print tool probe marker"});
+    for signature in [None, Some(""), Some("sig_nonempty")] {
+        let wire =
+            probe_native_followup_attempt("anthropic", thinking, call_id, &input, signature).await;
+        let messages = wire["messages"].as_array().expect("Anthropic history");
+        let blocks: Vec<&Value> = messages
+            .iter()
+            .filter_map(|m| m["content"].as_array())
+            .flatten()
+            .collect();
+        let result = blocks
+            .iter()
+            .find(|b| b["type"] == "tool_result")
+            .expect("native tool result");
+        assert_eq!(result["tool_use_id"], call_id);
+        assert_eq!(result["content"], "CLAUDE_NATIVE_TOOL_PROBE");
+        assert_eq!(result["is_error"], false, "{wire}");
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 async fn controlled_upstream(
     State(state): State<Arc<ProviderState>>,
     request: axum::extract::Request,
@@ -1989,11 +2171,10 @@ async fn controlled_upstream(
         };
         let mut captured = live_forward.captures.lock().unwrap();
         let number = captured.len() + 1;
-        let evidence_dir = std::path::Path::new(
-            "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012");
-        write_live_evidence(evidence_dir, &format!("claude-live-native-candidate-wire-{number}.json"), &exchange.request_body);
-        write_live_evidence(evidence_dir, &format!("claude-live-native-rcc-response-{number}.body"), &exchange.response_body);
-        write_live_evidence(evidence_dir, &format!("claude-live-native-exchange-{number}.meta.json"),
+        let evidence_dir = live_native_evidence_dir();
+        write_live_evidence(&evidence_dir, &format!("claude-live-native-candidate-wire-{number}.json"), &exchange.request_body);
+        write_live_evidence(&evidence_dir, &format!("claude-live-native-rcc-response-{number}.body"), &exchange.response_body);
+        write_live_evidence(&evidence_dir, &format!("claude-live-native-exchange-{number}.meta.json"),
             json!({"rcc_status":exchange.response_status.map(|status|status.as_u16()),
                 "rcc_content_type":exchange.response_content_type,"transport_error":exchange.transport_error}).to_string().as_bytes());
         captured.push(exchange);
@@ -5373,6 +5554,14 @@ fn collect_json_blocks(value: &Value, block_type: &str, out: &mut Vec<Value>) {
     }
 }
 
+fn live_native_evidence_dir() -> std::path::PathBuf {
+    std::env::var_os("CLAUDE_NATIVE_EVIDENCE_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(
+            "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012",
+        ))
+}
+
 fn write_live_evidence(run_dir: &std::path::Path, name: &str, bytes: &[u8]) {
     let path = run_dir.join(name);
     std::fs::write(&path, bytes).expect("required live consumer evidence");
@@ -5396,9 +5585,7 @@ async fn c8e707e_native_claude_cli_live_rcc_bash_and_followup() {
     let route_model = std::env::var("RCC_NATIVE_CHAT_MODEL").unwrap_or_else(|_| {
         panic!("set RCC_NATIVE_CHAT_MODEL to the current 4444 chat route label")
     });
-    let run_dir = std::path::PathBuf::from(
-        "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012",
-    );
+    let run_dir = live_native_evidence_dir();
     std::fs::create_dir_all(&run_dir).expect("live evidence run dir");
     let command = "/usr/bin/printf CLAUDE_NATIVE_TOOL_PROBE";
     let allowed_tool = format!("Bash({command})");
