@@ -237,7 +237,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal(
     stream: V3SseAttemptStream,
     provider_protocol: V3HubProviderWireProtocol,
     attempt_budget: crate::nodes::V3AttemptBudget,
-) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
     collect_direct_sse_attempt_after_terminal_with_memory(
         stream,
         provider_protocol,
@@ -254,14 +254,15 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
     attempt_budget: crate::nodes::V3AttemptBudget,
     manifest: Option<&V3Config05ManifestPublished>,
     request_id: Option<&str>,
-) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
     let deadline = tokio::time::Instant::from_std(attempt_budget.residence_deadline());
     let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
         .map_err(|error| {
-            direct_attempt_store_error_source(
-                error,
+            crate::shared::direct_plain_error(
+                V3ErrorSourceKind::RuntimeFailure,
                 "V3ExecutionAttemptPayloadStore",
                 "direct_sse_attempt_store_rejected",
+                error.to_string(),
             )
         })?;
     let mut terminal_seen = false;
@@ -271,12 +272,14 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         let next = match tokio::time::timeout_at(deadline, stream.next()).await {
             Ok(next) => next,
             Err(_) if terminal_seen => break,
-            Err(_) => return Err(build_v3_error_01_source_raised(
-                V3ErrorSourceKind::ProviderFailure,
-                "V3ProviderResp14Raw",
-                "provider_response_residence_timeout",
-                "provider SSE attempt exceeded the request residence deadline before a semantic terminal",
-            )),
+            Err(_) => {
+                return Err(crate::shared::direct_plain_error(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "provider_response_residence_timeout",
+                    "provider SSE attempt exceeded the request residence deadline before a semantic terminal",
+                ))
+            }
         };
         let Some(frame) = next else { break };
         // The attempt is complete at the protocol terminal.  A provider
@@ -286,12 +289,16 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         // post-terminal read errors).
         let frame = match frame {
             Ok(frame) => frame,
-            Err(_) if terminal_seen => break,
-            Err(error) => return Err(error),
+            // A typed SDK fault is never post-terminal transport noise. It must
+            // reach the caller intact instead of sealing an already-validated
+            // business attempt as success.
+            Err(Err(fault)) => return Err(Err(fault)),
+            Err(Ok(_)) if terminal_seen => break,
+            Err(Ok(source)) => return Err(Ok(source)),
         };
         let disposition = frame.disposition;
         if terminal_seen && disposition == V3SseFrameDisposition::Continue {
-            return Err(build_v3_error_01_source_raised(
+            return Err(crate::shared::direct_plain_error(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ExecutionAttemptPayloadStore",
                 "direct_sse_frame_after_terminal",
@@ -305,10 +312,11 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
             &mut business_decoder,
         )?;
         committed.push(frame).map_err(|error| {
-            direct_attempt_store_error_source(
-                error,
+            crate::shared::direct_plain_error(
+                V3ErrorSourceKind::RuntimeFailure,
                 "V3ExecutionAttemptPayloadStore",
                 "direct_sse_attempt_store_rejected",
+                error.to_string(),
             )
         })?;
         if matches!(
@@ -316,7 +324,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
             V3SseFrameDisposition::SemanticTerminal | V3SseFrameDisposition::LegalCloseout
         ) {
             if disposition == V3SseFrameDisposition::LegalCloseout && !terminal_seen {
-                return Err(build_v3_error_01_source_raised(
+                return Err(crate::shared::direct_plain_error(
                     V3ErrorSourceKind::ProviderFailure,
                     "V3ProviderResp14Raw",
                     "provider_response_sse_stream",
@@ -325,10 +333,11 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
             }
             terminal_seen = true;
             committed.mark_last_frame_as_terminal().map_err(|error| {
-                direct_attempt_store_error_source(
-                    error,
+                crate::shared::direct_plain_error(
+                    V3ErrorSourceKind::RuntimeFailure,
                     "V3ExecutionAttemptPayloadStore",
                     "direct_sse_terminal_seal_rejected",
+                    error.to_string(),
                 )
             })?;
             if disposition == V3SseFrameDisposition::LegalCloseout {
@@ -337,19 +346,21 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                 }
                 rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(
                     |error| {
-                        direct_attempt_store_error_source(
-                            error,
+                        crate::shared::direct_plain_error(
+                            V3ErrorSourceKind::RuntimeFailure,
                             "V3ExecutionAttemptPayloadStore",
                             "direct_sse_memory_strip_failed",
+                            error.to_string(),
                         )
                     },
                 )?;
                 let sealed = committed.seal_after_validated_terminal();
                 let sealed = sealed.map_err(|error| {
-                    direct_attempt_store_error_source(
-                        error,
+                    crate::shared::direct_plain_error(
+                        V3ErrorSourceKind::RuntimeFailure,
                         "V3ExecutionAttemptPayloadStore",
                         "direct_sse_terminal_seal_rejected",
+                        error.to_string(),
                     )
                 });
                 return sealed;
@@ -370,31 +381,34 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
             committed
                 .push(b"data: [DONE]\n\n".to_vec())
                 .map_err(|error| {
-                    direct_attempt_store_error_source(
-                        error,
+                    crate::shared::direct_plain_error(
+                        V3ErrorSourceKind::RuntimeFailure,
                         "V3ExecutionAttemptPayloadStore",
                         "direct_sse_attempt_store_rejected",
+                        error.to_string(),
                     )
                 })?;
         }
         rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|error| {
-            direct_attempt_store_error_source(
-                error,
+            crate::shared::direct_plain_error(
+                V3ErrorSourceKind::RuntimeFailure,
                 "V3ExecutionAttemptPayloadStore",
                 "direct_sse_memory_strip_failed",
+                error.to_string(),
             )
         })?;
         let sealed = committed.seal_after_validated_terminal();
         let sealed = sealed.map_err(|error| {
-            direct_attempt_store_error_source(
-                error,
+            crate::shared::direct_plain_error(
+                V3ErrorSourceKind::RuntimeFailure,
                 "V3ExecutionAttemptPayloadStore",
                 "direct_sse_terminal_seal_rejected",
+                error.to_string(),
             )
         });
         return sealed;
     }
-    Err(build_v3_error_01_source_raised(
+    Err(crate::shared::direct_plain_error(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderResp14Raw",
         "provider_response_sse_stream",
@@ -407,7 +421,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
 /// policy (reselect/cooldown), never a client error or an empty completion.
 pub(crate) fn direct_attempt_budget_error_source(
     error: crate::nodes::V3AttemptStoreError,
-) -> V3Error01SourceRaised {
+) -> crate::shared::V3DirectSourceError {
     direct_attempt_store_error_source(
         error,
         "V3ExecutionAttemptBudget",
@@ -419,17 +433,17 @@ pub(crate) fn direct_attempt_store_error_source(
     error: crate::nodes::V3AttemptStoreError,
     stage: &'static str,
     code: &'static str,
-) -> V3Error01SourceRaised {
+) -> crate::shared::V3DirectSourceError {
     match error {
         crate::nodes::V3AttemptStoreError::ResidenceDeadlineExceeded(message) => {
-            build_v3_error_01_source_raised(
+            crate::shared::direct_plain_error(
                 V3ErrorSourceKind::TargetPoolExhausted,
                 stage,
                 "request_residence_deadline_exceeded",
                 message,
             )
         }
-        error => build_v3_error_01_source_raised(
+        error => crate::shared::direct_plain_error(
             V3ErrorSourceKind::RuntimeFailure,
             stage,
             code,
@@ -438,8 +452,8 @@ pub(crate) fn direct_attempt_store_error_source(
     }
 }
 
-fn direct_sse_empty_attempt_failure() -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised(
+fn direct_sse_empty_attempt_failure() -> crate::shared::V3DirectSourceError {
+    crate::shared::direct_plain_error(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderResp14Raw",
         "provider_response_empty",
@@ -454,7 +468,7 @@ fn direct_sse_chunk_has_business_content(
     provider_protocol: V3HubProviderWireProtocol,
     chunk: &[u8],
     decoder: &mut SseIncrementalDecoder,
-) -> Result<bool, V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<bool> {
     let mut has_output = false;
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
@@ -656,6 +670,8 @@ fn test_direct_sse_attempt_stream(
     source: V3ClientSseStream,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> V3SseAttemptStream {
+    let source: crate::nodes::V3ProviderAttemptSseInnerStream =
+        Box::pin(source.map(|item| item.map_err(Ok)));
     wrap_direct_sse_provider_event_json_observation_stream(
         V3ProviderAttemptSseStream::new(source),
         V3RuntimeStreamObservation::default(),
@@ -679,7 +695,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
     hook_registry: &V3HookRegistry,
     failure_session_scope: &V3ProviderFailureSessionScope,
     attempt_budget: V3AttemptBudget,
-) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
     let projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
         stream,
         stream_observation,
@@ -728,7 +744,7 @@ fn record_direct_sse_provider_event_json_chunk(
     stream_observation: &V3RuntimeStreamObservation,
     content_consumer: &mut V3DirectSseContentConsumer,
     semantic_state: &mut V3DirectSseSemanticState,
-) -> Result<Option<V3SseAttemptFrame>, V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<Option<V3SseAttemptFrame>> {
     stream_observation
         .record_provider_raw_sse_chunk(chunk)
         .map_err(provider_sse_failure_source)?;
@@ -806,7 +822,7 @@ fn record_direct_sse_provider_event_json_chunk(
                 V3SseFrameDisposition::Continue
             }
             Some(V3ProviderResponsesJsonFrameOutcome::Failure { code, message }) => {
-                return Err(build_v3_error_01_source_raised(
+                return Err(crate::shared::direct_plain_error(
                     V3ErrorSourceKind::ProviderFailure,
                     "V3ProviderResp14Raw",
                     code,
@@ -857,7 +873,7 @@ fn record_direct_sse_provider_event_json_chunk(
 fn record_direct_sse_provider_event_json_frame(
     fields: &[SseField],
     stream_observation: &V3RuntimeStreamObservation,
-) -> Result<(), V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<()> {
     let data = collect_v3_provider_sse_json_data(fields);
     if is_v3_provider_sse_keepalive_text(&data) {
         return Ok(());
@@ -866,16 +882,35 @@ fn record_direct_sse_provider_event_json_frame(
         .map_err(provider_sse_failure_source)
 }
 
-fn provider_sse_failure_source(message: impl Into<String>) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised(
+fn provider_sse_failure_source(
+    message: impl Into<String>,
+) -> Result<V3Error01SourceRaised, crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault>
+{
+    crate::shared::direct_source_error(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderResp14Raw",
         "provider_response_sse_stream",
         message.into(),
+        crate::operation_runner::V3Err01SourceInput::Plain,
     )
 }
 
 pub(crate) fn runtime_source(
+    stage: &'static str,
+    error: impl std::fmt::Display,
+) -> Result<V3Error01SourceRaised, crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault>
+{
+    crate::shared::raise_v3_runtime_failure_source(
+        stage,
+        "v3_route_target_runtime_failure",
+        error.to_string(),
+    )
+}
+
+/// Raw diagnostic leaf for an SDK02..06 operator fault. It records the SDK
+/// failure itself and must never run Error01 again, because a second Err01
+/// failure would erase the original operator fault.
+pub(crate) fn sdk_fault_leaf_source(
     stage: &'static str,
     error: impl std::fmt::Display,
 ) -> V3Error01SourceRaised {
@@ -905,7 +940,14 @@ pub(crate) fn compat_source(
         V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
             crate::hub_v1::provider_request_payload_source(stage, error)
         }
-        V3ProviderCompatErrorClassification::Other => runtime_source(stage, error),
+        // Pending-R: shared provider-compat helpers still return Source-only.
+        // Keep this ordinary source wrapper until those producers migrate.
+        V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            stage,
+            "v3_route_target_runtime_failure",
+            error.to_string(),
+        ),
     }
 }
 
@@ -955,6 +997,64 @@ mod request_invalid_compat_tests {
         );
         let source = compat_source("V3ProviderRespInbound01Raw", &error);
         assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+    }
+}
+
+pub(crate) fn source_failure_output(
+    source: Result<
+        V3Error01SourceRaised,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    last_external_http: Option<V3ExternalHttpWitness>,
+    node_trace: Vec<&'static str>,
+    hook_registry: &V3HookRegistry,
+) -> V3ResponsesDirectRuntimeOutput {
+    source_failure_output_with_observability_and_snapshots(
+        source,
+        last_external_http,
+        node_trace,
+        hook_registry,
+        None,
+        None,
+        None,
+    )
+}
+
+pub(crate) fn source_failure_output_with_observability_and_snapshots(
+    source: Result<
+        V3Error01SourceRaised,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    last_external_http: Option<V3ExternalHttpWitness>,
+    node_trace: Vec<&'static str>,
+    hook_registry: &V3HookRegistry,
+    observability: Option<V3RuntimeObservability>,
+    provider_request_snapshot: Option<serde_json::Value>,
+    provider_response_snapshot: Option<serde_json::Value>,
+) -> V3ResponsesDirectRuntimeOutput {
+    match source {
+        Ok(source) => error_output_with_observability_and_snapshots(
+            source,
+            node_trace,
+            hook_registry,
+            observability,
+            provider_request_snapshot,
+            provider_response_snapshot,
+        ),
+        Err(fault) => {
+            let mut output = operator_fault_output_with_observability_and_snapshots(
+                fault,
+                node_trace,
+                observability,
+                provider_request_snapshot,
+                provider_response_snapshot,
+            );
+            output.terminal_disposition = Some(match last_external_http {
+                Some(witness) => V3ProviderTerminalDisposition::ExternalHttp(witness),
+                None => V3ProviderTerminalDisposition::NoResponse,
+            });
+            output
+        }
     }
 }
 
@@ -1023,6 +1123,24 @@ pub(crate) fn error_output_with_observability(
     hook_registry: &V3HookRegistry,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
+    error_output_with_observability_and_snapshots(
+        source,
+        node_trace,
+        hook_registry,
+        observability,
+        None,
+        None,
+    )
+}
+
+pub(crate) fn error_output_with_observability_and_snapshots(
+    source: V3Error01SourceRaised,
+    node_trace: Vec<&'static str>,
+    hook_registry: &V3HookRegistry,
+    observability: Option<V3RuntimeObservability>,
+    provider_request_snapshot: Option<serde_json::Value>,
+    provider_response_snapshot: Option<serde_json::Value>,
+) -> V3ResponsesDirectRuntimeOutput {
     let target_exhausted = source.source_kind == V3ErrorSourceKind::TargetPoolExhausted;
     let original_source = source.clone();
     let (decision_projection, decision) =
@@ -1031,12 +1149,12 @@ pub(crate) fn error_output_with_observability(
             Err(error) => {
                 return sdk_runtime_fault_output_with_observability_and_snapshots(
                     original_source,
-                    runtime_source("V3Error05ExecutionDecision", error),
+                    sdk_fault_leaf_source("V3Error05ExecutionDecision", error),
                     None,
                     node_trace,
                     observability,
-                    None,
-                    None,
+                    provider_request_snapshot,
+                    provider_response_snapshot,
                 )
             }
         };
@@ -1048,31 +1166,36 @@ pub(crate) fn error_output_with_observability(
         Ok(None) => {
             return sdk_runtime_fault_output_with_observability_and_snapshots(
                 original_source.clone(),
-                runtime_source(
+                sdk_fault_leaf_source(
                     "V3Error06ClientProjected",
                     "normal local terminal decision was not terminal",
                 ),
                 None,
                 node_trace,
                 observability,
-                None,
-                None,
+                provider_request_snapshot,
+                provider_response_snapshot,
             )
         }
         Err(error) => {
             return sdk_runtime_fault_output_with_observability_and_snapshots(
                 original_source,
-                runtime_source("V3Error06ClientProjected", error),
+                sdk_fault_leaf_source("V3Error06ClientProjected", error),
                 None,
                 node_trace,
                 observability,
-                None,
-                None,
+                provider_request_snapshot,
+                provider_response_snapshot,
             )
         }
     };
-    let mut output =
-        projected_error_output_with_observability(projected, node_trace, observability);
+    let mut output = projected_error_output_with_observability_and_snapshots(
+        projected,
+        node_trace,
+        observability,
+        provider_request_snapshot,
+        provider_response_snapshot,
+    );
     if target_exhausted {
         output.terminal_disposition = Some(V3ProviderTerminalDisposition::NoResponse);
     }
@@ -1169,7 +1292,7 @@ pub(crate) fn provider_terminal_output(
         Err(error) => {
             return sdk_runtime_fault_output_with_observability_and_snapshots(
                 decision.exhaustion.local_action.classified.source,
-                runtime_source("V3Error06ClientProjected", error),
+                sdk_fault_leaf_source("V3Error06ClientProjected", error),
                 witness,
                 node_trace,
                 observability,
@@ -1220,7 +1343,7 @@ fn provider_terminal_output_with_decision_projection(
         }
         Ok(None) => sdk_runtime_fault_output_with_observability_and_snapshots(
             original_source.clone(),
-            runtime_source(
+            sdk_fault_leaf_source(
                 "V3Error06ClientProjected",
                 "provider terminal decision was not terminal",
             ),
@@ -1235,7 +1358,7 @@ fn provider_terminal_output_with_decision_projection(
         ),
         Err(error) => sdk_runtime_fault_output_with_observability_and_snapshots(
             original_source,
-            runtime_source("V3Error06ClientProjected", error),
+            sdk_fault_leaf_source("V3Error06ClientProjected", error),
             match disposition {
                 V3ProviderTerminalDisposition::ExternalHttp(witness) => Some(witness),
                 V3ProviderTerminalDisposition::NoResponse => None,
@@ -1258,7 +1381,7 @@ pub(crate) fn client_disconnect_terminal_output(
         Err(error) => {
             return sdk_runtime_fault_output_with_observability_and_snapshots(
                 decision.exhaustion.local_action.classified.source,
-                runtime_source("V3Error06ClientProjected", error),
+                sdk_fault_leaf_source("V3Error06ClientProjected", error),
                 None,
                 node_trace,
                 observability,
@@ -1299,7 +1422,7 @@ fn client_disconnect_terminal_output_with_decision_projection(
         ),
         Ok(None) => sdk_runtime_fault_output_with_observability_and_snapshots(
             original_source.clone(),
-            crate::kernel::direct_runtime_helpers_stream::runtime_source(
+            crate::kernel::direct_runtime_helpers_stream::sdk_fault_leaf_source(
                 "V3Error06ClientProjected",
                 "client disconnect decision was not terminal",
             ),
@@ -1311,7 +1434,7 @@ fn client_disconnect_terminal_output_with_decision_projection(
         ),
         Err(error) => sdk_runtime_fault_output_with_observability_and_snapshots(
             original_source,
-            crate::kernel::direct_runtime_helpers_stream::runtime_source(
+            crate::kernel::direct_runtime_helpers_stream::sdk_fault_leaf_source(
                 "V3Error06ClientProjected",
                 error,
             ),
@@ -1358,6 +1481,49 @@ fn sdk_runtime_fault_output_with_observability_and_snapshots(
 #[cfg(test)]
 mod target_exhaustion_disposition_tests {
     use super::*;
+
+    #[test]
+    fn seeded_direct_source_fault_retains_prior_http_witness_and_original_cause() {
+        let original = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Provider12ResponsesWirePayload",
+            "request_projection_failed",
+            "seeded Direct origin",
+        );
+        let policy_failure = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Error01SourceRaised",
+            "err01_source_operator_sdk_failure",
+            "seeded SDK fault carrier, not a public rejection input",
+        );
+        let witness = V3ExternalHttpWitness::new(
+            429,
+            vec![("content-type".into(), b"application/json".to_vec())],
+            br#"{"error":"prior attempt limited"}"#.to_vec(),
+        );
+        let output = source_failure_output(
+            Err(
+                crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
+                    policy_failure: policy_failure.clone(),
+                    original_source: Some(original.clone()),
+                },
+            ),
+            Some(witness.clone()),
+            vec!["V3Provider12ResponsesWirePayload"],
+            &crate::hooks::register_responses_direct_hooks(),
+        );
+        assert_eq!(output.diagnostic_source, Some(policy_failure));
+        assert_eq!(output.diagnostic_cause, Some(original));
+        assert_eq!(
+            output.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
+        );
+        assert!(output.error_chain.is_none());
+        assert!(matches!(
+            output.client_payload.body,
+            V3ClientBody::Json(serde_json::Value::Null)
+        ));
+    }
 
     #[test]
     fn direct_target_exhaustion_reaches_transport_disconnect_witness() {

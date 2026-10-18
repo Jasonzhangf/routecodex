@@ -9,7 +9,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         Ok(standardized) => standardized,
         Err(error) => {
             trace.push("V3Req04StandardizedResponses");
-            return Err(protocol_plan_failure(
+            return Err(protocol_plan_source_failure(
                 runtime_source("V3Req04StandardizedResponses", error),
                 trace,
             ));
@@ -21,7 +21,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         .get("previous_response_id")
         .is_some_and(|value| !value.is_null())
     {
-        return Err(protocol_plan_failure(
+        return Err(protocol_plan_source_failure(
             runtime_source(
                 "V3HubReqInbound02Normalized",
                 "protocol execution plan only handles non-continuation responses requests",
@@ -36,7 +36,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     {
         Some(execution) => execution.allowed_modes.clone(),
         None => {
-            return Err(protocol_plan_failure(
+            return Err(protocol_plan_source_failure(
                 runtime_source(
                     "V3Execution11ProtocolDecision",
                     format!(
@@ -86,7 +86,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
                 return Err(crate::kernel::protocol_plan_operator_fault(fault, trace))
             }
             Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
-                return Err(protocol_plan_failure(
+                return Err(protocol_plan_source_failure(
                     runtime_source("V3Router07OpaqueTargetHitOnce", error),
                     trace,
                 ))
@@ -140,9 +140,9 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
             Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Failed(source)) => {
                 return Err(protocol_plan_failure(source, trace))
             }
-            Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::OperatorFault(fault)) => {
-                return Err(crate::kernel::protocol_plan_operator_fault(fault, trace))
-            }
+            Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::OperatorFault(
+                fault,
+            )) => return Err(crate::kernel::protocol_plan_operator_fault(fault, trace)),
         };
     trace.push("V3Target08KindClassified");
     trace.push("V3Target09CandidateSetExpanded");
@@ -217,6 +217,16 @@ fn protocol_plan_failure(
         source,
         node_trace,
         error_operator_fault: None,
+    }
+}
+
+fn protocol_plan_source_failure(
+    source: crate::shared::V3DirectSourceError,
+    node_trace: Vec<&'static str>,
+) -> V3ResponsesProtocolExecutionPlanFailure {
+    match source {
+        Ok(source) => protocol_plan_failure(source, node_trace),
+        Err(fault) => crate::kernel::protocol_plan_operator_fault(fault, node_trace),
     }
 }
 

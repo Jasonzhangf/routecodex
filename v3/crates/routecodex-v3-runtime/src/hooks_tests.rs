@@ -118,6 +118,49 @@ fn responses_direct_static_hooks_are_registered() {
 }
 
 #[test]
+fn direct_source_boundary_preserves_err01_operator_fault() {
+    let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
+        policy_failure: build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Error01SourceRaised",
+            "err01_source_operator_sdk_failure",
+            "seeded Err01 failure",
+        ),
+        original_source: Some(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Provider12ResponsesWirePayload",
+            "seeded_original_source",
+            "seeded original source",
+        )),
+    };
+    let result: V3DirectSourceResult<()> = Err(Err(fault.clone()));
+
+    assert_eq!(result.unwrap_err().unwrap_err(), fault);
+}
+
+#[test]
+fn direct_source_boundary_preserves_sdk_source() {
+    let (_, source) = crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3DirectRequestKeyHook",
+        "direct_source_boundary_test",
+        "seeded SDK source",
+        V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
+    )
+    .expect("real Error01 SDK must raise an Internal source");
+    let result: V3DirectSourceResult<()> = Err(Ok(source.clone()));
+
+    assert_eq!(result.unwrap_err().unwrap(), source);
+    assert_eq!(
+        source
+            .internal_error
+            .as_ref()
+            .map(|internal| internal.internal_code),
+        Some("500-150")
+    );
+}
+
+#[test]
 fn responses_direct_error_hook_runs_sdk_02_through_05_and_returns_decision_projection() {
     let registry = register_responses_direct_hooks();
     let source = build_v3_error_01_source_raised(
@@ -616,7 +659,9 @@ async fn malformed_json_response_is_explicit_error() {
             },
         )
         .await;
-    let source = result.expect_err("malformed provider JSON must be an explicit error");
+    let source = result
+        .expect_err("malformed provider JSON must be an explicit error")
+        .expect("Source-only response projection must not report an operator fault");
     assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);
     assert!(source.internal_error.is_none());
     let external = source

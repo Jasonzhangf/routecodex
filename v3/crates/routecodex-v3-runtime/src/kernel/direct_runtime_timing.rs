@@ -7,7 +7,7 @@ pub(super) fn finish_v3_direct_runtime_timing(
     live_client_sse: bool,
     stream_observation: Option<&V3RuntimeStreamObservation>,
     runtime_timing: &V3RuntimeTimingState,
-) -> Result<Option<crate::V3RuntimeTimingSummary>, V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<Option<crate::V3RuntimeTimingSummary>> {
     let timing = if live_client_sse {
         None
     } else {

@@ -75,11 +75,14 @@ fn protocol_plan_failure_preserves_source_status_and_pool_exhausted() {
 
 #[test]
 fn residence_expiry_is_not_a_local_store_598_and_never_commits_an_error() {
-    let source = direct_attempt_store_error_source(
+    let source = match direct_attempt_store_error_source(
         crate::nodes::V3AttemptStoreError::ResidenceDeadlineExceeded("expired".into()),
         "V3ExecutionAttemptPayloadStore",
         "direct_sse_attempt_store_rejected",
-    );
+    ) {
+        Ok(source) => source,
+        Err(fault) => panic!("unexpected SDK fault: {fault:?}"),
+    };
     assert_eq!(source.code, "request_residence_deadline_exceeded");
     let output = error_output(
         source,
@@ -93,11 +96,14 @@ fn residence_expiry_is_not_a_local_store_598_and_never_commits_an_error() {
     );
     assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
 
-    let source = direct_attempt_store_error_source(
+    let source = match direct_attempt_store_error_source(
         crate::nodes::V3AttemptStoreError::LocalResourceExhausted("byte cap".into()),
         "V3ExecutionAttemptPayloadStore",
         "direct_sse_attempt_store_rejected",
-    );
+    ) {
+        Ok(source) => source,
+        Err(fault) => panic!("unexpected SDK fault: {fault:?}"),
+    };
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert_eq!(source.code, "direct_sse_attempt_store_rejected");
 }
