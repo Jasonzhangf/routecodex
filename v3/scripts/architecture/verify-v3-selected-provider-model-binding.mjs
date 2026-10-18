@@ -12,7 +12,8 @@ const failures = [];
 const files = {
   owner: 'v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs',
   direct: 'v3/crates/routecodex-v3-runtime/src/hooks.rs',
-  relay: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+  relay: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs',
+  compat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
   providerWire: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
   providerError: 'v3/crates/routecodex-v3-provider-responses/src/error.rs',
   functionMap: 'docs/architecture/v3-function-map.yml',
@@ -83,16 +84,16 @@ if (directBind < 0 || directWire < 0 || directBind > directWire) {
 requireText(text.direct, files.direct, 'provider_model_binding_mismatch');
 requireText(text.direct, files.direct, 'V3ErrorSourceKind::RuntimeFailure');
 
-const relayBuilderStart = text.relay.indexOf('fn build_v3_provider_standard_protocol_payload_from_req07');
+const relayBuilderStart = text.relay.indexOf('fn project_v3_operation_runner_standard_provider_request');
 const relayBind = text.relay.indexOf('bind_v3_selected_provider_model(', relayBuilderStart);
 if (relayBuilderStart < 0 || relayBind < relayBuilderStart) {
   failures.push(`${files.relay}: Relay protocol payload builder must call the shared selected-model owner`);
 }
-const compatStart = text.relay.indexOf('fn apply_v3_provider_req_compat');
-const compatRun = text.relay.indexOf('run_req_outbound_stage3_compat(', compatStart);
-const boundBuilderCall = text.relay.indexOf('build_v3_provider_standard_protocol_payload_from_req07(input)', compatStart);
-if (compatStart < 0 || compatRun < 0 || boundBuilderCall < 0 || boundBuilderCall > compatRun + 500) {
-  failures.push(`${files.relay}: ProviderReqCompat06 must receive the bound protocol payload`);
+const compatStart = text.compat.indexOf('fn apply_v3_provider_req_compat');
+const compatRun = text.compat.indexOf('apply_v3_provider_req_compat_to_provider_payload(', compatStart);
+const boundPayload = text.compat.indexOf('input.provider_semantic_payload().clone()', compatRun);
+if (compatStart < 0 || compatRun < 0 || boundPayload < 0 || boundPayload > compatRun + 200) {
+  failures.push(`${files.compat}: ProviderReqCompat06 must consume the bound Node06 payload`);
 }
 
 requireText(text.providerError, files.providerError, 'ProviderModelBindingMismatch');

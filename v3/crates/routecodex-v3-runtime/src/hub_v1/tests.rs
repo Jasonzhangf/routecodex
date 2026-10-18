@@ -296,7 +296,8 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         req06,
         V3HubProviderWireProtocol::OpenAiChat,
-    );
+    )
+    .expect("Node06 standard projection must succeed for test fixture");
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
     let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat.node);
     let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
@@ -376,7 +377,8 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         req06,
         V3HubProviderWireProtocol::Responses,
-    );
+    )
+    .expect("Node06 standard projection must succeed for test fixture");
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
     let payload = req_compat.provider_semantic_payload();
     assert!(
@@ -455,7 +457,8 @@ fn provider_req_compat_loads_selected_target_profile() {
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         req06,
         V3HubProviderWireProtocol::Responses,
-    );
+    )
+    .expect("Node06 standard projection must succeed for test fixture");
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
     assert_eq!(req_compat.profile().as_str(), "chat:minimax");
     let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat.node);
@@ -914,7 +917,8 @@ fn project_v3_output_cap_wire(
         V3HubTargetResolution::Routed,
         v3_output_cap_test_candidate(wire_model, entry_protocol, declared_max_tokens),
     );
-    let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol);
+    let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
+        .expect("Node06 standard projection must succeed for test fixture");
     build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
         .expect("provider compat projection must succeed")
         .provider_semantic_payload()

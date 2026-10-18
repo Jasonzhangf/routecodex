@@ -14,11 +14,25 @@
 //! - 缺失的 native id 保持缺失：不生成 id、filename 或 signature，不把未知
 //!   part/MIME 合成为文本或媒体，也不把 no-id functionResponse 改写为 user 角色。
 
-use crate::protocol_tables::{map_value as table_map_value, V3TableDirection, V3TableKind};
+use crate::protocol_tables::{
+    map_field as table_map_field, map_value as table_map_value, V3TableDirection, V3TableKind,
+};
 use serde_json::{json, Map, Value};
 
 const V3_GEMINI_PROTOCOL: &str = "gemini";
 const GEMINI_NATIVE_FIELDS_KEY: &str = "gemini_native_fields";
+pub(crate) const V3_GEMINI_GENERATION_SCALAR_FIELDS: [&str; 10] = [
+    "temperature",
+    "top_p",
+    "top_k",
+    "max_completion_tokens",
+    "stop",
+    "frequency_penalty",
+    "presence_penalty",
+    "logprobs",
+    "top_logprobs",
+    "seed",
+];
 
 /// 把 Gemini 客户端请求归一化为 canonical Chat payload（`messages` + 已登记标量）。
 pub fn build_v3_chat_canonical_request_from_gemini_payload(
@@ -117,33 +131,24 @@ pub fn build_v3_chat_canonical_request_from_gemini_payload(
     }
     apply_gemini_generation_config(root.get("generationConfig"), &mut request)?;
     let mut request_fields = root_residual;
-    let generation_mapped = [
-        "temperature",
-        "top_p",
-        "top_k",
-        "max_completion_tokens",
-        "stop",
-        "frequency_penalty",
-        "presence_penalty",
-        "logprobs",
-        "top_logprobs",
-        "seed",
-        "reasoning_include_thoughts",
-        "reasoning_budget_tokens",
-        "reasoning_thinking_mode",
-        "reasoning_effort",
-    ];
+    let generation_mapped = V3_GEMINI_GENERATION_SCALAR_FIELDS
+        .iter()
+        .any(|key| request.contains_key(*key))
+        || [
+            "reasoning_include_thoughts",
+            "reasoning_budget_tokens",
+            "reasoning_thinking_mode",
+            "reasoning_effort",
+        ]
+        .iter()
+        .any(|key| request.contains_key(*key));
     if let Some(tools_declaration_fields) = tool_declarations {
         request_fields.insert("tools".to_string(), tools_declaration_fields);
     }
     if let Some(tool_config) = tool_config.residual {
         request_fields.insert("toolConfig".to_string(), tool_config);
     }
-    if request.contains_key("generation")
-        || generation_mapped
-            .iter()
-            .any(|key| request.contains_key(*key))
-    {
+    if request.contains_key("generation") || generation_mapped {
         request_fields.insert(
             "generationConfig".to_string(),
             request
@@ -1018,36 +1023,23 @@ fn apply_gemini_generation_config(
     let generation_config = generation_config
         .as_object()
         .ok_or_else(|| "Gemini generationConfig must be an object".to_string())?;
-    for (source, destination) in [
-        ("temperature", "temperature"),
-        ("topP", "top_p"),
-        ("topK", "top_k"),
-        ("maxOutputTokens", "max_completion_tokens"),
-        ("stopSequences", "stop"),
-        ("frequencyPenalty", "frequency_penalty"),
-        ("presencePenalty", "presence_penalty"),
-        ("responseLogprobs", "logprobs"),
-        ("logprobs", "top_logprobs"),
-        ("seed", "seed"),
-    ] {
-        if let Some(value) = generation_config.get(source) {
-            request.insert(destination.to_string(), value.clone());
+    let mut mapped_fields = Vec::new();
+    for hub_field in V3_GEMINI_GENERATION_SCALAR_FIELDS {
+        if let Some(protocol_field) =
+            table_map_field(V3_GEMINI_PROTOCOL, hub_field, V3TableDirection::Outbound)
+                .map_err(|error| format!("Gemini field_map lookup failed: {error}"))?
+        {
+            mapped_fields.push((hub_field, protocol_field));
+        }
+    }
+    for (hub_field, protocol_field) in &mapped_fields {
+        if let Some(value) = generation_config.get(*protocol_field) {
+            request.insert((*hub_field).to_string(), value.clone());
         }
     }
     let mut extension = generation_config.clone();
-    for source in [
-        "temperature",
-        "topP",
-        "topK",
-        "maxOutputTokens",
-        "stopSequences",
-        "frequencyPenalty",
-        "presencePenalty",
-        "responseLogprobs",
-        "logprobs",
-        "seed",
-    ] {
-        extension.remove(source);
+    for (_, protocol_field) in &mapped_fields {
+        extension.remove(*protocol_field);
     }
     if let Some(thinking_config) = extension
         .get_mut("thinkingConfig")

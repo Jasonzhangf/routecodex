@@ -7657,6 +7657,18 @@ extension_path_consumers:
       semantics: enum(extended_semantic)
       failure_class: enum(598)
     mapping_record: exact
+  - path: request.messages.parts_items.gemini_native_fields
+    direction: request
+    consumers:
+      client_request_to_chat: routecodex.v3.field.identity_preserve@1
+      chat_to_provider: routecodex.v3.field.request_field_whitelist@1
+    protocol: openai_chat_extension
+    section: extended_superset
+    params:
+      shape: leaf
+      semantics: enum(extended_semantic)
+      failure_class: enum(598)
+    mapping_record: exact
   - path: request.messages.parts_items.part_metadata
     direction: request
     consumers:

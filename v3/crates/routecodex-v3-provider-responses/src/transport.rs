@@ -1176,7 +1176,8 @@ impl ProviderResponsesTransport {
                 OPENAI_BETA_HEADER,
                 HeaderValue::from_static(RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE),
             );
-            let connect = connect_async(handshake);
+            // Keep handshake state off the nested Server/Relay poll stack.
+            let connect = Box::pin(connect_async(handshake));
             let connected = match cancellation.clone() {
                 Some(cancellation) => {
                     tokio::select! {

@@ -6107,8 +6107,8 @@ chains:
   - step_id: v3-model-bind-03
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: V3SelectedProviderModelBindingBlock
-    caller_symbol: build_v3_provider_standard_protocol_payload_from_req07
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+    caller_symbol: project_v3_operation_runner_standard_provider_request
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs
     callee_symbol: bind_v3_selected_provider_model
     callee_file: v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
     status: anchored
@@ -8587,9 +8587,9 @@ chains:
   - step_id: v3-tool-thinking-provider-schema-preservation
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: ProviderReqCompat06ProviderCompat
-    caller_symbol: build_v3_provider_standard_protocol_payload_from_req07
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
-    callee_symbol: build_v3_openai_chat_standard_request_for_selected_web_search_mode
+    caller_symbol: project_v3_operation_runner_standard_provider_request
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs
+    callee_symbol: build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
     status: anchored
     behavior_gap: current Req04 wrapper and mechanical projection are source-controlled; remaining gap is complete native/custom live evidence across every provider protocol
@@ -9592,9 +9592,25 @@ chains:
         - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
         captured_value: reuse the same in-flight Value; do not call the ingress operation again
         request_execution_control: preserve the existing typed handoff unchanged
-      unsupported_modes:
-      - Anthropic Direct remains pending/unsupported
-      - Gemini Direct remains pending/unsupported
+      supported_direct_protocols: [openai_chat, responses, anthropic, gemini]
+    standard_projection_binding:
+      status: runtime_bound
+      selected_node: project_standard_provider_request
+      source_graph: docs/architecture/dagpipe/v3.operation_runner.request.graph.json
+      input_arc: governed-request
+      output_arc: standard-provider-request
+      derived_graph_id: v3.operation_runner.request.project_standard_provider_request
+      operation_owner_file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/project_standard_provider_request.rs
+      operation_call: execute_v3_operation_runner_request_project_standard_provider_request
+      caller_symbol: build_v3_hub_req_outbound_07_from_v3_hub_req_target_06
+      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs
+      compile_api: pipeline_runtime::compile
+      run_api: pipeline_runtime::Runtime::run
+      control_binding: per-invocation typed operator fields; selected target and auth never enter business Value
+      result_binding: standard provider payload plus typed drops and namespace inverse context
+      compat_boundary: consumes the projected payload once; retains governed payload only for inverse context
+      protocol_scope: [openai_chat, responses, anthropic, gemini]
+      execution_scope: existing Relay path; Direct hooks retain their current owners
   edges:
   - step_id: v3-op-runner-req-01
     from_node: V3OperationRunnerCaptureClientJson
