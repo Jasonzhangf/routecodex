@@ -223,10 +223,10 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
                 })
             })
             .map_err(|error| {
-                Ok(crate::hooks::build_v3_provider_error_source(
+                crate::hooks::build_v3_provider_error_source(
                     "V3Provider12ResponsesWirePayload",
                     error,
-                ))
+                )
             })
     }
 

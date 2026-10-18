@@ -1182,6 +1182,138 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
     }
 
     #[tokio::test]
+    async fn responses_compat_other_none_uses_canonical_fallback_source() {
+        let manifest = operator_fault_manifest();
+        let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+        let failure_session_scope =
+            V3ProviderFailureSessionScope::new("operator_fault", "operator_fault", "session")
+                .expect("compat session scope");
+        let selected = match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
+            manifest: &manifest,
+            server_id: "operator_fault",
+            failure_session_scope: &failure_session_scope,
+            entry_kind: "responses",
+            endpoint_path: "/v1/responses",
+            body: &json!({"model": "gpt-test", "input": "hello"}),
+            request_local_excluded_candidates: &BTreeSet::new(),
+            provider_health: &health,
+            now_ms: 0,
+            deterministic_sample: 0,
+        }) {
+            V3RelayProviderTargetResolution::Selected(selected) => selected,
+            _ => panic!("fixture must select its provider"),
+        };
+        let compat_error = classify_v3_provider_compat_error(
+            "request",
+            &V3ProviderCompatProfileId::Passthrough,
+            "provider request compatibility failed".to_string(),
+        );
+        assert_eq!(
+            compat_error.classification(),
+            V3ProviderCompatErrorClassification::Other
+        );
+        let expected_message = format!("V3 Responses Relay provider compat failed: {compat_error}");
+        let failure = provider_request_relay_failure(
+            V3ResponsesRelayRuntimeError::ProviderCompat(compat_error),
+            "primary",
+            None,
+        )
+        .expect("Responses compat Other must defer to the provider failure policy");
+        assert_eq!(failure.status, 502);
+        assert_eq!(failure.source_stage, "ProviderReqCompat06ProviderCompat");
+        assert_eq!(failure.policy_error_type, "provider_request_compat_error");
+        assert_eq!(failure.policy_error_message, expected_message);
+        assert!(failure.terminal_projection.is_none());
+        assert!(failure.error_operator_fault.is_none());
+
+        let context = V3RelayProviderFailurePolicyContext {
+            manifest: &manifest,
+            captured_target_09: None,
+            failure_session_scope: failure_session_scope.clone(),
+            provider_health: &health,
+            retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+            deterministic_sample: 0,
+        };
+        let mut last_external_http = None;
+        let mut failed_candidates = BTreeSet::new();
+        let mut same_candidate_retries = BTreeMap::new();
+        let mut retry_selected = None;
+        let mut pending_recovery = None;
+        let mut provider_failure_events = Vec::new();
+        let selected_observability = V3RuntimeObservability::default();
+        let mut trace = Vec::new();
+        let mut state = V3ResponsesRelayProviderRetryState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            retry_selected: &mut retry_selected,
+            pending_recovery: &mut pending_recovery,
+            provider_failure_events: &mut provider_failure_events,
+            provider_failure_event_sink: None,
+            selected_observability: &selected_observability,
+            trace: &mut trace,
+            last_external_http: &mut last_external_http,
+        };
+
+        let output =
+            handle_v3_responses_relay_provider_failure(&context, selected, failure, &mut state)
+                .await
+                .expect("compat Other must use the ordinary failure policy")
+                .expect("single-candidate compat Other must terminate");
+        let projected = output
+            .terminal_projection
+            .as_ref()
+            .expect("compat Other must carry the canonical Error06 projection");
+        let source = &projected.diagnostic_source;
+
+        assert_eq!(
+            source.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
+        );
+        assert_eq!(source.source_stage, "ProviderReqCompat06ProviderCompat");
+        assert_eq!(source.code, "provider_request_compat_error");
+        assert_eq!(source.message, expected_message);
+        assert!(source.internal_error.is_none());
+        let external = source
+            .external_error
+            .as_ref()
+            .expect("policy fallback must preserve provider identity");
+        assert_eq!(
+            external.kind,
+            routecodex_v3_error::V3ExternalErrorKind::Provider
+        );
+        assert_eq!(external.status, None);
+        assert_eq!(
+            external.code.as_deref(),
+            Some("provider_request_compat_error")
+        );
+        assert_eq!(external.provider_id.as_deref(), Some("primary"));
+        assert_eq!(external.upstream_request_id, None);
+        assert_eq!(external.message.as_deref(), Some(expected_message.as_str()));
+        assert_eq!(
+            projected.chain,
+            routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+        );
+        assert!(output.error_operator_fault.is_none());
+        assert_eq!(failed_candidates.len(), 1);
+        assert!(same_candidate_retries.is_empty());
+        assert!(retry_selected.is_none());
+        assert!(pending_recovery.is_none());
+        assert_eq!(provider_failure_events.len(), 1);
+        assert!(
+            health
+                .store()
+                .availability_for_session(
+                    &failure_session_scope,
+                    "primary",
+                    Some("key"),
+                    Some("gpt-test"),
+                    u64::MAX,
+                )
+                .available
+        );
+    }
+
+    #[tokio::test]
     async fn operator_fault_short_circuits_before_retry_health_and_candidate_mutation() {
         let manifest = operator_fault_manifest();
         let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
