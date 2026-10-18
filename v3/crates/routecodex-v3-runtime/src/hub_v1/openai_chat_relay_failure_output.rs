@@ -5,6 +5,25 @@ pub(super) fn provider_failure_output(
     mut trace: Vec<&'static str>,
     provider_failure_attempts: Vec<V3RuntimeProviderFailureObservation>,
 ) -> V3OpenAiChatRelayRuntimeOutput {
+    if let Some(fault) = failure.error_operator_fault {
+        return V3OpenAiChatRelayRuntimeOutput {
+            status: 499,
+            terminal_disposition: Some(
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+            ),
+            client_body: V3OpenAiChatRelayClientBody::Json(Value::Null),
+            node_trace: trace,
+            error_chain: None,
+            error_class: None,
+            error_detail: None,
+            observability: None,
+            stream_observation: None,
+            provider_snapshots: None,
+            provider_failure_attempts,
+            diagnostic_source: Some(fault.policy_failure),
+            diagnostic_cause: fault.original_source,
+        };
+    }
     let projected = failure
         .terminal_projection
         .expect("terminal OpenAI Chat provider failure must carry typed Error06 projection");
@@ -24,6 +43,7 @@ pub(super) fn provider_failure_output(
         provider_snapshots: None,
         provider_failure_attempts,
         diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
     }
 }
 
@@ -46,6 +66,7 @@ pub(super) fn error_output(
         error_detail: Some(error_detail),
         provider_failure_attempts: Vec::new(),
         diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         observability: None,
         stream_observation: None,
         provider_snapshots: None,

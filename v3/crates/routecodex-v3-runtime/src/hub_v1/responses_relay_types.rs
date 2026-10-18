@@ -1,4 +1,5 @@
 use super::*;
+use crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault;
 use routecodex_v3_error::V3Error01SourceRaised;
 use serde_json::Value;
 use std::sync::Arc;
@@ -31,6 +32,8 @@ pub struct V3ResponsesRelayRuntimeOutput {
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
     pub observability: Option<V3RuntimeObservability>,
+    pub diagnostic_source: Option<V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<V3Error01SourceRaised>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub finalized_response: Option<Value>,
     pub provider_snapshots: Option<V3ResponsesRelayProviderSnapshots>,
@@ -215,14 +218,6 @@ pub struct V3RuntimeObservability {
     pub target_path: Vec<String>,
     pub usage: Option<V3RuntimeUsageSummary>,
     pub timing: Option<V3RuntimeTimingSummary>,
-    /// Private Relay disconnect diagnostic carrier: the typed Error01 source
-    /// raised by the failing runtime stage. It stays on this diagnostic
-    /// side-channel only and never decides control flow or business payload.
-    pub diagnostic_source: Option<V3Error01SourceRaised>,
-    /// Private Relay disconnect diagnostic carrier: the original typed Error01
-    /// cause behind `diagnostic_source`. It is evidence only, never a routing or
-    /// response-semantics authority.
-    pub diagnostic_cause: Option<V3Error01SourceRaised>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -284,6 +279,7 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
     pub(crate) observability: Option<V3RuntimeObservability>,
     pub(crate) terminal_projection: Option<routecodex_v3_error::V3Error06ClientProjected>,
     pub(crate) terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
+    pub(crate) error_operator_fault: Option<V3RelayErrorOperatorFault>,
     pub(crate) matched_policy: Option<V3ProviderFailureDirective>,
 }
 

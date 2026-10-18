@@ -66,6 +66,9 @@ pub struct V3GeminiRelayRuntimeOutput {
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
     pub observability: Option<V3RuntimeObservability>,
+    pub provider_failure_attempts: Vec<V3RuntimeProviderFailureObservation>,
+    pub diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub provider_snapshots: Option<V3RelayProviderSnapshots>,
 }
@@ -421,6 +424,9 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             node_trace: trace,
             error_chain: None,
             observability: Some(observability),
+            provider_failure_attempts: Vec::new(),
+            diagnostic_source: None,
+            diagnostic_cause: None,
             stream_observation: None,
             provider_snapshots: Some(provider_snapshots),
         }
@@ -440,6 +446,9 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             node_trace: trace,
             error_chain: None,
             observability: Some(observability),
+            provider_failure_attempts: Vec::new(),
+            diagnostic_source: None,
+            diagnostic_cause: None,
             stream_observation: Some(stream_observation),
             provider_snapshots: Some(provider_snapshots),
         }
@@ -448,9 +457,9 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
     fn assemble_failure_output(
         failure: V3RelayProviderFailure,
         trace: Vec<&'static str>,
-        _provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
+        provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     ) -> V3GeminiRelayRuntimeOutput {
-        provider_failure_output(failure, trace)
+        provider_failure_output(failure, trace, provider_failure_events)
     }
 }
 
@@ -556,6 +565,9 @@ pub fn project_v3_gemini_relay_runtime_failure(
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
         observability: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         stream_observation: None,
         provider_snapshots: None,
     }
@@ -884,7 +896,25 @@ fn server_routing_group<'a>(
 fn provider_failure_output(
     failure: V3RelayProviderFailure,
     mut trace: Vec<&'static str>,
+    provider_failure_attempts: Vec<V3RuntimeProviderFailureObservation>,
 ) -> V3GeminiRelayRuntimeOutput {
+    if let Some(fault) = failure.error_operator_fault {
+        return V3GeminiRelayRuntimeOutput {
+            status: 499,
+            terminal_disposition: Some(
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+            ),
+            client_body: V3GeminiRelayClientBody::Json(Value::Null),
+            node_trace: trace,
+            error_chain: None,
+            observability: None,
+            provider_failure_attempts,
+            diagnostic_source: Some(fault.policy_failure),
+            diagnostic_cause: fault.original_source,
+            stream_observation: None,
+            provider_snapshots: None,
+        };
+    }
     let projected = failure
         .terminal_projection
         .expect("terminal Gemini provider failure must carry typed Error06 projection");
@@ -896,6 +926,9 @@ fn provider_failure_output(
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
         observability: None,
+        provider_failure_attempts,
+        diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         stream_observation: None,
         provider_snapshots: None,
     }

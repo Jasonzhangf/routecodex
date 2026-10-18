@@ -65,6 +65,7 @@ pub(crate) fn provider_http_failure(
         observability,
         terminal_projection: None,
         terminal_disposition: None,
+        error_operator_fault: None,
         matched_policy: None,
     }
 }
@@ -109,17 +110,23 @@ pub(crate) fn provider_runtime_failure(
             terminal_disposition: Some(
                 routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
             ),
+            error_operator_fault: None,
             matched_policy: None,
         };
     }
-    let terminal_projection =
-        matches!(&error, V3ProviderError::ClientDisconnect { .. }).then(|| {
-            project_v3_client_disconnect(
+    let (terminal_projection, error_operator_fault) =
+        if matches!(&error, V3ProviderError::ClientDisconnect { .. }) {
+            match project_v3_client_disconnect(
                 provider_id,
                 provider_runtime_failure_stage(&error),
                 error.to_string(),
-            )
-        });
+            ) {
+                Ok(projected) => (Some(projected), None),
+                Err(fault) => (None, Some(fault)),
+            }
+        } else {
+            (None, None)
+        };
     let policy_error_message = error.to_string();
     // transport 响应头挂起由错误处理中心按「transport 阶段 + 专属类别码」判定为
     // 瞬态（health-neutral 同 provider 重试 3 次）；其余 transport 错误保持原策略。
@@ -163,6 +170,7 @@ pub(crate) fn provider_runtime_failure(
         observability,
         terminal_projection,
         terminal_disposition: None,
+        error_operator_fault,
         matched_policy: None,
     }
 }
@@ -189,6 +197,7 @@ pub(crate) fn provider_response_stream_relay_failure(
             observability,
             terminal_projection: None,
             terminal_disposition: None,
+            error_operator_fault: None,
             matched_policy: None,
         },
         V3ResponsesRelayRuntimeError::ProviderJson(reason) => {
@@ -222,6 +231,7 @@ fn provider_response_codec_relay_failure(
         observability,
         terminal_projection: None,
         terminal_disposition: None,
+        error_operator_fault: None,
         matched_policy: None,
     }
 }
@@ -310,6 +320,7 @@ pub(crate) fn provider_request_relay_failure(
         observability,
         terminal_projection,
         terminal_disposition: None,
+        error_operator_fault: None,
         matched_policy: None,
     })
 }
@@ -318,7 +329,7 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure(
     mut failure: V3ResponsesRelayProviderFailure,
     last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
 ) -> V3ResponsesRelayProviderFailure {
-    if failure.terminal_projection.is_none() {
+    if failure.terminal_projection.is_none() && failure.error_operator_fault.is_none() {
         let source = routecodex_v3_error::build_v3_error_01_source_raised(
             routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
             failure.source_stage,
@@ -441,6 +452,7 @@ pub(crate) fn provider_response_hook_failure(
                 observability,
                 terminal_projection: None,
                 terminal_disposition: None,
+                error_operator_fault: None,
                 matched_policy: None,
             }
         }
@@ -460,6 +472,24 @@ pub(crate) fn provider_failure_output_with_observation(
     mut trace: Vec<&'static str>,
     stream_observation: Option<V3RuntimeStreamObservation>,
 ) -> V3ResponsesRelayRuntimeOutput {
+    if let Some(fault) = failure.error_operator_fault {
+        return V3ResponsesRelayRuntimeOutput {
+            status: 499,
+            terminal_disposition: Some(
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+            ),
+            client_body: V3ResponsesRelayClientBody::Json(Value::Null),
+            node_trace: trace,
+            error_chain: None,
+            observability: failure.observability,
+            diagnostic_source: Some(fault.policy_failure),
+            diagnostic_cause: fault.original_source,
+            stream_observation,
+            finalized_response: None,
+            provider_snapshots: None,
+            protocol_direct_handoff: None,
+        };
+    }
     let projected = failure
         .terminal_projection
         .expect("terminal Responses provider failure must carry typed Error06 projection");
@@ -483,6 +513,8 @@ pub(crate) fn provider_failure_output_with_observation(
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
         observability,
+        diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         stream_observation,
         finalized_response: None,
         provider_snapshots: None,
@@ -523,6 +555,8 @@ pub(crate) fn error_output(
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
         observability,
+        diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         stream_observation: None,
         finalized_response: None,
         provider_snapshots: None,

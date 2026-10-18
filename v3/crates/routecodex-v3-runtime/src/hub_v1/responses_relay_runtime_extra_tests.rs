@@ -349,6 +349,7 @@ fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
             terminal_disposition: Some(
                 routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
             ),
+            error_operator_fault: None,
             observability: None,
             matched_policy: None,
         },

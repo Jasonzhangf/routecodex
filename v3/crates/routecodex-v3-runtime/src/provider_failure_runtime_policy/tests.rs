@@ -37,6 +37,9 @@ mod probe_recovery;
 #[path = "tests/responses_probe_terminal.rs"]
 mod responses_probe_terminal;
 
+#[path = "tests/relay_error_operator_fault.rs"]
+mod relay_error_operator_fault;
+
 // 归一化优先级基线：隔离自适应分数阻断，让用例专测阈值语义。
 fn normalize_global_pool_priorities(manifest: &mut V3Config05ManifestPublished) {
     for target in manifest

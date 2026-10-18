@@ -20,6 +20,9 @@ pub struct V3AnthropicRelayRuntimeOutput {
     pub error_chain: Option<Vec<&'static str>>,
     pub servertool_followup_required: bool,
     pub observability: Option<V3RuntimeObservability>,
+    pub provider_failure_attempts: Vec<V3RuntimeProviderFailureObservation>,
+    pub diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub provider_snapshots: Option<V3RelayProviderSnapshots>,
 }
@@ -249,6 +252,7 @@ fn provider_http_failure(status: u16, body: &[u8], _provider_id: &str) -> V3Rela
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
         terminal_disposition: None,
+        error_operator_fault: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -267,6 +271,7 @@ fn provider_request_failure(
         source_stage,
         terminal_projection: None,
         terminal_disposition: None,
+        error_operator_fault: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -309,18 +314,24 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
             source_stage,
             terminal_projection: Some(projected),
             terminal_disposition: None,
+            error_operator_fault: None,
             error_type_fn: extract_error_type_style,
             error_message_fn: extract_message_type_style,
         };
     }
-    let terminal_projection =
-        matches!(&error, V3ProviderError::ClientDisconnect { .. }).then(|| {
-            project_v3_client_disconnect(
+    let (terminal_projection, error_operator_fault) =
+        if matches!(&error, V3ProviderError::ClientDisconnect { .. }) {
+            match project_v3_client_disconnect(
                 provider_id,
                 provider_runtime_failure_stage(&error),
                 error.to_string(),
-            )
-        });
+            ) {
+                Ok(projected) => (Some(projected), None),
+                Err(fault) => (None, Some(fault)),
+            }
+        } else {
+            (None, None)
+        };
     let error_type = match &error {
         V3ProviderError::Transport { reason, .. }
             if routecodex_v3_error::is_v3_provider_response_header_timeout_reason(reason) =>
@@ -344,6 +355,7 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
         source_stage: provider_runtime_failure_stage(&error),
         terminal_projection,
         terminal_disposition: None,
+        error_operator_fault,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -352,7 +364,27 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
 fn provider_failure_output(
     failure: V3RelayProviderFailure,
     mut trace: Vec<&'static str>,
+    provider_failure_attempts: Vec<V3RuntimeProviderFailureObservation>,
 ) -> V3AnthropicRelayRuntimeOutput {
+    if let Some(fault) = failure.error_operator_fault {
+        return V3AnthropicRelayRuntimeOutput {
+            status: 499,
+            terminal_disposition: Some(
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+            ),
+            client_response: Value::Null,
+            client_body: V3AnthropicRelayClientBody::Json,
+            node_trace: trace,
+            error_chain: None,
+            servertool_followup_required: false,
+            observability: None,
+            provider_failure_attempts,
+            diagnostic_source: Some(fault.policy_failure),
+            diagnostic_cause: fault.original_source,
+            stream_observation: None,
+            provider_snapshots: None,
+        };
+    }
     let projected = failure
         .terminal_projection
         .expect("terminal Anthropic provider failure must carry typed Error06 projection");
@@ -366,6 +398,9 @@ fn provider_failure_output(
         error_chain: Some(projected.chain.to_vec()),
         servertool_followup_required: false,
         observability: None,
+        provider_failure_attempts,
+        diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         stream_observation: None,
         provider_snapshots: None,
     }
@@ -387,6 +422,9 @@ fn error_output(
         error_chain: Some(projected.chain.to_vec()),
         servertool_followup_required: false,
         observability: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         stream_observation: None,
         provider_snapshots: None,
     }

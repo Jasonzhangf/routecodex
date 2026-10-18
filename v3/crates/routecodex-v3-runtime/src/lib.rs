@@ -59,8 +59,9 @@ pub use kernel::{
 pub use nodes::*;
 pub use provider_action_gate::*;
 pub use provider_failure_runtime_policy::{
-    build_v3_provider_global_probe_target, probe_v3_provider_global_target,
-    V3ProviderFailureRuntimeHealth, V3ProviderHealthProbeFailure,
+    build_v3_provider_global_probe_target, finish_v3_relay_error_projection,
+    probe_v3_provider_global_target, V3ProviderFailureRuntimeHealth, V3ProviderHealthProbeFailure,
+    V3RelayErrorOperatorFault,
 };
 pub use route_policy::*;
 pub use runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};

@@ -16,8 +16,8 @@ use crate::hub_v1::{
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,
     run_v3_relay_provider_failure_policy, v3_relay_provider_candidate_key_parts,
-    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
-    V3RelayProviderFailurePolicyState,
+    V3RelayErrorOperatorFault, V3RelayProviderFailurePolicyContext,
+    V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -143,6 +143,7 @@ pub struct V3RelayProviderFailure {
     pub source_stage: &'static str,
     pub terminal_projection: Option<V3Error06ClientProjected>,
     pub terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
+    pub error_operator_fault: Option<V3RelayErrorOperatorFault>,
     /// 从 client_response 提取错误类型（协议形状相关）。
     pub error_type_fn: fn(&Value) -> Option<String>,
     /// 从 client_response 提取错误消息（协议形状相关）。
@@ -311,7 +312,7 @@ pub async fn handle_provider_failure(
     pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
     provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
-    if failure.terminal_projection.is_some() {
+    if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
     }
     let mut result = run_v3_relay_provider_failure_policy(
@@ -424,6 +425,7 @@ pub fn provider_http_failure(
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
         terminal_disposition: None,
+        error_operator_fault: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -563,6 +565,7 @@ pub fn provider_request_failure(
         source_stage,
         terminal_projection: None,
         terminal_disposition: None,
+        error_operator_fault: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -609,6 +612,7 @@ pub fn provider_runtime_failure(
             source_stage,
             terminal_projection: Some(projected),
             terminal_disposition: None,
+            error_operator_fault: None,
             error_type_fn: extract_error_code_style,
             error_message_fn: extract_message_code_style,
         };
@@ -625,14 +629,19 @@ pub fn provider_runtime_failure(
         V3ProviderError::MalformedSse { .. } => "provider_response_sse_event_invalid",
         _ => "provider_error",
     };
-    let terminal_projection =
-        matches!(&error, V3ProviderError::ClientDisconnect { .. }).then(|| {
-            project_v3_client_disconnect(
+    let (terminal_projection, error_operator_fault) =
+        if matches!(&error, V3ProviderError::ClientDisconnect { .. }) {
+            match project_v3_client_disconnect(
                 provider_id,
                 provider_runtime_failure_stage(&error),
                 error.to_string(),
-            )
-        });
+            ) {
+                Ok(projected) => (Some(projected), None),
+                Err(fault) => (None, Some(fault)),
+            }
+        } else {
+            (None, None)
+        };
     V3RelayProviderFailure {
         status: if terminal_projection.is_some() {
             499
@@ -649,6 +658,7 @@ pub fn provider_runtime_failure(
         source_stage: provider_runtime_failure_stage(&error),
         terminal_projection,
         terminal_disposition: None,
+        error_operator_fault,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -670,7 +680,7 @@ pub fn terminalize_provider_failure(
     mut failure: V3RelayProviderFailure,
     last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
 ) -> V3RelayProviderFailure {
-    if failure.terminal_projection.is_some() {
+    if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return failure;
     }
     let source = build_v3_error_01_source_raised(
@@ -770,8 +780,6 @@ pub(crate) fn build_v3_relay_observability(
         target_path: selected.candidate.path.clone(),
         usage: None,
         timing: None,
-        diagnostic_source: None,
-        diagnostic_cause: None,
     }
 }
 
