@@ -3341,7 +3341,7 @@ chains:
   - step_id: v3-de-04
     from_node: V3Server03HttpRequestRaw
     to_node: V3Error01SourceRaised
-    caller_symbol: raise_and_project_foundation_error
+    caller_symbol: project_v3_server_boundary_error_via_sdk
     caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
     callee_symbol: raise_v3_source_via_err01
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -9613,7 +9613,6 @@ chains:
       execution_scope: existing Relay path; Direct hooks retain their current owners
     candidate_stage_bindings:
       status: candidate_behavior_13_of_20_scoped
-      delivery_state: candidate_installed_review_and_main_merge_pending
       acceptance_scope: nine_request_and_four_response_nodes; frame_limited_to_existing_responses_json_path
       acceptance_evidence: live-self-contained58-m2-final-images-20261018/baseline-report.json passed 58 of 58 with cleanup complete; m2-final-image-runtime-r2.log passed 1358 with one existing ignore; m2-final-image-server.log passed 127; m2-final-image-build.log passed
       canonical_execution:
@@ -9933,7 +9932,6 @@ chains:
     owner_doc: docs/design/v3-unified-operation-runner-design.md
     candidate_stage_bindings:
       status: candidate_behavior_13_of_20_scoped
-      delivery_state: candidate_installed_review_and_main_merge_pending
       acceptance_scope: four_response_nodes; frame_limited_to_existing_responses_json_path
       acceptance_evidence: live-self-contained58-m2-final-images-20261018/baseline-report.json passed 58 of 58 with cleanup complete; m2-final-image-runtime-r2.log passed 1358 with one existing ignore; m2-final-image-server.log passed 127; m2-final-image-build.log passed
       canonical_execution:

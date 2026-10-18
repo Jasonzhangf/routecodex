@@ -1200,7 +1200,7 @@ resources:
     owner_node: V3Error01SourceRaised
     identity: [sourceStage, code, sourceKind]
     allowed_writers: [build_v3_error_01_source_raised, build_v3_error_01_source_raised_external, raise_v3_source_via_err01, run_v3_err01_source_raised_operator]
-    allowed_readers: [V3Error02Classified, build_v3_error_06_client_projected_from_v3_error_05, build_v3_runtime_provider_failure_observation_from_policy_event, persist_v3_chat_failure_evidence, projected_error_output_with_observability_and_snapshots, execute_v3_openai_chat_direct_server_outcome, persist_v3_chat_failure_evidence_sources, raise_and_project_foundation_error, foundation_output_from_error_sdk_result, project_v3_relay_error_source, run_v3_error_02_to_05_decision_operators, V3ModelClientNoResponse]
+    allowed_readers: [V3Error02Classified, build_v3_error_06_client_projected_from_v3_error_05, build_v3_runtime_provider_failure_observation_from_policy_event, persist_v3_chat_failure_evidence, projected_error_output_with_observability_and_snapshots, execute_v3_openai_chat_direct_server_outcome, persist_v3_chat_failure_evidence_sources, project_v3_server_boundary_error_via_sdk, foundation_output_from_error_sdk_result, project_v3_relay_error_source, run_v3_error_02_to_05_decision_operators, V3ModelClientNoResponse]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
     may_enter_provider_body: false
     may_enter_client_body: false

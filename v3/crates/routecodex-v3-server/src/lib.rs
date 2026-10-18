@@ -46,6 +46,10 @@ pub use restart_handoff::*;
 pub(crate) use routecodex_v3_runtime::V3RequestPurpose;
 pub(crate) use scope_metadata::*;
 use websocket::{responses_websocket_endpoint, responses_websocket_session};
+#[cfg(test)]
+pub(crate) use websocket::{
+    send_responses_websocket_error_sdk_result, take_responses_websocket_sdk_fault_diagnostics,
+};
 use webui_observability::V3WebuiObservability;
 
 use axum::body::{to_bytes, Body};
@@ -79,10 +83,9 @@ use routecodex_v3_debug::{
 use routecodex_v3_error::{
     is_v3_client_disconnect_source, project_v3_post_commit_sse_source,
     project_v3_server_invalid_request, project_v3_server_runtime_failure,
-    project_v3_server_websocket_error, raise_v3_debug_artifact_failure,
-    raise_v3_runtime_observability_contract_failure, raise_v3_sse_client_disconnect,
-    raise_v3_sse_provider_failure, raise_v3_sse_runtime_failure, V3Error01SourceRaised,
-    V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
+    raise_v3_debug_artifact_failure, raise_v3_runtime_observability_contract_failure,
+    raise_v3_sse_client_disconnect, raise_v3_sse_provider_failure, raise_v3_sse_runtime_failure,
+    V3Error01SourceRaised, V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw, build_v3_server_03_http_request_raw_with_purpose,

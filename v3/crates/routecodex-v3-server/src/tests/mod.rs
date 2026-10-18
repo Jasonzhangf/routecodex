@@ -10,6 +10,7 @@ use std::sync::Mutex as StdMutex;
 
 mod foundation_output;
 mod local599_output;
+mod websocket_sdk_fault;
 
 #[tokio::test]
 async fn listener_bind_retries_eintr_once_before_success() {

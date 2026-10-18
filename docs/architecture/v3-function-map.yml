@@ -698,7 +698,8 @@ features:
   - V3DebugRuntime::record_node_event
   - V3DebugRuntime::build_dry_run_execution_plan
   - V3DebugRuntime::start_snapshot_session
-  - raise_and_project_foundation_error
+  - project_v3_server_boundary_error_via_sdk
+  - project_v3_server_websocket_error_via_sdk
   - foundation_output_from_error_sdk_result
   - raise_v3_source_via_err01
   - project_v3_relay_error_source
