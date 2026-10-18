@@ -41,7 +41,7 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
             Some(Value::String(text)) => {
                 encoded.push(json!({
                     "role":role,
-                    "content":[{"type":"input_text","text":text}]
+                    "content":text
                 }));
             }
             Some(Value::Array(parts)) => {
@@ -109,7 +109,11 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
                                 }
                                 encoded.push(call);
                             } else {
-                                encoded.push(json!({"type":"function_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null),"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use input" })?}));
+                                let mut call = json!({"type":"function_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null),"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use input" })?});
+                                if let Some(signature) = part.get("thought_signature") {
+                                    call["thought_signature"] = signature.clone();
+                                }
+                                encoded.push(call);
                             }
                         }
                         Some("tool_result") => {
@@ -246,13 +250,13 @@ pub(super) fn anthropic_image_part_as_responses_input_image(
             field: "image source",
         },
     )?;
-    match source.get("type").and_then(Value::as_str) {
+    let image_url = match source.get("type").and_then(Value::as_str) {
         Some("url") => source
             .get("url")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
-            .map(|url| json!({"type":"input_image","image_url":url}))
-            .ok_or(V3AnthropicCodecError::MalformedField { field: "image url" }),
+            .map(str::to_string)
+            .ok_or(V3AnthropicCodecError::MalformedField { field: "image url" })?,
         Some("base64") => {
             let media_type = source
                 .get("media_type")
@@ -268,10 +272,23 @@ pub(super) fn anthropic_image_part_as_responses_input_image(
                 .ok_or(V3AnthropicCodecError::MalformedField {
                     field: "image data",
                 })?;
-            Ok(json!({"type":"input_image","image_url":format!("data:{media_type};base64,{data}")}))
+            format!("data:{media_type};base64,{data}")
         }
-        _ => Err(V3AnthropicCodecError::MalformedField {
-            field: "image source type",
-        }),
+        _ => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "image source type",
+            });
+        }
+    };
+    let mut converted = Map::new();
+    converted.insert("type".to_string(), Value::String("input_image".to_string()));
+    converted.insert("image_url".to_string(), Value::String(image_url));
+    if let Some(object) = part.as_object() {
+        for (key, value) in object {
+            if !matches!(key.as_str(), "type" | "source" | "image_url") {
+                converted.insert(key.clone(), value.clone());
+            }
+        }
     }
+    Ok(Value::Object(converted))
 }

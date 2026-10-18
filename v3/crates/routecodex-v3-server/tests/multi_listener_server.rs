@@ -4553,6 +4553,7 @@ async fn responses_relay_live_sse_sample_saves_materialized_json_without_losing_
     let body = response.text().await.unwrap();
     assert!(body.contains("event: response.completed"));
     assert!(body.contains("relay sse reasoning summary"));
+    assert_responses_sse_delivered_business_text(&body, "relay sse final text");
     let _capture = captures.recv().await.unwrap();
     handle
         .wait_for_codex_sample_persistence()
@@ -4572,6 +4573,7 @@ async fn responses_relay_live_sse_sample_saves_materialized_json_without_losing_
         .as_str()
         .unwrap()
         .contains("response.completed"));
+    assert_responses_sample_sse_delivered_business_text(&sample, "relay sse final text");
     assert_eq!(sample["materializedResponse"]["id"], "resp_sse");
     assert_eq!(sample["materializedResponse"]["status"], "completed");
     assert_eq!(
@@ -4579,7 +4581,7 @@ async fn responses_relay_live_sse_sample_saves_materialized_json_without_losing_
         "relay sse reasoning summary"
     );
     assert_eq!(
-        sample["materializedResponse"]["output"][1]["text"],
+        sample["materializedResponse"]["output"][1]["content"][0]["text"],
         "relay sse final text"
     );
 }

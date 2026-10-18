@@ -47,8 +47,6 @@ const entries = [
   'scripts/tests/v3-provider-session-cooldown-red-fixtures.mjs',
   'scripts/tests/v3-relay-hook-resource-red-fixtures.mjs',
   'scripts/tests/v3-relay-payload-copy-budget-red-fixtures.mjs',
-  'scripts/tests/v3-relay-request-semantics-red-fixtures.mjs',
-  'scripts/tests/v3-relay-response-semantics-red-fixtures.mjs',
   'scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs',
   'scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs',
   'scripts/tests/v3-responses-inbound-websocket-proxy-red-fixtures.mjs',

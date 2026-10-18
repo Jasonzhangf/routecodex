@@ -784,6 +784,7 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
             "/v1beta/models/:model/generateContent",
             post(pending_endpoint),
         )
+        .route("/v1beta/models/:model", post(pending_endpoint))
         .route("/_routecodex/debug/status", get(debug_status))
         .route("/_routecodex/debug/logs", get(debug_logs))
         .route("/_routecodex/debug/snapshots", get(debug_snapshots))
@@ -1026,7 +1027,11 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
             &path,
             &request_id,
             project_http_input_error(
-                V3HttpBoundaryErrorKind::EndpointNotEnabled,
+                if path.starts_with("/v1beta/models/") {
+                    V3HttpBoundaryErrorKind::PathNotFound
+                } else {
+                    V3HttpBoundaryErrorKind::EndpointNotEnabled
+                },
                 format!("endpoint path {path} has no entry protocol binding"),
             ),
         );
@@ -1143,9 +1148,10 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
     // transport: a client that requested SSE must not stay on a silent
     // connection for longer than one keepalive interval while the runtime
     // buffers the attempt.
-    let client_sse_channel = v3_request_wants_sse(&request_headers, &payload)
-        .then_some(Duration::from_millis(state.server.http_sse_keepalive_ms))
-        .filter(|interval| !interval.is_zero());
+    let client_sse_channel = (v3_request_wants_sse(&request_headers, &payload)
+        || (entry_protocol == "gemini" && path.ends_with(":streamGenerateContent")))
+    .then_some(Duration::from_millis(state.server.http_sse_keepalive_ms))
+    .filter(|interval| !interval.is_zero());
     let runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>> =
         Box::pin(pending_endpoint_after_responses_admission(
             Arc::clone(&state),

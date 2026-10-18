@@ -186,7 +186,12 @@ pub(crate) fn apply_direct_provider_response_compat(
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         payload,
         V3ProviderRespInbound01RawContext::new(
-            V3HubEntryProtocol::OpenAiChat,
+            match provider_protocol {
+                V3HubProviderWireProtocol::Responses => V3HubEntryProtocol::Responses,
+                V3HubProviderWireProtocol::OpenAiChat => V3HubEntryProtocol::OpenAiChat,
+                V3HubProviderWireProtocol::Anthropic => V3HubEntryProtocol::Anthropic,
+                V3HubProviderWireProtocol::Gemini => V3HubEntryProtocol::Gemini,
+            },
             provider_protocol,
             V3HubExecutionMode::Direct,
             V3HubInvocationSource::Client,

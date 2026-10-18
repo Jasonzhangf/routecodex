@@ -80,6 +80,21 @@ const cases = [
   },
   {
     relative: '.github/workflows/test.yml',
+    contents: '  - name: Installed V3 protocol matrix\n    run: node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs --binary "$HOME/.local/bin/rccv3" --binary-kind installed\n',
+    fine: { v3_architecture: true, v3_build: true },
+    v3: true,
+    v4: false,
+  },
+  {
+    relative: '.github/workflows/test.yml',
+    contents: '  - name: V3 host tests\n    run: node v3/scripts/run-v3-cargo-test.mjs --workspace -- --nocapture\n',
+    diffMode: 'new-ref',
+    fine: { v3_architecture: true, v3_build: true },
+    v3: true,
+    v4: false,
+  },
+  {
+    relative: '.github/workflows/test.yml',
     contents: '  - name: V4 gate\n    run: npm --prefix v4 run verify:ci\n',
     v3: false,
     v4: true,

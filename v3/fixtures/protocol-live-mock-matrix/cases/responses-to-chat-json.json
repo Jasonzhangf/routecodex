@@ -6,13 +6,13 @@
     "method": "POST",
     "path": "/v1/responses",
     "headers": {"content-type": "application/json"},
-    "body": {"model": "mock.chat-model", "instructions": "be brief", "input": [{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}], "max_output_tokens": 64, "stream": false}
+    "body": {"model": "mock.chat-model", "instructions": "be brief", "input": [{"role": "user", "content": [{"type": "input_text", "text": "hello"}, {"type":"input_image","image_url":"https://example.test/image.png","future_sibling":{"occurrence":1}}, {"type":"input_image","image_url":"https://example.test/image.png","future_sibling":{"occurrence":2}}]}], "max_output_tokens": 64, "stream": false}
   },
   "expected_provider": {
     "paths": ["/v1/chat/completions"],
     "method": "POST",
     "auth_required": true,
-    "body_must": {"model": "chat-model", "messages.0.role": "system", "messages.1.content": "hello", "stream": false},
+    "body_must": {"model": "chat-model", "messages.0.role": "system", "messages.1.content": [{"type": "text", "text": "hello"}, {"type":"image_url","image_url":{"url":"https://example.test/image.png"},"future_sibling":{"occurrence":1}}, {"type":"image_url","image_url":{"url":"https://example.test/image.png"},"future_sibling":{"occurrence":2}}], "stream": false},
     "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
     "exact": null
   },
@@ -35,7 +35,7 @@
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/testdata/upstream_bodies/responses-to-chat.json"],
     "tests": ["internal/gateway/translate_stream_test.go::TestChatTranslationUsageBeforeUnindexedChoice"],
-    "adaptation": "Fixed Responses input; expected Chat wire and Responses client semantics come from the protocols."
+    "adaptation": "Responses text and duplicate image URLs retain each source part's opaque sibling through the Chat wire. The mock validates complete occurrence association before returning business content."
   },
   "contract_differences": []
 }

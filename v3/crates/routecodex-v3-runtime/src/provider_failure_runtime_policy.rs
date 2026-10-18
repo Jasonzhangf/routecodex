@@ -31,6 +31,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::operation_runner::{
+    run_v3_err01_source_raised_operator, run_v3_error_02_to_05_decision_operators,
+    run_v3_error_06_terminal_projection_operator, V3Err01SourceInput,
+};
 use crate::provider_action_gate::{
     V3ProviderActionAdmission, V3ProviderActionFailureRecorded, V3ProviderActionGate,
     V3ProviderActionGateKey, V3ProviderActionProviderScope, V3ProviderActionRecoveryTransition,
@@ -649,15 +653,19 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     state: &mut V3RelayProviderFailurePolicyState<'_>,
 ) -> Result<V3RelayProviderFailurePolicyResult, String> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
+    // Request-local provider failure exclusion is monotonic. Record it before
+    // every fallible Error-chain or health/policy step so the failed identity
+    // can never be sent again in this request.
+    state.failed_candidates.insert(candidate_key.clone());
     // Preserve the original typed Error01 source of this provider attempt before
     // the Error05 decision consumes it, so a later target-resolution failure
     // cannot erase the provider cause that actually began this attempt.
-    let attempt_source = build_v3_relay_provider_attempt_source(
+    let (attempt_source_projection, attempt_source) = build_v3_relay_provider_attempt_source(
         &selected,
         source_stage,
         error_type.as_deref(),
         &message,
-    );
+    )?;
     let matched_policy = matched_policy_directive.or_else(|| {
         find_matching_provider_error_policy(
             context.manifest,
@@ -734,15 +742,15 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 Some(&selected.candidate.model_id),
                 error_type.as_deref().unwrap_or("provider_failure"),
             )?;
-        let decision = build_v3_relay_provider_error_05_decision(
+        let (decision_projection, decision) = build_v3_relay_provider_error_05_decision(
             &selected,
+            attempt_source_projection.clone(),
             attempt_source.clone(),
-            status,
             0,
             false,
             true,
             Some(recovery.recovery_witness()?),
-        );
+        )?;
         let event =
             build_v3_relay_provider_failure_policy_event(V3RelayProviderFailurePolicyEventInput {
                 candidate: selected.candidate.clone(),
@@ -756,7 +764,11 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 diagnostic_source: attempt_source,
             });
         return Ok(V3RelayProviderFailurePolicyResult {
-            terminal_projection: None,
+            terminal_projection: terminal_projection_for(
+                decision_projection,
+                &decision,
+                matched_policy,
+            )?,
             terminal_disposition: None,
             decision,
             retry_selected: Some(Box::new(selected)),
@@ -833,10 +845,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                         )?
                 })
             };
-            let decision = build_v3_relay_provider_error_05_decision(
+            let (decision_projection, decision) = build_v3_relay_provider_error_05_decision(
                 &selected,
+                attempt_source_projection.clone(),
                 attempt_source.clone(),
-                status,
                 usize::from(!alternative.candidate.default_pool_member),
                 alternative.candidate.default_pool_member,
                 false,
@@ -845,11 +857,15 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 } else {
                     Some(request_local_recovery()?)
                 },
-            );
+            )?;
             state.failed_candidates.insert(candidate_key);
             state.trace.push("V3TargetLocalReselected");
             return Ok(V3RelayProviderFailurePolicyResult {
-                terminal_projection: terminal_projection_for(&decision, matched_policy),
+                terminal_projection: terminal_projection_for(
+                    decision_projection,
+                    &decision,
+                    matched_policy,
+                )?,
                 terminal_disposition: terminal_disposition_for(&decision, state),
                 decision,
                 retry_selected: Some(Box::new(alternative)),
@@ -873,19 +889,32 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         } => true,
         V3RelayProviderTargetResolution::Failed(source) => {
             let resolution_message = source.message.clone();
-            let decision = V3ErrorHandlingCenter::decide_provider(
-                V3ErrorHandlingCenterInput {
-                    source,
-                    action_scope: V3ErrorActionScope::None,
-                    candidates_remaining: 0,
-                    source_status: Some(500),
-                },
+            let source_stage = source.source_stage;
+            let source_code = source.code.clone();
+            let source_projection = serde_json::to_value(&source)
+                .map_err(|error| format!("serialize raised target-resolution source: {error}"))?;
+            // The target-resolution source already raised Err01. Its Err01
+            // migration remains pending; enter this batch at the complete
+            // serialized Err01 diagnostic projection without rerunning Err01.
+            let (decision_projection, decision) = run_v3_error_02_to_05_decision_operators(
+                source_projection,
+                source,
+                V3ErrorActionScope::None,
+                0,
                 false,
                 false,
                 None,
-            );
+            )
+            .map_err(|error| {
+                format!(
+                    "{error} (diagnostic_source={}:{})",
+                    source_stage, source_code
+                )
+            })?;
+            let terminal_projection =
+                terminal_projection_for(decision_projection, &decision, matched_policy)?;
             return Ok(V3RelayProviderFailurePolicyResult {
-                terminal_projection: terminal_projection_for(&decision, matched_policy),
+                terminal_projection,
                 terminal_disposition: None,
                 decision,
                 retry_selected: None,
@@ -907,17 +936,21 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     };
     if is_request_local_compat_failure {
         state.failed_candidates.insert(candidate_key);
-        let decision = build_v3_relay_provider_error_05_decision(
+        let (decision_projection, decision) = build_v3_relay_provider_error_05_decision(
             &selected,
+            attempt_source_projection.clone(),
             attempt_source.clone(),
-            status,
             0,
             false,
             false,
             None,
-        );
+        )?;
         return Ok(V3RelayProviderFailurePolicyResult {
-            terminal_projection: terminal_projection_for(&decision, matched_policy),
+            terminal_projection: terminal_projection_for(
+                decision_projection,
+                &decision,
+                matched_policy,
+            )?,
             terminal_disposition: terminal_disposition_for(&decision, state),
             decision,
             retry_selected: None,
@@ -943,15 +976,15 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         );
     }
     state.failed_candidates.insert(candidate_key);
-    let decision = build_v3_relay_provider_error_05_decision(
+    let (decision_projection, decision) = build_v3_relay_provider_error_05_decision(
         &selected,
+        attempt_source_projection,
         attempt_source.clone(),
-        status,
         0,
         false,
         false,
         None,
-    );
+    )?;
     let admission = context
         .provider_health
         .record_terminal_provider_projection_in_scope_for_interface(
@@ -962,9 +995,12 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             Some(&selected.candidate.model_id),
             error_type.as_deref().unwrap_or("provider_failure"),
         )?;
+    let terminal_projection =
+        terminal_projection_for(decision_projection, &decision, matched_policy)?;
+    let terminal_disposition = terminal_disposition_for(&decision, state);
     Ok(V3RelayProviderFailurePolicyResult {
-        terminal_projection: terminal_projection_for(&decision, matched_policy),
-        terminal_disposition: terminal_disposition_for(&decision, state),
+        terminal_projection,
+        terminal_disposition,
         decision,
         retry_selected: None,
         event: build_v3_relay_provider_failure_policy_event(
@@ -996,16 +1032,29 @@ fn terminal_disposition_for(
 }
 
 fn terminal_projection_for(
+    decision_projection: Value,
     decision: &V3Error05ExecutionDecision,
     matched_policy: Option<&V3ProviderErrorActionPolicyManifest>,
-) -> Option<V3Error06ClientProjected> {
-    // 非 terminal decision 携带 None 是合法 Option 状态（调用点仅在
-    // ProjectTerminal 时消费，并以 expect 锁定不变量）；不允许静默吞错。
-    let mut projected = decision
-        .clone()
-        .try_into_terminal()
-        .ok()
-        .map(V3ErrorHandlingCenter::project_terminal_decision)?;
+) -> Result<Option<V3Error06ClientProjected>, String> {
+    let Some((_, mut projected)) =
+        run_v3_error_06_terminal_projection_operator(decision_projection, decision.clone())
+            .map_err(|error| {
+                format!(
+                    "{error} (diagnostic_source={}:{})",
+                    decision
+                        .exhaustion
+                        .local_action
+                        .classified
+                        .source
+                        .source_stage,
+                    decision.exhaustion.local_action.classified.source.code
+                )
+            })?
+    else {
+        // A failed terminal proof is a legal nonterminal Error05 outcome.
+        // It never enters Error06 and never commits a client projection.
+        return Ok(None);
+    };
     if !is_v3_provider_pool_exhausted(&decision.exhaustion) {
         if let Some(V3ProviderDispositionStepManifest::Project { public_code, .. }) = matched_policy
             .and_then(|policy| {
@@ -1029,7 +1078,7 @@ fn terminal_projection_for(
             }
         }
     }
-    Some(projected)
+    Ok(Some(projected))
 }
 
 fn find_matching_provider_error_policy<'manifest>(
@@ -1114,51 +1163,63 @@ fn build_v3_relay_provider_attempt_source(
     source_stage: &'static str,
     error_type: Option<&str>,
     message: &str,
-) -> V3Error01SourceRaised {
+) -> Result<(Value, V3Error01SourceRaised), String> {
     let code = error_type.unwrap_or("provider_failure").to_string();
     // The numeric policy status also represents synthesized request/transport
     // failures. Only the separately captured HTTP witness proves an upstream
     // status, so Error01 must not claim this policy number as external HTTP.
-    build_v3_error_01_source_raised_external(
+    run_v3_err01_source_raised_operator(
         V3ErrorSourceKind::ProviderFailure,
         source_stage,
         code.clone(),
-        message,
-        V3ExternalErrorLink {
+        message.to_string(),
+        V3Err01SourceInput::External(V3ExternalErrorLink {
             kind: V3ExternalErrorKind::Provider,
             status: None,
             code: Some(code),
             provider_id: Some(selected.candidate.provider_id.clone()),
             upstream_request_id: None,
             message: Some(message.to_string()),
-        },
+        }),
     )
+    .map_err(|error| {
+        format!(
+            "{error} (diagnostic_source={source_stage}:{})",
+            error_type.unwrap_or("provider_failure")
+        )
+    })
 }
 
 fn build_v3_relay_provider_error_05_decision(
     selected: &V3Target10ConcreteProviderSelected,
+    source_projection: Value,
     source: V3Error01SourceRaised,
-    status: u16,
     route_pool_remaining_after_exclusion: usize,
     default_pool_available: bool,
     same_provider_retry_available: bool,
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
-) -> V3Error05ExecutionDecision {
-    V3ErrorHandlingCenter::decide_provider(
-        V3ErrorHandlingCenterInput {
-            source,
-            action_scope: V3ErrorActionScope::ProviderKeyModel {
-                provider_id: selected.candidate.provider_id.clone(),
-                auth_alias: selected.candidate.auth_alias.clone(),
-                model_id: selected.candidate.model_id.clone(),
-            },
-            candidates_remaining: route_pool_remaining_after_exclusion,
-            source_status: Some(status),
+) -> Result<(Value, V3Error05ExecutionDecision), String> {
+    let source_stage = source.source_stage;
+    let source_code = source.code.clone();
+    run_v3_error_02_to_05_decision_operators(
+        source_projection,
+        source,
+        V3ErrorActionScope::ProviderKeyModel {
+            provider_id: selected.candidate.provider_id.clone(),
+            auth_alias: selected.candidate.auth_alias.clone(),
+            model_id: selected.candidate.model_id.clone(),
         },
+        route_pool_remaining_after_exclusion,
         default_pool_available,
         same_provider_retry_available,
         recovery,
     )
+    .map_err(|error| {
+        format!(
+            "{error} (diagnostic_source={source_stage}:{source_code}; candidate={}:{})",
+            selected.candidate.provider_id, selected.candidate.model_id,
+        )
+    })
 }
 
 pub(crate) fn expand_v3_relay_target_plan_for_selected(

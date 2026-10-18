@@ -437,7 +437,7 @@ features:
   - Fresh Responses orchestration may wrap implemented Direct or Relay bindings with the Relay shell, but Config-owned PendingNotImplemented remains pending for HTTP and WebSocket and cannot enter provider
     execution.
   - Server route table config allowed protocols manifest endpoint declarations runtime dispatch must stay consistent.
-  - Gemini relay implementation must be explicit and bound to v3.gemini_relay_runtime_integration.
+  - Gemini Direct is the default binding and explicit Relay remains available through its separately bound runtime owner.
   - No unbound endpoint can fall through to generic foundation pending.
   - Server must not duplicate the protocol registry or bypass binding with raw path dispatch.
   - Protocol binding must not depend on provider runtime state metadata debug side-channel or request payload.
@@ -664,8 +664,6 @@ features:
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
-  - scripts/architecture/verify-v3-relay-response-semantics.mjs
-  - scripts/tests/v3-relay-response-semantics-red-fixtures.mjs
   design:
   - docs/design/v3-hub-relay-fixed-pipeline-contract.md
   - docs/design/v3-hub-pipeline-static-skeleton-contract.md
@@ -687,14 +685,12 @@ features:
   - response payload ownership is Arc-backed and does not deep-copy full provider response/body/context for governance
   required_gates:
   - npm run test:v3-relay-response-semantics
-  - npm run verify:v3-relay-response-semantics
-  - npm run test:v3-relay-response-semantics-red-fixtures
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-cargo-fmt
   completion_rule:
-    source: Relay response-side source slice is complete when focused Rust tests prove Resp01-Resp03 behavior and source gates reject Resp05/SSE/handler/required_action/second-exit/copy-budget violations.
+    source: Relay response-side source slice is complete when focused Rust consumers prove Resp01-Resp03 behavior and the single JSON/SSE exit; module-boundary, compile-fail, resource-map and payload-copy-budget checks retain their independent contracts.
     runtime: No live Relay runtime is claimed. Request source and resource/hook config remain separate workstreams.
     forbidden_claim: Do not claim request-side completion, resource/hook config completion, live Relay, Server entry cutover, P6 deletion, global install, or production
       replacement.
@@ -707,8 +703,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
-  - scripts/architecture/verify-v3-relay-request-semantics.mjs
-  - scripts/tests/v3-relay-request-semantics-red-fixtures.mjs
   design:
   - docs/design/v3-hub-relay-fixed-pipeline-contract.md
   - docs/design/v3-hub-pipeline-static-skeleton-contract.md
@@ -728,16 +722,13 @@ features:
   - request payload ownership moves forward once and rejects JSON round-trip or full payload clone budget violations
   required_gates:
   - npm run test:v3-relay-request-semantics
-  - npm run verify:v3-relay-request-semantics
-  - npm run test:v3-relay-request-semantics-red-fixtures
   - npm run test:v3-compile-fail
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-cargo-fmt
   completion_rule:
-    source: Relay request-side source slice is complete when focused Rust tests prove Req01-Req04 behavior and source/compile-fail gates reject Req04 bypass, dynamic hooks, shortcut lifecycle,
-      and payload copy-budget violations.
+    source: Relay request-side source slice is complete when focused Rust consumers prove lossless normalization and Req04 governance; compile-fail, static-hook, resource-map and payload-copy-budget checks retain their independent contracts.
     runtime: No live Relay runtime, Req05-Req09 execution, response slice, or resource/hook config is claimed.
     forbidden_claim: Do not claim response-side completion, resource/hook config completion, live Relay, Server entry cutover, P6 deletion, global install, or production
       replacement.
@@ -1574,10 +1565,6 @@ features:
   - node scripts/architecture/verify-v3-anthropic-relay-controlled-replay-harness.mjs
   - node scripts/tests/v3-anthropic-relay-controlled-replay-harness-mutations.mjs
   - node scripts/tests/v3-anthropic-relay-controlled-replay-harness-red-fixtures.mjs
-  - npm run verify:v3-relay-request-semantics
-  - npm run test:v3-relay-request-semantics-red-fixtures
-  - npm run verify:v3-relay-response-semantics
-  - npm run test:v3-relay-response-semantics-red-fixtures
   - node scripts/architecture/verify-v3-anthropic-relay-protocol-hooks.mjs
   - node scripts/tests/v3-anthropic-relay-protocol-hooks-red-fixtures.mjs
   - npm run verify:v3-architecture-docs
@@ -1880,6 +1867,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_responses_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_terminal_semantics.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
@@ -1928,6 +1916,7 @@ features:
     token fields, and projects Responses reasoning config to `reasoning_effort` while rejecting non-standard client_metadata and the raw Responses `reasoning` object from provider wire.
   - OpenAI Chat provider response to Responses projection preserves model, created timestamp, reasoning, text, tool calls, finish_reason, and usage fields.
   - Responses provider JSON and SSE tool calls restore namespace and name only from the current request's declared provider-name identity map, preserving call_id and the complete arguments through matching function_call_output follow-up.
+  - Responses JSON client projection consumes the final governed Resp03 payload and applies the same completed-response output-item projection as SSE: legacy output_text items become assistant messages with the complete item retained as content, structured text is serialized losslessly, missing text remains absent, and non-legacy items retain their complete value and order.
   - Anthropic Messages request to Responses provider semantic preserves system, image/text blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k, token, stop, stream, and thinking
     fields.
   - Anthropic request thinking.type, thinking.budget_tokens, and thinking.display decode into separate registered Chat fields; no raw thinking object crosses Chat Process and none is compressed to effort.
@@ -2048,6 +2037,7 @@ features:
   required_gates:
   - npm run render:v3-protocol-semantic-field-matrix
   - npm run test:v3-protocol-conversion-field-parity
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_relay_json_projects_legacy_output_text_items_without_losing_fields
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_cross_protocol_public -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_native_discovery_public -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test gemini_sse_attempt_public -- --nocapture
@@ -2100,7 +2090,7 @@ features:
   - Server SSE uses Body::from_stream and delivers first frame before controlled terminal delay
   - Server 429 response exposes Error01-06 and does not wrap success
   - rejected metadata_center request produces zero upstream captures
-  - Config binding marks gemini relay implemented with Gemini runtime owner
+  - Config binding marks gemini Direct implemented with the Gemini Direct Server owner
   - Virtual Router recognizes dynamic /v1beta/models/:model/generateContent as gemini entry protocol
   required_gates:
   - npm run test:v3-gemini-relay-runtime-integration
@@ -2136,7 +2126,7 @@ features:
   - omitted server endpoints default to responses, anthropic, gemini, and openai_chat
   - endpoint_patterns missing or duplicated fail
   - duplicate protocol binding and unknown protocol fail
-  - gemini must be relay implemented with explicit Gemini runtime owner
+  - gemini must be Direct implemented by default with explicit Gemini Direct Server owner, while explicit Relay remains supported
   - implemented direct or relay bindings must declare runtime owner symbol and path
   required_blackbox:
   - none; this slice is config contract only and does not claim live runtime behavior
@@ -3229,10 +3219,12 @@ features:
 - feature_id: v3.history_image_cleanup
   status: active_latest_image_preservation
   change_risk: medium
-  owner_kind: rust_project_v3_req_inbound_normalization
-  owner_scope: ReqInbound preserves the latest image-bearing carrier despite later text-only reminders and cleans earlier images; ProviderReqCompat06 preserves representable latest images and paired tool receipts independently of target capability metadata.
+  owner_kind: rust_project_v3_runtime_chat_process_gate
+  owner_scope: history_image_cleanup owns the stateless latest-carrier image normalization rule. Relay invokes it from Chat Process Req04 in relay_request.rs; Inbound remains lossless and does not rewrite payload. Direct reaches it only through its existing registered request standardization/hook path. ProviderReqCompat06 preserves representable latest images and paired tool receipts independently of target capability metadata.
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target
@@ -3899,10 +3891,11 @@ features:
     merge: supervisor_owned
 
 - feature_id: v3.unified_operation_runner_design
-  status: node01_capture_runtime_candidate_full_runner_pending
+  status: candidate_behavior_13_of_20_scoped_review_and_main_merge_pending
   change_risk: high
   owner_kind: design_architecture
-  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, and first runtime slice. This candidate delivers only Node 01 capture_client_json; later operation nodes remain pending.
+  owner_scope: >-
+    Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, and canonical single-node SDK execution. Candidate M2 records scoped acceptance for thirteen of twenty operation nodes: all nine request nodes and four response nodes, including the existing Responses JSON frame path. resolve_target and plan_execution have accepted Direct, four-protocol Relay, and Server non-admitting preplan callers. Ordinary response inverse projection is SDK-wired, but its hosted path awaits REQ02. Relay Error01-06 and health Error01/02 consumers are SDK-wired; Direct, disconnect, and target-origin Error01 remain pending global acceptance. Existing Hub owners remain execution truth for pending paths. Candidate behavior does not establish whole-graph, Native Direct payload migration, independent review, or main merge completion.
   owner_modules:
   - routecodex-v3-runtime
   - routecodex-v3-config
@@ -3948,11 +3941,25 @@ features:
   - the first node is compiled and run by pipeline_runtime from the deterministic SESE slice derived from the canonical request graph; the selected node keeps its canonical operator/version/schema/effects, and the slice exits at client-json
   - RuntimeRequestGraphEntry owns slice derivation, pipeline_runtime::compile, and Runtime::run; there is no direct Operator call path
   - Direct-to-Relay handoff reuses the in-flight captured value and existing request_execution_control; it does not re-enter Server ingress or recapture
-  - the first node does not claim one existing shared normalize_request_losslessly caller: Direct keeps its current V3Server03HttpRequestRaw/C::build_standardized owner, Relay keeps its protocol Req02 owner
+  - the candidate binds normalize_request_losslessly through V3HubRelayRequestHooks::run and build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01; Direct retains V3Server03HttpRequestRaw/C::build_standardized and does not claim the Relay binding
+  - the candidate binds request transforms through run_v3_single_node_operator, which selects the canonical graph node, creates an SDK Registry, calls pipeline_runtime::compile, and executes Runtime::run
+  - the real request callers bind adjust_provider_private_request, encode_provider_wire, and construct_transport_request from execute_v3_relay_runtime_core, construct_responses_relay_transport_request, and execute_v3_anthropic_relay_runtime_inner
+  - the Responses request helper is synchronous so SDK execution does not enlarge the async transport poll frame
+  - the real response callers bind adjust_provider_private_response, normalize_provider_response, and govern_chat_response through build_provider_resp_compat_02_from_v3_provider_resp_inbound_01, build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id, and V3HubRelayResponseHookRegistry::govern
+  - request and response operator instance fields carry typed context outside business JSON; declared side outputs are consumed, and original typed errors remain errors
+  - the thirteen scoped accepted candidate nodes are request capture_client_json, normalize_request_losslessly, resolve_target, plan_execution, govern_chat_request, project_standard_provider_request, adjust_provider_private_request, encode_provider_wire, construct_transport_request; and response adjust_provider_private_response, normalize_provider_response, govern_chat_response, frame_committed_client_response
+  - frame acceptance covers only the existing Responses JSON caller; identity, Direct, and hosted frame paths remain pending, so no addressable global frame node is claimed
+  - resolve_target and plan_execution are SDK-wired through actual Direct kernel, four-protocol Relay, and Server non-admitting preplan callers; initial execution and reselection both use run_v3_plan_execution_operator_with_probes, the actual typed V3PlanExecutionModePolicy is consumed, and control does not mirror into payload
+  - resolve_target and plan_execution passed the final combined58/58 matrix, Server127/127, and Runtime1358/0fail/1existingignored; no pending-node acceptance is inferred from those results
+  - inverse_project_client_response has ordinary Anthropic Relay wiring through resp_outbound_05_client_semantic.rs; its hosted path remains pending REQ02 and is not a released API symbol
+  - six Error nodes execute as single-node SDK slices through provider_failure_runtime_policy.rs and operation_runner/error_decision.rs; the Relay Err01 source builder calls the canonical SDK node, the decision helper runs Error02 through Error05, and the terminal helper runs Error06. Direct source binding, disconnect, and target-origin Err01 remain pending global acceptance
+  - provider_failure_runtime_policy_health.rs binds record_provider_failure_record_with_policy_for_interface to Error01 then Error02; record_provider_failure_record_from_source_for_interface and record_post_commit_provider_stream_failure_from_source_for_interface consume already-raised sources through Error02 only. Actual status Some, fingerprints, identity isolation, and mutation order remain unchanged
+  - pending acceptance retains existing Hub owners; R02 image residual composition passed the combined matrix, and Direct hooks remain owned by Direct
+  - candidate behavior is13of20 scoped; remaining7 are inverse projection and all6globalError nodes. Whole-graph execution, Native Direct payload migration, independent review, and main merge are not inferred
   - every inbound direction_bindings source names a path in that protocol's raw source inventory; outbound Chat sources are not constrained to wire inventory paths
   - Responses request.input[].type is read per input array item, and the selected request branch remains paired with that same request's typed inverse provenance for the response projection
   - the target request design assigns historical image placeholders to Chat Process request governance after lossless normalization, retaining current-turn images and stable historical placeholders for tool-only replay
-  - currently unsupported Anthropic/Gemini Direct modes remain unsupported after the capture-node delivery
+  - this SDK migration leaves Anthropic/Gemini Direct behavior with its existing owners
   negative_assertions:
   - a protocol profile cannot authorize a field path absent from the source inventory
   - an inbound direction binding cannot source a path absent from that protocol's source inventory
@@ -3969,6 +3976,7 @@ features:
   - capture_client_json reads or writes neither v3.operation_runner.metadata_center_control nor v3.operation_runner.request_origin_kind
   - missing capture_client_json@1 registration is rejected by DAGpipe compile and enters the typed ErrorErr01 path
   - RuntimeRequestFinalizer consumes/releases no request_origin_kind storage; request_origin_kind has no MetadataCenter slot and no cross-invocation storage to clean
+  - topology edge v3-op-runner-req-02b remains binding_pending because no direct adjacent caller/callee binding is proven
   evidence_sources:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
@@ -3989,10 +3997,71 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml
   - docs/architecture/dagpipe/v3.operation_runner.request.graph.json
+  - docs/architecture/dagpipe/README.md
+  - docs/design/v3-unified-operation-runner-design.md
+  behavior_evidence:
+  - case: affected_runtime_library
+    source: /Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012/m2-real-wire-callers-lib.log
+    result: 1301 passed; 0 failed; 1 ignored
+    reuse: recorded M2 candidate run; not rerun in the maps-only worktree
+  - case: affected_integration_suites
+    source: /Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012/m2-combined-affected-six.log
+    result: 18 + 4 + 14 + 29 + 12 + 46 passed; 0 failed
+    reuse: recorded M2 candidate run; not rerun in the maps-only worktree
+  - case: public_protocol_live_mock_matrix
+    source: /Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012/live-self-contained58-m2-stack-fixed-20261017/baseline-report.json
+    result: 58 passed; 0 failed; 0 not_run; 0 skipped; 0 infra_failure; failed 0; product_failures 0; runner_failures 0; cleanup.complete=true
+    reuse: recorded M2 candidate run; not rerun in the maps-only worktree
+  - case: namespace_and_tool_followup
+    fixtures: [namespace-custom-complete-args, namespace-local-client-mock-execution, tool-followup-responses-to-chat]
+    expects: actual SDK body changed; namespace/custom identity retained; actual first provider attempt and client tool follow-up
+    matrix: v3/scripts/tests/v3-protocol-live-mock-matrix.mjs
+    manifest: v3/fixtures/protocol-live-mock-matrix/manifest.json
+  - case: provider_failure_and_stream_cut
+    fixtures: [provider-error-exhaustion, provider-fault-stream-cut]
+    expects: provider failure stays in the typed Error chain and is not returned as business success
+    matrix: v3/scripts/tests/v3-protocol-live-mock-matrix.mjs
+    manifest: v3/fixtures/protocol-live-mock-matrix/manifest.json
+  candidate_test_bindings:
+  - node: adjust_provider_private_request
+    tests:
+    - provider_req_compat_06_provider_compat::tests::private_request_operator_preserves_original_typed_error
+    - provider_req_compat_06_provider_compat::tests::custom_tool_function_binding_is_retained_from_private_request_operator
+  - node: encode_provider_wire
+    tests:
+    - provider_req_outbound_08_wire_payload::tests::sdk_wire_preserves_body_model_namespace_custom_binding_and_stream
+    - provider_req_outbound_08_wire_payload::tests::r08_fallible_builder_consumes_sdk_body_and_rejects_target_drift
+    - provider_req_outbound_08_wire_payload::tests::r08_invalid_stream_flag_is_typed_failure_without_wire_side_output
+  - node: construct_transport_request
+    tests:
+    - provider_req_outbound_09_transport_request::tests::construct_transport_request_consumes_sdk_input_not_captured_wire_body
+    - provider_req_outbound_09_transport_request::tests::construct_transport_request_requires_typed_wire_side_output
+  - node: adjust_provider_private_response
+    tests:
+    - provider_resp_compat_02_provider_compat::tests::canonical_adjust_node_executes_the_real_custom_tool_response_compat
+    - provider_resp_compat_02_provider_compat::tests::canonical_adjust_node_preserves_typed_compat_failure_classification
+  - node: normalize_provider_response
+    tests:
+    - resp_inbound_02_normalized::tests::canonical_normalize_node_projects_anthropic_json_with_the_request_context
+    - resp_inbound_02_normalized::tests::canonical_normalize_node_executes_gemini_business_normalization_once
+  - node: govern_chat_response
+    tests:
+    - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_registry_govern_returns_transformation_and_typed_side_outputs
+    - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_registry_govern_preserves_the_original_typed_error
+    - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_govern_operator_consumes_sdk_input_not_captured_payload
+    - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_govern_operator_uses_sdk_output_as_business_payload
   required_gates:
   - npm run verify:v3-operation-runner-dagpipe
   - npm run test:v3-operation-runner-red-fixtures
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime operation_runner --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_req_compat_06_provider_compat --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_req_outbound_08_wire_payload --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_req_outbound_09_transport_request --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_resp_compat_02_provider_compat --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime resp_inbound_02_normalized --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime resp_chat_process_03_governed --lib
+  - npm run run:v3-protocol-live-mock-matrix
+  - npm run test:v3-protocol-live-mock-matrix-selftest
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_responses_endpoint_uses_runtime_provider_path_and_projects_json
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_last_default_projects_after_provider_failure
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server openai_chat_http_entry_completes_responses_tool_round_trip
@@ -4004,8 +4073,11 @@ features:
   completion_boundary:
     source_controlled: required
     mapped_gates: required
-    runtime: required_for_node01_capture_client_json_slice
-    remaining_operation_nodes: pending
+    runtime: candidate_scoped_evidence_for_13_of_20
+    review: pending
+    install: candidate_verified
+    merge: not_run
+    remaining_operation_nodes: 7_pending_acceptance
 - feature_id: v3.anthropic_control_text_resp03
   status: source_gate_verified
   change_risk: high

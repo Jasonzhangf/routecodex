@@ -39,6 +39,9 @@ type SharedResponsesWebSocket = Arc<Mutex<Option<ResponsesWebSocket>>>;
 mod cancellation;
 mod probe;
 use probe::is_rate_limited;
+mod request_metadata;
+pub use request_metadata::V3ProviderRequestHeader;
+use request_metadata::{normalize_provider_header_name, V3ProviderHttpAuthCarrier};
 mod websocket;
 pub use cancellation::V3ProviderCancellation;
 use websocket::{
@@ -95,39 +98,6 @@ pub(crate) enum V3Transport13ResponsesRequestKind {
         compatibility_profile: Option<String>,
     },
 }
-#[derive(Clone, PartialEq, Eq)]
-pub struct V3ProviderRequestHeader {
-    name: String,
-    value: String,
-}
-
-impl fmt::Debug for V3ProviderRequestHeader {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("V3ProviderRequestHeader")
-            .field("name", &self.name)
-            .field("value", &"[REDACTED]")
-            .finish()
-    }
-}
-
-impl V3ProviderRequestHeader {
-    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
-        Self {
-            name: normalize_provider_header_name(name.into()),
-            value: value.into(),
-        }
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn value(&self) -> &str {
-        &self.value
-    }
-}
-
 pub fn build_v3_anthropic_provider_request_header(
     name: impl Into<String>,
     value: impl Into<String>,
@@ -146,16 +116,13 @@ pub fn is_v3_anthropic_provider_request_header_name(name: impl AsRef<str>) -> bo
         .any(|allowed| *allowed == name)
 }
 
-fn normalize_provider_header_name(name: String) -> String {
-    name.trim().to_ascii_lowercase()
-}
-
 #[derive(Debug)]
 pub struct V3Transport13ResponsesRequest {
     _sealed: (),
     pub(crate) kind: V3Transport13ResponsesRequestKind,
     handoff_scope: Option<crate::transport_handoff::V3ProviderTransportHandoffScope>,
     pre_acquired_probe: V3PreAcquiredProviderAdmission,
+    auth_carrier: V3ProviderHttpAuthCarrier,
 }
 
 pub type V3Transport13ResponsesHttpRequest = V3Transport13ResponsesRequest;
@@ -414,6 +381,7 @@ pub(crate) fn v3_transport_13_request(
         kind,
         handoff_scope: None,
         pre_acquired_probe: V3PreAcquiredProviderAdmission::empty(),
+        auth_carrier: V3ProviderHttpAuthCarrier::ExistingBearer,
     }
 }
 
@@ -421,6 +389,24 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
     wire: V3Provider12ResponsesWirePayload,
 ) -> Result<V3Transport13ResponsesRequest, V3ProviderError> {
     let (request_id, target, stream_intent, endpoint, body) = wire.into_parts();
+    build_v3_transport_13_responses_request_from_wire_parts(
+        request_id,
+        target,
+        stream_intent,
+        endpoint,
+        body,
+    )
+}
+
+/// The wire node has already selected the target and encoded the body. Keep
+/// that typed transport context separate while consuming the data edge body.
+pub fn build_v3_transport_13_responses_request_from_wire_parts(
+    request_id: String,
+    target: crate::V3ResponsesProviderTarget,
+    stream_intent: V3ResponsesStreamIntent,
+    endpoint: crate::V3ResponsesRequestEndpoint,
+    body: Value,
+) -> Result<V3Transport13ResponsesRequest, V3ProviderError> {
     let provider_id = target.provider_id;
     let request_timeout_ms = target.request_timeout_ms;
     let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
@@ -748,6 +734,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
             attempt_key.as_ref(),
         )
         .await?;
+        let auth_carrier = request.auth_carrier;
         let result = match request.kind {
             V3Transport13ResponsesRequestKind::Http {
                 request_id,
@@ -769,6 +756,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     provider_id,
                     url,
                     auth,
+                    auth_carrier,
                     stream_intent,
                     body,
                     provider_headers,
@@ -947,6 +935,7 @@ impl ProviderResponsesTransport {
         provider_id: &str,
         url: reqwest::Url,
         auth: V3ProviderAuthHandle,
+        auth_carrier: V3ProviderHttpAuthCarrier,
         stream_intent: V3ResponsesStreamIntent,
         body: Value,
         provider_headers: Vec<V3ProviderRequestHeader>,
@@ -972,8 +961,11 @@ impl ProviderResponsesTransport {
         let mut request = self
             .client
             .post(url)
-            .header(reqwest::header::ACCEPT, accept)
-            .bearer_auth(&secret);
+            .header(reqwest::header::ACCEPT, accept);
+        request = match auth_carrier {
+            V3ProviderHttpAuthCarrier::ExistingBearer => request.bearer_auth(&secret),
+            V3ProviderHttpAuthCarrier::GeminiApiKey => request.header("x-goog-api-key", &secret),
+        };
         if let Some(deadline) = deadline {
             request = request.timeout(remaining_timeout(deadline, &request_id, &provider_id)?);
         }
@@ -1005,6 +997,7 @@ impl ProviderResponsesTransport {
         provider_id: String,
         url: reqwest::Url,
         auth: V3ProviderAuthHandle,
+        auth_carrier: V3ProviderHttpAuthCarrier,
         stream_intent: V3ResponsesStreamIntent,
         body: Value,
         provider_headers: Vec<V3ProviderRequestHeader>,
@@ -1019,6 +1012,7 @@ impl ProviderResponsesTransport {
                 &provider_id,
                 url,
                 auth,
+                auth_carrier,
                 stream_intent,
                 body,
                 provider_headers,
@@ -1065,41 +1059,38 @@ impl ProviderResponsesTransport {
             .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms));
         }
 
-        match stream_intent {
-            V3ResponsesStreamIntent::Json => Err(V3ProviderError::UnexpectedContentType {
+        if response_content_type
+            .as_deref()
+            .is_some_and(|value| value.starts_with("text/event-stream"))
+        {
+            let stream = validated_sse_stream(
+                response.bytes_stream(),
+                request_id.clone(),
+                provider_id.clone(),
+                cancellation,
+            );
+            return Ok(V3ProviderResp14Raw::from_sse(
                 request_id,
                 provider_id,
-                expected: "JSON",
-                content_type: response_content_type,
                 status,
                 headers,
-            }),
-            V3ResponsesStreamIntent::Sse
-                if response_content_type
-                    .as_deref()
-                    .is_some_and(|value| value.starts_with("text/event-stream")) =>
-            {
-                let stream = validated_sse_stream(
-                    response.bytes_stream(),
-                    request_id.clone(),
-                    provider_id.clone(),
-                    cancellation,
-                );
-                Ok(
-                    V3ProviderResp14Raw::from_sse(request_id, provider_id, status, headers, stream)
-                        .with_compatibility_profile(compatibility_profile)
-                        .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms),
-                )
-            }
-            V3ResponsesStreamIntent::Sse => Err(V3ProviderError::UnexpectedContentType {
-                request_id,
-                provider_id,
-                expected: "SSE",
-                content_type: response_content_type,
-                status,
-                headers,
-            }),
+                stream,
+            )
+            .with_compatibility_profile(compatibility_profile)
+            .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms));
         }
+
+        Err(V3ProviderError::UnexpectedContentType {
+            request_id,
+            provider_id,
+            expected: match stream_intent {
+                V3ResponsesStreamIntent::Json => "JSON",
+                V3ResponsesStreamIntent::Sse => "SSE",
+            },
+            content_type: response_content_type,
+            status,
+            headers,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1131,7 +1122,8 @@ impl ProviderResponsesTransport {
                 OPENAI_BETA_HEADER,
                 HeaderValue::from_static(RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE),
             );
-            let connect = connect_async(handshake);
+            // Keep handshake state off the nested Server/Relay poll stack.
+            let connect = Box::pin(connect_async(handshake));
             let connected = match cancellation.clone() {
                 Some(cancellation) => {
                     tokio::select! {

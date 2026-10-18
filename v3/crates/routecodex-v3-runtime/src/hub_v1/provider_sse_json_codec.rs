@@ -570,16 +570,21 @@ fn classify_v3_provider_anthropic_json_event(
                 .ok_or_else(|| {
                     "provider Anthropic message_start requires message object".to_string()
                 })?;
-            let content = message
-                .get("content")
-                .and_then(Value::as_array)
-                .ok_or_else(|| {
-                    "provider Anthropic message_start requires content array".to_string()
-                })?;
-            let mut has_output = false;
-            for block in content {
-                has_output |= anthropic_content_block_has_client_output(block)?;
-            }
+            // `message_start.message.content` is optional provider business
+            // data, not a local admission boundary.  The common wire shape
+            // omits it; a supplied non-array value is opaque business content.
+            // Observe what is present and never reject a frame on its shape.
+            let has_output = match message.get("content") {
+                None | Some(Value::Null) => false,
+                Some(Value::Array(content)) => {
+                    let mut has_output = false;
+                    for block in content {
+                        has_output |= anthropic_content_block_has_client_output(block)?;
+                    }
+                    has_output
+                }
+                Some(_) => true,
+            };
             Ok(if has_output {
                 V3ProviderResponsesJsonFrameOutcome::StartClientStream
             } else {
@@ -1124,6 +1129,69 @@ mod provider_sse_json_codec_tests {
             })
         );
         assert_eq!(classify(r#"{"type":"ping"}"#), None);
+
+        // Canonical 52eb92d fixture (`usage-cache-writes-chat-entry`): a
+        // `message_start` that omits `message.content`, a real `OK` text
+        // delta, a usage-bearing `message_delta`, then `message_stop`.  Every
+        // frame keeps its native outcome, so the omitted content neither
+        // becomes a provider failure nor hides the later business delta.
+        let canonical_fixture = [
+            (
+                r#"{"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","usage":{"input_tokens":10,"cache_creation_input_tokens":6416,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":6416},"output_tokens":4}}}"#,
+                V3ProviderResponsesJsonFrameOutcome::ContinueBuffering,
+            ),
+            (
+                r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"OK"}}"#,
+                V3ProviderResponsesJsonFrameOutcome::StartClientStream,
+            ),
+            (
+                r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":10,"cache_creation_input_tokens":6416,"cache_read_input_tokens":0,"output_tokens":40}}"#,
+                V3ProviderResponsesJsonFrameOutcome::ContinueBuffering,
+            ),
+            (
+                r#"{"type":"message_stop"}"#,
+                V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput,
+            ),
+        ];
+        for (data, expected) in canonical_fixture {
+            assert_eq!(
+                classify(data),
+                Some(expected),
+                "canonical 52eb92d fixture frame must keep its native outcome: {data}"
+            );
+        }
+
+        // Focused boundaries for the removed `message_start.message.content`
+        // admission.  Absent or explicit-null content carries no output yet;
+        // supplied content is observed as business data and never rejected.
+        for no_content in [
+            r#"{"type":"message_start","message":{"id":"msg_absent","type":"message","role":"assistant"}}"#,
+            r#"{"type":"message_start","message":{"id":"msg_null","content":null}}"#,
+        ] {
+            assert_eq!(
+                classify(no_content),
+                Some(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering),
+                "missing/null message_start content is no output yet: {no_content}"
+            );
+        }
+        for supplied_content in [
+            r#"{"type":"message_start","message":{"id":"msg_object","content":{"type":"text","text":"hi"}}}"#,
+            r#"{"type":"message_start","message":{"id":"msg_string","content":"provider text"}}"#,
+            r#"{"type":"message_start","message":{"id":"msg_block","content":[{"type":"text","text":"hi"}]}}"#,
+        ] {
+            assert_eq!(
+                classify(supplied_content),
+                Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream),
+                "supplied message_start content is observed business data: {supplied_content}"
+            );
+        }
+        // The `message` object is still required; only the content array
+        // admission was removed.
+        assert!(classify_v3_provider_sse_json_data(
+            V3HubProviderWireProtocol::Anthropic,
+            r#"{"type":"message_start"}"#
+        )
+        .is_err());
     }
 
     #[test]

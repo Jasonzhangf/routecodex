@@ -436,6 +436,7 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
         .map_err(|reason| V3AnthropicCodecError::AmbiguousToolDispatch { reason })?;
     registry.project_references(&mut input);
     strip_unmapped_responses_reasoning_extensions(&mut input);
+    consume_mapped_gemini_request_root_fields(&mut input);
     let object = input
         .as_object()
         .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
@@ -524,7 +525,61 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
                 .unwrap_or(false),
         ),
     );
+    if let Some(records) = object
+        .get("routecodex_chat_extension")
+        .and_then(|extension| extension.get("gemini_native_fields"))
+    {
+        output.insert(
+            "routecodex_chat_extension".to_string(),
+            json!({"gemini_native_fields":records}),
+        );
+    }
     Ok(Value::Object(output))
+}
+
+fn consume_mapped_gemini_request_root_fields(input: &mut Value) {
+    let Some(row) = input.as_object_mut() else {
+        return;
+    };
+    let mut stream = None;
+    if let Some(extension) = row
+        .get_mut("routecodex_chat_extension")
+        .and_then(Value::as_object_mut)
+    {
+        if let Some(records) = extension
+            .get_mut("gemini_native_fields")
+            .and_then(Value::as_array_mut)
+        {
+            records.retain_mut(|record| {
+                if record.get("kind").and_then(Value::as_str) != Some("request") {
+                    return true;
+                }
+                let Some(fields) = record.get_mut("fields").and_then(Value::as_object_mut) else {
+                    return true;
+                };
+                if fields
+                    .get("generationConfig")
+                    .and_then(Value::as_object)
+                    .is_some_and(Map::is_empty)
+                {
+                    fields.remove("generationConfig");
+                }
+                if fields.get("stream").is_some_and(Value::is_boolean) {
+                    stream = fields.remove("stream");
+                }
+                !fields.is_empty()
+            });
+            if records.is_empty() {
+                extension.remove("gemini_native_fields");
+            }
+        }
+        if extension.is_empty() {
+            row.remove("routecodex_chat_extension");
+        }
+    }
+    if let Some(stream) = stream {
+        row.entry("stream").or_insert(stream);
+    }
 }
 
 fn claude_code_system_prompt_for_model(model: &str) -> Option<Value> {
@@ -592,10 +647,12 @@ fn responses_request_chat_extension(
         .ok_or(V3AnthropicCodecError::MalformedField {
             field: "routecodex_chat_extension",
         })?;
-    if extension
-        .keys()
-        .any(|key| !matches!(key.as_str(), "responses_request" | "anthropic_request"))
-    {
+    if extension.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "responses_request" | "anthropic_request" | "gemini_native_fields"
+        )
+    }) {
         return Err(V3AnthropicCodecError::MalformedField {
             field: "routecodex_chat_extension",
         });
@@ -713,7 +770,10 @@ fn responses_reasoning_fields_as_anthropic_thinking(
             thinking.insert("type".to_string(), Value::String("adaptive".to_string()));
         }
         "disabled" => {
-            if explicit_budget.is_some() || display.is_some() || summary_policy.is_some() {
+            if explicit_budget.is_some_and(|budget| budget != 0)
+                || display.is_some()
+                || summary_policy.is_some()
+            {
                 return Err(V3AnthropicCodecError::MalformedField {
                     field: "reasoning_thinking_mode",
                 });
@@ -861,7 +921,6 @@ fn responses_reasoning_budget_tokens(value: &Value) -> Option<u64> {
     value
         .as_u64()
         .or_else(|| value.as_str().and_then(|text| text.trim().parse().ok()))
-        .filter(|budget| *budget > 0)
 }
 
 pub fn project_v3_anthropic_message_as_responses_response(

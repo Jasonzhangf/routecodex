@@ -412,27 +412,71 @@ function deriveAnthropicSemantic(frames) {
 
 function deriveGeminiSemantic(frames) {
   const semantic = {};
-  const candidates = [];
-  let lastCandidate = null;
+  const candidateFrames = [];
   for (const frame of frames) {
     const data = frameData(frame);
     if (!data) continue;
     if (data.usageMetadata !== undefined) semantic.usageMetadata = mergeUsage(semantic.usageMetadata ?? {}, data.usageMetadata);
-    for (const candidate of Array.isArray(data.candidates) ? data.candidates : []) {
-      if (!isObject(candidate)) continue;
-      const index = candidate.index ?? candidates.length;
-      candidates[index] = candidate;
-      if (candidate.finishReason !== undefined) lastCandidate = candidate;
+    const present = Array.isArray(data.candidates) ? data.candidates.filter(isObject) : [];
+    if (present.length > 0) candidateFrames.push(present);
+  }
+
+  const identityOf = (index) => `${typeof index}:${String(index)}`;
+  const explicitIndexes = new Set();
+  let multiElementArray = false;
+  for (const present of candidateFrames) {
+    if (present.length > 1) multiElementArray = true;
+    for (const candidate of present) {
+      if (candidate.index !== undefined) explicitIndexes.add(identityOf(candidate.index));
     }
   }
-  const terminal = lastCandidate ?? candidates.find(isObject);
-  if (terminal) {
-    semantic.candidate = terminal;
-    semantic.finishReason = terminal.finishReason;
-    semantic.text = terminal.content?.parts?.find((part) => typeof part?.text === 'string')?.text;
+  const singleCandidateStream = !multiElementArray && explicitIndexes.size <= 1;
+  const singleIdentity = explicitIndexes.size === 1 ? [...explicitIndexes][0] : 'indexless';
+  const records = new Map();
+  let lastTerminal = null;
+  for (const present of candidateFrames) {
+    for (const candidate of present) {
+      const hasIndex = candidate.index !== undefined;
+      const identity = singleCandidateStream ? singleIdentity : (hasIndex ? identityOf(candidate.index) : 'indexless');
+      const assigned = singleCandidateStream || hasIndex;
+      let record = records.get(identity);
+      if (!record) {
+        record = { assigned, parts: [], textParts: [], content: {} };
+        records.set(identity, record);
+      }
+      if (record.index === undefined && hasIndex) record.index = candidate.index;
+      if (isObject(candidate.content)) {
+        for (const [key, value] of Object.entries(candidate.content)) {
+          if (key !== 'parts') record.content[key] = value;
+        }
+        for (const part of Array.isArray(candidate.content.parts) ? candidate.content.parts : []) {
+          record.parts.push(part);
+          if (isObject(part) && typeof part.text === 'string' && part.thought !== true) record.textParts.push(part.text);
+        }
+      }
+      if (candidate.finishReason !== undefined) lastTerminal = { candidate, record };
+    }
   }
-  const present = candidates.filter(isObject);
-  if (present.length > 0) semantic.candidates = present;
+  if (lastTerminal) {
+    semantic.candidate = lastTerminal.candidate;
+    semantic.finishReason = lastTerminal.candidate.finishReason;
+    if (lastTerminal.record.assigned && lastTerminal.record.textParts.length > 0) {
+      semantic.text = lastTerminal.record.textParts.join('');
+    }
+  }
+  // Text comes from the selected candidate. Only a stream with no terminal may
+  // fall back to the single unambiguous observed candidate.
+  const assignedWithText = [...records.values()].filter((record) => record.assigned && record.textParts.length > 0);
+  if (!lastTerminal && assignedWithText.length === 1) semantic.text = assignedWithText[0].textParts.join('');
+
+  const observed = [];
+  for (const record of records.values()) {
+    if (record.parts.length === 0 && Object.keys(record.content).length === 0) continue;
+    const content = { ...record.content };
+    if (record.parts.length > 0) content.parts = record.parts;
+    observed.push({ ...(record.index === undefined ? {} : { index: record.index }), content });
+  }
+  if (observed.length > 0) semantic.candidates = observed;
   return semantic;
 }
 

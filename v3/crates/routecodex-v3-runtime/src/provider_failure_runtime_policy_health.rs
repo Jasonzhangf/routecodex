@@ -307,7 +307,14 @@ impl V3ProviderFailureRuntimeHealth {
         source: &V3Error01SourceRaised,
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, String> {
-        let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
+        let source_projection = serde_json::to_value(source)
+            .map_err(|error| format!("serialize Err01 source raised: {error}"))?;
+        let (_, classified) = crate::operation_runner::run_v3_err02_classified_operator(
+            source_projection,
+            source.clone(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
         let status = source
             .external_error
             .as_ref()
@@ -488,21 +495,28 @@ impl V3ProviderFailureRuntimeHealth {
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, String> {
         let code = error_type.unwrap_or("provider_failure").to_string();
-        let source = build_v3_error_01_source_raised_external(
-            V3ErrorSourceKind::ProviderFailure,
-            source_stage,
-            code.clone(),
-            message,
-            V3ExternalErrorLink {
-                kind: V3ExternalErrorKind::Provider,
-                status: Some(status),
-                code: Some(code),
-                provider_id: Some(provider_id.to_string()),
-                upstream_request_id: None,
-                message: Some(message.to_string()),
-            },
-        );
-        let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
+        let (source_projection, source) =
+            crate::operation_runner::run_v3_err01_source_raised_operator(
+                V3ErrorSourceKind::ProviderFailure,
+                source_stage,
+                code.clone(),
+                message,
+                crate::operation_runner::V3Err01SourceInput::External(V3ExternalErrorLink {
+                    kind: V3ExternalErrorKind::Provider,
+                    status: Some(status),
+                    code: Some(code),
+                    provider_id: Some(provider_id.to_string()),
+                    upstream_request_id: None,
+                    message: Some(message.to_string()),
+                }),
+            )
+            .map_err(|error| error.to_string())?;
+        let (_, classified) = crate::operation_runner::run_v3_err02_classified_operator(
+            source_projection,
+            source,
+            None,
+        )
+        .map_err(|error| error.to_string())?;
         let failure_action = build_v3_provider_failure_action_from_v3_error_02(&classified);
         if let Some(policy) = matched_policy_directive
             .map(|policy| {
@@ -897,7 +911,14 @@ impl V3ProviderFailureRuntimeHealth {
         model_id: Option<&str>,
         source: &V3Error01SourceRaised,
     ) -> Result<(), String> {
-        let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
+        let source_projection = serde_json::to_value(source)
+            .map_err(|error| format!("serialize Err01 source raised: {error}"))?;
+        let (_, classified) = crate::operation_runner::run_v3_err02_classified_operator(
+            source_projection,
+            source.clone(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
         let status = source
             .external_error
             .as_ref()

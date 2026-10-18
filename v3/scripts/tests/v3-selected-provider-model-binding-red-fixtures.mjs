@@ -40,7 +40,7 @@ const cases = [
   },
   {
     name: 'Relay skips shared binding',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs',
     mutate: (source) => source.replace('bind_v3_selected_provider_model(provider_protocol_payload, selected)', 'Ok(V3SelectedProviderModelBinding::from_unbound(provider_protocol_payload))'),
     diagnostic: /Relay protocol payload builder must call the shared selected-model owner/u,
   },

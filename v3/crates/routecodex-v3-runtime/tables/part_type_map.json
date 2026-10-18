@@ -1,15 +1,15 @@
 {
   "table_id": "part_type_map",
   "kind": "protocol_value_map",
-  "protocols": ["responses", "openai_chat", "anthropic"],
-  "description": "content part type 双向别名映射。数据来源：anthropic_codec.rs:823-835/1297-1332（text->output_text、thinking->reasoning、tool_use->function_call）、responses_openai_codec.rs:628-700/1059-1155、request_outbound_format.rs:992-1021/1317-1318。direction 区分请求侧归一化（inbound）与响应侧投影（outbound）。",
+  "protocols": ["responses", "openai_chat", "anthropic", "gemini"],
+  "description": "content part type 双向别名映射。数据来源：anthropic_codec.rs:823-835/1297-1332（text->output_text、thinking->reasoning、tool_use->function_call）、responses_openai_codec.rs:628-700/1059-1155、request_outbound_format.rs:992-1021/1317-1318。direction 区分请求侧归一化（inbound）与响应侧投影（outbound）。Gemini part 以字段名区分类型（text/functionCall/functionResponse/inlineData/fileData），故 gemini 列存字段名：text 双向（inbound->input_text、outbound->text）、functionCall 仅 outbound、functionResponse 仅 inbound、inlineData 仅 inbound->input_image；fileData 无精确 hub media 值，暂不登记，由相邻 codec container 逻辑按 MIME 分支。",
   "values": [
-    { "hub": "text", "direction": "outbound", "responses": "output_text", "openai_chat": "text", "anthropic": "text" },
-    { "hub": "input_text", "direction": "inbound", "responses": "input_text", "openai_chat": "text", "anthropic": "text" },
-    { "hub": "input_image", "direction": "inbound", "responses": "input_image", "openai_chat": "image_url", "anthropic": "image" },
+    { "hub": "text", "direction": "outbound", "responses": "output_text", "openai_chat": "text", "anthropic": "text", "gemini": "text" },
+    { "hub": "input_text", "direction": "inbound", "responses": "input_text", "openai_chat": "text", "anthropic": "text", "gemini": "text" },
+    { "hub": "input_image", "direction": "inbound", "responses": "input_image", "openai_chat": "image_url", "anthropic": "image", "gemini": "inlineData" },
     { "hub": "reasoning", "direction": "outbound", "responses": "reasoning", "anthropic": "thinking" },
-    { "hub": "function_call", "direction": "outbound", "responses": "function_call", "openai_chat": "tool_calls", "anthropic": "tool_use" },
-    { "hub": "function_call_output", "direction": "inbound", "responses": "function_call_output", "openai_chat": "tool", "anthropic": "tool_result" },
+    { "hub": "function_call", "direction": "outbound", "responses": "function_call", "openai_chat": "tool_calls", "anthropic": "tool_use", "gemini": "functionCall" },
+    { "hub": "function_call_output", "direction": "inbound", "responses": "function_call_output", "openai_chat": "tool", "anthropic": "tool_result", "gemini": "functionResponse" },
     { "hub": "refusal", "direction": "outbound", "responses": "refusal", "openai_chat": "text", "anthropic": "text" }
   ]
 }

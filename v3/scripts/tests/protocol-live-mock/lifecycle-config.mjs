@@ -18,6 +18,18 @@ const PROVIDER_BASE_SUFFIX = {
   gemini: '/v1beta',
 };
 
+// Authoring keys of the V3 `attempt_store` policy, in the owner's field order.
+// The Rust owner is `deny_unknown_fields` and defaults every field, so only
+// fixture-declared keys are written through.
+const ATTEMPT_STORE_KEYS = [
+  'request_max_attempts',
+  'attempt_max_bytes',
+  'attempt_max_frames',
+  'request_max_bytes',
+  'process_max_bytes',
+  'residence_timeout_ms',
+];
+
 /**
  * Write a task-owned V3 config and its referenced provider directory.
  *
@@ -49,6 +61,7 @@ export async function generateRccConfig(options = {}) {
   if (mode !== null && mode !== 'direct' && mode !== 'relay') {
     throw new Error('mode must be direct or relay');
   }
+  const attemptStore = normalizeAttemptStore(options.runtimeSetup?.attempt_store);
   const serverId = requireIdentifier(options.serverId ?? 'loopback', 'serverId');
   const defaultProviderId = requireIdentifier(options.providerId ?? `mock-${providerProtocol}`, 'providerId');
   const defaultModel = options.model ?? `mock.${MODEL_FOR_PROTOCOL[providerProtocol]}`;
@@ -109,12 +122,7 @@ export async function generateRccConfig(options = {}) {
 bind = "127.0.0.1"
 port = ${rccPort}
 endpoints = ${tomlStringArray(PROTOCOLS)}
-${mode ? `
-[servers.${tomlKey(serverId)}.execution]
-allowed_modes = ["${mode}"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
-allowed_transports = ["json", "sse"]
-` : ''}
+${renderExecutionSection(serverId, mode, attemptStore)}
 
 [servers.${tomlKey(serverId)}.routes.default]
 tiers = ${renderDefaultTier(plan.candidates)}
@@ -184,6 +192,12 @@ tiers = ${renderDefaultTier(plan.candidates)}
       field: `servers.${serverId}.execution.allowed_modes`,
       allowed_modes: [writtenMode],
     } : null,
+    attempt_store: attemptStore,
+    attempt_store_receipt: {
+      configured: Boolean(attemptStore),
+      policy: attemptStore,
+      config_section: attemptStore ? `servers.${serverId}.execution.attempt_store` : null,
+    },
     provider_id: primary.provider_id,
     model: primary.model,
     model_alias: primary.model,
@@ -300,6 +314,43 @@ function renderDefaultTier(candidates) {
   const members = candidates.map((candidate) => `  { use = "${candidate.providerId}/${candidate.model}" },`);
   members[members.length - 1] = members[members.length - 1].replace(/,$/, '');
   return `[[\n${members.join('\n')}\n]]`;
+}
+
+function renderExecutionSection(serverId, mode, attemptStore) {
+  if (!mode && !attemptStore) return '';
+  const allowedModes = mode ? [mode] : ['direct', 'relay'];
+  const lines = [
+    `[servers.${tomlKey(serverId)}.execution]`,
+    `allowed_modes = ${tomlStringArray(allowedModes)}`,
+    'allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]',
+    'allowed_transports = ["json", "sse"]',
+  ];
+  if (attemptStore) {
+    const entries = ATTEMPT_STORE_KEYS
+      .filter((key) => attemptStore[key] !== undefined)
+      .map((key) => `${key} = ${attemptStore[key]}`);
+    lines.push(`attempt_store = { ${entries.join(', ')} }`);
+  }
+  return `\n${lines.join('\n')}\n`;
+}
+
+function normalizeAttemptStore(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('runtime_setup.attempt_store must be an object when present');
+  }
+  const normalized = {};
+  for (const key of Object.keys(raw)) {
+    if (!ATTEMPT_STORE_KEYS.includes(key)) {
+      throw new Error(`runtime_setup.attempt_store.${key} is not a supported field`);
+    }
+    const value = raw[key];
+    if (!Number.isInteger(value) || value < 1) {
+      throw new Error(`runtime_setup.attempt_store.${key} must be a positive integer`);
+    }
+    normalized[key] = value;
+  }
+  return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
 /**

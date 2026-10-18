@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "case_id": "gemini-native-zero-thinking-relay-json",
+  "cell": {"entry_protocol": "gemini", "provider_protocol": "gemini", "transport": "json", "mode": "relay"},
+  "client_request": {
+    "method": "POST",
+    "path": "/v1beta/models/mock.gemini-model/generateContent",
+    "headers": {"content-type": "application/json"},
+    "body": {
+      "contents": [{"role": "user", "parts": [{"text": "native zero thinking control"}]}],
+      "generationConfig": {
+        "maxOutputTokens": 8192,
+        "thinkingConfig": {"thinkingBudget": 0, "includeThoughts": false}
+      },
+      "stream": false
+    }
+  },
+  "expected_provider": {
+    "paths": ["/v1beta/models/gemini-model:generateContent"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "contents.0.role": "user",
+      "contents.0.parts.0.text": "native zero thinking control",
+      "generationConfig.maxOutputTokens": 8192,
+      "generationConfig.thinkingConfig.thinkingBudget": 0,
+      "generationConfig.thinkingConfig.includeThoughts": false
+    },
+    "body_must_not": ["reasoning_budget_tokens", "reasoning_thinking_mode", "reasoning_include_thoughts", "routecodex_internal", "metadata_center"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "gemini",
+    "mode": "json",
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "candidates": [{
+        "index": 0,
+        "finishReason": "STOP",
+        "content": {"role": "model", "parts": [{"text": "native-zero-thinking-ok"}]}
+      }],
+      "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 2, "totalTokenCount": 5}
+    }
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {"candidates.0.content.parts.0.text": "native-zero-thinking-ok", "candidates.0.finishReason": "STOP"},
+    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "semantic_terminal_required": true
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "runtime_setup": {
+    "provider_id": "mock-gemini",
+    "model": "mock.gemini-model",
+    "wire_model": "gemini-model",
+    "candidate_ids": ["mock-gemini/mock.gemini-model"]
+  },
+  "source": {
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "files": [],
+    "tests": [],
+    "adaptation": "Independent RCC public-entry regression for issue 383b135. The native Gemini wire expectations are written as literal dotted-field oracles so the explicit zero and presence-false values are caught."
+  },
+  "contract_differences": [
+    {
+      "source_behavior": "The Gemini entry supplies explicit thinkingBudget 0 and includeThoughts false under an explicit Relay path.",
+      "rcc_requirement": "The native Gemini provider wire must preserve both values verbatim; canonical reasoning members must not leak into the native request."
+    }
+  ]
+}

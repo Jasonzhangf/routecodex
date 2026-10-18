@@ -881,7 +881,7 @@ async fn responses_relay_openai_chat_target_keeps_tool_result_immediately_after_
         .expect("assistant tool call message");
     assert_eq!(
         messages[tool_call_index]["content"],
-        "I will inspect the result next.",
+        json!([{"type":"text","text":"I will inspect the result next."}]),
         "assistant text between Responses function_call and function_call_output must stay on the same Chat assistant tool-call turn"
     );
     let tool_result = messages
@@ -889,11 +889,15 @@ async fn responses_relay_openai_chat_target_keeps_tool_result_immediately_after_
         .expect("tool result must immediately follow assistant tool call");
     assert_eq!(tool_result["role"], "tool");
     assert_eq!(tool_result["tool_call_id"], "call_order");
+    assert_eq!(tool_result["content"], "ok");
     let next_user = messages
         .get(tool_call_index + 2)
         .expect("user turn must remain after the tool result");
     assert_eq!(next_user["role"], "user");
-    assert_eq!(next_user["content"], "continue");
+    assert_eq!(
+        next_user["content"],
+        json!([{"type":"text","text":"continue"}])
+    );
 }
 
 struct CompletedTextSseTransport;
@@ -1126,7 +1130,14 @@ async fn responses_relay_client_json_request_projects_json_even_when_provider_re
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["id"], "resp_completed_text_sse");
             assert_eq!(body["status"], "completed");
-            assert_eq!(body["output"][0]["text"], "done");
+            assert_eq!(
+                body["output"],
+                json!([{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"done"}]
+                }])
+            );
         }
         V3ResponsesRelayClientBody::Sse(_) => {
             panic!("client stream=false must not be upgraded to SSE when provider returned SSE")

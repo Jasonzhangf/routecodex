@@ -102,6 +102,7 @@ impl V3ResponsesRelayProviderHealthHandle {
         self.runtime_health.store().persistence_alarm()
     }
 }
+pub(super) use responses_openai_chat_conversion::build_v3_responses_provider_response_from_openai_chat_payload;
 pub(crate) use responses_openai_chat_conversion::build_v3_responses_reasoning_item_from_openai_chat_message;
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
@@ -159,7 +160,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
     server_tool_state: &V3ResponsesRelayServerToolState,
     scope: V3ResponsesRelayServerToolScope,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    Box::pin(execute_v3_responses_relay_runtime_inner(
+    execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
@@ -177,7 +178,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
         None,
         BTreeSet::new(),
         V3ResponsesRelayRuntimeSeeds::default(),
-    ))
+    )
     .await
 }
 
@@ -197,7 +198,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
-    let mut output = Box::pin(execute_v3_responses_relay_runtime_inner(
+    let mut output = execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         &transport,
@@ -215,7 +216,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
         initial_expanded,
         initial_request_local_excluded_candidates,
         initial_relay_seeds,
-    ))
+    )
     .await?;
     let failed_attempt = output.terminal_disposition.is_some()
         || output
@@ -237,7 +238,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
-    Box::pin(execute_v3_responses_relay_runtime_inner(
+    execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
@@ -251,7 +252,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         None,
         BTreeSet::new(),
         V3ResponsesRelayRuntimeSeeds::default(),
-    ))
+    )
     .await
 }
 
@@ -264,7 +265,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
     provider_health: &V3ResponsesRelayProviderHealthHandle,
     retry_policy: V3ResponsesRelayRetryPolicy,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    Box::pin(execute_v3_responses_relay_runtime_inner(
+    execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
@@ -278,7 +279,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         None,
         BTreeSet::new(),
         V3ResponsesRelayRuntimeSeeds::default(),
-    ))
+    )
     .await
 }
 
@@ -716,114 +717,122 @@ pub fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
 }
 
 pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget(
-    mut response: Value,
+    response: Value,
     attempt_budget: crate::nodes::V3AttemptBudget,
 ) -> Result<V3ResponsesRelayClientStream, String> {
     let _owner = V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER;
-    materialize_v3_responses_terminal_usage(&mut response);
-    let status = response.get("status").and_then(Value::as_str);
-    // response.incomplete 是 Responses 协议合法终态（max_output_tokens 截断 /
-    // content_filter 触发）：必须按协议投影 response.created + output_item.done
-    // （部分输出）+ response.incomplete，禁止把它映射成 response.failed 丢弃部分
-    // 输出；只有 status=failed 才是失败终态。
-    //
-    // Responses 客户端帧序列与 Direct 路径/上游 provider 保持一致：协议没有
-    // `response.done` 事件，Chat Completions 的 `[DONE]` 终止符也不属于 Responses。
-    // A paused provider turn retains response.in_progress at the end of this
-    // exchange; it must not acquire a fabricated response.completed event.
-    // 不得向 Responses 客户端追加非协议帧。
-    let failed = status == Some("failed");
-    let mut frames = Vec::new();
-    if !failed {
-        if let Some(response_id) = response.get("id").and_then(Value::as_str) {
-            // response.created/response.in_progress 承载“尚未产生输出”的响应快照：
-            // 与上游 provider 和 Direct 路径一致，status 为 in_progress、output 为空。
-            let progress_response =
-                build_v3_responses_client_progress_response(&response, response_id);
-            frames.push(build_v3_runtime_sse_json_frame(
-                "response.created",
-                &json!({
-                    "type": "response.created",
-                    "response": progress_response,
-                }),
-            ));
-            frames.push(build_v3_runtime_sse_json_frame(
-                "response.in_progress",
-                &json!({
-                    "type": "response.in_progress",
-                    "response": progress_response,
-                }),
-            ));
-            if let Some(output) = response.get("output").and_then(Value::as_array) {
-                let mut reasoning_progress_emitted = false;
-                for (index, item) in output.iter().enumerate() {
-                    let projected_item =
-                        project_v3_responses_client_event_output_item_done_item(item);
-                    append_v3_responses_client_reasoning_progress_frames(
-                        &mut frames,
-                        response_id,
-                        index,
-                        &projected_item,
-                        &mut reasoning_progress_emitted,
-                    );
-                    append_v3_responses_client_function_call_progress_frames(
-                        &mut frames,
-                        response_id,
-                        index,
-                        &projected_item,
-                    )?;
+    let (_, stream) = super::execute_v3_operation_runner_response_frame_committed_client_sse(
+        response,
+        move |mut response| {
+            materialize_v3_responses_terminal_usage(&mut response);
+            let status = response.get("status").and_then(Value::as_str);
+            // response.incomplete 是 Responses 协议合法终态（max_output_tokens 截断 /
+            // content_filter 触发）：必须按协议投影 response.created + output_item.done
+            // （部分输出）+ response.incomplete，禁止把它映射成 response.failed 丢弃部分
+            // 输出；只有 status=failed 才是失败终态。
+            //
+            // Responses 客户端帧序列与 Direct 路径/上游 provider 保持一致：协议没有
+            // `response.done` 事件，Chat Completions 的 `[DONE]` 终止符也不属于 Responses。
+            // A paused provider turn retains response.in_progress at the end of this
+            // exchange; it must not acquire a fabricated response.completed event.
+            // 不得向 Responses 客户端追加非协议帧。
+            let failed = status == Some("failed");
+            let mut frames = Vec::new();
+            if !failed {
+                if let Some(response_id) = response.get("id").and_then(Value::as_str) {
+                    // response.created/response.in_progress 承载“尚未产生输出”的响应快照：
+                    // 与上游 provider 和 Direct 路径一致，status 为 in_progress、output 为空。
+                    let progress_response =
+                        build_v3_responses_client_progress_response(&response, response_id);
                     frames.push(build_v3_runtime_sse_json_frame(
-                        "response.output_item.done",
+                        "response.created",
                         &json!({
-                            "type": "response.output_item.done",
-                            "response_id": response_id,
-                            "output_index": index,
-                            "item": projected_item,
+                            "type": "response.created",
+                            "response": progress_response,
                         }),
                     ));
+                    frames.push(build_v3_runtime_sse_json_frame(
+                        "response.in_progress",
+                        &json!({
+                            "type": "response.in_progress",
+                            "response": progress_response,
+                        }),
+                    ));
+                    if let Some(output) = response.get("output").and_then(Value::as_array) {
+                        let mut reasoning_progress_emitted = false;
+                        for (index, item) in output.iter().enumerate() {
+                            let projected_item =
+                                project_v3_responses_client_event_output_item_done_item(item);
+                            append_v3_responses_client_reasoning_progress_frames(
+                                &mut frames,
+                                response_id,
+                                index,
+                                &projected_item,
+                                &mut reasoning_progress_emitted,
+                            );
+                            append_v3_responses_client_function_call_progress_frames(
+                                &mut frames,
+                                response_id,
+                                index,
+                                &projected_item,
+                            )?;
+                            frames.push(build_v3_runtime_sse_json_frame(
+                                "response.output_item.done",
+                                &json!({
+                                    "type": "response.output_item.done",
+                                    "response_id": response_id,
+                                    "output_index": index,
+                                    "item": projected_item,
+                                }),
+                            ));
+                        }
+                    }
                 }
             }
-        }
-    }
-    let terminal_frame_index;
-    if failed {
-        frames.push(build_v3_runtime_sse_json_frame(
-            "response.failed",
-            &json!({
-                "type": "response.failed",
-                "response": response,
-            }),
-        ));
-        terminal_frame_index = frames.len() - 1;
-    } else {
-        let terminal_response = project_v3_responses_client_completed_response(&response);
-        let terminal_event = match status {
-            Some("incomplete") => "response.incomplete",
-            Some("in_progress") => "response.in_progress",
-            _ => "response.completed",
-        };
-        frames.push(build_v3_runtime_sse_json_frame(
-            terminal_event,
-            &json!({
-                "type": terminal_event,
-                "response": terminal_response,
-            }),
-        ));
-        terminal_frame_index = frames.len() - 1;
-    }
-    let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
-        .map_err(|error| error.to_string())?;
-    for (index, frame) in frames.into_iter().enumerate() {
-        committed.push(frame).map_err(|error| error.to_string())?;
-        if index == terminal_frame_index {
-            committed
-                .mark_last_frame_as_terminal()
+            let terminal_frame_index;
+            if failed {
+                frames.push(build_v3_runtime_sse_json_frame(
+                    "response.failed",
+                    &json!({
+                        "type": "response.failed",
+                        "response": response,
+                    }),
+                ));
+                terminal_frame_index = frames.len() - 1;
+            } else {
+                let terminal_response = project_v3_responses_client_completed_response(&response);
+                let terminal_event = match status {
+                    Some("incomplete") => "response.incomplete",
+                    Some("in_progress") => "response.in_progress",
+                    _ => "response.completed",
+                };
+                frames.push(build_v3_runtime_sse_json_frame(
+                    terminal_event,
+                    &json!({
+                        "type": terminal_event,
+                        "response": terminal_response,
+                    }),
+                ));
+                terminal_frame_index = frames.len() - 1;
+            }
+            let mut committed =
+                crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
+                    .map_err(|error| error.to_string())?;
+            for (index, frame) in frames.into_iter().enumerate() {
+                committed.push(frame).map_err(|error| error.to_string())?;
+                if index == terminal_frame_index {
+                    committed
+                        .mark_last_frame_as_terminal()
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+            let stream = committed
+                .seal_after_validated_terminal()
                 .map_err(|error| error.to_string())?;
-        }
-    }
-    committed
-        .seal_after_validated_terminal()
-        .map_err(|error| error.to_string())
+            Ok((response, stream))
+        },
+    )?;
+    Ok(stream)
 }
 
 pub(crate) fn materialize_v3_responses_terminal_usage(response: &mut Value) {
@@ -1014,18 +1023,23 @@ fn append_v3_responses_client_function_call_progress_frames(
     Ok(())
 }
 
-fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Value {
+pub(super) fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Value {
     if item.get("type").and_then(Value::as_str) != Some("output_text") {
         return item.clone();
     }
-    let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
+    let mut content_part = item.clone();
+    if let Some(text) = content_part.get_mut("text") {
+        if !text.is_string() {
+            *text = Value::String(text.to_string());
+        }
+    }
+    if let Some(object) = content_part.as_object_mut() {
+        object.remove("id");
+    }
     let mut projected = json!({
         "type": "message",
         "role": "assistant",
-        "content": [{
-            "type": "output_text",
-            "text": text,
-        }],
+        "content": [content_part],
     });
     if let Some(id) = item.get("id").cloned() {
         projected["id"] = id;
@@ -1060,7 +1074,7 @@ fn build_v3_responses_client_progress_response(response: &Value, response_id: &s
 /// SSE 事件级 completed/done 内嵌 response 的 item 表示投影：与
 /// `output_item.done` 事件保持一致（output_text -> message 包裹），
 /// 避免同一 SSE 流内同一 output 条目出现两种 client 语义。
-fn project_v3_responses_client_completed_response(response: &Value) -> Value {
+pub(super) fn project_v3_responses_client_completed_response(response: &Value) -> Value {
     let mut projected = response.clone();
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
         for item in output.iter_mut() {

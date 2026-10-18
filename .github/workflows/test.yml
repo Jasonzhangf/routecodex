@@ -128,6 +128,7 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.v3_debug == 'true' }}
         run: npm run test:v3-debug-payload-budget-red-fixtures
       - name: V3 canonical verification stack
+        id: v3_canonical
         if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
         run: npm --prefix v3 run verify:ci
       - name: V3 DAGPipe graph governance
@@ -151,9 +152,21 @@ jobs:
       - name: Install built V3 CLI shim
         if: needs.scope.outputs.v3_build == 'true'
         run: npm run fix:cli-shim
+      - name: Installed V3 protocol live-mock matrix
+        if: needs.scope.outputs.v3_build == 'true'
+        run: |
+          node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs \
+            --binary "$HOME/.local/bin/rccv3" \
+            --binary-kind installed \
+            --evidence "$RUNNER_TEMP/v3-installed-protocol-matrix"
       - name: Run host tests after install
         if: needs.scope.outputs.v3_build == 'true'
-        run: node v3/scripts/run-v3-cargo-test.mjs --workspace -- --nocapture
+        run: |
+          if [[ '${{ needs.scope.outputs.v3_architecture }}' == 'true' && '${{ steps.v3_canonical.outcome }}' == 'success' ]]; then
+            node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli -p routecodex-v3-lifecycle -- --nocapture
+          else
+            node v3/scripts/run-v3-cargo-test.mjs --workspace -- --nocapture
+          fi
 
   v4-build:
     needs: scope

@@ -1,5 +1,9 @@
 use super::*;
 use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
+use crate::operation_runner::{
+    run_v3_single_node_operator, OperationRunnerError, V3OperationGraph,
+};
+use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde::Deserializer;
 use serde_json::{json, Map, Value};
@@ -1025,6 +1029,8 @@ pub enum V3HubRelayResponseError {
 pub struct V3HubRelayResponseHookRegistry {
     normalize: fn(
         V3ProviderRespInbound01Raw,
+        Option<&Value>,
+        Option<&str>,
     ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError>,
     govern: fn(
         V3HubRespInbound02Normalized,
@@ -1038,7 +1044,16 @@ impl V3HubRelayResponseHookRegistry {
         &self,
         input: V3ProviderRespInbound01Raw,
     ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {
-        (self.normalize)(input)
+        self.normalize_with_context(input, None, None)
+    }
+
+    pub(crate) fn normalize_with_context(
+        &self,
+        input: V3ProviderRespInbound01Raw,
+        chat_request: Option<&Value>,
+        request_id: Option<&str>,
+    ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {
+        (self.normalize)(input, chat_request, request_id)
     }
 
     pub fn govern(
@@ -1046,7 +1061,7 @@ impl V3HubRelayResponseHookRegistry {
         input: V3HubRespInbound02Normalized,
         profile: &V3HubRelayResponseHookProfile,
     ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
-        (self.govern)(input, profile)
+        govern_v3_hub_relay_response_via_operator(input, profile, self.govern)
     }
 
     pub(crate) fn typed_sse_catalog(&self) -> V3RelaySseHookCatalog {
@@ -1064,6 +1079,8 @@ pub fn compile_v3_hub_relay_response_hooks() -> V3HubRelayResponseHookRegistry {
 
 fn normalize_v3_hub_relay_response(
     input: V3ProviderRespInbound01Raw,
+    chat_request: Option<&Value>,
+    request_id: Option<&str>,
 ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {
     if input.execution != V3HubExecutionMode::Relay {
         return Err(V3HubRelayResponseError::ExecutionModeNotRelay);
@@ -1081,8 +1098,12 @@ fn normalize_v3_hub_relay_response(
             }
         })?;
     Ok(
-        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat)
-            .map_err(|error| V3HubRelayResponseError::ProviderCompatFailed { reason: error })?,
+        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id(
+            compat,
+            chat_request,
+            request_id,
+        )
+        .map_err(|error| V3HubRelayResponseError::ProviderCompatFailed { reason: error })?,
     )
 }
 
@@ -1182,6 +1203,128 @@ fn govern_v3_hub_relay_response(
         web_search_transition: web_search_center_state,
         web_search_hook_outcome,
     })
+}
+
+type V3HubRelayResponseGovernFn =
+    fn(
+        V3HubRespInbound02Normalized,
+        &V3HubRelayResponseHookProfile,
+    ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError>;
+
+struct GovernChatResponseOperator {
+    input: V3HubRespInbound02Normalized,
+    profile: V3HubRelayResponseHookProfile,
+    govern: V3HubRelayResponseGovernFn,
+    side_output: Arc<Mutex<Option<GovernedResponseSideOutput>>>,
+}
+
+#[derive(Debug)]
+enum GovernedResponseSideOutput {
+    Complete(Box<V3HubRespChatProcess03Outcome>),
+    Error(V3HubRelayResponseError),
+}
+
+impl GovernChatResponseOperator {
+    fn new(
+        input: V3HubRespInbound02Normalized,
+        profile: &V3HubRelayResponseHookProfile,
+        govern: V3HubRelayResponseGovernFn,
+        side_output: Arc<Mutex<Option<GovernedResponseSideOutput>>>,
+    ) -> Self {
+        Self {
+            input,
+            profile: profile.clone(),
+            govern,
+            side_output,
+        }
+    }
+}
+
+impl Operator for GovernChatResponseOperator {
+    fn name(&self) -> &'static str {
+        "routecodex.v3.operation.govern_chat_response"
+    }
+
+    fn version(&self) -> &'static str {
+        "1"
+    }
+
+    fn input_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _: &OperatorContext) -> Result<Value, String> {
+        let mut captured = self.input.clone();
+        *captured.provider_payload_mut() = Arc::new(input);
+        match (self.govern)(captured, &self.profile) {
+            Ok(governed) => {
+                *self.side_output.lock().map_err(|_| {
+                    "response governance side-output holder is poisoned".to_string()
+                })? = Some(GovernedResponseSideOutput::Complete(Box::new(
+                    governed.clone(),
+                )));
+                Ok(governed.finalized_payload().clone())
+            }
+            Err(error) => {
+                let error_message = error.to_string();
+                *self.side_output.lock().map_err(|_| {
+                    "response governance side-output holder is poisoned".to_string()
+                })? = Some(GovernedResponseSideOutput::Error(error));
+                Err(error_message)
+            }
+        }
+    }
+}
+
+fn govern_v3_hub_relay_response_via_operator(
+    input: V3HubRespInbound02Normalized,
+    profile: &V3HubRelayResponseHookProfile,
+    govern: V3HubRelayResponseGovernFn,
+) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
+    let side_output = Arc::new(Mutex::new(None));
+    let operator =
+        GovernChatResponseOperator::new(input.clone(), profile, govern, side_output.clone());
+    let executed = run_v3_single_node_operator(
+        V3OperationGraph::Response,
+        "govern_chat_response",
+        input.provider_payload().as_ref().clone(),
+        operator,
+    );
+    let captured = side_output
+        .lock()
+        .map_err(|_| V3HubRelayResponseError::ProviderCompatFailed {
+            reason: "response governance side-output holder is poisoned".to_string(),
+        })?
+        .take();
+    resolve_governed_response_execution(executed, captured)
+}
+
+fn resolve_governed_response_execution(
+    executed: Result<Value, OperationRunnerError>,
+    captured: Option<GovernedResponseSideOutput>,
+) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
+    match (executed, captured) {
+        (Err(_), Some(GovernedResponseSideOutput::Error(error))) => Err(error),
+        (Err(runner_error), _) => Err(operation_runner_response_error(runner_error)),
+        (Ok(executed), Some(GovernedResponseSideOutput::Complete(mut outcome))) => {
+            *outcome.data.previous.provider_payload_mut() = Arc::new(executed);
+            Ok(*outcome)
+        }
+        (Ok(_), Some(GovernedResponseSideOutput::Error(error))) => Err(error),
+        (Ok(_), None) => Err(V3HubRelayResponseError::ProviderCompatFailed {
+            reason: "response governance operator omitted typed side output".to_string(),
+        }),
+    }
+}
+
+fn operation_runner_response_error(error: OperationRunnerError) -> V3HubRelayResponseError {
+    V3HubRelayResponseError::ProviderCompatFailed {
+        reason: format!("canonical response governance failed: {error}"),
+    }
 }
 
 fn restore_v3_tool_thinking_custom_calls_at_resp03(
@@ -4565,3 +4708,269 @@ mod resp_chat_process_03_governed_tests;
 #[cfg(test)]
 #[path = "resp_chat_process_03_governed_inline_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod canonical_govern_registry_tests {
+    use super::*;
+
+    fn resp02(payload: Value) -> V3HubRespInbound02Normalized {
+        let resp01 = build_v3_provider_resp_inbound_01_raw(
+            payload,
+            V3HubEntryProtocol::Responses,
+            V3HubProviderWireProtocol::Responses,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)
+            .expect("Resp01 must normalize");
+        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat)
+            .expect("Resp02 must build")
+    }
+
+    fn success_payload() -> Value {
+        json!({
+            "id": "resp_registry_sidecar",
+            "model": "client-visible-model",
+            "status": "completed",
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{
+                        "type": "output_text",
+                        "text": "<think>typed sidecar</think>visible"
+                    }]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_registry_web_search",
+                    "name": "web_search",
+                    "arguments": "{\"query\":\"registry\"}"
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_registry_followup",
+                    "name": "registry_followup",
+                    "arguments": "{\"item\":\"preserved\"}"
+                }
+            ]
+        })
+    }
+
+    fn success_profile() -> V3HubRelayResponseHookProfile {
+        let active_search = V3WebSearchCenterState::new()
+            .transition_to(
+                V3WebSearchCenterPhase::LocalToolSurfaceActive,
+                "registry_test_request",
+            )
+            .expect("typed web_search state must activate");
+        V3HubRelayResponseHookProfile::empty()
+            .with_servertool_name("registry_followup")
+            .with_web_search_execution_mode(
+                routecodex_v3_config::V3WebSearchExecutionMode::MetadataCenterLocalSearch,
+            )
+            .with_web_search_center_state(active_search)
+    }
+
+    #[test]
+    fn canonical_registry_govern_returns_transformation_and_typed_side_outputs() {
+        let profile = success_profile();
+        let expected = govern_v3_hub_relay_response(resp02(success_payload()), &profile)
+            .expect("direct governance must succeed")
+            .finalized_payload()
+            .clone();
+        assert_eq!(
+            expected["output"][0]["summary"][0]["text"],
+            json!("typed sidecar")
+        );
+        assert!(!expected.to_string().contains("<think>"));
+        assert!(!expected.to_string().contains("call_registry_web_search"));
+        assert!(expected.to_string().contains("call_registry_followup"));
+        assert!(expected.to_string().contains("preserved"));
+
+        let outcome = compile_v3_hub_relay_response_hooks()
+            .govern(resp02(success_payload()), &profile)
+            .expect("public registry governance must succeed");
+
+        assert_eq!(outcome.finalized_payload(), &expected);
+        assert_eq!(
+            outcome.servertool_action(),
+            V3HubServertoolResponseAction::FollowupRequired
+        );
+        assert_eq!(outcome.terminality(), V3HubResponseTerminality::NonTerminal);
+        let sidecar = outcome
+            .web_search_transition()
+            .expect("local web_search must preserve its typed state transition");
+        assert_eq!(sidecar.phase(), V3WebSearchCenterPhase::ToolCallObserved);
+        assert_eq!(sidecar.original_call_id(), Some("call_registry_web_search"));
+        assert_eq!(sidecar.query(), Some("registry"));
+        assert_eq!(
+            outcome.web_search_hook_outcome(),
+            &V3WebSearchHookOutcome::NotApplicable
+        );
+    }
+
+    #[test]
+    fn canonical_registry_govern_preserves_the_original_typed_error() {
+        let expected = V3HubRelayResponseError::UnsupportedStatus {
+            status: "typed-registry-error".to_string(),
+        };
+        let error = compile_v3_hub_relay_response_hooks()
+            .govern(
+                resp02(json!({
+                    "id": "resp_registry_error",
+                    "status": "typed-registry-error",
+                    "output": []
+                })),
+                &V3HubRelayResponseHookProfile::empty(),
+            )
+            .expect_err("typed governance failure must remain an error");
+
+        assert_eq!(error, expected);
+    }
+
+    fn assert_sdk_payload(
+        input: V3HubRespInbound02Normalized,
+        _: &V3HubRelayResponseHookProfile,
+    ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
+        assert_eq!(input.provider_payload().as_ref()["id"], "sdk-input-truth");
+        Err(V3HubRelayResponseError::UnsupportedStatus {
+            status: "sdk-input-observed".to_string(),
+        })
+    }
+
+    #[test]
+    fn canonical_govern_operator_consumes_sdk_input_not_captured_payload() {
+        let side_output = Arc::new(Mutex::new(None));
+        let operator = GovernChatResponseOperator::new(
+            resp02(json!({
+                "id": "captured-payload-must-not-run",
+                "status": "completed",
+                "output": []
+            })),
+            &V3HubRelayResponseHookProfile::empty(),
+            assert_sdk_payload,
+            side_output.clone(),
+        );
+        let context = OperatorContext {
+            identity: pipeline_runtime::Identity {
+                project_id: "routecodex-v3".to_string(),
+                graph_id: "registry-test".to_string(),
+                graph_version: "1".to_string(),
+                execution_id: "sdk-input-test".to_string(),
+                attempt_id: "client-entry".to_string(),
+            },
+            node_id: "govern_chat_response".to_string(),
+        };
+
+        let error = operator
+            .execute(
+                json!({
+                    "id": "sdk-input-truth",
+                    "status": "completed",
+                    "output": []
+                }),
+                &context,
+            )
+            .expect_err("typed governance failure must not return empty business success");
+
+        assert_eq!(
+            error,
+            "unsupported provider response status: sdk-input-observed"
+        );
+        let captured = side_output.lock().expect("side-output must lock");
+        match captured.as_ref() {
+            Some(GovernedResponseSideOutput::Error(
+                V3HubRelayResponseError::UnsupportedStatus { status },
+            )) => assert_eq!(status, "sdk-input-observed"),
+            other => panic!("expected typed governance error sidecar, found {other:?}"),
+        }
+    }
+
+    fn typed_success_from_sdk_input(
+        mut input: V3HubRespInbound02Normalized,
+        _: &V3HubRelayResponseHookProfile,
+    ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
+        assert_eq!(input.provider_payload().as_ref()["id"], "sdk-input-truth");
+        let mut payload = input.provider_payload().as_ref().clone();
+        payload["transformed_by"] = json!("sdk-output");
+        *input.provider_payload_mut() = Arc::new(payload);
+        Ok(V3HubRespChatProcess03Outcome {
+            data: V3HubRespChatProcess03Governed {
+                previous: input,
+                terminality: V3HubResponseTerminality::Terminal,
+                tool_calls: Vec::new(),
+                servertool_action: V3HubServertoolResponseAction::None,
+            },
+            web_search_transition: None,
+            web_search_hook_outcome: V3WebSearchHookOutcome::NotApplicable,
+        })
+    }
+
+    #[test]
+    fn canonical_govern_operator_uses_sdk_output_as_business_payload() {
+        let side_output = Arc::new(Mutex::new(None));
+        let operator = GovernChatResponseOperator::new(
+            resp02(json!({
+                "id": "captured-payload-must-not-run",
+                "status": "completed",
+                "output": []
+            })),
+            &V3HubRelayResponseHookProfile::empty(),
+            typed_success_from_sdk_input,
+            side_output.clone(),
+        );
+        let context = OperatorContext {
+            identity: pipeline_runtime::Identity {
+                project_id: "routecodex-v3".to_string(),
+                graph_id: "registry-test".to_string(),
+                graph_version: "1".to_string(),
+                execution_id: "sdk-output-test".to_string(),
+                attempt_id: "client-entry".to_string(),
+            },
+            node_id: "govern_chat_response".to_string(),
+        };
+
+        let output = operator
+            .execute(
+                json!({
+                    "id": "sdk-input-truth",
+                    "status": "completed",
+                    "output": []
+                }),
+                &context,
+            )
+            .expect("successful typed governance must complete the SDK node");
+
+        assert_eq!(output["id"], "sdk-input-truth");
+        assert_eq!(output["transformed_by"], "sdk-output");
+        assert!(!output
+            .as_object()
+            .expect("output must be an object")
+            .is_empty());
+        let captured = side_output.lock().expect("side-output must lock");
+        assert!(matches!(
+            captured.as_ref(),
+            Some(GovernedResponseSideOutput::Complete(outcome))
+                if outcome.finalized_payload()["transformed_by"] == "sdk-output"
+        ));
+    }
+
+    #[test]
+    fn govern_execution_preserves_runner_error_when_no_typed_error_was_captured() {
+        let runner_error = OperationRunnerError {
+            message: "runner failed before operator execution".to_string(),
+        };
+        let error = resolve_governed_response_execution(Err(runner_error), None)
+            .expect_err("runner failure must remain an error");
+
+        assert_eq!(
+            error,
+            V3HubRelayResponseError::ProviderCompatFailed {
+                reason:
+                    "canonical response governance failed: runner failed before operator execution"
+                        .to_string(),
+            }
+        );
+    }
+}

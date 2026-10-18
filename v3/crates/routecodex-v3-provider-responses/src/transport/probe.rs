@@ -58,6 +58,7 @@ impl ProviderResponsesTransport {
         else {
             unreachable!("HTTP checked before admission")
         };
+        let auth_carrier = request.auth_carrier;
         let result = async {
             let response = self
                 .send_http_headers(
@@ -65,6 +66,7 @@ impl ProviderResponsesTransport {
                     &provider_id,
                     url,
                     auth,
+                    auth_carrier,
                     stream_intent,
                     body,
                     provider_headers,

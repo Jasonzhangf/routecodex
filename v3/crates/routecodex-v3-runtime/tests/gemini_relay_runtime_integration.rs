@@ -183,6 +183,110 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_gemini_semantics(
 }
 
 #[tokio::test]
+async fn relay_routes_before_tool_schema_inflation_and_preserves_gemini_url_model() {
+    use routecodex_v3_runtime::{
+        build_v3_hub_req_inbound_01_client_raw, build_v3_router_request_facts_for_entry,
+        compile_v3_hub_relay_request_hooks, V3HubEntryProtocol, V3HubInvocationSource,
+        V3HubServertoolRequestProfile, V3HubTransportIntent,
+    };
+    let scope = "gemini_pre_govern_route";
+    let payload = json!({
+        "contents":[{"role":"user","parts":[{"text":"look up this value"}]}],
+        "tools":[{"functionDeclarations":[{
+            "name":"lookup", "parameters":{"type":"object","properties":{"q":{"type":"string"}}}
+        }]}]
+    });
+    let raw = || {
+        build_v3_hub_req_inbound_01_client_raw(
+            payload.clone(),
+            V3HubEntryProtocol::Gemini,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        )
+    };
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let normalized = hooks
+        .run(raw(), &V3HubServertoolRequestProfile::disabled())
+        .unwrap();
+    let governed = hooks
+        .run(
+            raw(),
+            &V3HubServertoolRequestProfile::enabled(["servertool.request"])
+                .with_tool_thinking_enabled(true),
+        )
+        .unwrap();
+    let routing_tokens = |request: &Value| {
+        let mut view = request.clone();
+        view["model"] = json!("gemini-wire");
+        build_v3_router_request_facts_for_entry(&view, "gemini", None).input_tokens
+    };
+    let normalized_tokens = routing_tokens(normalized.payload());
+    let governed_tokens = routing_tokens(governed.payload());
+    assert!(governed_tokens > normalized_tokens + 1,
+        "fixture must cross a real routing token boundary: {normalized_tokens} -> {governed_tokens}");
+    let threshold = normalized_tokens + (governed_tokens - normalized_tokens) / 2;
+    let mut manifest = manifest_for_action_gate_scope(scope);
+    manifest
+        .servers
+        .get_mut(scope)
+        .unwrap()
+        .features
+        .insert("tool_thinking".into(), true);
+    let group = manifest.route_groups.get_mut(scope).unwrap();
+    let mut longcontext = group.pools["gemini_client"].clone();
+    longcontext.id = "longcontext".into();
+    let matcher = longcontext.match_rule.as_mut().unwrap();
+    matcher.precedence = 1;
+    matcher.min_input_tokens = Some(threshold);
+    matcher.models = vec!["gemini-wire".into()];
+    group.pools.remove("gemini_client");
+    group.pools.insert("longcontext".into(), longcontext);
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_gemini_relay_runtime(
+        &manifest,
+        V3GeminiRelayRuntimeInput {
+            server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                scope,
+                scope,
+                "pre-govern-route",
+            )
+            .unwrap(),
+            request_id: "gemini-pre-govern-route".into(),
+            endpoint_path: "/v1beta/models/gemini-wire:generateContent".into(),
+            payload,
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.status, 200);
+    assert_eq!(
+        output.observability.as_ref().unwrap().pool_id.as_deref(),
+        Some("default")
+    );
+    let captured = transport.captured_body.lock().unwrap();
+    let captured = captured.as_ref().unwrap();
+    assert!(
+        captured.get("model").is_none(),
+        "URL model must stay out of business payload"
+    );
+    assert!(
+        captured
+            .pointer("/tools/0/functionDeclarations/0/parameters/properties/reason")
+            .is_some(),
+        "provider must still receive governed tool schema: {captured}"
+    );
+    assert_eq!(
+        transport.captured_url.lock().unwrap().as_deref(),
+        Some(format!("http://{scope}.invalid/v1beta/models/gemini-wire:generateContent").as_str())
+    );
+}
+
+#[tokio::test]
 async fn json_function_call_governance_preserves_gemini_name_mapping() {
     let transport = StaticJsonTransport {
         provider_body: json!({
@@ -1427,12 +1531,11 @@ async fn side_channel_request_fails_before_provider_send() {
 }
 
 #[tokio::test]
-async fn non_gemini_route_target_fails_before_provider_send() {
-    let transport = JsonTransport {
-        captured_url: Mutex::new(None),
-        captured_body: Mutex::new(None),
+async fn non_gemini_route_target_returns_gemini_client_projection() {
+    let transport = StaticJsonTransport {
+        provider_body: json!({"id":"chat-cross","choices":[{"index":0,"message":{"role":"assistant","content":"cross target"},"finish_reason":"stop"}]}),
     };
-    let error = execute_v3_gemini_relay_runtime(
+    let output = execute_v3_gemini_relay_runtime(
         &manifest_with_provider_type("openai_chat"),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -1445,23 +1548,125 @@ async fn non_gemini_route_target_fails_before_provider_send() {
             request_id: "req-non-gemini-target".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
-                "contents":[{"role":"user","parts":[{"text":"must not hit OpenAI target"}]}],
+                "contents":[{"role":"user","parts":[{"text":"use selected OpenAI target"}]}],
                 "stream":false
             }),
         },
         &transport,
     )
     .await
-    .expect_err("non-Gemini provider target must fail before transport");
-
-    assert!(
-        error
-            .to_string()
-            .contains("no compatible Gemini provider target"),
-        "{error:?}"
+    .expect("selected cross-protocol provider must execute");
+    let V3GeminiRelayClientBody::Json(payload) = output.client_body else {
+        panic!("JSON client projection expected")
+    };
+    assert_eq!(
+        payload["candidates"][0]["content"]["parts"][0]["text"],
+        "cross target"
     );
-    assert!(transport.captured_url.lock().unwrap().is_none());
-    assert!(transport.captured_body.lock().unwrap().is_none());
+    assert_eq!(payload["candidates"][0]["finishReason"], "STOP");
+}
+
+async fn run_json_client_with_chat_sse(
+    limit: usize,
+    hold_open: bool,
+) -> Result<routecodex_v3_runtime::V3GeminiRelayRuntimeOutput, String> {
+    let (sender, receiver) = tokio::sync::mpsc::channel(4);
+    let content = if hold_open {
+        "x".repeat(2048)
+    } else {
+        "complete JSON".to_string()
+    };
+    let mut bytes = format!("data: {}\n\n", json!({"id":"chat-json","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":content}}]})).into_bytes();
+    if !hold_open {
+        bytes.extend_from_slice(b"data: {\"id\":\"chat-json\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
+    }
+    sender.send(Ok(bytes)).await.unwrap();
+    let sender = hold_open.then_some(sender);
+    let transport = ControlledSseTransport {
+        receiver: Mutex::new(Some(receiver)),
+    };
+    let mut manifest = manifest_with_provider_type("openai_chat");
+    manifest
+        .servers
+        .get_mut("controlled")
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .attempt_max_bytes = limit;
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let output = tokio::time::timeout(
+        Duration::from_millis(500),
+        execute_v3_gemini_relay_runtime_with_provider_health(
+            &manifest,
+            V3GeminiRelayRuntimeInput {
+                server_id: "controlled".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    format!("json-chat-sse-{limit}-{hold_open}"),
+                )
+                .unwrap(),
+                request_id: format!("json-chat-sse-{limit}-{hold_open}"),
+                endpoint_path: "/v1beta/models/gemini-client:generateContent".into(),
+                payload: json!({"contents":[{"role":"user","parts":[{"text":"hello"}]}]}),
+            },
+            &transport,
+            provider_health.runtime_health(),
+        ),
+    )
+    .await
+    .map_err(|_| "runtime did not settle before the held-open provider terminal".to_string())?
+    .map_err(|error| error.to_string());
+    drop(sender);
+    if hold_open {
+        let availability = provider_health.store().availability(
+            "controlled",
+            Some("controlled"),
+            Some("gemini-wire"),
+            u64::MAX,
+        );
+        assert!(
+            availability.available,
+            "local resource exhaustion must not cool the provider"
+        );
+        assert!(availability.blocked_scopes.is_empty());
+    }
+    output
+}
+
+#[tokio::test]
+async fn gemini_json_client_materializes_complete_chat_sse_as_json() {
+    let output = run_json_client_with_chat_sse(16384, false).await.unwrap();
+    let V3GeminiRelayClientBody::Json(payload) = output.client_body else {
+        panic!("JSON client must receive projected JSON")
+    };
+    assert_eq!(
+        payload["candidates"][0]["content"]["parts"][0]["text"], "complete JSON",
+        "status={} payload={payload} trace={:?}",
+        output.status, output.node_trace
+    );
+    assert_eq!(payload["candidates"][0]["finishReason"], "STOP");
+}
+
+#[tokio::test]
+async fn gemini_json_client_stops_over_budget_chat_sse_before_terminal() {
+    let error = match run_json_client_with_chat_sse(1024, true).await {
+        Err(error) => error,
+        Ok(output) => match output.client_body {
+            V3GeminiRelayClientBody::Json(payload) => panic!(
+                "over-budget attempt returned status={} payload={payload} trace={:?}",
+                output.status, output.node_trace
+            ),
+            _ => panic!("over-budget attempt returned a stream"),
+        },
+    };
+    assert!(
+        error.contains("V3ExecutionAttemptPayloadStore"),
+        "unexpected failure: {error}"
+    );
 }
 
 async fn collect_sse_failure(

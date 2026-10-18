@@ -514,6 +514,32 @@ fn build_v3_router_request_facts_for_entry_with_control(
     }
 }
 
+/// Resolve-target uses the same complete facts builder as direct routing,
+/// including compaction and current-turn context.
+pub(crate) fn build_v3_router_request_facts_for_resolve_target(
+    body: &Value,
+    entry_protocol: &str,
+    endpoint: &str,
+    longcontext_threshold_tokens: Option<u64>,
+    is_compaction: bool,
+    manifest: &routecodex_v3_config::V3Config05ManifestPublished,
+) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
+    let mut normalized = body.clone();
+    crate::hub_v1::normalize_v3_history_image_placeholders(&mut normalized);
+    let compaction = is_compaction || is_v3_compaction_endpoint(endpoint);
+    let mut facts = build_v3_router_request_facts_for_entry_with_control(
+        &normalized,
+        entry_protocol,
+        longcontext_threshold_tokens,
+        compaction,
+        Some(manifest),
+    );
+    if compaction && entry_protocol != "openai_chat" {
+        facts.client_model = None;
+    }
+    facts
+}
+
 fn is_v3_compaction_endpoint(endpoint: &str) -> bool {
     endpoint
         .trim_end_matches('/')

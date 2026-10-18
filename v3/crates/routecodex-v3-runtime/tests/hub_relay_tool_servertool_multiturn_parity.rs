@@ -188,6 +188,36 @@ fn current_tool_round_payload() -> Value {
     })
 }
 
+fn current_tool_round_payload_for_entry(entry_protocol: V3HubEntryProtocol) -> Value {
+    match entry_protocol {
+        V3HubEntryProtocol::Responses => current_tool_round_payload(),
+        V3HubEntryProtocol::Anthropic => json!({
+            "messages":[
+                {"role":"assistant","content":[
+                    {"type":"tool_use","id":"call_current","name":"lookup","input":{}}
+                ]},
+                {"role":"user","content":[
+                    {"type":"tool_result","tool_use_id":"call_current","content":"current ok"}
+                ]}
+            ]
+        }),
+        V3HubEntryProtocol::OpenAiChat => json!({
+            "messages":[
+                {"role":"assistant","content":null,"tool_calls":[
+                    {"id":"call_current","type":"function","function":{"name":"lookup","arguments":"{}"}}
+                ]},
+                {"role":"tool","tool_call_id":"call_current","content":"current ok"}
+            ]
+        }),
+        V3HubEntryProtocol::Gemini => json!({
+            "contents": [
+                {"role":"model","parts":[{"functionCall":{"id":"call_current","name":"lookup","args":{}}}]},
+                {"role":"user","parts":[{"functionResponse":{"id":"call_current","name":"lookup","response":{"result":"current ok"}}}]}
+            ]
+        }),
+    }
+}
+
 #[test]
 fn protocol_transport_matrix_uses_one_chat_process_governance_path() {
     let request_hooks = compile_v3_hub_relay_request_hooks();
@@ -204,11 +234,39 @@ fn protocol_transport_matrix_uses_one_chat_process_governance_path() {
         for transport in transports {
             let new_outcome = request_hooks
                 .run(
-                    raw_request_for(current_tool_round_payload(), entry, transport),
+                    raw_request_for(
+                        current_tool_round_payload_for_entry(entry),
+                        entry,
+                        transport,
+                    ),
                     &V3HubServertoolRequestProfile::disabled(),
                 )
                 .expect("new/current-history tool output must be governed at Req04");
             assert_eq!(new_outcome.tool_output_count(), 1);
+            let messages = new_outcome.payload()["messages"]
+                .as_array()
+                .expect("normalized request must use canonical Chat messages");
+            let tool_call = messages
+                .iter()
+                .find(|message| message["role"] == "assistant")
+                .and_then(|message| message["tool_calls"].as_array())
+                .and_then(|tool_calls| tool_calls.first())
+                .expect("current tool call must survive normalization");
+            assert_eq!(tool_call["id"], "call_current");
+            assert_eq!(tool_call["function"]["name"], "lookup");
+            assert_eq!(tool_call["function"]["arguments"], "{}");
+            let tool_result = messages
+                .iter()
+                .find(|message| {
+                    message["role"] == "tool" && message["tool_call_id"] == "call_current"
+                })
+                .expect("current tool result must remain paired by call id");
+            let expected_tool_result = if entry == V3HubEntryProtocol::Gemini {
+                "{\"result\":\"current ok\"}"
+            } else {
+                "current ok"
+            };
+            assert_eq!(tool_result["content"], expected_tool_result);
 
             let resp02 = response_hooks
                 .normalize(relay_response_for(

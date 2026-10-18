@@ -732,6 +732,34 @@ fn compact_native_hub_v1_authoring_derives_closed_internal_defaults() {
             "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug"
         )
     );
+    let anthropic = hub_v1
+        .entry_protocol_bindings
+        .iter()
+        .find(|binding| binding.entry_protocol == "anthropic")
+        .expect("anthropic binding");
+    assert_eq!(anthropic.execution_mode.as_str(), "direct");
+    assert_eq!(
+        anthropic.runtime_owner_symbol.as_deref(),
+        Some("execute_v3_anthropic_direct_server_outcome")
+    );
+    assert_eq!(
+        anthropic.runtime_owner_path.as_deref(),
+        Some("v3/crates/routecodex-v3-server/src/executors.rs")
+    );
+    let gemini = hub_v1
+        .entry_protocol_bindings
+        .iter()
+        .find(|binding| binding.entry_protocol == "gemini")
+        .expect("gemini binding");
+    assert_eq!(gemini.execution_mode.as_str(), "direct");
+    assert_eq!(
+        gemini.runtime_owner_symbol.as_deref(),
+        Some("execute_v3_gemini_direct_server_outcome")
+    );
+    assert_eq!(
+        gemini.runtime_owner_path.as_deref(),
+        Some("v3/crates/routecodex-v3-server/src/executors.rs")
+    );
 
     let execution = manifest.servers["primary"]
         .execution
@@ -744,6 +772,44 @@ fn compact_native_hub_v1_authoring_derives_closed_internal_defaults() {
     assert_eq!(execution.attempt_store.request_max_bytes, 64 * 1024 * 1024);
     assert_eq!(execution.attempt_store.process_max_bytes, 512 * 1024 * 1024);
     assert_eq!(execution.attempt_store.residence_timeout_ms, 600_000);
+}
+
+#[test]
+fn explicit_same_protocol_relay_is_preserved() {
+    let raw = format!(
+        "{}\n{}\n{}",
+        FULL_CONFIG, HUB_V1_DECLARATION, HUB_V1_SERVER_EXECUTION
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap()).unwrap();
+    let hub = manifest.hub_v1.as_ref().expect("hub_v1 declaration");
+    for protocol in ["anthropic", "gemini"] {
+        let binding = hub
+            .entry_protocol_bindings
+            .iter()
+            .find(|binding| binding.entry_protocol == protocol)
+            .expect("explicit Relay binding");
+        assert_eq!(binding.execution_mode.as_str(), "relay");
+        let expected_owner = match protocol {
+            "anthropic" => (
+                "execute_v3_anthropic_relay_runtime_with_default_transport",
+                "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs",
+            ),
+            "gemini" => (
+                "execute_v3_gemini_relay_runtime_with_default_transport",
+                "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs",
+            ),
+            _ => unreachable!("closed native protocols"),
+        };
+        assert_eq!(
+            binding.runtime_owner_symbol.as_deref(),
+            Some(expected_owner.0)
+        );
+        assert_eq!(
+            binding.runtime_owner_path.as_deref(),
+            Some(expected_owner.1)
+        );
+    }
 }
 
 #[test]
@@ -1348,6 +1414,28 @@ fn compiles_hub_v1_declarations_without_request_branch_decisions() {
         .entry_protocol_binding_for_endpoint("/v1beta/models/gemini-2.5-pro/generateContent")
         .expect("gemini endpoint binding lookup");
     assert_eq!(gemini_lookup.entry_protocol, "gemini");
+    for endpoint in [
+        "/v1beta/models/gemini-2.5-pro:generateContent",
+        "/v1beta/models/gemini-2.5-pro:streamGenerateContent",
+    ] {
+        assert_eq!(
+            hub.entry_protocol_binding_for_endpoint(endpoint)
+                .map(|binding| binding.entry_protocol.as_str()),
+            Some("gemini"),
+            "standard Gemini action must reach its declared owner: {endpoint}"
+        );
+    }
+    for endpoint in [
+        "/v1beta/models/:generateContent",
+        "/v1beta/models/a/b:generateContent",
+        "/v1beta/models/model:unknownAction",
+        "/v1beta/models/model",
+    ] {
+        assert!(
+            hub.entry_protocol_binding_for_endpoint(endpoint).is_none(),
+            "an unregistered action must not enter the Gemini owner: {endpoint}"
+        );
+    }
     assert!(hub
         .entry_protocol_binding_for_endpoint("/v1/unknown")
         .is_none());

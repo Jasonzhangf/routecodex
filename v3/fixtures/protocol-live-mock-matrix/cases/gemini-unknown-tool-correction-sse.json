@@ -1,0 +1,674 @@
+{
+  "schema_version": 1,
+  "case_id": "gemini-unknown-tool-correction-sse",
+  "cell": {
+    "entry_protocol": "gemini",
+    "provider_protocol": "gemini",
+    "transport": "sse",
+    "mode": "relay"
+  },
+  "client_request": {
+    "method": "POST",
+    "path": "/v1beta/models/gemini-client/generateContent",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "cachedContent": "caches/correction",
+      "contents": [
+        {
+          "role": "user",
+          "parts": [
+            {
+              "text": "correct an unknown tool call"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "echo",
+              "description": "Return the provided text unchanged.",
+              "parametersJsonSchema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "stream": true
+    }
+  },
+  "expected_provider": {
+    "paths": [
+      "/v1beta/models/gemini-wire:generateContent",
+      "/v1beta/models/gemini-wire:streamGenerateContent"
+    ],
+    "method": "POST",
+    "auth_required": true,
+    "body_must_not": [
+      "routecodex_internal",
+      "metadata_center",
+      "debug_snapshot",
+      "routecodex_chat_extension",
+      "gemini_native_fields"
+    ],
+    "exact": {
+      "cachedContent": "caches/correction",
+      "contents": [
+        {
+          "role": "user",
+          "parts": [
+            {
+              "text": "correct an unknown tool call"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "echo",
+              "description": "Return the provided text unchanged.",
+              "parametersJsonSchema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "upstream_response": {
+    "protocol": "gemini",
+    "mode": "sse",
+    "status": 200,
+    "content_type": "text/event-stream",
+    "sse_events": [
+      {
+        "data": {
+          "candidates": [
+            {
+              "index": 0,
+              "content": {
+                "role": "model",
+                "parts": [
+                  {
+                    "text": "early-authorized"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "data": {
+          "candidates": [
+            {
+              "index": 0,
+              "finishReason": "STOP",
+              "content": {
+                "role": "model",
+                "parts": [
+                  {
+                    "functionCall": {
+                      "id": "call_unknown_1",
+                      "name": "outside_declared",
+                      "args": {
+                        "text": "must-not-execute"
+                      }
+                    },
+                    "thoughtSignature": "late-signature"
+                  }
+                ]
+              }
+            }
+          ],
+          "usageMetadata": {
+            "promptTokenCount": 3,
+            "candidatesTokenCount": 2,
+            "totalTokenCount": 5
+          }
+        }
+      }
+    ]
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must_not": [
+      "provider_error",
+      "internal_error",
+      "routecodex_internal",
+      "metadata_center"
+    ],
+    "semantic_terminal_required": true,
+    "body_must": {
+      "candidates.0.content.parts.0.text": "early-authorized",
+      "candidates.0.content.parts.1.functionCall.id": "call_unknown_1",
+      "candidates.0.content.parts.1.functionCall.name": "outside_declared",
+      "candidates.0.content.parts.1.functionCall.args.text": "must-not-execute",
+      "candidates.0.content.parts.1.thoughtSignature": "late-signature",
+      "finishReason": "STOP"
+    }
+  },
+  "assertions": {
+    "provider_attempt_count": 1,
+    "probe_attempts_may_occur": true,
+    "no_control_leakage": true
+  },
+  "runtime_setup": {
+    "provider_id": "mock-gemini",
+    "model": "gemini-client",
+    "wire_model": "gemini-wire",
+    "candidate_ids": [
+      "mock-gemini/gemini-client"
+    ]
+  },
+  "source": {
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "files": [],
+    "tests": [],
+    "adaptation": "Repository-owned RCC regression for issue75a3435, using independent native Gemini wire literals. Magpie is a fixed protocol reference only. The real test client denies the observed unknown call, authors its paired error, executes the corrected declared echo, and submits the actual output."
+  },
+  "contract_differences": [
+    {
+      "source_behavior": "The model may emit an undeclared but representable native functionCall.",
+      "rcc_requirement": "Forward the complete call and native parts/signature; executor authority stays with the test client. Preserve the client-authored unknown-tool error and subsequent corrected-call result through three actual business requests."
+    }
+  ],
+  "turns": [
+    {
+      "turn_id": "unknown-call",
+      "purpose": "Deliver the observed unknown model call, preserving text/signature/identity and terminal.",
+      "expected_client_must": {
+        "candidates.0.content.parts.0.text": "early-authorized",
+        "candidates.0.content.parts.1.functionCall.id": "call_unknown_1",
+        "candidates.0.content.parts.1.functionCall.name": "outside_declared",
+        "candidates.0.content.parts.1.functionCall.args.text": "must-not-execute",
+        "candidates.0.content.parts.1.thoughtSignature": "late-signature",
+        "finishReason": "STOP"
+      }
+    },
+    {
+      "turn_id": "unknown-error",
+      "purpose": "Submit the actual observed call and client-authored unknown-tool error without executing it.",
+      "client_request": {
+        "method": "POST",
+        "path": "/v1beta/models/gemini-client/generateContent",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "cachedContent": "caches/correction",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "correct an unknown tool call"
+                }
+              ]
+            },
+            {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "early-authorized"
+                },
+                {
+                  "functionCall": {
+                    "id": "call_unknown_1",
+                    "name": "outside_declared",
+                    "args": {
+                      "text": "must-not-execute"
+                    }
+                  },
+                  "thoughtSignature": "late-signature"
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "call_unknown_1",
+                    "name": "outside_declared",
+                    "response": {
+                      "error": {
+                        "code": "unknown_tool",
+                        "message": "unknown tool outside_declared"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "echo",
+                  "description": "Return the provided text unchanged.",
+                  "parametersJsonSchema": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "stream": false
+        }
+      },
+      "expected_provider_exact": {
+        "cachedContent": "caches/correction",
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "correct an unknown tool call"
+              }
+            ]
+          },
+          {
+            "role": "model",
+            "parts": [
+              {
+                "text": "early-authorized"
+              },
+              {
+                "functionCall": {
+                  "id": "call_unknown_1",
+                  "name": "outside_declared",
+                  "args": {
+                    "text": "must-not-execute"
+                  }
+                },
+                "thoughtSignature": "late-signature"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "parts": [
+              {
+                "functionResponse": {
+                  "id": "call_unknown_1",
+                  "name": "outside_declared",
+                  "response": {
+                    "error": {
+                      "code": "unknown_tool",
+                      "message": "unknown tool outside_declared"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "tools": [
+          {
+            "functionDeclarations": [
+              {
+                "name": "echo",
+                "description": "Return the provided text unchanged.",
+                "parametersJsonSchema": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "upstream_response": {
+        "protocol": "gemini",
+        "mode": "json",
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "candidates": [
+            {
+              "index": 0,
+              "finishReason": "STOP",
+              "content": {
+                "role": "model",
+                "parts": [
+                  {
+                    "functionCall": {
+                      "id": "call_corrected_1",
+                      "name": "echo",
+                      "args": {
+                        "text": "corrected"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "usageMetadata": {
+            "promptTokenCount": 3,
+            "candidatesTokenCount": 2,
+            "totalTokenCount": 5
+          }
+        }
+      },
+      "expected_client_contract": {
+        "transport": "complete",
+        "status": 200,
+        "body_must_not": [
+          "provider_error",
+          "internal_error",
+          "routecodex_internal",
+          "metadata_center"
+        ],
+        "semantic_terminal_required": true
+      },
+      "expected_client_must": {
+        "candidates.0.content.parts.0.functionCall.id": "call_corrected_1",
+        "candidates.0.content.parts.0.functionCall.name": "echo",
+        "candidates.0.content.parts.0.functionCall.args.text": "corrected",
+        "candidates.0.finishReason": "STOP"
+      }
+    },
+    {
+      "turn_id": "corrected-result",
+      "purpose": "Execute only the corrected declared echo once, submit its actual paired output, and receive the final business text.",
+      "client_request": {
+        "method": "POST",
+        "path": "/v1beta/models/gemini-client/generateContent",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "cachedContent": "caches/correction",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "correct an unknown tool call"
+                }
+              ]
+            },
+            {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "early-authorized"
+                },
+                {
+                  "functionCall": {
+                    "id": "call_unknown_1",
+                    "name": "outside_declared",
+                    "args": {
+                      "text": "must-not-execute"
+                    }
+                  },
+                  "thoughtSignature": "late-signature"
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "call_unknown_1",
+                    "name": "outside_declared",
+                    "response": {
+                      "error": {
+                        "code": "unknown_tool",
+                        "message": "unknown tool outside_declared"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "model",
+              "parts": [
+                {
+                  "functionCall": {
+                    "id": "call_corrected_1",
+                    "name": "echo",
+                    "args": {
+                      "text": "corrected"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "call_corrected_1",
+                    "name": "echo",
+                    "response": {
+                      "output": "corrected"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "echo",
+                  "description": "Return the provided text unchanged.",
+                  "parametersJsonSchema": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "stream": false
+        }
+      },
+      "expected_provider_exact": {
+        "cachedContent": "caches/correction",
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "correct an unknown tool call"
+              }
+            ]
+          },
+          {
+            "role": "model",
+            "parts": [
+              {
+                "text": "early-authorized"
+              },
+              {
+                "functionCall": {
+                  "id": "call_unknown_1",
+                  "name": "outside_declared",
+                  "args": {
+                    "text": "must-not-execute"
+                  }
+                },
+                "thoughtSignature": "late-signature"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "parts": [
+              {
+                "functionResponse": {
+                  "id": "call_unknown_1",
+                  "name": "outside_declared",
+                  "response": {
+                    "error": {
+                      "code": "unknown_tool",
+                      "message": "unknown tool outside_declared"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "model",
+            "parts": [
+              {
+                "functionCall": {
+                  "id": "call_corrected_1",
+                  "name": "echo",
+                  "args": {
+                    "text": "corrected"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "parts": [
+              {
+                "functionResponse": {
+                  "id": "call_corrected_1",
+                  "name": "echo",
+                  "response": {
+                    "output": "corrected"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "tools": [
+          {
+            "functionDeclarations": [
+              {
+                "name": "echo",
+                "description": "Return the provided text unchanged.",
+                "parametersJsonSchema": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "upstream_response": {
+        "protocol": "gemini",
+        "mode": "json",
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "candidates": [
+            {
+              "index": 0,
+              "finishReason": "STOP",
+              "content": {
+                "role": "model",
+                "parts": [
+                  {
+                    "text": "correction-complete"
+                  }
+                ]
+              }
+            }
+          ],
+          "usageMetadata": {
+            "promptTokenCount": 7,
+            "candidatesTokenCount": 2,
+            "totalTokenCount": 9
+          }
+        }
+      },
+      "expected_client_contract": {
+        "transport": "complete",
+        "status": 200,
+        "body_must_not": [
+          "provider_error",
+          "internal_error",
+          "routecodex_internal",
+          "metadata_center"
+        ],
+        "semantic_terminal_required": true
+      },
+      "expected_client_must": {
+        "candidates.0.content.parts.0.text": "correction-complete",
+        "candidates.0.finishReason": "STOP",
+        "usageMetadata.totalTokenCount": 9
+      }
+    }
+  ],
+  "tool_followup": {
+    "consumer": "unknown-tool-correction",
+    "side_effect": "none",
+    "input": {
+      "text": "corrected"
+    },
+    "expected_output": "corrected",
+    "assert_no_synthesized_tool_result": true,
+    "assert_declared_tool_binding_only": true,
+    "assert_tool_executed_once": true
+  }
+}

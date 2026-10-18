@@ -1,6 +1,24 @@
 use super::V3HubEntryProtocol;
 use serde_json::{json, Map, Value};
 
+/// Gemini's URL action carries transport intent. The other standard protocols
+/// represent that same intent in the provider request's `stream` field.
+pub(crate) fn project_standard_request_transport_intent(
+    payload: &mut Value,
+    entry: V3HubEntryProtocol,
+    target: super::V3HubProviderWireProtocol,
+    intent: super::V3HubTransportIntent,
+) {
+    if entry == V3HubEntryProtocol::Gemini
+        && target != super::V3HubProviderWireProtocol::Gemini
+        && intent == super::V3HubTransportIntent::Sse
+    {
+        if let Some(row) = payload.as_object_mut() {
+            row.insert("stream".into(), Value::Bool(true));
+        }
+    }
+}
+
 use crate::projection_drop_log::{
     resolve_v3_json_path, split_v3_json_path, V3JsonPathSegment, V3ProjectionDropContext,
     V3ProjectionDropRecord,
@@ -207,6 +225,7 @@ fn build_v3_openai_responses_request_from_projected_chat_canonical(
     for key in [
         "tools",
         "tool_choice",
+        "routecodex_chat_extension",
         "instructions",
         "temperature",
         "top_p",
@@ -461,10 +480,21 @@ pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical_wit
             }
             Err("Anthropic provider wire requires governed Chat/Anthropic messages".to_string())
         }
-        V3HubEntryProtocol::Gemini => Err(
-            "Gemini entry to Anthropic provider wire requires an explicit protocol codec"
-                .to_string(),
-        ),
+        V3HubEntryProtocol::Gemini => {
+            // Gemini 请求已在 ReqInbound02 归一化为 canonical Chat `messages`；这里
+            // 复用与 Anthropic/OpenAiChat 相同的标准 Anthropic projection，不再需要
+            // Gemini→Anthropic 成对 converter。
+            if payload.get("messages").and_then(Value::as_array).is_some() {
+                return project_outbound_payload_for_target_protocol_with_drops(
+                    payload,
+                    V3OutboundTargetProtocol::Anthropic,
+                );
+            }
+            Err(
+                "Gemini entry to Anthropic provider wire requires canonicalized Chat messages"
+                    .to_string(),
+            )
+        }
     }
 }
 
@@ -745,6 +775,7 @@ fn consume_gemini_transport_intent(projected: &mut Value) -> Result<(), String> 
 fn project_responses_request_chat_extension_to_openai_responses(
     projected: &mut Value,
 ) -> Result<(), String> {
+    consume_anthropic_system_block_text(projected);
     let Some(extension) = take_responses_request_chat_extension(projected, "responses")? else {
         return Ok(());
     };
@@ -759,9 +790,28 @@ fn project_responses_request_chat_extension_to_openai_responses(
     Ok(())
 }
 
+fn consume_anthropic_system_block_text(projected: &mut Value) {
+    if let Some(parts) = projected
+        .pointer_mut("/routecodex_chat_extension/anthropic_request/system")
+        .and_then(Value::as_array_mut)
+    {
+        for part in parts {
+            if part.get("type").and_then(Value::as_str) == Some("text")
+                && part.get("text").is_some_and(Value::is_string)
+            {
+                // Its text has already passed through canonical system
+                // governance. Retain block siblings and positions, not a
+                // second copy of the source instruction.
+                part.as_object_mut().unwrap().remove("text");
+            }
+        }
+    }
+}
+
 fn project_responses_request_chat_extension_to_openai_chat(
     projected: &mut Value,
 ) -> Result<(), String> {
+    consume_anthropic_system_block_text(projected);
     let Some(mut extension) = take_responses_request_chat_extension(projected, "openai_chat")?
     else {
         return Ok(());
@@ -933,7 +983,7 @@ fn reject_unmapped_responses_text_format_keys(
 
 fn take_responses_request_chat_extension(
     projected: &mut Value,
-    target_protocol: &str,
+    _target_protocol: &str,
 ) -> Result<Option<Map<String, Value>>, String> {
     let Some(row) = projected.as_object_mut() else {
         return Ok(None);
@@ -946,15 +996,80 @@ fn take_responses_request_chat_extension(
         .cloned()
         .ok_or_else(|| "MalformedOutboundField path=$.routecodex_chat_extension".to_string())?;
     let responses_request = extension.remove("responses_request");
+    if let Some(records) = extension
+        .get_mut("gemini_native_fields")
+        .and_then(Value::as_array_mut)
+    {
+        records.retain_mut(|record| {
+            if record.get("kind").and_then(Value::as_str) != Some("request") {
+                return true;
+            }
+            let Some(fields) = record.get_mut("fields").and_then(Value::as_object_mut) else {
+                return true;
+            };
+            if let Some(tools) = fields.get_mut("tools").and_then(Value::as_array_mut) {
+                tools.retain(|association| {
+                    let Some(association) = association.as_object() else {
+                        return true;
+                    };
+                    let mapped_function = association
+                        .get("canonical_index")
+                        .and_then(Value::as_u64)
+                        .is_some()
+                        && association
+                            .get("declaration_index")
+                            .and_then(Value::as_u64)
+                            .is_some();
+                    let no_declaration_residual = association
+                        .get("fields")
+                        .and_then(Value::as_object)
+                        .is_some_and(Map::is_empty);
+                    let no_tool_residual = association
+                        .get("tool_fields")
+                        .and_then(Value::as_object)
+                        .is_some_and(|tool| tool.keys().all(|key| key == "functionDeclarations"));
+                    let known_association_fields = association.keys().all(|key| {
+                        matches!(
+                            key.as_str(),
+                            "tool_index"
+                                | "declaration_index"
+                                | "canonical_index"
+                                | "tool_fields"
+                                | "bindings"
+                                | "fields"
+                                | "parameters_json_schema_present"
+                        )
+                    });
+
+                    !(mapped_function
+                        && no_declaration_residual
+                        && no_tool_residual
+                        && known_association_fields)
+                });
+                if tools.is_empty() {
+                    fields.remove("tools");
+                }
+            }
+            // The canonical scalar fields already carry the mapped generation
+            // leaves. This empty native container adds no target field.
+            if fields
+                .get("generationConfig")
+                .and_then(Value::as_object)
+                .is_some_and(Map::is_empty)
+            {
+                fields.remove("generationConfig");
+            }
+            if let Some(stream) = fields.remove("stream") {
+                row.entry("stream").or_insert(stream);
+            }
+            !fields.is_empty()
+        });
+        if records.is_empty() {
+            extension.remove("gemini_native_fields");
+        }
+    }
     if !extension.is_empty() {
-        return Err(format!(
-            "UnmappedOutboundFields target_protocol={target_protocol} paths={}",
-            extension
-                .keys()
-                .map(|key| format!("$.request.{key}"))
-                .collect::<Vec<_>>()
-                .join(",")
-        ));
+        row.insert("routecodex_chat_extension".into(), Value::Object(extension));
     }
     responses_request
         .map(|value| {
@@ -1353,6 +1468,29 @@ fn normalize_openai_chat_messages_payload(
             }
         }
     }
+    let synthesized_tool_text = messages
+        .iter()
+        .map(|message| {
+            message
+                .pointer("/routecodex_chat_extension/gemini_native_fields")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .flat_map(|record| {
+                    record
+                        .get("bindings")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                })
+                .any(|binding| {
+                    binding.get("encoding").and_then(Value::as_str) == Some("json_text")
+                        && binding.get("source_path")
+                            == Some(&json!(["functionResponse", "response"]))
+                        && binding.get("canonical_path") == Some(&json!(["content", "0", "text"]))
+                })
+        })
+        .collect::<Vec<_>>();
     for message in messages.iter_mut() {
         let Some(message_row) = message.as_object_mut() else {
             continue;
@@ -1381,24 +1519,36 @@ fn normalize_openai_chat_messages_payload(
             *content = Value::Array(normalized_parts);
         }
     }
-    // Chat tool results represent text only. Keep the result and call identity,
-    // and carry images after the complete consecutive tool-result group.
+    // Keep the result and call identity; carry images and files after the
+    // complete consecutive tool-result group.
     let mut projected_messages = Vec::with_capacity(messages.len());
     let mut images = Vec::new();
-    for mut message in std::mem::take(messages) {
+    for (mut message, synthesized_tool_text) in std::mem::take(messages)
+        .into_iter()
+        .zip(synthesized_tool_text)
+    {
         if message.get("role").and_then(Value::as_str) == Some("tool") {
             if let Some(content) = message.get_mut("content") {
                 if let Some(parts) = content.as_array_mut() {
                     parts.retain(|part| {
-                        if part.get("type").and_then(Value::as_str) == Some("image_url") {
+                        if matches!(
+                            part.get("type").and_then(Value::as_str),
+                            Some("image_url" | "file")
+                        ) {
                             images.push(part.clone());
                             false
                         } else {
                             true
                         }
                     });
-                    if parts.is_empty() {
-                        *content = Value::String(String::new());
+                    if synthesized_tool_text
+                        && parts.len() == 1
+                        && parts[0].as_object().is_some_and(|part| part.len() == 2)
+                        && parts[0].get("type").and_then(Value::as_str) == Some("text")
+                    {
+                        if let Some(text) = parts[0].get("text").and_then(Value::as_str) {
+                            *content = Value::String(text.to_owned());
+                        }
                     }
                 }
             }
@@ -1442,7 +1592,65 @@ fn normalize_openai_chat_messages_payload(
 fn consume_routecodex_chat_extension_for_openai_chat_provider(
     message_row: &mut Map<String, Value>,
 ) {
+    fn merge_residual_fields(target: &mut Map<String, Value>, residual: &Map<String, Value>) {
+        for (key, value) in residual {
+            match target.get_mut(key) {
+                Some(existing) => {
+                    if let (Some(existing), Some(value)) =
+                        (existing.as_object_mut(), value.as_object())
+                    {
+                        merge_residual_fields(existing, value);
+                    }
+                }
+                None => {
+                    target.insert(key.clone(), value.clone());
+                }
+            }
+        }
+    }
+
+    fn consume_gemini_content_part(part: &mut Value) {
+        let Some(row) = part.as_object_mut() else {
+            return;
+        };
+        let Some(extension) = row
+            .get_mut("routecodex_chat_extension")
+            .and_then(Value::as_object_mut)
+        else {
+            return;
+        };
+        let Some(records) = extension.remove("gemini_native_fields") else {
+            return;
+        };
+        let residual_fields = records
+            .as_array()
+            .map(|records| {
+                records
+                    .iter()
+                    .filter_map(|record| record.get("fields").and_then(Value::as_object).cloned())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for fields in &residual_fields {
+            merge_residual_fields(row, fields);
+        }
+        if row
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object)
+            .is_some_and(Map::is_empty)
+        {
+            row.remove("routecodex_chat_extension");
+        }
+    }
+
     remove_object_field(message_row, "routecodex_chat_extension");
+    if let Some(content) = message_row.get_mut("content") {
+        if let Some(parts) = content.as_array_mut() {
+            for part in parts.iter_mut() {
+                consume_gemini_content_part(part);
+            }
+        }
+    }
     let Some(tool_calls) = message_row
         .get_mut("tool_calls")
         .and_then(Value::as_array_mut)

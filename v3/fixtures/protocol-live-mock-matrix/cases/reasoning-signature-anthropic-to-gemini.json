@@ -23,10 +23,10 @@
     "auth_required": true,
     "body_must": {
       "contents.1.parts.0.functionCall.id": "function-call-7",
-      "contents.1.parts.0.functionCall.thoughtSignature": "c2lnbmF0dXJlLW9uZQ==",
+      "contents.1.parts.0.thoughtSignature": "c2lnbmF0dXJlLW9uZQ==",
       "contents.2.parts.0.functionResponse.id": "function-call-7"
     },
-    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
+    "body_must_not": ["contents.1.parts.0.functionCall.thoughtSignature", "routecodex_internal", "metadata_center", "debug_snapshot"],
     "exact": null
   },
   "upstream_response": {
@@ -48,7 +48,7 @@
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/gemini_signature_test.go"],
     "tests": ["internal/gateway/gemini_signature_test.go::TestGeminiThoughtSignatureThroughAnthropic"],
-    "adaptation": "The provided signature is replayed exactly into the Gemini function call. RCC must not synthesize or tunnel signatures."
+    "adaptation": "The provided signature is replayed exactly onto the paired Gemini Part.thoughtSignature sibling (contents.1.parts.0.thoughtSignature) and is forbidden on the non-native functionCall.thoughtSignature child. RCC must not synthesize or tunnel signatures."
   },
   "contract_differences": [
     {"source_behavior": "Magpie can carry the Gemini signature in tool IDs or wrapper fields.", "rcc_requirement": "Represent the provided signature only through the protocol-native field; no signature-in-ID tunneling and no guessing."}

@@ -477,11 +477,12 @@ impl V3OpenAiChatAnthropicSseTransducer {
         if !self.active_blocks.contains_key(&index) && delta_type == Some("signature_delta") {
             return Ok(Vec::new());
         }
-        let kind = self
-            .active_blocks
-            .get(&index)
-            .ok_or_else(|| format!("Anthropic content block {index} has no start"))?;
-        match (kind.as_str(), delta_type) {
+        let kind = match self.active_blocks.get(&index) {
+            Some(kind) => kind.as_str(),
+            None if delta_type == Some("text_delta") => "text",
+            None => return Err(format!("Anthropic content block {index} has no start")),
+        };
+        match (kind, delta_type) {
             ("text", Some("text_delta")) => Ok(vec![self.chunk(
                 json!({"content": delta.get("text").and_then(Value::as_str).ok_or("Anthropic text_delta is missing text")?}),
                 None,

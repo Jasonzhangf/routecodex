@@ -80,10 +80,62 @@
           "uniqueItems": true,
           "items": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"}
         },
-        "all_candidates_fail": {"type": "boolean"}
+        "all_candidates_fail": {"type": "boolean"},
+        "attempt_store": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "request_max_attempts": {"type": "integer", "minimum": 1},
+            "attempt_max_bytes": {"type": "integer", "minimum": 1},
+            "attempt_max_frames": {"type": "integer", "minimum": 1},
+            "request_max_bytes": {"type": "integer", "minimum": 1},
+            "process_max_bytes": {"type": "integer", "minimum": 1},
+            "residence_timeout_ms": {"type": "integer", "minimum": 1}
+          }
+        }
       }
     },
     "turns": {"type": "array"},
-    "tool_followup": {"type": "object"}
+    "tool_followup": {
+      "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "properties": {"consumer": {"const": "echo-line-result"}},
+            "required": ["consumer"]
+          },
+          "then": {
+            "required": [
+              "side_effect",
+              "input",
+              "expected_output",
+              "assert_no_synthesized_tool_result",
+              "assert_declared_tool_binding_only",
+              "assert_tool_executed_once"
+            ],
+            "properties": {
+              "side_effect": {"const": "none"},
+              "input": {
+                "type": "object",
+                "required": ["message"],
+                "properties": {"message": {"type": "string"}}
+              },
+              "expected_output": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["output", "exitCode"],
+                "properties": {
+                  "output": {"type": "string"},
+                  "exitCode": {"const": 0}
+                }
+              },
+              "assert_no_synthesized_tool_result": {"const": true},
+              "assert_declared_tool_binding_only": {"const": true},
+              "assert_tool_executed_once": {"const": true}
+            }
+          }
+        }
+      ]
+    }
   }
 }
