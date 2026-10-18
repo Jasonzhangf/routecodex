@@ -1266,11 +1266,23 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
 /// v3.protocol.pending_projection：尚未实现协议绑定的客户端响应统一由
 /// foundation pending 投影出站（见 v3-resource-operation-map.yml 同名资源）。
 fn pending_binding_output_response(
+    state: &V3ListenerState,
     output: V3FoundationRuntimeOutput,
-    _entry_protocol: &str,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
     _pending_not_implemented: &str,
     _pending_owner: &str,
 ) -> Response<Body> {
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        &[],
+        output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
+    );
     foundation_output_response(output)
 }
 

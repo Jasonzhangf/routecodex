@@ -2,11 +2,14 @@ use crate::nodes::{
     build_v3_req_04_standardized_responses_from_v3_server_03,
     build_v3_router_request_facts_from_v3_req_04, V3Server03HttpRequestRaw,
 };
+use crate::operation_runner::V3Err01SourceInput;
+use crate::provider_failure_runtime_policy::{
+    project_v3_relay_error_source, raise_v3_source_via_err01, V3RelayErrorOperatorFault,
+};
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error06ClientProjected, V3ErrorActionScope,
-    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3Error01SourceRaised, V3Error06ClientProjected, V3ErrorActionScope, V3ErrorSourceKind,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityReader, V3ProviderAvailabilityRegistry,
@@ -65,6 +68,60 @@ pub struct V3FoundationRuntimeOutput {
     pub error_chain: Vec<&'static str>,
     pub node_trace: Vec<&'static str>,
     pub stopped_before_provider_send: bool,
+    pub diagnostic_source: Option<V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<V3Error01SourceRaised>,
+}
+
+fn raise_and_project_foundation_error(
+    source_kind: V3ErrorSourceKind,
+    source_stage: &'static str,
+    code: &'static str,
+    message: String,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    let (_source_projection, source) = raise_v3_source_via_err01(
+        source_kind,
+        source_stage,
+        code,
+        message,
+        V3Err01SourceInput::Plain,
+    )?;
+    project_v3_relay_error_source(source, V3ErrorActionScope::None, 0, None)
+}
+
+fn foundation_output_from_error_sdk_result(
+    debug_node: &'static str,
+    fault_node_trace: Vec<&'static str>,
+    success_node_trace: Option<Vec<&'static str>>,
+    result: Result<V3Error06ClientProjected, V3RelayErrorOperatorFault>,
+) -> V3FoundationRuntimeOutput {
+    match result {
+        Ok(projected) => {
+            let error_node = projected.chain[5];
+            let chain = projected.chain.to_vec();
+            V3FoundationRuntimeOutput {
+                status: projected.status,
+                body: projected.body,
+                debug_node,
+                error_node,
+                error_chain: chain.clone(),
+                node_trace: success_node_trace.unwrap_or(chain),
+                stopped_before_provider_send: true,
+                diagnostic_source: Some(projected.diagnostic_source),
+                diagnostic_cause: None,
+            }
+        }
+        Err(fault) => V3FoundationRuntimeOutput {
+            status: 599,
+            body: Value::Null,
+            debug_node,
+            error_node: "none",
+            error_chain: Vec::new(),
+            node_trace: fault_node_trace,
+            stopped_before_provider_send: true,
+            diagnostic_source: Some(fault.policy_failure),
+            diagnostic_cause: fault.original_source,
+        },
+    }
 }
 
 pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
@@ -229,6 +286,8 @@ pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
                     "V3Target10ConcreteProviderSelected",
                 ],
                 stopped_before_provider_send: true,
+                diagnostic_source: None,
+                diagnostic_cause: None,
             }
         }
         Err(exhausted) => {
@@ -270,27 +329,17 @@ fn project_p5_failure(
     code: &'static str,
     message: String,
 ) -> V3FoundationRuntimeOutput {
-    let source = build_v3_error_01_source_raised(
-        V3ErrorSourceKind::TargetPoolExhausted,
+    foundation_output_from_error_sdk_result(
         source_stage,
-        code,
-        message,
-    );
-    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-        source,
-        action_scope: V3ErrorActionScope::None,
-        candidates_remaining: 0,
-        source_status: None,
-    });
-    V3FoundationRuntimeOutput {
-        status: projected.status,
-        body: projected.body,
-        debug_node: source_stage,
-        error_node: projected.chain[5],
-        error_chain: projected.chain.to_vec(),
-        node_trace: projected.chain.to_vec(),
-        stopped_before_provider_send: true,
-    }
+        Vec::new(),
+        None,
+        raise_and_project_foundation_error(
+            V3ErrorSourceKind::TargetPoolExhausted,
+            source_stage,
+            code,
+            message,
+        ),
+    )
 }
 
 pub fn execute_v3_foundation_pending_runtime(
@@ -324,7 +373,22 @@ pub fn execute_v3_foundation_pending_runtime(
     ) {
         return project_v3_debug_failure("V3Debug01NodeEventRegistered", error);
     }
-    let projected = build_pending_projection(&input);
+    let projected = match build_pending_projection(&input) {
+        Ok(projected) => projected,
+        Err(fault) => {
+            return foundation_output_from_error_sdk_result(
+                "V3Debug01NodeEventRegistered",
+                vec![
+                    "V3Server03HttpRequestRaw",
+                    "V3Debug01TraceContextStarted",
+                    "V3Debug02RawRequestCaptured",
+                    "V3Debug01NodeEventRegistered",
+                ],
+                None,
+                Err(fault),
+            )
+        }
+    };
     if let Err(error) = debug.record_node_event(
         &scope,
         "V3Error06ClientProjected",
@@ -333,13 +397,10 @@ pub fn execute_v3_foundation_pending_runtime(
     ) {
         return project_v3_debug_failure("V3Error06ClientProjected", error);
     }
-    V3FoundationRuntimeOutput {
-        status: projected.status,
-        body: projected.body,
-        debug_node: "V3Debug01NodeEventRegistered",
-        error_node: projected.chain[5],
-        error_chain: projected.chain.to_vec(),
-        node_trace: vec![
+    foundation_output_from_error_sdk_result(
+        "V3Debug01NodeEventRegistered",
+        Vec::new(),
+        Some(vec![
             "V3Server03HttpRequestRaw",
             "V3Debug01TraceContextStarted",
             "V3Debug02RawRequestCaptured",
@@ -351,40 +412,32 @@ pub fn execute_v3_foundation_pending_runtime(
             "V3Error05ExecutionDecision",
             "V3Error06ClientProjected",
             "V3Server16HttpFrame",
-        ],
-        stopped_before_provider_send: true,
-    }
+        ]),
+        Ok(projected),
+    )
 }
 
 pub fn project_v3_debug_failure(
     source_stage: &'static str,
     error: V3DebugError,
 ) -> V3FoundationRuntimeOutput {
-    let source = build_v3_error_01_source_raised(
-        V3ErrorSourceKind::RuntimeFailure,
+    foundation_output_from_error_sdk_result(
         source_stage,
-        "v3_debug_failure",
-        error.to_string(),
-    );
-    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-        source,
-        action_scope: V3ErrorActionScope::None,
-        candidates_remaining: 0,
-        source_status: None,
-    });
-    V3FoundationRuntimeOutput {
-        status: projected.status,
-        body: projected.body,
-        debug_node: source_stage,
-        error_node: projected.chain[5],
-        error_chain: projected.chain.to_vec(),
-        node_trace: projected.chain.to_vec(),
-        stopped_before_provider_send: true,
-    }
+        Vec::new(),
+        None,
+        raise_and_project_foundation_error(
+            V3ErrorSourceKind::RuntimeFailure,
+            source_stage,
+            "v3_debug_failure",
+            error.to_string(),
+        ),
+    )
 }
 
-fn build_pending_projection(input: &V3FoundationRuntimeInput) -> V3Error06ClientProjected {
-    let source = build_v3_error_01_source_raised(
+fn build_pending_projection(
+    input: &V3FoundationRuntimeInput,
+) -> Result<V3Error06ClientProjected, V3RelayErrorOperatorFault> {
+    raise_and_project_foundation_error(
         V3ErrorSourceKind::PendingEndpoint,
         "V3Server03HttpRequestRaw",
         "not_implemented",
@@ -392,13 +445,7 @@ fn build_pending_projection(input: &V3FoundationRuntimeInput) -> V3Error06Client
             "V3 endpoint node is registered but not implemented: {} {} on {}",
             input.method, input.path, input.server_id
         ),
-    );
-    V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-        source,
-        action_scope: V3ErrorActionScope::None,
-        candidates_remaining: 0,
-        source_status: None,
-    })
+    )
 }
 
 #[cfg(test)]
@@ -435,7 +482,78 @@ mod tests {
         assert_eq!(output.status, 501);
         assert!(output.stopped_before_provider_send);
         assert_eq!(output.error_chain.len(), 6);
+        assert_eq!(
+            output.diagnostic_source.as_ref().unwrap().source_kind,
+            V3ErrorSourceKind::PendingEndpoint
+        );
+        assert!(output.diagnostic_cause.is_none());
         assert_eq!(debug.status().unwrap().raw_request_count, 1);
+    }
+
+    #[test]
+    fn normal_foundation_failures_preserve_typed_sources() {
+        let p5 = project_p5_failure(
+            "V3Target10ConcreteProviderSelected",
+            "selected_target_exhausted",
+            "all candidates unavailable".to_string(),
+        );
+        assert_eq!(p5.status, 502);
+        assert_eq!(
+            p5.diagnostic_source.unwrap().source_kind,
+            V3ErrorSourceKind::TargetPoolExhausted
+        );
+
+        let debug_failure = project_v3_debug_failure(
+            "V3Debug01NodeEventRegistered",
+            V3DebugError::MalformedFixture("typed debug failure".to_string()),
+        );
+        assert_eq!(debug_failure.status, 598);
+        assert_eq!(
+            debug_failure.diagnostic_source.unwrap().source_kind,
+            V3ErrorSourceKind::RuntimeFailure
+        );
+        assert!(debug_failure.diagnostic_cause.is_none());
+    }
+
+    #[test]
+    fn sdk_operator_fault_preserves_policy_source_and_original_cause() {
+        let (_, original_source) = raise_v3_source_via_err01(
+            V3ErrorSourceKind::PendingEndpoint,
+            "V3Server03HttpRequestRaw",
+            "not_implemented",
+            "pending endpoint",
+            V3Err01SourceInput::Plain,
+        )
+        .unwrap();
+        let fault = V3RelayErrorOperatorFault {
+            policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Error06ClientProjected",
+                "relay_error_operator_sdk_failure",
+                "synthetic Error06 operator failure",
+            ),
+            original_source: Some(original_source.clone()),
+        };
+        let output = foundation_output_from_error_sdk_result(
+            "V3Debug01NodeEventRegistered",
+            vec!["V3Server03HttpRequestRaw"],
+            None,
+            Err(fault),
+        );
+
+        assert_eq!(output.status, 599);
+        assert_eq!(output.body, Value::Null);
+        assert_eq!(output.error_node, "none");
+        assert!(output.error_chain.is_empty());
+        assert_eq!(
+            output.diagnostic_source.as_ref().unwrap().source_kind,
+            V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(
+            output.diagnostic_source.as_ref().unwrap().code,
+            "relay_error_operator_sdk_failure"
+        );
+        assert_eq!(output.diagnostic_cause, Some(original_source));
     }
 
     #[test]

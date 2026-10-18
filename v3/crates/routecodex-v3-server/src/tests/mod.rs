@@ -8,6 +8,7 @@ use routecodex_v3_runtime::V3AnthropicRelayClientBody;
 use std::collections::BTreeMap;
 use std::sync::Mutex as StdMutex;
 
+mod foundation_output;
 mod local599_output;
 
 #[tokio::test]

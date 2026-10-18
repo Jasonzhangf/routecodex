@@ -282,6 +282,8 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
         error_chain: output.error_chain.unwrap_or_default(),
         node_trace: output.node_trace,
         stopped_before_provider_send: true,
+        diagnostic_source: output.diagnostic_source,
+        diagnostic_cause: output.diagnostic_cause,
     }
 }
 
@@ -368,6 +370,8 @@ pub async fn execute_v3_anthropic_relay_response_dry_run_runtime(
         error_chain: output.error_chain.unwrap_or_default(),
         node_trace: output.node_trace,
         stopped_before_provider_send: true,
+        diagnostic_source: output.diagnostic_source,
+        diagnostic_cause: output.diagnostic_cause,
     }
 }
 

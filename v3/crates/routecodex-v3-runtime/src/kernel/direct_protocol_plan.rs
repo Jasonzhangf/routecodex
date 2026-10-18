@@ -572,5 +572,7 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         error_chain: output.error_chain.unwrap_or_default(),
         node_trace: output.node_trace,
         stopped_before_provider_send: true,
+        diagnostic_source: None,
+        diagnostic_cause: None,
     }
 }

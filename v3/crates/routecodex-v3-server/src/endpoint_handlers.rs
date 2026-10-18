@@ -452,6 +452,15 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         ) {
             return response;
         }
+        persist_v3_chat_failure_evidence_sources(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &[],
+            output.diagnostic_source.as_ref(),
+            output.diagnostic_cause.as_ref(),
+        );
         return foundation_output_response(output);
     }
     if is_provider_request_dry_run(&request_headers)
@@ -563,6 +572,15 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         ) {
             return response;
         }
+        persist_v3_chat_failure_evidence_sources(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &[],
+            output.diagnostic_source.as_ref(),
+            output.diagnostic_cause.as_ref(),
+        );
         return foundation_output_response(output);
     }
     if is_provider_request_dry_run(&request_headers)
@@ -614,6 +632,15 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         ) {
             return response;
         }
+        persist_v3_chat_failure_evidence_sources(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &[],
+            output.diagnostic_source.as_ref(),
+            output.diagnostic_cause.as_ref(),
+        );
         return foundation_output_response(output);
     }
     if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Direct {
@@ -1460,10 +1487,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         let output = execute_v3_foundation_pending_runtime(
             V3FoundationRuntimeInput {
                 server_id: state.server.id.clone(),
-                request_id,
+                request_id: request_id.clone(),
                 execution_id,
                 method,
-                path,
+                path: path.clone(),
                 payload,
             },
             &state.debug,
@@ -1479,8 +1506,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             return response;
         }
         pending_binding_output_response(
+            &state,
             output,
             &entry_protocol,
+            &path,
+            &request_id,
             pending_not_implemented,
             &pending_owner,
         )
