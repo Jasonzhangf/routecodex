@@ -161,31 +161,15 @@ fn record_v3_direct_provider_failure_record(
     source: &V3Error01SourceRaised,
     now_epoch_ms: u64,
 ) -> Result<V3ProviderFailureRecord, V3Error01SourceRaised> {
-    let classified =
-        routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(source.clone());
-    // 统一错误模型：direct runtime 路径同样经 internal 全局策略表盖章，
-    // 400/无状态码失败与 401/403 按既定阈值进入冷却，不允许绕过。
-    let status = source
-        .external_error
-        .as_ref()
-        .and_then(|error| error.status)
-        .unwrap_or(0);
-    let action = crate::provider_failure_runtime_policy::apply_v3_internal_provider_failure_policy(
-        routecodex_v3_error::build_v3_provider_failure_action_from_v3_error_02(&classified),
-        source.source_stage,
-        status,
-        &source.code,
-    );
     provider_health
-        .record_provider_failure_record_with_action_for_interface(
+        .record_provider_failure_record_from_source_for_interface(
             failure_session_scope,
             &selected.candidate.provider_id,
             &selected.candidate.interface_id,
             Some(&selected.candidate.auth_alias),
             Some(&selected.candidate.model_id),
-            Some(&source.message),
+            source,
             now_epoch_ms,
-            &action,
         )
         .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))
 }
