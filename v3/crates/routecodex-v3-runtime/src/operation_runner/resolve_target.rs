@@ -53,6 +53,7 @@ pub(crate) struct V3ResolveTargetSideOutput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum V3ResolveTargetOperatorError {
     Typed(V3Error01SourceRaised),
+    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
     Runner(OperationRunnerError),
 }
 
@@ -60,6 +61,7 @@ impl std::fmt::Display for V3ResolveTargetOperatorError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Typed(error) => formatter.write_str(&error.message),
+            Self::OperatorFault(fault) => formatter.write_str(&fault.policy_failure.message),
             Self::Runner(error) => error.fmt(formatter),
         }
     }
@@ -69,7 +71,19 @@ impl std::error::Error for V3ResolveTargetOperatorError {}
 
 struct ResolveTargetOperator {
     mode: V3ResolveTargetExecutionMode,
-    side_output: Arc<Mutex<Option<Result<V3ResolveTargetSideOutput, V3Error01SourceRaised>>>>,
+    side_output: Arc<
+        Mutex<
+            Option<
+                Result<
+                    V3ResolveTargetSideOutput,
+                    Result<
+                        V3Error01SourceRaised,
+                        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+                    >,
+                >,
+            >,
+        >,
+    >,
 }
 
 impl Operator for ResolveTargetOperator {
@@ -102,7 +116,10 @@ impl Operator for ResolveTargetOperator {
             }
             Err(error) => {
                 *holder = Some(Err(error.clone()));
-                Err(error.message)
+                Err(match error {
+                    Ok(source) => source.message,
+                    Err(fault) => fault.policy_failure.message,
+                })
             }
         }
     }
@@ -111,7 +128,13 @@ impl Operator for ResolveTargetOperator {
 fn resolve_target_from_value(
     input: &Value,
     mode: &V3ResolveTargetExecutionMode,
-) -> Result<V3ResolveTargetSideOutput, V3Error01SourceRaised> {
+) -> Result<
+    V3ResolveTargetSideOutput,
+    Result<
+        V3Error01SourceRaised,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+> {
     match mode {
         V3ResolveTargetExecutionMode::RelayFresh {
             manifest,
@@ -265,7 +288,8 @@ pub(crate) fn run_v3_resolve_target_operator(
         })?
         .take();
     match (runner_result, typed_output) {
-        (_, Some(Err(error))) => Err(V3ResolveTargetOperatorError::Typed(error)),
+        (_, Some(Err(Ok(source)))) => Err(V3ResolveTargetOperatorError::Typed(source)),
+        (_, Some(Err(Err(fault)))) => Err(V3ResolveTargetOperatorError::OperatorFault(fault)),
         (Err(error), _) => Err(V3ResolveTargetOperatorError::Runner(error)),
         (Ok(payload), Some(Ok(side_output))) => Ok((payload, side_output)),
         (Ok(_), None) => Err(V3ResolveTargetOperatorError::Runner(

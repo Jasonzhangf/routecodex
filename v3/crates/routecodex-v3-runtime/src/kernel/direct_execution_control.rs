@@ -6,7 +6,7 @@ pub(super) fn resolve_v3_direct_request_execution_control(
     control: Option<V3RequestExecutionControl>,
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
-) -> Result<V3RequestExecutionControl, V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<V3RequestExecutionControl> {
     match control {
         Some(control) => Ok(control),
         None => V3RequestExecutionControl::from_manifest(manifest, server_id)

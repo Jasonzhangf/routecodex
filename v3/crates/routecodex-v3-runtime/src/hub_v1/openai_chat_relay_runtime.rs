@@ -337,26 +337,31 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
             V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
                 super::provider_request_payload_source("ProviderReqCompat06ProviderCompat", &error)
             }
-            V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
+            V3ProviderCompatErrorClassification::Other => crate::shared::direct_plain_error(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3HubRuntime",
                 "openai_chat_relay_runtime_error",
                 error.to_string(),
             ),
         },
-        error => build_v3_error_01_source_raised(
+        error => crate::shared::direct_plain_error(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",
             "openai_chat_relay_runtime_error",
             error.to_string(),
         ),
     };
-    let mut output = error_output(
-        source,
-        if request_payload_invalid { 400 } else { 500 },
-        "none",
-        Vec::new(),
-    );
+    let mut output = match source {
+        Ok(source) => error_output(
+            source,
+            if request_payload_invalid { 400 } else { 500 },
+            "none",
+            Vec::new(),
+        ),
+        Err(fault) => {
+            openai_chat_relay_failure_output::error_output_from_projection(Err(fault), Vec::new())
+        }
+    };
     output.provider_failure_attempts = attempts;
     if provider_pool_exhausted {
         output.terminal_disposition =
@@ -1280,6 +1285,7 @@ fn openai_chat_provider_http_failure(
         terminal_projection: None,
         terminal_disposition: None,
         error_operator_fault: None,
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -1362,6 +1368,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             terminal_projection: None,
             terminal_disposition: None,
             error_operator_fault: None,
+            failed_attempt_evidence: None,
             error_type_fn: extract_error_type_style,
             error_message_fn: extract_message_type_style,
         }

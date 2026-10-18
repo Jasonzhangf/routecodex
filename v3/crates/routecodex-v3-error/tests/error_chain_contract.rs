@@ -163,20 +163,15 @@ fn error_handling_center_never_projects_an_error_as_http_success() {
 }
 
 #[test]
-fn request_in_flight_projects_standard_error_chain_with_http_conflict() {
-    let projected = routecodex_v3_error::project_v3_http_boundary_error(
-        V3HttpBoundaryErrorKind::RequestInFlight,
-        "controlled active Responses request",
+fn request_in_flight_has_one_http_boundary_spec_mapping() {
+    assert_eq!(
+        routecodex_v3_error::v3_http_boundary_error_spec(V3HttpBoundaryErrorKind::RequestInFlight),
+        (
+            V3ErrorSourceKind::RequestConflict,
+            "V3Server03HttpRequestRaw",
+            "request_in_flight",
+        )
     );
-
-    assert_eq!(projected.status, 409);
-    assert_eq!(projected.body["error"]["code"], "request_in_flight");
-    assert!(
-        projected.body["error"].get("error_node").is_none(),
-        "Error06 body must not carry the error node identity: {}",
-        projected.body["error"]
-    );
-    assert_eq!(projected.chain.len(), 6);
 }
 
 #[test]

@@ -10,6 +10,17 @@ use std::collections::BTreeSet;
 
 fn request_key_notify(_view: &V3DirectRequestKeyView) {}
 
+fn provider_error_source_for_test(
+    stage: &'static str,
+    error: V3ProviderError,
+) -> routecodex_v3_error::V3Error01SourceRaised {
+    let message = error.to_string();
+    let source = build_v3_provider_error_source(stage, error)
+        .expect("provider error source must execute Error01 successfully");
+    assert_eq!(source.message, message);
+    source
+}
+
 fn direct_system_wire_mount(
     _view: &V3DirectRequestKeyView,
     edits: &mut V3DirectRequestKeyEdits,
@@ -115,6 +126,49 @@ fn responses_direct_static_hooks_are_registered() {
     ] {
         assert!(registry.require_hook(hook), "{hook}");
     }
+}
+
+#[test]
+fn direct_source_boundary_preserves_err01_operator_fault() {
+    let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
+        policy_failure: build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Error01SourceRaised",
+            "err01_source_operator_sdk_failure",
+            "seeded Err01 failure",
+        ),
+        original_source: Some(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Provider12ResponsesWirePayload",
+            "seeded_original_source",
+            "seeded original source",
+        )),
+    };
+    let result: V3DirectSourceResult<()> = Err(Err(fault.clone()));
+
+    assert_eq!(result.unwrap_err().unwrap_err(), fault);
+}
+
+#[test]
+fn direct_source_boundary_preserves_sdk_source() {
+    let (_, source) = crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3DirectRequestKeyHook",
+        "direct_source_boundary_test",
+        "seeded SDK source",
+        V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
+    )
+    .expect("real Error01 SDK must raise an Internal source");
+    let result: V3DirectSourceResult<()> = Err(Ok(source.clone()));
+
+    assert_eq!(result.unwrap_err().unwrap(), source);
+    assert_eq!(
+        source
+            .internal_error
+            .as_ref()
+            .map(|internal| internal.internal_code),
+        Some("500-150")
+    );
 }
 
 #[test]
@@ -576,7 +630,8 @@ fn provider_model_binding_mismatch_is_internal_not_provider_failure() {
             expected_model: "provider-wire-model".to_string(),
             actual_model: Some("client-route-alias".to_string()),
         },
-    );
+    )
+    .expect("provider source must execute Error01 successfully");
 
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert_eq!(source.code, "provider_model_binding_mismatch");
@@ -616,7 +671,9 @@ async fn malformed_json_response_is_explicit_error() {
             },
         )
         .await;
-    let source = result.expect_err("malformed provider JSON must be an explicit error");
+    let source = result
+        .expect_err("malformed provider JSON must be an explicit error")
+        .expect("Source-only response projection must not report an operator fault");
     assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);
     assert!(source.internal_error.is_none());
     let external = source
@@ -644,7 +701,8 @@ fn provider_http_status_source_is_external_provider_identity_without_internal_co
                 body: b"{\"error\":{\"code\":\"rate_limit\"}}".to_vec(),
                 body_read_failure: None,
             }),
-        });
+        })
+        .expect("provider source must execute Error01 successfully");
 
     assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);
     assert!(source.internal_error.is_none());
@@ -661,7 +719,8 @@ fn provider_transport_source_is_external_transport_identity_without_internal_cod
             request_id: "req".to_string(),
             provider_id: "asxs-grok".to_string(),
             reason: "error sending request for url".to_string(),
-        });
+        })
+        .expect("provider source must execute Error01 successfully");
 
     assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);
     assert!(source.internal_error.is_none());
@@ -681,7 +740,8 @@ fn provider_internal_transport_source_is_internal_runtime_identity() {
             lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
             reason: "provider frame sequence mismatch".to_string(),
         },
-    );
+    )
+    .expect("provider source must execute Error01 successfully");
 
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert!(source.external_error.is_none());
@@ -697,7 +757,8 @@ fn provider_internal_transport_response_lane_projects_599() {
         provider_id: "asxs-grok".to_string(),
         lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
         reason: "provider frame sequence mismatch".to_string(),
-    });
+    })
+    .expect("provider source must execute Error01 successfully");
 
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     let internal = source
@@ -725,7 +786,8 @@ fn provider_local_auth_secret_failure_is_internal_runtime_identity() {
             provider_id: "cc".to_string(),
             auth_alias: "key1".to_string(),
         },
-    );
+    )
+    .expect("provider source must execute Error01 successfully");
 
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert!(source.external_error.is_none());
@@ -742,7 +804,8 @@ fn malformed_current_image_source_is_client_input_without_internal_or_external_i
             media_type: "image/png".to_string(),
             reason: "base64 decode failed".to_string(),
         },
-    );
+    )
+    .expect("provider source must execute Error01 successfully");
 
     assert_eq!(source.source_kind, V3ErrorSourceKind::InvalidRequest);
     assert_eq!(source.code, "invalid_provider_request_payload");
@@ -757,11 +820,232 @@ fn control_field_leak_source_is_internal_wire_boundary_violation() {
             request_id: "req".to_string(),
             field: "metadata",
         },
-    );
+    )
+    .expect("provider source must execute Error01 successfully");
 
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert!(source.external_error.is_none());
     let internal = source.internal_error.expect("internal wire boundary code");
     assert_eq!(internal.internal_code, "500-150");
     assert_eq!(internal.node_id, "V3Provider12ResponsesWirePayload");
+}
+
+#[test]
+fn invalid_request_provider_error_branch_preserves_client_input_identity() {
+    let errors = [
+        V3ProviderError::InvalidWireBody {
+            request_id: "req-invalid-wire".to_string(),
+        },
+        V3ProviderError::InvalidStreamIntent {
+            request_id: "req-invalid-stream".to_string(),
+        },
+        V3ProviderError::NamespaceToolFlattenFailed {
+            request_id: "req-namespace".to_string(),
+            detail: "namespace collision".to_string(),
+        },
+        V3ProviderError::FunctionToolShapeFailed {
+            request_id: "req-function".to_string(),
+            detail: "function shape".to_string(),
+        },
+    ];
+
+    for error in errors {
+        let source = provider_error_source_for_test("V3Provider12ResponsesWirePayload", error);
+        assert_eq!(source.source_kind, V3ErrorSourceKind::InvalidRequest);
+        assert_eq!(source.source_stage, "V3Provider12ResponsesWirePayload");
+        assert_eq!(source.code, "invalid_provider_request_payload");
+        assert!(source.internal_error.is_none());
+        assert!(source.external_error.is_none());
+    }
+}
+
+#[test]
+fn local_provider_runtime_error_branch_preserves_internal_transport_identity() {
+    let errors = [
+        V3ProviderError::InvalidBaseUrl {
+            request_id: "req-base-url".to_string(),
+            provider_id: "provider-a".to_string(),
+            reason: "invalid URL".to_string(),
+        },
+        V3ProviderError::AuthSecretRead {
+            request_id: "req-auth-read".to_string(),
+            provider_id: "provider-a".to_string(),
+            auth_alias: "primary".to_string(),
+            reason: "permission denied".to_string(),
+        },
+    ];
+
+    for error in errors {
+        let source = provider_error_source_for_test("V3Transport13ResponsesHttpRequest", error);
+        assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+        assert_eq!(source.source_stage, "V3Transport13ResponsesHttpRequest");
+        assert_eq!(source.code, "provider_local_runtime_error");
+        let internal = source
+            .internal_error
+            .expect("local runtime internal identity");
+        assert_eq!(internal.internal_code, "500-160");
+        assert_eq!(internal.node_id, "V3Transport13ResponsesHttpRequest");
+        assert!(source.external_error.is_none());
+    }
+}
+
+#[test]
+fn oauth_credential_error_branch_preserves_internal_runtime_identity() {
+    let source = provider_error_source_for_test(
+        "V3Transport13ResponsesHttpRequest",
+        V3ProviderError::OAuthCredential {
+            request_id: "req-oauth".to_string(),
+            provider_id: "provider-a".to_string(),
+            auth_alias: "primary".to_string(),
+            reason: routecodex_v3_oauth::V3OAuthError::RefreshRejected { status: 401 },
+        },
+    );
+
+    assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+    assert_eq!(source.source_stage, "V3Transport13ResponsesHttpRequest");
+    assert_eq!(source.code, "provider_local_runtime_error");
+    let internal = source
+        .internal_error
+        .expect("OAuth runtime failure internal identity");
+    assert_eq!(internal.internal_code, "500-160");
+    assert_eq!(internal.node_id, "V3Transport13ResponsesHttpRequest");
+    assert!(source.external_error.is_none());
+}
+
+#[test]
+fn concurrency_and_client_disconnect_branches_preserve_source_kind() {
+    let concurrency = provider_error_source_for_test(
+        "V3Target10ConcreteProviderSelected",
+        V3ProviderError::ConcurrencyBusy {
+            request_id: "req-concurrency".to_string(),
+            provider_id: "provider-a".to_string(),
+        },
+    );
+    assert_eq!(
+        concurrency.source_kind,
+        V3ErrorSourceKind::TargetPoolExhausted
+    );
+    assert_eq!(concurrency.code, "provider_concurrency_busy");
+    assert!(concurrency.internal_error.is_none());
+    assert!(concurrency.external_error.is_none());
+
+    let disconnect = provider_error_source_for_test(
+        "V3Transport13ResponsesHttpRequest",
+        V3ProviderError::ClientDisconnect {
+            request_id: "req-disconnect".to_string(),
+            provider_id: "provider-a".to_string(),
+        },
+    );
+    assert_eq!(disconnect.source_kind, V3ErrorSourceKind::ClientDisconnect);
+    assert_eq!(disconnect.code, "client_disconnect");
+    assert!(disconnect.internal_error.is_none());
+    assert!(disconnect.external_error.is_none());
+}
+
+#[test]
+fn external_provider_error_branch_preserves_external_identity() {
+    let headers = vec![V3ProviderResponseHeader {
+        name: "x-request-id".to_string(),
+        value: b"upstream-request".to_vec(),
+    }];
+    let errors = [
+        (
+            V3ProviderError::Transport {
+                request_id: "req-transport".to_string(),
+                provider_id: "provider-transport".to_string(),
+                reason: "connection reset".to_string(),
+            },
+            "provider_transport_error",
+            "provider-transport",
+            None,
+        ),
+        (
+            V3ProviderError::WebSocketTransport {
+                request_id: "req-ws-transport".to_string(),
+                provider_id: "provider-ws".to_string(),
+                reason: "socket closed".to_string(),
+            },
+            "provider_transport_error",
+            "provider-ws",
+            None,
+        ),
+        (
+            V3ProviderError::WebSocketProtocol {
+                request_id: "req-ws-protocol".to_string(),
+                provider_id: "provider-ws".to_string(),
+                reason: "invalid event".to_string(),
+            },
+            "provider_websocket_protocol_error",
+            "provider-ws",
+            None,
+        ),
+        (
+            V3ProviderError::WebSocketProviderEvent {
+                request_id: "req-ws-event".to_string(),
+                provider_id: "provider-ws".to_string(),
+                status: Some(429),
+                code: Some("rate_limit".to_string()),
+                message: "slow down".to_string(),
+            },
+            "rate_limit",
+            "provider-ws",
+            Some(429),
+        ),
+        (
+            V3ProviderError::UnexpectedContentType {
+                request_id: "req-content-type".to_string(),
+                provider_id: "provider-content".to_string(),
+                expected: "application/json",
+                content_type: Some("text/plain".to_string()),
+                status: 200,
+                headers: headers.clone(),
+            },
+            "provider_content_type_unexpected",
+            "provider-content",
+            None,
+        ),
+        (
+            V3ProviderError::ResponseBodyUnreadable {
+                request_id: "req-body-read".to_string(),
+                provider_id: "provider-body".to_string(),
+                status: 503,
+                headers: headers.clone(),
+                reason: "body stream failed".to_string(),
+            },
+            "provider_transport_error",
+            "provider-body",
+            None,
+        ),
+        (
+            V3ProviderError::ResponseBody {
+                request_id: "req-body".to_string(),
+                provider_id: "provider-body".to_string(),
+                reason: "invalid JSON".to_string(),
+            },
+            "provider_response_body_error",
+            "provider-body",
+            None,
+        ),
+        (
+            V3ProviderError::MalformedSse {
+                request_id: "req-sse".to_string(),
+                provider_id: "provider-sse".to_string(),
+                reason: "missing terminal".to_string(),
+            },
+            "provider_malformed_sse",
+            "provider-sse",
+            None,
+        ),
+    ];
+
+    for (error, expected_code, expected_provider_id, expected_status) in errors {
+        let source = provider_error_source_for_test("V3ProviderResp14Raw", error);
+        assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(source.source_stage, "V3ProviderResp14Raw");
+        assert_eq!(source.code, expected_code);
+        assert!(source.internal_error.is_none());
+        let external = source.external_error.expect("external provider identity");
+        assert_eq!(external.provider_id.as_deref(), Some(expected_provider_id));
+        assert_eq!(external.status, expected_status);
+    }
 }

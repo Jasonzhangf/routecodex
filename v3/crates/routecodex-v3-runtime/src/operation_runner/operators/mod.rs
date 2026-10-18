@@ -1,5 +1,15 @@
 mod capture_client_json;
 mod err01_source_raised;
+
+#[cfg(test)]
+thread_local! {
+    static ERR01_EXECUTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn err01_execution_count_for_test() -> usize {
+    ERR01_EXECUTIONS.with(std::cell::Cell::get)
+}
 mod err02_classified;
 mod err03_target_local_action;
 mod err04_target_exhaustion;

@@ -266,6 +266,9 @@ fn opaque_helper_missing_server_reports_router_stage() {
         0,
     )
     .expect_err("a missing server must raise a typed source");
+    let Ok(source) = source else {
+        panic!("missing server must preserve the typed source without an SDK operator fault");
+    };
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert_eq!(source.source_stage, "V3Router05RequestClassified");
     assert_eq!(source.code, "target_resolution_classification_failed");
@@ -285,6 +288,9 @@ fn opaque_helper_endpoint_protocol_mismatch_reports_router_stage() {
         0,
     )
     .expect_err("an endpoint/entry protocol mismatch must raise a typed source");
+    let Ok(source) = source else {
+        panic!("endpoint mismatch must preserve the typed source without an SDK operator fault");
+    };
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert_eq!(source.source_stage, "V3Router05RequestClassified");
     assert_eq!(source.code, "target_resolution_classification_failed");

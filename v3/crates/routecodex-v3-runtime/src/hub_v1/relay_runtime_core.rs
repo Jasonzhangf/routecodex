@@ -500,18 +500,28 @@ where
         },
     };
     let (target_resolved_request, resolved_target) =
-        crate::operation_runner::run_v3_resolve_target_operator(
+        match crate::operation_runner::run_v3_resolve_target_operator(
             (*req02.previous.payload.0).clone(),
             resolve_mode,
-        )
-        .map_err(|error| match error {
-            crate::operation_runner::V3ResolveTargetOperatorError::Typed(source) => {
-                V3RelayCoreError::Target(format!("{}: {}", source.code, source.message))
+        ) {
+            Ok(resolved) => resolved,
+            Err(crate::operation_runner::V3ResolveTargetOperatorError::Typed(source)) => {
+                return Err(V3RelayCoreError::Target(format!(
+                    "{}: {}",
+                    source.code, source.message
+                )));
             }
-            crate::operation_runner::V3ResolveTargetOperatorError::Runner(error) => {
-                V3RelayCoreError::Target(error.to_string())
+            Err(crate::operation_runner::V3ResolveTargetOperatorError::OperatorFault(fault)) => {
+                return Ok(C::assemble_failure_output(
+                    super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                    trace,
+                    std::mem::take(failure_events),
+                ));
             }
-        })?;
+            Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
+                return Err(V3RelayCoreError::Target(error.to_string()));
+            }
+        };
     let route_policy_pending = resolved_target.route_policy_pending;
     if execution_mode != V3HubExecutionMode::Relay {
         return Err(V3RelayCoreError::Target(format!(
@@ -546,6 +556,13 @@ where
                     "{}: {}",
                     source.code, source.message
                 )));
+            }
+            Err(V3PlanExecutionStop::OperatorFault(fault)) => {
+                return Ok(C::assemble_failure_output(
+                    super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                    trace,
+                    std::mem::take(failure_events),
+                ));
             }
             Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
                 let failure = C::request_failure_builder(
@@ -632,6 +649,16 @@ where
                         "{}: {}",
                         source.code, source.message
                     )));
+                }
+                Err(V3PlanExecutionStop::OperatorFault(fault)) => {
+                    return Ok(C::assemble_failure_output(
+                        terminalize_provider_failure(
+                            super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                            last_external_http.clone(),
+                        ),
+                        trace,
+                        std::mem::take(failure_events),
+                    ));
                 }
                 Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
                     let attempted_candidates = exhaustion.attempted_candidates;
@@ -896,7 +923,7 @@ where
                 }
             }
         }
-        attempt_budget.admit_transport_attempt().map_err(|error| {
+        let transport_attempt = attempt_budget.admit_transport_attempt().map_err(|error| {
             V3RelayCoreError::Target(format!(
                 "V3ExecutionAttemptBudget rejected provider transport attempt: {error}"
             ))
@@ -940,7 +967,7 @@ where
                     last_external_http = Some(
                         crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
                     );
-                    let failure = if response.body_read_failure.is_some() {
+                    let mut failure = if response.body_read_failure.is_some() {
                         crate::hub_v1::relay_runtime_shared::provider_http_body_read_failure(
                             &response,
                             &selected_target_provider_id,
@@ -952,6 +979,16 @@ where
                             &selected_target_provider_id,
                         )
                     };
+                    failure.failed_attempt_evidence = Some(
+                        build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                            transport_attempt,
+                            Some(provider_request_snapshot.clone()),
+                            response.status,
+                            &response.headers,
+                            &response.body,
+                            response.body_read_failure.as_deref(),
+                        ),
+                    );
                     let _ = runtime_timing.finish_external();
                     drop(provider_action_permit.take());
                     if let Some(failure) = handle_provider_failure(
@@ -985,7 +1022,14 @@ where
                     {
                         last_external_http = Some(witness);
                     }
-                    let failure = provider_runtime_failure(error, &selected_target_provider_id);
+                    let failed_attempt_evidence =
+                        build_v3_runtime_provider_failed_attempt_evidence_from_error(
+                            transport_attempt,
+                            Some(provider_request_snapshot.clone()),
+                            &error,
+                        );
+                    let mut failure = provider_runtime_failure(error, &selected_target_provider_id);
+                    failure.failed_attempt_evidence = failed_attempt_evidence;
                     let _ = runtime_timing.finish_external();
                     drop(provider_action_permit.take());
                     if let Some(failure) = handle_provider_failure(

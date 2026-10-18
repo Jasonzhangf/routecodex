@@ -128,8 +128,8 @@ fn classify_error(
         .expect("side output lock")
         .take()
         .expect("typed error is required");
-    let Err(typed) = typed else {
-        panic!("side output must preserve the typed error");
+    let Err(Ok(typed)) = typed else {
+        panic!("side output must preserve the typed source without an SDK operator fault");
     };
     (error, typed)
 }
@@ -247,6 +247,9 @@ fn relay_error_keeps_the_existing_typed_resolver_error() {
         0,
     )
     .expect_err("missing server must produce the existing resolver error");
+    let Ok(expected) = expected else {
+        panic!("resolver helper must preserve the typed source without an SDK operator fault");
+    };
     let Err(observed) = run_v3_resolve_target_operator(
         request,
         V3ResolveTargetExecutionMode::RelayFresh {

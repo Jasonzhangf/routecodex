@@ -40,6 +40,9 @@ pub(crate) use provider_compat_shared::{
 mod relay_runtime_shared;
 pub(crate) use relay_runtime_shared::{
     bind_v3_selected_business_auth_kind, build_v3_relay_observability,
+    build_v3_runtime_provider_failed_attempt_evidence_from_error,
+    build_v3_runtime_provider_failed_attempt_evidence_from_response,
+    build_v3_runtime_provider_failed_attempt_evidence_no_response,
     build_v3_runtime_provider_failure_observation_from_policy_event, error_output,
     external_http_witness_from_provider_error, external_http_witness_head,
     extract_error_type_style, extract_message_type_style, handle_provider_failure,

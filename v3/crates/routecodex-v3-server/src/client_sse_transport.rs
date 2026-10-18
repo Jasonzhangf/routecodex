@@ -256,7 +256,7 @@ impl Stream for V3ClientSseChannelStream {
                         }
                         Poll::Ready(Some(Err(error))) => {
                             this.state = V3ClientSseChannelState::Finished;
-                            return Poll::Ready(Some(Err(io::Error::other(error.to_string()))));
+                            return Poll::Ready(Some(Err(io::Error::other(error))));
                         }
                         Poll::Ready(None) => {
                             this.state = V3ClientSseChannelState::Finished;
@@ -272,7 +272,7 @@ impl Stream for V3ClientSseChannelStream {
                         }
                         Poll::Ready(Some(Err(error))) => {
                             this.state = V3ClientSseChannelState::Finished;
-                            return Poll::Ready(Some(Err(io::Error::other(error.to_string()))));
+                            return Poll::Ready(Some(Err(io::Error::other(error))));
                         }
                         Poll::Ready(None) => {
                             let frame = build_v3_client_sse_data_frame(&std::mem::take(payload));

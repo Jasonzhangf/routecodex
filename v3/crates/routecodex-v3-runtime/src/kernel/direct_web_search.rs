@@ -21,12 +21,11 @@ pub(crate) fn prepare_v3_responses_direct_web_search_control_request(
     server_tool_scope: Option<&V3ResponsesDirectServerToolScope>,
     payload: &mut Value,
     trace: &mut Vec<&'static str>,
-) -> Result<(), V3Error01SourceRaised> {
+) -> crate::shared::V3DirectSourceResult<()> {
     if !direct_web_search_execution_mode(manifest, payload).is_metadata_center_local_search() {
         return Ok(());
     }
-    let (Some(server_tool_state), Some(server_tool_scope)) =
-        (server_tool_state, server_tool_scope)
+    let (Some(server_tool_state), Some(server_tool_scope)) = (server_tool_state, server_tool_scope)
     else {
         return Err(runtime_source(
             "V3DirectWebSearchReq01LocalToolSurfaceActive",
@@ -36,8 +35,13 @@ pub(crate) fn prepare_v3_responses_direct_web_search_control_request(
     if !server_tool_scope.has_client_session_scope() {
         return Ok(());
     }
-    let state = crate::hub_v1::apply_v3_web_search_request_hook_at_req04(payload)
-        .map_err(|error| runtime_source("V3DirectWebSearchReq01LocalToolSurfaceActive", error.to_string()))?;
+    let state =
+        crate::hub_v1::apply_v3_web_search_request_hook_at_req04(payload).map_err(|error| {
+            runtime_source(
+                "V3DirectWebSearchReq01LocalToolSurfaceActive",
+                error.to_string(),
+            )
+        })?;
     if let Some(state) = state {
         server_tool_state
             .web_search_store_for_scope(
@@ -51,7 +55,9 @@ pub(crate) fn prepare_v3_responses_direct_web_search_control_request(
                 Some("req04 web_search surface activated, store paired state"),
                 None,
             )
-            .map_err(|error| runtime_source("V3DirectWebSearchReq01LocalToolSurfaceActive", error))?;
+            .map_err(|error| {
+                runtime_source("V3DirectWebSearchReq01LocalToolSurfaceActive", error)
+            })?;
         trace.push("V3DirectWebSearchReq01LocalToolSurfaceActive");
     }
     Ok(())
@@ -62,9 +68,8 @@ pub(crate) fn apply_v3_responses_direct_web_search_control_completion(
     server_tool_scope: Option<&V3ResponsesDirectServerToolScope>,
     payload: &Value,
     trace: &mut Vec<&'static str>,
-) -> Result<(), V3Error01SourceRaised> {
-    let (Some(server_tool_state), Some(server_tool_scope)) =
-        (server_tool_state, server_tool_scope)
+) -> crate::shared::V3DirectSourceResult<()> {
+    let (Some(server_tool_state), Some(server_tool_scope)) = (server_tool_state, server_tool_scope)
     else {
         return Ok(());
     };
@@ -89,14 +94,19 @@ pub(crate) fn apply_v3_responses_direct_web_search_control_completion(
         return Ok(());
     }
     let completed = state
-        .transition_to(V3WebSearchCenterPhase::HostedResultProjected, "req04_pair_verified")
+        .transition_to(
+            V3WebSearchCenterPhase::HostedResultProjected,
+            "req04_pair_verified",
+        )
         .and_then(|state| {
             state.transition_to(
                 V3WebSearchCenterPhase::MainModelContinuationPrepared,
                 "req04_pair_verified",
             )
         })
-        .and_then(|state| state.transition_to(V3WebSearchCenterPhase::Completed, "req04_pair_verified"))
+        .and_then(|state| {
+            state.transition_to(V3WebSearchCenterPhase::Completed, "req04_pair_verified")
+        })
         .map_err(|reason| runtime_source("V3DirectWebSearchReq02PairVerified", reason))?;
     server_tool_state
         .web_search_store_for_scope(
@@ -120,9 +130,8 @@ pub(crate) fn apply_v3_responses_direct_web_search_json_response_control(
     server_tool_scope: Option<&V3ResponsesDirectServerToolScope>,
     payload: &mut Value,
     trace: &mut Vec<&'static str>,
-) -> Result<Option<V3WebSearchCenterState>, V3Error01SourceRaised> {
-    let (Some(server_tool_state), Some(server_tool_scope)) =
-        (server_tool_state, server_tool_scope)
+) -> crate::shared::V3DirectSourceResult<Option<V3WebSearchCenterState>> {
+    let (Some(server_tool_state), Some(server_tool_scope)) = (server_tool_state, server_tool_scope)
     else {
         return Ok(None);
     };

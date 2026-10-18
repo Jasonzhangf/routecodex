@@ -282,6 +282,8 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
         error_chain: output.error_chain.unwrap_or_default(),
         node_trace: output.node_trace,
         stopped_before_provider_send: true,
+        diagnostic_source: output.diagnostic_source,
+        diagnostic_cause: output.diagnostic_cause,
     }
 }
 
@@ -368,6 +370,8 @@ pub async fn execute_v3_anthropic_relay_response_dry_run_runtime(
         error_chain: output.error_chain.unwrap_or_default(),
         node_trace: output.node_trace,
         stopped_before_provider_send: true,
+        diagnostic_source: output.diagnostic_source,
+        diagnostic_cause: output.diagnostic_cause,
     }
 }
 
@@ -517,6 +521,10 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let (runtime_timing, mut failed_candidates, mut retry_selected) =
         super::relay_runtime_shared::relay_handoff_entry_state(initial_handoff.as_ref());
+    let mut provider_failure_events: Vec<V3RuntimeProviderFailureObservation> = initial_handoff
+        .as_ref()
+        .map(|handoff| handoff.provider_failure_events.clone())
+        .unwrap_or_default();
     let resolve_mode = match initial_handoff.as_ref() {
         Some(handoff) => crate::operation_runner::V3ResolveTargetExecutionMode::CapturedHandoff {
             opaque_hit: handoff.expanded.route.clone(),
@@ -533,11 +541,20 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         },
     };
     let (resolved_request, resolved_target) =
-        crate::operation_runner::run_v3_resolve_target_operator(
+        match crate::operation_runner::run_v3_resolve_target_operator(
             req02.payload().clone(),
             resolve_mode,
-        )
-        .map_err(|error| V3AnthropicRelayRuntimeError::Target(error.to_string()))?;
+        ) {
+            Ok(resolved) => resolved,
+            Err(crate::operation_runner::V3ResolveTargetOperatorError::OperatorFault(fault)) => {
+                return Ok(provider_failure_output(
+                    super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                    trace,
+                    std::mem::take(&mut provider_failure_events),
+                ));
+            }
+            Err(error) => return Err(V3AnthropicRelayRuntimeError::Target(error.to_string())),
+        };
     let target_source = match initial_handoff.as_ref() {
         Some(handoff) => V3PlanExecutionTargetSource::Expanded(handoff.expanded.clone()),
         None => V3PlanExecutionTargetSource::OpaqueHit(resolved_target.opaque_hit),
@@ -565,6 +582,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 "{}: {}",
                 source.code, source.message
             )))
+        }
+        Err(V3PlanExecutionStop::OperatorFault(fault)) => {
+            return Ok(provider_failure_output(
+                super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                trace,
+                std::mem::take(&mut provider_failure_events),
+            ))
         }
         Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
             let failure = provider_request_failure(
@@ -627,10 +651,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
-    let mut provider_failure_events: Vec<V3RuntimeProviderFailureObservation> = initial_handoff
-        .as_ref()
-        .map(|handoff| handoff.provider_failure_events.clone())
-        .unwrap_or_default();
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
         captured_target_09: Some(&retained_expanded),
@@ -675,6 +695,16 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             "{}: {}",
                             source.code, source.message
                         )))
+                    }
+                    Err(V3PlanExecutionStop::OperatorFault(fault)) => {
+                        return Ok(provider_failure_output(
+                            terminalize_provider_failure(
+                                super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                                last_external_http.clone(),
+                            ),
+                            trace,
+                            std::mem::take(&mut provider_failure_events),
+                        ))
                     }
                     Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
                         let attempted_candidates = exhaustion.attempted_candidates;
@@ -895,7 +925,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
-        attempt_budget.admit_transport_attempt().map_err(|error| {
+        let transport_attempt = attempt_budget.admit_transport_attempt().map_err(|error| {
             V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
         })?;
         let transport_request = match selected_admission.take() {
@@ -933,7 +963,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 last_external_http = Some(
                     crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
                 );
-                let failure = if let Some(reason) = &response.body_read_failure {
+                let mut failure = if let Some(reason) = &response.body_read_failure {
                     let mut failure = provider_runtime_failure(
                         V3ProviderError::ResponseBody {
                             request_id: response.request_id.clone(),
@@ -958,6 +988,16 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         &selected_target_provider_id,
                     )
                 };
+                failure.failed_attempt_evidence = Some(
+                    build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                        transport_attempt,
+                        Some(provider_request_snapshot.clone()),
+                        response.status,
+                        &response.headers,
+                        &response.body,
+                        response.body_read_failure.as_deref(),
+                    ),
+                );
                 let _ = runtime_timing.finish_external();
                 drop(_provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
@@ -990,7 +1030,14 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 {
                     last_external_http = Some(witness);
                 }
-                let failure = provider_runtime_failure(error, &selected_target_provider_id);
+                let failed_attempt_evidence =
+                    build_v3_runtime_provider_failed_attempt_evidence_from_error(
+                        transport_attempt,
+                        Some(provider_request_snapshot.clone()),
+                        &error,
+                    );
+                let mut failure = provider_runtime_failure(error, &selected_target_provider_id);
+                failure.failed_attempt_evidence = failed_attempt_evidence;
                 let _ = runtime_timing.finish_external();
                 drop(_provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
@@ -1589,6 +1636,7 @@ async fn anthropic_provider_stream_failure_from_closeout_error(
         terminal_projection: failure.terminal_projection,
         terminal_disposition: failure.terminal_disposition,
         error_operator_fault: failure.error_operator_fault,
+        failed_attempt_evidence: failure.failed_attempt_evidence,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     })

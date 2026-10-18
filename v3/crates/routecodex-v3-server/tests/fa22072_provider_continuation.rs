@@ -63,7 +63,10 @@ const BETA_WIRE: &str = "beta-wire";
 const REQUEST_MARKER: &str = "owned continuation request";
 const BETA_BUSINESS_TEXT: &str = "owned beta continuation complete";
 const ALPHA_PRIVATE_CAUSE: &str = "alpha private cause fa22072";
+const ALPHA_NONCREDENTIAL_HEADER: &str = "owned-alpha-503-header";
+const ALPHA_RESPONSE_SECRET: &str = "owned-alpha-response-secret";
 const TOOL_CALL_ID: &str = "call_owned_1";
+const FAILED_ATTEMPT_ATTEMPT_ID: usize = 1;
 
 /// The private diagnostic artifact this node freezes for the failed-attempt source.
 const FAILED_ATTEMPT_FILE: &str = "provider-failed-attempts.json";
@@ -78,6 +81,8 @@ enum AlphaBehavior {
     PreHeadDrop,
     /// Answer a real HTTP 503 with a provider-private JSON body.
     Http503,
+    /// Send a real 200 head and only part of its declared body.
+    PostHeadBodyReadFailure,
     /// Send a 200 head with a well-formed content-length but malformed JSON body.
     PostHeadMalformedJson,
 }
@@ -178,14 +183,24 @@ async fn serve_alpha(listener: TcpListener, peer: Arc<AlphaPeer>) {
                 }
                 AlphaBehavior::Http503 => {
                     let payload = format!(
-                        "{{\"error\":{{\"type\":\"server_error\",\"code\":\"alpha_owned_failure\",\"message\":\"{ALPHA_PRIVATE_CAUSE}\"}}}}"
+                        "{{\"error\":{{\"type\":\"server_error\",\"code\":\"alpha_owned_failure\",\"message\":\"{ALPHA_PRIVATE_CAUSE}\",\"api_key\":\"{ALPHA_RESPONSE_SECRET}\"}}}}"
                     );
                     let head = format!(
-                        "HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                        "HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\nx-routecodex-fixture: {ALPHA_NONCREDENTIAL_HEADER}\r\nauthorization: Bearer {ALPHA_RESPONSE_SECRET}\r\nset-cookie: session={ALPHA_RESPONSE_SECRET}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
                         payload.len()
                     );
                     let _ = socket.write_all(head.as_bytes()).await;
                     let _ = socket.write_all(payload.as_bytes()).await;
+                    let _ = socket.flush().await;
+                }
+                AlphaBehavior::PostHeadBodyReadFailure => {
+                    let partial_payload =
+                        format!("{{\"error\":{{\"message\":\"{ALPHA_PRIVATE_CAUSE}\"}}");
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nx-routecodex-fixture: {ALPHA_NONCREDENTIAL_HEADER}\r\ncontent-length: 512\r\nconnection: close\r\n\r\n"
+                    );
+                    let _ = socket.write_all(head.as_bytes()).await;
+                    let _ = socket.write_all(partial_payload.as_bytes()).await;
                     let _ = socket.flush().await;
                 }
                 AlphaBehavior::PostHeadMalformedJson => {
@@ -808,6 +823,120 @@ fn validate_case_artifact(case: &CaseOutcome, failures: &mut Vec<String>) {
             ));
         }
     }
+    if matches!(
+        case.name,
+        "json_http_503" | "json_post_head_body_read_failure"
+    ) {
+        let evidence = &attempt["failed_attempt_evidence"];
+        if evidence["attempt"].as_u64() != Some(FAILED_ATTEMPT_ATTEMPT_ID as u64) {
+            failures.push(format!(
+                "{}: failed attempt must retain the actual admitted transport ordinal {}, got {:?}",
+                case.name, FAILED_ATTEMPT_ATTEMPT_ID, evidence["attempt"]
+            ));
+        }
+        let request = &evidence["provider_request"];
+        if request["method"].as_str() != Some("POST")
+            || request["body"]["messages"][0]["content"].as_str() != Some(REQUEST_MARKER)
+            || request["body"]["model"].as_str() != Some(ALPHA_WIRE)
+        {
+            failures.push(format!(
+                "{}: failed attempt must retain the exact admitted provider request projection, got {:?}",
+                case.name, request
+            ));
+        }
+        let request_headers = request["headers"].as_object().cloned().unwrap_or_default();
+        if request_headers
+            .values()
+            .any(|value| value.as_str().unwrap_or_default().contains(ALPHA_KEY))
+        {
+            failures.push(format!(
+                "{}: failed attempt request headers retained a synthetic credential",
+                case.name
+            ));
+        }
+        let response = &evidence["provider_response"];
+        let expected_response_status = if case.name == "json_http_503" {
+            503
+        } else {
+            200
+        };
+        if response["kind"].as_str() != Some("external_http")
+            || response["status"].as_u64() != Some(expected_response_status)
+        {
+            failures.push(format!(
+                "{}: failed attempt must retain the real HTTP {} response head, got {:?}",
+                case.name, expected_response_status, response
+            ));
+        }
+        let bytes = response["body"]["bytes"]
+            .as_array()
+            .map(|bytes| {
+                bytes
+                    .iter()
+                    .filter_map(serde_json::Value::as_u64)
+                    .map(|byte| byte as u8)
+                    .collect::<Vec<u8>>()
+            })
+            .unwrap_or_default();
+        let raw_body = String::from_utf8_lossy(&bytes);
+        if case.name == "json_http_503" && !raw_body.contains(ALPHA_PRIVATE_CAUSE) {
+            failures.push(format!(
+                "{}: failed attempt body must preserve the provider failure bytes, got {:?}",
+                case.name, response["body"]
+            ));
+        }
+        if case.name == "json_http_503"
+            && (!raw_body.contains("alpha_owned_failure")
+                || response["body"]["redacted"].as_bool() != Some(true)
+                || raw_body.contains(ALPHA_RESPONSE_SECRET))
+        {
+            failures.push(format!(
+                "{}: failed attempt body must preserve the 503 business bytes with credential fields redacted, got {:?}",
+                case.name, response["body"]
+            ));
+        }
+        let response_headers = response["headers"].as_array().cloned().unwrap_or_default();
+        if !response_headers.iter().any(|header| {
+            header["name"].as_str() == Some("x-routecodex-fixture")
+                && header["value"].as_str() == Some(ALPHA_NONCREDENTIAL_HEADER)
+        }) || response_headers.iter().any(|header| {
+            header["value"]
+                .as_str()
+                .unwrap_or_default()
+                .contains(ALPHA_RESPONSE_SECRET)
+        }) {
+            failures.push(format!(
+                "{}: failed attempt headers must retain noncredential evidence and remove credentials, got {:?}",
+                case.name, response_headers
+            ));
+        }
+        if case.name == "json_post_head_body_read_failure" {
+            if !bytes.is_empty()
+                || response["body"]["redacted"].as_bool() != Some(false)
+                || response["body_read_failure"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .is_empty()
+            {
+                failures.push(format!(
+                    "{}: received head must retain an empty unreadable body and explicit body-read failure, got {:?}",
+                    case.name, response
+                ));
+            }
+        }
+    }
+    if case.name.ends_with("pre_head_drop") {
+        let evidence = &attempt["failed_attempt_evidence"];
+        if evidence["attempt"].as_u64() != Some(FAILED_ATTEMPT_ATTEMPT_ID as u64)
+            || evidence["provider_request"]["method"].as_str() != Some("POST")
+            || evidence["provider_response"]["kind"].as_str() != Some("no_response")
+        {
+            failures.push(format!(
+                "{}: post-admission pre-head failure must retain attempt 1, request, and no_response without borrowing another response, got {:?}",
+                case.name, evidence
+            ));
+        }
+    }
 }
 
 /// Private markers that must never reach the client. They cover the typed source
@@ -859,10 +988,15 @@ async fn fa22072_chat_failed_attempt_recovers_with_source_public_entry() {
         listener_port
     );
 
-    let case_defs: [(&'static str, AlphaBehavior, bool); 4] = [
+    let case_defs: [(&'static str, AlphaBehavior, bool); 5] = [
         ("json_pre_head_drop", AlphaBehavior::PreHeadDrop, false),
         ("sse_pre_head_drop", AlphaBehavior::PreHeadDrop, true),
         ("json_http_503", AlphaBehavior::Http503, false),
+        (
+            "json_post_head_body_read_failure",
+            AlphaBehavior::PostHeadBodyReadFailure,
+            false,
+        ),
         (
             "json_post_head_malformed",
             AlphaBehavior::PostHeadMalformedJson,

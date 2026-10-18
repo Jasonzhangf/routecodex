@@ -1,6 +1,148 @@
 include!("../../tests/support/kernel_unit.rs");
 
 #[test]
+fn protocol_candidate_keys_raise_only_actual_failures() {
+    let manifest = test_manifest();
+    let raw = crate::nodes::build_v3_server_03_http_request_raw(
+        "test".into(),
+        test_failure_session_scope("default"),
+        "protocol-candidate-errors".into(),
+        "protocol-candidate-errors-exec".into(),
+        "POST".into(),
+        "/v1/responses".into(),
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        raw,
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        0,
+    )
+    .expect("baseline plan");
+    let mut expanded = plan.expanded;
+    let mut relay_only = expanded.candidates[0].clone();
+    relay_only.model_id = "relay-only".into();
+    relay_only.responses_process = Some("chat".into());
+    expanded.candidates.push(relay_only);
+    let allowed_modes = vec!["direct".to_string()];
+    let count = crate::operation_runner::err01_execution_count_for_test;
+    let before = count();
+    let keys = protocol_candidate_keys_for_decision_mode(
+        &expanded,
+        "responses",
+        &allowed_modes,
+        V3Execution11ProtocolDecisionMode::SameProtocolDirect,
+    )
+    .expect("retain the compatible candidate");
+    assert_eq!(keys.len(), 1);
+    assert_eq!(count() - before, 0, "candidate exclusions are not failures");
+
+    let before = count();
+    let source = expect_ordinary_source(protocol_candidate_keys_for_decision_mode(
+        &expanded,
+        "unsupported",
+        &allowed_modes,
+        V3Execution11ProtocolDecisionMode::SameProtocolDirect,
+    ));
+    assert_eq!(source.code, "entry_protocol_unresolved");
+    assert_eq!(count() - before, 1);
+
+    let before = count();
+    let source = expect_ordinary_source(protocol_candidate_keys_for_decision_mode(
+        &expanded,
+        "gemini",
+        &allowed_modes,
+        V3Execution11ProtocolDecisionMode::SameProtocolDirect,
+    ));
+    assert_eq!(source.code, "protocol_mode_candidate_set_empty");
+    assert_eq!(count() - before, 1, "only the empty-set outcome is raised");
+}
+
+#[test]
+fn direct_source_fault_preserves_http_witness_observability_and_snapshots() {
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3Provider12ResponsesWirePayload",
+        "seeded_direct_source",
+        "seeded direct source",
+    );
+    let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+        source.clone(),
+        Ok(None),
+    )
+    .expect_err("missing terminal Error06 is a typed SDK fault");
+    let diagnostic_source = fault.policy_failure.clone();
+    let diagnostic_cause = fault
+        .original_source
+        .clone()
+        .expect("the SDK fault keeps its original source");
+    assert_eq!(diagnostic_cause, source);
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        429,
+        vec![("retry-after".to_string(), b"3".to_vec())],
+        br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
+    );
+    let observability = V3RuntimeObservability {
+        entry_protocol: "responses".to_string(),
+        execution_mode: "direct".to_string(),
+        transport: "sse".to_string(),
+        attempts: Some(2),
+        ..Default::default()
+    };
+    let request_snapshot = json!({"model":"route-alias","tools":[{"name":"echo"}]});
+    let trace = vec!["V3Target10ConcreteProviderSelected"];
+
+    let output = source_failure_output_with_observability_and_snapshots(
+        Err(fault),
+        Some(witness.clone()),
+        trace.clone(),
+        &crate::hooks::register_responses_direct_hooks(),
+        Some(observability.clone()),
+        Some(request_snapshot.clone()),
+        None,
+    );
+
+    assert_eq!(output.observability, Some(observability));
+    assert_eq!(
+        output.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
+    );
+    assert_eq!(output.provider_request_snapshot, Some(request_snapshot));
+    assert!(output.error_chain.is_none());
+    assert_eq!(output.node_trace, trace);
+    assert_eq!(output.diagnostic_source, Some(diagnostic_source));
+    assert_eq!(output.diagnostic_cause, Some(diagnostic_cause));
+    assert_eq!(output.client_payload.status, 599);
+    assert!(matches!(
+        &output.client_payload.body,
+        crate::nodes::V3ClientBody::Json(value) if value.is_null()
+    ));
+}
+
+#[test]
+fn protocol_plan_operator_fault_keeps_original_cause_without_running_error_projection() {
+    let original = routecodex_v3_error::build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3Execution11ProtocolDecision",
+        "protocol_plan_failure",
+        "the original planning failure",
+    );
+    // Seed the typed fault at the planning boundary; this does not claim that
+    // a public request can force an SDK01 rejection with the fixed catalog.
+    let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+        original.clone(),
+        Ok(None),
+    )
+    .expect_err("missing terminal projection is an actual typed operator fault");
+    let failure =
+        protocol_plan_operator_fault(fault.clone(), vec!["V3Execution11ProtocolDecision"]);
+    let returned = project_v3_protocol_execution_plan_failure(failure)
+        .expect_err("an operator fault must not become a successful Error06 projection");
+    assert_eq!(returned, fault);
+    assert_eq!(returned.original_source, Some(original));
+}
+
+#[test]
 fn protocol_plan_failure_preserves_source_status_and_pool_exhausted() {
     let routing_group = "protocol_plan_failure";
     let mut manifest = scoped_test_manifest(responses_process_chat_manifest(), routing_group);
@@ -52,11 +194,14 @@ fn protocol_plan_failure_preserves_source_status_and_pool_exhausted() {
 
 #[test]
 fn residence_expiry_is_not_a_local_store_598_and_never_commits_an_error() {
-    let source = direct_attempt_store_error_source(
+    let source = match direct_attempt_store_error_source(
         crate::nodes::V3AttemptStoreError::ResidenceDeadlineExceeded("expired".into()),
         "V3ExecutionAttemptPayloadStore",
         "direct_sse_attempt_store_rejected",
-    );
+    ) {
+        Ok(source) => source,
+        Err(fault) => panic!("unexpected SDK fault: {fault:?}"),
+    };
     assert_eq!(source.code, "request_residence_deadline_exceeded");
     let output = error_output(
         source,
@@ -70,11 +215,14 @@ fn residence_expiry_is_not_a_local_store_598_and_never_commits_an_error() {
     );
     assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
 
-    let source = direct_attempt_store_error_source(
+    let source = match direct_attempt_store_error_source(
         crate::nodes::V3AttemptStoreError::LocalResourceExhausted("byte cap".into()),
         "V3ExecutionAttemptPayloadStore",
         "direct_sse_attempt_store_rejected",
-    );
+    ) {
+        Ok(source) => source,
+        Err(fault) => panic!("unexpected SDK fault: {fault:?}"),
+    };
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     assert_eq!(source.code, "direct_sse_attempt_store_rejected");
 }

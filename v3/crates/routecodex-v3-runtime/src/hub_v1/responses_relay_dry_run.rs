@@ -188,6 +188,8 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         error_chain: output.error_chain.unwrap_or_default(),
         node_trace: output.node_trace,
         stopped_before_provider_send: true,
+        diagnostic_source: output.diagnostic_source,
+        diagnostic_cause: output.diagnostic_cause,
     })
 }
 
@@ -196,75 +198,104 @@ pub fn project_v3_responses_relay_runtime_failure(
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayRuntimeOutput {
     match error {
-        V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
-            attempted_candidates,
-        } => {
-            let source = provider_pool_exhausted_source(
-                "V3Target10ConcreteProviderSelected",
-                &attempted_candidates,
-            );
-            let mut output = error_output(source, 502, "none", Vec::new(), observability, 0);
-            output.terminal_disposition =
-                Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse);
-            output
-        }
-        V3ResponsesRelayRuntimeError::Target(message) => {
-            let source = build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3HubRuntime",
-                "responses_relay_runtime_error",
-                message,
-            );
-            error_output(source, 500, "none", Vec::new(), observability, 0)
-        }
-        V3ResponsesRelayRuntimeError::ClientInboundCanonical(message) => {
-            let source = routecodex_v3_error::build_v3_error_01_source_raised(
-                V3ErrorSourceKind::InvalidRequest,
-                "V3HubReqInbound02Normalized",
-                "invalid_responses_request",
-                message,
-            );
-            error_output(source, 400, "none", Vec::new(), observability, 0)
-        }
-        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message) => {
-            let source = routecodex_v3_error::build_v3_error_01_source_raised_internal(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3ProviderResp14Raw",
-                "provider_response_sse_event_invalid",
-                message,
-                routecodex_v3_error::V3InternalErrorCode::V3ProviderResp14Raw,
-            );
-            error_output(source, 599, "none", Vec::new(), observability, 0)
-        }
-        V3ResponsesRelayRuntimeError::ExecutionControlResponse(message) => {
-            let source = build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3ServerRespOutbound06ClientFrame",
-                "responses_relay_response_execution_control_error",
-                message,
-            );
-            error_output(source, 599, "none", Vec::new(), observability, 0)
-        }
-        V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
-            call_id,
-            code,
-            message,
-            retryable: _,
-        } => {
-            let source = super::web_search_sidecar::web_search_sidecar_failure_source(
-                &call_id, code, &message,
-            );
-            error_output(source, 599, "none", Vec::new(), observability, 0)
-        }
         error => {
-            let message = error.to_string();
-            let source = build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3HubRuntime",
-                "responses_relay_runtime_error",
-                message.clone(),
-            );
-            error_output(source, 500, "none", Vec::new(), observability, 0)
+            let (source, status, terminal_disposition) = match error {
+                V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
+                    attempted_candidates,
+                } => (
+                    provider_pool_exhausted_source(
+                        "V3Target10ConcreteProviderSelected",
+                        &attempted_candidates,
+                    ),
+                    502,
+                    Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+                ),
+                V3ResponsesRelayRuntimeError::Target(message) => (
+                    crate::shared::direct_plain_error(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3HubRuntime",
+                        "responses_relay_runtime_error",
+                        message,
+                    ),
+                    500,
+                    None,
+                ),
+                V3ResponsesRelayRuntimeError::ClientInboundCanonical(message) => (
+                    crate::shared::direct_plain_error(
+                        V3ErrorSourceKind::InvalidRequest,
+                        "V3HubReqInbound02Normalized",
+                        "invalid_responses_request",
+                        message,
+                    ),
+                    400,
+                    None,
+                ),
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message) => (
+                    crate::shared::direct_internal_error(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3ProviderResp14Raw",
+                        "provider_response_sse_event_invalid",
+                        message,
+                        routecodex_v3_error::V3InternalErrorCode::V3ProviderResp14Raw,
+                    ),
+                    599,
+                    None,
+                ),
+                V3ResponsesRelayRuntimeError::ExecutionControlResponse(message) => (
+                    crate::shared::direct_plain_error(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3ServerRespOutbound06ClientFrame",
+                        "responses_relay_response_execution_control_error",
+                        message,
+                    ),
+                    599,
+                    None,
+                ),
+                V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
+                    call_id,
+                    code,
+                    message,
+                    retryable: _,
+                } => (
+                    super::web_search_sidecar::web_search_sidecar_failure_source(
+                        &call_id, code, &message,
+                    ),
+                    599,
+                    None,
+                ),
+                error => {
+                    let message = error.to_string();
+                    (
+                        crate::shared::direct_plain_error(
+                            V3ErrorSourceKind::RuntimeFailure,
+                            "V3HubRuntime",
+                            "responses_relay_runtime_error",
+                            message,
+                        ),
+                        500,
+                        None,
+                    )
+                }
+            };
+            let mut output = match source {
+                Ok(source) => error_output(source, status, "none", Vec::new(), observability, 0),
+                Err(fault) => {
+                    let mut output =
+                        super::responses_relay_failures::local_error_output_from_projection(
+                            Err(fault),
+                            Vec::new(),
+                            observability,
+                        );
+                    if let Some(terminal_disposition) = terminal_disposition {
+                        output.terminal_disposition = Some(terminal_disposition);
+                    }
+                    return output;
+                }
+            };
+            if let Some(terminal_disposition) = terminal_disposition {
+                output.terminal_disposition = Some(terminal_disposition);
+            }
+            output
         }
     }
 }

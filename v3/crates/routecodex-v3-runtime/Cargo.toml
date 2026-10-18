@@ -31,3 +31,4 @@ tiktoken-rs.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+routecodex-v3-oauth = { path = "../routecodex-v3-oauth" }

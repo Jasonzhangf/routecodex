@@ -356,7 +356,7 @@ features:
   - compile_provider_health
   - spawn_v3_server_aggregate
   - read_json_payload
-  - project_v3_http_boundary_error
+  - project_v3_http_boundary_error_via_sdk
   allowed_paths:
   - v3/crates/routecodex-v3-config
   - v3/crates/routecodex-v3-server
@@ -630,6 +630,13 @@ features:
   - v3/crates/routecodex-v3-runtime/src/provider_error_policy_matching.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs
+  - v3/crates/routecodex-v3-runtime/src/operation_runner/error_decision.rs
+  - v3/crates/routecodex-v3-runtime/src/operation_runner/operators/err01_source_raised.rs
+  - v3/crates/routecodex-v3-runtime/src/operation_runner/operators/err02_classified.rs
+  - v3/crates/routecodex-v3-runtime/src/operation_runner/operators/err03_target_local_action.rs
+  - v3/crates/routecodex-v3-runtime/src/operation_runner/operators/err04_target_exhaustion.rs
+  - v3/crates/routecodex-v3-runtime/src/operation_runner/operators/err05_execution_decision.rs
+  - v3/crates/routecodex-v3-runtime/src/operation_runner/operators/err06_client_projected.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
   resource_bindings:
@@ -691,6 +698,21 @@ features:
   - V3DebugRuntime::record_node_event
   - V3DebugRuntime::build_dry_run_execution_plan
   - V3DebugRuntime::start_snapshot_session
+  - project_v3_server_boundary_error_via_sdk
+  - project_v3_server_websocket_error_via_sdk
+  - foundation_output_from_error_sdk_result
+  - raise_v3_source_via_err01
+  - project_v3_relay_error_source
+  - finish_v3_relay_error_projection
+  - V3RelayErrorOperatorFault
+  - run_v3_err01_source_raised_operator
+  - run_v3_error_02_to_05_decision_operators
+  - run_v3_error_06_terminal_projection_operator
+  - run_v3_err02_classified_operator
+  - run_v3_error_03_target_local_action_operator
+  - run_v3_error_04_target_exhaustion_operator
+  - execute_v3_operation_runner_error_err05_execution_decision
+  - execute_v3_operation_runner_error_err06_client_projected
   - build_v3_error_01_source_raised
   - V3ExternalErrorLink
   - V3InternalErrorCode
@@ -4773,10 +4795,14 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
   entry_symbols:
+  - build_v3_runtime_provider_failed_attempt_evidence_from_error
+  - build_v3_runtime_provider_failed_attempt_evidence_from_response
+  - build_v3_runtime_provider_failed_attempt_evidence_no_response
   - relay_handoff_entry_state
   - relay_request_execution_control
   - resolve_v3_relay_entry_target
   resource_bindings:
+  - v3.runtime.responses_observability
   - v3.execution.target_plan
   - v3.execution.request_lifecycle_control
   - v3.runtime.responses_timing_observability
