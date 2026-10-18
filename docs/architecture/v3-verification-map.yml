@@ -662,8 +662,6 @@ features:
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
-  - scripts/architecture/verify-v3-relay-response-semantics.mjs
-  - scripts/tests/v3-relay-response-semantics-red-fixtures.mjs
   design:
   - docs/design/v3-hub-relay-fixed-pipeline-contract.md
   - docs/design/v3-hub-pipeline-static-skeleton-contract.md
@@ -685,14 +683,12 @@ features:
   - response payload ownership is Arc-backed and does not deep-copy full provider response/body/context for governance
   required_gates:
   - npm run test:v3-relay-response-semantics
-  - npm run verify:v3-relay-response-semantics
-  - npm run test:v3-relay-response-semantics-red-fixtures
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-cargo-fmt
   completion_rule:
-    source: Relay response-side source slice is complete when focused Rust tests prove Resp01-Resp03 behavior and source gates reject Resp05/SSE/handler/required_action/second-exit/copy-budget violations.
+    source: Relay response-side source slice is complete when focused Rust consumers prove Resp01-Resp03 behavior and the single JSON/SSE exit; module-boundary, compile-fail, resource-map and payload-copy-budget checks retain their independent contracts.
     runtime: No live Relay runtime is claimed. Request source and resource/hook config remain separate workstreams.
     forbidden_claim: Do not claim request-side completion, resource/hook config completion, live Relay, Server entry cutover, P6 deletion, global install, or production
       replacement.
@@ -705,8 +701,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
-  - scripts/architecture/verify-v3-relay-request-semantics.mjs
-  - scripts/tests/v3-relay-request-semantics-red-fixtures.mjs
   design:
   - docs/design/v3-hub-relay-fixed-pipeline-contract.md
   - docs/design/v3-hub-pipeline-static-skeleton-contract.md
@@ -726,16 +720,13 @@ features:
   - request payload ownership moves forward once and rejects JSON round-trip or full payload clone budget violations
   required_gates:
   - npm run test:v3-relay-request-semantics
-  - npm run verify:v3-relay-request-semantics
-  - npm run test:v3-relay-request-semantics-red-fixtures
   - npm run test:v3-compile-fail
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-cargo-fmt
   completion_rule:
-    source: Relay request-side source slice is complete when focused Rust tests prove Req01-Req04 behavior and source/compile-fail gates reject Req04 bypass, dynamic hooks, shortcut lifecycle,
-      and payload copy-budget violations.
+    source: Relay request-side source slice is complete when focused Rust consumers prove lossless normalization and Req04 governance; compile-fail, static-hook, resource-map and payload-copy-budget checks retain their independent contracts.
     runtime: No live Relay runtime, Req05-Req09 execution, response slice, or resource/hook config is claimed.
     forbidden_claim: Do not claim response-side completion, resource/hook config completion, live Relay, Server entry cutover, P6 deletion, global install, or production
       replacement.
@@ -1570,10 +1561,6 @@ features:
   - node scripts/architecture/verify-v3-anthropic-relay-controlled-replay-harness.mjs
   - node scripts/tests/v3-anthropic-relay-controlled-replay-harness-mutations.mjs
   - node scripts/tests/v3-anthropic-relay-controlled-replay-harness-red-fixtures.mjs
-  - npm run verify:v3-relay-request-semantics
-  - npm run test:v3-relay-request-semantics-red-fixtures
-  - npm run verify:v3-relay-response-semantics
-  - npm run test:v3-relay-response-semantics-red-fixtures
   - node scripts/architecture/verify-v3-anthropic-relay-protocol-hooks.mjs
   - node scripts/tests/v3-anthropic-relay-protocol-hooks-red-fixtures.mjs
   - npm run verify:v3-architecture-docs
