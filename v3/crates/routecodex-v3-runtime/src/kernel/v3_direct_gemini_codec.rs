@@ -476,7 +476,6 @@ mod tests {
                 candidate_count: 1,
                 unavailable_candidates: Vec::new(),
                 attempts: 0,
-                default_floor_protected: false,
             },
             request_id: "request-gemini".to_string(),
             request_body: json!({
