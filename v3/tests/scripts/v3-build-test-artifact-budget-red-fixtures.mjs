@@ -308,10 +308,13 @@ function runWrapperFixture({ fixtureBin, env = {} }) {
 }
 
 const targetDir = join(root, 'target');
-const cliFixture = mkdtempSync(join(tmpdir(), 'routecodex-v3-cli-budget-'));
+const cliFixtureParent = mkdtempSync(join(tmpdir(), 'routecodex-v3-cli-budget-'));
+writeFileSync(join(cliFixtureParent, 'package.json'), JSON.stringify({ type: 'module' }));
+const cliFixture = join(cliFixtureParent, 'consumer');
 try {
   const fixtureBin = join(cliFixture, 'bin');
   mkdirSync(fixtureBin, { recursive: true });
+  writeFileSync(join(cliFixture, 'package.json'), JSON.stringify({ type: 'commonjs' }));
 
   // cargo stub: success run, no unrelated compile. Record invocations so the
   // test can prove whether profile cleanup was requested.
@@ -465,7 +468,7 @@ process.exit(1);
   assert.ok(!existsSync(join(targetDir, '.routecodex-v3-test.lock')));
   writeExecutable(psFailPath, psOkSource);
 } finally {
-  rmSync(cliFixture, { recursive: true, force: true });
+  rmSync(cliFixtureParent, { recursive: true, force: true });
 }
 
 process.stdout.write('[v3-build-test-artifact-budget-red-fixtures] PASS\n');
