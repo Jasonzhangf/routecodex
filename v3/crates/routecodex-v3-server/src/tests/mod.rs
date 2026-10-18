@@ -1438,6 +1438,8 @@ fn test_direct_observability(
             external: std::time::Duration::from_millis(20),
             internal: std::time::Duration::from_millis(5),
         }),
+        diagnostic_source: None,
+        diagnostic_cause: None,
     }
 }
 

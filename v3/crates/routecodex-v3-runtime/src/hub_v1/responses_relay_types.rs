@@ -215,6 +215,14 @@ pub struct V3RuntimeObservability {
     pub target_path: Vec<String>,
     pub usage: Option<V3RuntimeUsageSummary>,
     pub timing: Option<V3RuntimeTimingSummary>,
+    /// Private Relay disconnect diagnostic carrier: the typed Error01 source
+    /// raised by the failing runtime stage. It stays on this diagnostic
+    /// side-channel only and never decides control flow or business payload.
+    pub diagnostic_source: Option<V3Error01SourceRaised>,
+    /// Private Relay disconnect diagnostic carrier: the original typed Error01
+    /// cause behind `diagnostic_source`. It is evidence only, never a routing or
+    /// response-semantics authority.
+    pub diagnostic_cause: Option<V3Error01SourceRaised>,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -940,6 +940,8 @@ pub(crate) fn build_v3_direct_runtime_observability(
         target_path: selected.candidate.path.clone(),
         usage: None,
         timing: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
     }
 }
 
