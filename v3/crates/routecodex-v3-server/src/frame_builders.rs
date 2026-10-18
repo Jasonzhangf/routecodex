@@ -296,8 +296,8 @@ pub(crate) fn project_v3_protocol_stream_error_frame_if_requested(
     requested_stream: bool,
     _protocol: V3SseClientProtocol,
 ) -> V3Server16HttpFrame {
-    if !requested_stream || frame.error_chain.is_empty() || frame.content_type != "application/json"
-    {
+    let is_error_frame = !frame.error_chain.is_empty() || frame.diagnostic_source.is_some();
+    if !requested_stream || !is_error_frame || frame.content_type != "application/json" {
         return frame;
     }
     let body = match frame.body {
@@ -1022,6 +1022,24 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_foundation_output(
     }
 }
 
+pub(crate) fn build_v3_server_16_http_frame_from_error_sdk_result(
+    default_stage: &'static str,
+    projection: V3HttpInputErrorProjection,
+) -> V3Server16HttpFrame {
+    match projection {
+        Ok(projected) => build_v3_server_16_http_frame_from_v3_error_06(projected),
+        Err(fault) => {
+            let stage = fault
+                .original_source
+                .as_ref()
+                .map_or(default_stage, |source| source.source_stage);
+            build_v3_server_16_http_frame_from_v3_foundation_output(
+                foundation_output_from_error_sdk_result(stage, vec![stage], None, Err(fault)),
+            )
+        }
+    }
+}
+
 pub(crate) fn build_v3_debug_runtime_from_manifest(
     manifest: &V3DebugManifest,
 ) -> Result<V3DebugRuntime, routecodex_v3_debug::V3DebugError> {
@@ -1170,9 +1188,13 @@ fn resolve_http_input_error_projection(
     projection: V3HttpInputErrorProjection,
 ) -> Result<routecodex_v3_error::V3Error06ClientProjected, Response<Body>> {
     projection.map_err(|fault| {
+        let stage = fault
+            .original_source
+            .as_ref()
+            .map_or("V3Server03HttpRequestRaw", |source| source.source_stage);
         foundation_output_response(foundation_output_from_error_sdk_result(
-            "V3Server03HttpRequestRaw",
-            vec!["V3Server03HttpRequestRaw"],
+            stage,
+            vec![stage],
             None,
             Err(fault),
         ))
@@ -1197,18 +1219,21 @@ pub(crate) fn error_output_response_for_server_with_project_path(
     projection: V3HttpInputErrorProjection,
     project_path: Option<&str>,
 ) -> Response<Body> {
-    let projected = match resolve_http_input_error_projection(projection) {
-        Ok(projected) => projected,
-        Err(response) => return response,
-    };
-    let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
-    emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
     if endpoint.starts_with("/_routecodex/") {
+        let projected = match resolve_http_input_error_projection(projection) {
+            Ok(projected) => projected,
+            Err(response) => return response,
+        };
+        let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
+        emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
         return json_response(
             frame.status,
             frame.error_body.expect("typed diagnostic error"),
         );
     }
+    let frame =
+        build_v3_server_16_http_frame_from_error_sdk_result("V3Server03HttpRequestRaw", projection);
+    emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
     responses_direct_output_response(
         frame,
         Some(Duration::from_millis(server.http_sse_keepalive_ms)),
@@ -1224,11 +1249,8 @@ pub(crate) fn error_output_response_for_responses_request_with_project_path(
     payload: Option<&Value>,
     project_path: Option<&str>,
 ) -> Response<Body> {
-    let projected = match resolve_http_input_error_projection(projection) {
-        Ok(projected) => projected,
-        Err(response) => return response,
-    };
-    let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
+    let frame =
+        build_v3_server_16_http_frame_from_error_sdk_result("V3Server03HttpRequestRaw", projection);
     emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
     responses_direct_output_response(
         project_v3_responses_error_frame_for_request_if_sse(frame, request_headers, payload),

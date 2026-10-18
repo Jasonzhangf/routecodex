@@ -188,12 +188,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     &state.server,
                     &path,
                     &request_id,
-                    Ok(project_v3_server_runtime_failure(
+                    project_v3_server_boundary_error_via_sdk(
+                        V3ErrorSourceKind::RuntimeFailure,
                         "V3Server03HttpRequestRaw",
                         "provider_transport_handoff_scope_incomplete",
                         message,
-                        598,
-                    )),
+                        Some(598),
+                    ),
                     None,
                 );
             }
@@ -210,12 +211,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 &state.server,
                 &path,
                 &request_id,
-                Ok(project_v3_server_runtime_failure(
+                project_v3_server_boundary_error_via_sdk(
+                    V3ErrorSourceKind::RuntimeFailure,
                     "V3Server03HttpRequestRaw",
                     "provider_transport_handoff_scope_incomplete",
                     message,
-                    598,
-                )),
+                    Some(598),
+                ),
                 None,
             );
         }
@@ -227,12 +229,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 &state.server,
                 &path,
                 &request_id,
-                Ok(project_v3_server_runtime_failure(
+                project_v3_server_boundary_error_via_sdk(
+                    V3ErrorSourceKind::RuntimeFailure,
                     "V3OperationRunnerCaptureClientJson",
                     "operation_runner_capture_client_json_failed",
                     error.to_string(),
-                    598,
-                )),
+                    Some(598),
+                ),
                 None,
             );
         }
