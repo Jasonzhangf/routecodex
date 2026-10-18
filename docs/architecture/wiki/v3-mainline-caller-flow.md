@@ -3541,7 +3541,7 @@ flowchart TD
 
 ## v3.operation_runner.dagpipe.request
 
-Existing DAGpipe request graph; one source client JSON and one exit transport request. Candidate M2 binds six request-side stages through the canonical SDK Registry, compile, and Runtime.run path, while target resolution, execution planning, and request governance remain at their existing Hub owners. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
+Existing DAGpipe request graph; one source client JSON and one exit transport request. Candidate M2 accepts nine request-side stages through the canonical SDK Registry, compile, and Runtime.run path. The accepted control stages resolve_target and plan_execution use actual callers in Direct kernels, four-protocol Relay, and the Server non-admitting preplan, and passed the fresh full-chain matrix. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
 
 Owner feature: `v3.unified_operation_runner_design`
 Manifest: `docs/architecture/dagpipe/v3.operation_runner.request.graph.json`
@@ -3597,7 +3597,7 @@ flowchart TD
 
 ## v3.operation_runner.dagpipe.response
 
-Existing DAGpipe response graph; one source provider raw and one staged client-frame-candidate sink. Candidate M2 binds three response-side stages through the canonical SDK Registry, compile, and Runtime.run path. The inverse projection and client frame stages remain binding_pending. The target fixed order is not claimed as migrated; Runtime still consumes the current Resp03 outcome, and retry remains Error05-owned while cancellation remains Runtime-owned.
+Existing DAGpipe response graph; one source provider raw and one staged client-frame-candidate sink. Candidate M2 accepts four response-side stages through the canonical SDK Registry, compile, and Runtime.run path, with the frame stage limited to the existing Responses JSON path. Ordinary inverse projection is SDK-wired but its hosted path still awaits REQ02. The target fixed order is not claimed as migrated; Runtime still consumes the current Resp03 outcome, and retry remains Error05-owned while cancellation remains Runtime-owned.
 
 Owner feature: `v3.unified_operation_runner_design`
 Manifest: `docs/architecture/dagpipe/v3.operation_runner.response.graph.json`
@@ -3628,7 +3628,7 @@ flowchart TD
 
 ## v3.operation_runner.dagpipe.error
 
-Design-only DAGpipe error graph; exact ErrorErr01-06 chain with HostCaptured. Error06 records internal failure evidence only; Runtime consumes Error05 and terminates exhausted transport without a client error commit through Server/SSE. Retry launches a new attempt after typed attempt_cleanup; terminal failure releases attempt scope before RuntimeRequestFinalizer.
+Canonical DAGpipe ErrorErr01-06 graph has source, classification, target-local action, exhaustion, execution decision, and internal terminal projection. Relay and health consumers execute the declared SDK slices; remaining callers are pending. Error06 records internal evidence only; Runtime consumes Error05 and terminates exhausted transport without a client error commit through Server/SSE. Retry launches a new attempt after typed attempt_cleanup; terminal failure releases attempt scope before RuntimeRequestFinalizer.
 
 Owner feature: `v3.unified_operation_runner_design`
 Manifest: `docs/architecture/dagpipe/v3.operation_runner.error.graph.json`

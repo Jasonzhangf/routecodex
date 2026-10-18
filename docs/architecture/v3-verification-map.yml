@@ -3906,10 +3906,11 @@ features:
     merge: supervisor_owned
 
 - feature_id: v3.unified_operation_runner_design
-  status: candidate_behavior_9_of_20_not_reviewed_installed_merged_or_production
+  status: candidate_behavior_13_of_20_scoped_review_and_main_merge_pending
   change_risk: high
   owner_kind: design_architecture
-  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, and canonical single-node SDK execution. Candidate M2 binds nine of twenty operation nodes through Registry, compile, and Runtime.run. The bound nodes are capture_client_json, normalize_request_losslessly, project_standard_provider_request, adjust_provider_private_request, encode_provider_wire, construct_transport_request, adjust_provider_private_response, normalize_provider_response, and govern_chat_response. Eleven nodes remain pending, including target resolution, execution planning, request governance, response inverse projection, client frame, and Error01-06. Existing Hub owners remain execution truth for pending nodes. This is candidate behavior only, not whole-graph, fixed-order, Native Direct, review, install, merge, or production completion.
+  owner_scope: >-
+    Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, and canonical single-node SDK execution. Candidate M2 records scoped acceptance for thirteen of twenty operation nodes: all nine request nodes and four response nodes, including the existing Responses JSON frame path. resolve_target and plan_execution have accepted Direct, four-protocol Relay, and Server non-admitting preplan callers. Ordinary response inverse projection is SDK-wired, but its hosted path awaits REQ02. Relay Error01-06 and health Error01/02 consumers are SDK-wired; Direct, disconnect, and target-origin Error01 remain pending global acceptance. Existing Hub owners remain execution truth for pending paths. Candidate behavior does not establish whole-graph, Native Direct payload migration, independent review, or main merge completion.
   owner_modules:
   - routecodex-v3-runtime
   - routecodex-v3-config
@@ -3961,10 +3962,15 @@ features:
   - the Responses request helper is synchronous so SDK execution does not enlarge the async transport poll frame
   - the real response callers bind adjust_provider_private_response, normalize_provider_response, and govern_chat_response through build_provider_resp_compat_02_from_v3_provider_resp_inbound_01, build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id, and V3HubRelayResponseHookRegistry::govern
   - request and response operator instance fields carry typed context outside business JSON; declared side outputs are consumed, and original typed errors remain errors
-  - the nine bound candidate nodes are request capture_client_json, normalize_request_losslessly, project_standard_provider_request, adjust_provider_private_request, encode_provider_wire, construct_transport_request; and response adjust_provider_private_response, normalize_provider_response, govern_chat_response
-  - the eleven pending nodes are request resolve_target, plan_execution, govern_chat_request; response inverse_project_client_response, frame_committed_client_response; and error_err01_source_raised through error_err06_client_projected
-  - pending nodes retain their existing Hub owners; R02 image residual composition passed the combined matrix, and Direct hooks remain owned by Direct
-  - candidate behavior is 9 of 20, not whole-graph execution, fixed target order, Native Direct migration, production, review, install, or merge
+  - the thirteen scoped accepted candidate nodes are request capture_client_json, normalize_request_losslessly, resolve_target, plan_execution, govern_chat_request, project_standard_provider_request, adjust_provider_private_request, encode_provider_wire, construct_transport_request; and response adjust_provider_private_response, normalize_provider_response, govern_chat_response, frame_committed_client_response
+  - frame acceptance covers only the existing Responses JSON caller; identity, Direct, and hosted frame paths remain pending, so no addressable global frame node is claimed
+  - resolve_target and plan_execution are SDK-wired through actual Direct kernel, four-protocol Relay, and Server non-admitting preplan callers; initial execution and reselection both use run_v3_plan_execution_operator_with_probes, the actual typed V3PlanExecutionModePolicy is consumed, and control does not mirror into payload
+  - resolve_target and plan_execution passed the final combined58/58 matrix, Server127/127, and Runtime1358/0fail/1existingignored; no pending-node acceptance is inferred from those results
+  - inverse_project_client_response has ordinary Anthropic Relay wiring through resp_outbound_05_client_semantic.rs; its hosted path remains pending REQ02 and is not a released API symbol
+  - six Error nodes execute as single-node SDK slices through provider_failure_runtime_policy.rs and operation_runner/error_decision.rs; the Relay Err01 source builder calls the canonical SDK node, the decision helper runs Error02 through Error05, and the terminal helper runs Error06. Direct source binding, disconnect, and target-origin Err01 remain pending global acceptance
+  - provider_failure_runtime_policy_health.rs binds record_provider_failure_record_with_policy_for_interface to Error01 then Error02; record_provider_failure_record_from_source_for_interface and record_post_commit_provider_stream_failure_from_source_for_interface consume already-raised sources through Error02 only. Actual status Some, fingerprints, identity isolation, and mutation order remain unchanged
+  - pending acceptance retains existing Hub owners; R02 image residual composition passed the combined matrix, and Direct hooks remain owned by Direct
+  - candidate behavior is13of20 scoped; remaining7 are inverse projection and all6globalError nodes. Whole-graph execution, Native Direct payload migration, independent review, and main merge are not inferred
   - every inbound direction_bindings source names a path in that protocol's raw source inventory; outbound Chat sources are not constrained to wire inventory paths
   - Responses request.input[].type is read per input array item, and the selected request branch remains paired with that same request's typed inverse provenance for the response projection
   - the target request design assigns historical image placeholders to Chat Process request governance after lossless normalization, retaining current-turn images and stable historical placeholders for tool-only replay
@@ -4082,11 +4088,11 @@ features:
   completion_boundary:
     source_controlled: required
     mapped_gates: required
-    runtime: candidate_evidence_reused_for_9_of_20
+    runtime: candidate_scoped_evidence_for_13_of_20
     review: pending
-    install: not_run
+    install: candidate_verified
     merge: not_run
-    remaining_operation_nodes: 11_pending
+    remaining_operation_nodes: 7_pending_acceptance
 - feature_id: v3.anthropic_control_text_resp03
   status: source_gate_verified
   change_risk: high

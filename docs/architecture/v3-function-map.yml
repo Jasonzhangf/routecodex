@@ -6350,11 +6350,11 @@ features:
   - git diff --check
 
 - feature_id: v3.unified_operation_runner_design
-  status: candidate_behavior_11_of_20_not_reviewed_installed_merged_or_production
+  status: candidate_behavior_13_of_20_installed_review_and_main_merge_pending
   change_risk: high
   owner_kind: design_architecture
   owner_scope: >-
-    Unified operation runner DAGpipe design, lifecycle manifest, ErrorErr01-06 binding, typed owner table, and canonical single-node SDK execution. Candidate M2 accepts eleven of twenty nodes through Registry, compile, and Runtime.run: capture_client_json, normalize_request_losslessly, govern_chat_request, project_standard_provider_request, adjust_provider_private_request, encode_provider_wire, construct_transport_request, adjust_provider_private_response, normalize_provider_response, govern_chat_response, and Responses client framing. Target resolution and execution planning have partial Relay and Direct caller bindings; response inverse projection retains a hosted-branch handoff gap. Error01-06 are not runtime-bound. Existing owners remain execution truth for pending paths. Candidate acceptance does not establish whole-graph, review, install, main merge, or production completion.
+    Unified operation runner DAGpipe design, lifecycle manifest, ErrorErr01-06 binding, typed owner table, and canonical single-node SDK execution. Candidate M2 accepts thirteen of twenty nodes through Registry, compile, and Runtime.run: the nine request nodes capture_client_json, normalize_request_losslessly, govern_chat_request, resolve_target, plan_execution, project_standard_provider_request, adjust_provider_private_request, encode_provider_wire, and construct_transport_request; plus the four response nodes adjust_provider_private_response, normalize_provider_response, govern_chat_response, and Responses JSON client framing. Relay error execution is SDK-wired from Error01 through Error06, and the health source interfaces are SDK-wired from Error01 to Error02. Direct provider/error source binding, client disconnect binding, and target-origin Error01 binding remain pending global acceptance. Response inverse projection retains a hosted-branch handoff gap. Existing owners remain execution truth for pending paths. Candidate acceptance does not establish whole-graph, review, install, main merge, or production completion.
   owner_crate: routecodex-v3-runtime
   owner_file: docs/design/v3-unified-operation-runner-design.md
   resource_bindings:
@@ -6396,10 +6396,13 @@ features:
   - v3-op-runner-err-04
   - v3-op-runner-err-05
   candidate_stage_bindings:
-    state: candidate_behavior_9_of_20_not_reviewed_installed_merged_or_production
+    state: candidate_behavior_13_of_20_scoped_installed_review_and_main_merge_pending
     request:
     - capture_client_json
     - normalize_request_losslessly
+    - govern_chat_request
+    - resolve_target
+    - plan_execution
     - project_standard_provider_request
     - adjust_provider_private_request
     - encode_provider_wire
@@ -6408,23 +6411,23 @@ features:
     - adjust_provider_private_response
     - normalize_provider_response
     - govern_chat_response
-    pending:
-    - resolve_target
-    - plan_execution
-    - govern_chat_request
-    - inverse_project_client_response
     - frame_committed_client_response
+    pending:
+    - inverse_project_client_response
     - error_err01_source_raised
-    - error_err02_host_captured
-    - error_err03_runtime_classified
-    - error_err04_router_policy_applied
+    - error_err02_classified
+    - error_err03_target_local_action
+    - error_err04_target_exhaustion
     - error_err05_execution_decision
     - error_err06_client_projected
-    pending_count: 11
-    request_pending_count: 3
-    response_pending_count: 2
+    pending_count: 7
+    request_pending_count: 0
+    response_pending_count: 1
     error_pending_count: 6
-    boundary: pending nodes retain existing Hub/Direct owners; R02 image residual composition passed the combined matrix; Direct hooks are not migrated
+    sdk_wired_acceptance_pending:
+      response: [inverse_project_client_response]
+    scoped_acceptance: frame acceptance is limited to the existing Responses JSON path; Relay Error01 through Error06 and health Error01 to Error02 are SDK-wired without global pipeline acceptance; Direct provider/error source, disconnect, and target-origin Error01 remain pending; inverse hosted path awaits REQ02
+    boundary: pending acceptance retains existing Hub/Direct owners; single-node SDK wiring is not a global cutover; R02 image residual composition passed the combined matrix; Direct hooks are not migrated
   entry_symbols:
   - RuntimeRequestGraphEntry
   - pending_endpoint_after_responses_admission_inner
