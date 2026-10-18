@@ -1827,7 +1827,7 @@ chains:
   - step_id: v3-entry-bind-04
     from_node: V3EntryBind03ServerEnablementChecked
     to_node: V3EntryBind04ExecutionBindingProjected
-    caller_symbol: pending_endpoint_after_responses_admission_inner
+    caller_symbol: execute_v3_non_responses_protocol_branch
     caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
     callee_symbol: execute_v3_gemini_direct_server_outcome
     callee_file: v3/crates/routecodex-v3-server/src/executors.rs
@@ -5428,7 +5428,7 @@ chains:
   - step_id: v3-chat-relay-error-evidence-01
     from_node: V3OpenAiChatRelayRuntimeOutput
     to_node: V3ChatFailedAttemptEvidence
-    caller_symbol: pending_endpoint_after_responses_admission_inner
+    caller_symbol: execute_v3_non_responses_protocol_branch
     caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
     callee_symbol: persist_v3_chat_failure_evidence
     callee_file: v3/crates/routecodex-v3-server/src/lib.rs
