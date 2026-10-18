@@ -37,7 +37,14 @@ const imageUrl =
 // the following user message, and the intervening assistant text plus the final
 // user question keep their exact order.
 const currentFullHistory = [
-  { role: 'user', content: 'take a screenshot' },
+  {
+    role: 'user',
+    content: [
+      { type: 'text', text: 'take a screenshot' },
+      { type: 'text', text: '[Image]', future_sibling: { occurrence: 1 } },
+      { type: 'text', text: '[Image]', future_sibling: { occurrence: 2 } },
+    ],
+  },
   {
     role: 'assistant',
     tool_calls: [{ id: 'toolu_1', type: 'function', function: { name: 'screenshot', arguments: '{}' } }],

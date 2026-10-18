@@ -132,8 +132,9 @@ pub(crate) fn normalize_v3_history_image_placeholders(body: &mut Value) {
             normalize_responses_content_parts(item);
             normalize_responses_output_parts(item);
             if is_top_level_input_image(item) {
-                *item =
-                    serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
+                if let Some(row) = item.as_object_mut() {
+                    replace_image_carrier_with_placeholder(row, Some("input_text"));
+                }
             }
         }
         return;
@@ -206,7 +207,7 @@ fn strip_v3_embedded_image_bytes(value: &mut Value, changed: &mut bool) {
                 return;
             }
             if is_v3_embedded_image_carrier(map) {
-                *value = serde_json::json!({"type":"text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
+                replace_image_carrier_with_placeholder(map, Some("text"));
                 *changed = true;
                 return;
             }
@@ -227,6 +228,55 @@ fn strip_v3_embedded_image_bytes(value: &mut Value, changed: &mut bool) {
         }
         _ => {}
     }
+}
+
+fn remove_image_string_fields(row: &mut serde_json::Map<String, Value>, fields: &[&str]) {
+    for field in fields {
+        if row.get(*field).is_some_and(Value::is_string) {
+            row.remove(*field);
+        }
+    }
+}
+
+fn replace_image_carrier_with_placeholder(
+    row: &mut serde_json::Map<String, Value>,
+    text_type: Option<&str>,
+) {
+    remove_image_string_fields(row, &["image_url", "data", "file_id", "file_url", "detail"]);
+    for (container, fields) in [
+        ("image_url", &["url", "detail"][..]),
+        ("source", &["data", "url", "file_id", "media_type"][..]),
+        ("inline_data", &["data", "mime_type"][..]),
+        (
+            "file_data",
+            &["file_uri", "file_url", "url", "mime_type"][..],
+        ),
+    ] {
+        let Some(Value::Object(inner)) = row.get_mut(container) else {
+            continue;
+        };
+        remove_image_string_fields(inner, fields);
+        if container == "source"
+            && matches!(
+                inner.get("type").and_then(Value::as_str),
+                Some("base64" | "url" | "file")
+            )
+        {
+            inner.remove("type");
+        }
+        if inner.is_empty() {
+            row.remove(container);
+        }
+    }
+    if let Some(kind) = text_type {
+        row.insert("type".to_string(), Value::String(kind.to_string()));
+    } else if row.get("type").and_then(Value::as_str) == Some("image") {
+        row.remove("type");
+    }
+    row.insert(
+        "text".to_string(),
+        Value::String(V3_HISTORY_IMAGE_PLACEHOLDER.to_string()),
+    );
 }
 
 /// 判定 JSON 对象是否为图片载体 part：`image_url` / `data` / `file_id` 键的
@@ -296,7 +346,7 @@ fn normalize_responses_image_part_array(parts: &mut [Value]) -> bool {
             continue;
         };
         if is_v3_embedded_image_carrier(row) {
-            *part = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
+            replace_image_carrier_with_placeholder(row, Some("input_text"));
             changed = true;
         }
     }
@@ -351,7 +401,7 @@ fn normalize_gemini_content_parts(content: &mut Value) {
             || row.contains_key("inline_data")
             || row.contains_key("file_data")
         {
-            *part = serde_json::json!({"text":V3_HISTORY_IMAGE_PLACEHOLDER});
+            replace_image_carrier_with_placeholder(row, None);
         }
     }
 }
@@ -360,6 +410,44 @@ fn normalize_gemini_content_parts(content: &mut Value) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn historical_placeholders_preserve_top_level_and_nested_opaque_fields() {
+        for (collection, parts, image, expected) in [
+            (
+                "messages",
+                "content",
+                json!({"type":"image_url","image_url":{"url":"https://example.test/old.png","future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
+                json!({"type":"text","text":"[Image]","image_url":{"future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
+            ),
+            (
+                "input",
+                "content",
+                json!({"type":"input_image","image_url":"https://example.test/old.png","source":{"type":"url","url":"https://example.test/old.png","future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
+                json!({"type":"input_text","text":"[Image]","source":{"future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
+            ),
+            (
+                "contents",
+                "parts",
+                json!({"inline_data":{"mime_type":"image/png","data":"OLD","future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
+                json!({"text":"[Image]","inline_data":{"future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
+            ),
+        ] {
+            let mut body = json!({collection:[{parts:[image.clone()]},{parts:[image.clone()]}]});
+            normalize_v3_history_image_placeholders(&mut body);
+            assert_eq!(body[collection][0][parts][0], expected, "{collection}");
+            assert_eq!(body[collection][1][parts][0], image, "latest {collection}");
+        }
+        let mut body = json!({"input":[
+            {"type":"input_image","image_url":"https://example.test/old.png","future_sibling":{"occurrence":2}},
+            {"type":"input_image","image_url":"https://example.test/latest.png"}
+        ]});
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["input"][0],
+            json!({"type":"input_text","text":"[Image]","future_sibling":{"occurrence":2}})
+        );
+    }
 
     #[test]
     fn history_images_become_uniform_placeholder_current_turn_image_preserved() {
