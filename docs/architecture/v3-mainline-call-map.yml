@@ -3979,6 +3979,26 @@ chains:
       - v3.hub.entry_protocol
       side_channel_writes: []
     status: anchored
+  - step_id: v3-anthropic-relay-client-intent-projection-01
+    from_node: V3HubRespChatProcess03Governed
+    to_node: V3HubRespOutbound05ClientSemantic
+    caller_symbol: execute_v3_anthropic_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+    callee_symbol: project_v3_anthropic_client_response_for_provider
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+    status: anchored
+    binding_kind: relay_closeout_projection_closure
+    owner_feature_id: v3.anthropic_relay_runtime_integration
+    semantic_contract:
+      - In the Anthropic SSE response branch, execute_v3_anthropic_relay_runtime_inner passes project_v3_anthropic_client_response_for_provider as the closeout projection closure, and that closure captures the client's real transport intent. The upstream body is SSE only because the provider forced it, so a non-streaming Messages client receives one JSON message instead of an SSE envelope. closeout_anthropic_relay_sse_response only forwards this closure to closeout_anthropic_relay_normalized_response; it never reads the transport intent.
+    resource_flow:
+      consumes:
+      - v3.hub.response_semantic
+      produces:
+      - v3.response.client_payload
+      side_channel_reads:
+      - v3.hub.entry_protocol
+      side_channel_writes: []
   - step_id: v3-anthropic-relay-16
     from_node: V3HubRespOutbound05ClientSemantic
     to_node: V3ServerRespOutbound06ClientFrame
@@ -4818,6 +4838,26 @@ chains:
       - v3.provider.transport_request
       side_channel_reads:
       - v3.secret.provider_auth_handle
+      side_channel_writes: []
+  - step_id: v3-responses-relay-transport-intent-guard-01
+    from_node: V3ProviderReqOutbound08WirePayload
+    to_node: V3ProviderReqOutbound09TransportRequest
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    callee_symbol: validate_v3_responses_relay_provider_request_transport_intent
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    status: anchored
+    binding_kind: provider_transport_intent_guard
+    owner_feature_id: v3.hub_relay_runtime_closeout
+    semantic_contract:
+      - A declared profile that forces upstream SSE retargets the expected provider transport intent to Sse; every other profile keeps the client intent, and a mismatch fails before transport instead of being silently allowed.
+    resource_flow:
+      consumes:
+      - v3.provider.transport_request
+      produces:
+      - v3.provider.transport_request
+      side_channel_reads:
+      - v3.hub.resolved_target
       side_channel_writes: []
   - step_id: v3-hub-relay-closeout-09
     from_node: V3ProviderReqOutbound09TransportRequest

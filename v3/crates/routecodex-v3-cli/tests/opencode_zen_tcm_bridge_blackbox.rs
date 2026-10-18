@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
 };
 use routecodex_v3_config::{parse_v3_config_02_authoring, V3UserConfigStore};
-use routecodex_v3_server::spawn_v3_server_aggregate;
+use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -56,9 +56,27 @@ struct Peer {
     correction: bool,
     guarded: bool,
     image: bool,
+    /// 真实免费层拒绝没有 `tools` 的请求；单发契约用例只声明它要覆盖的部分。
+    declared_tools: bool,
+    /// 第一发就返回终态，便于断言单次请求的客户端响应形状。
+    immediate_terminal: bool,
+    /// 模拟上游 403 `FreeTierError`。
+    reject: bool,
+    /// 让上游在终态 chunk 带上 envelope/choice/delta 扩展字段，用于断言
+    /// 折叠回 JSON 时不丢字段。
+    echo_extensions: bool,
 }
 
 fn check_wire(body: &Value, peer: &Peer, stage: usize) -> Result<(), String> {
+    if body["stream"] != true {
+        return Err(format!(
+            "free tier requires upstream stream=true, got {}",
+            body["stream"]
+        ));
+    }
+    if !peer.declared_tools {
+        return Ok(());
+    }
     if peer.image {
         let messages = body["messages"].as_array().ok_or("messages missing")?;
         let images: Vec<_> = messages
@@ -170,6 +188,14 @@ fn check_wire(body: &Value, peer: &Peer, stage: usize) -> Result<(), String> {
 }
 
 async fn provider(State(peer): State<Peer>, Json(body): Json<Value>) -> Response {
+    if peer.reject {
+        peer.captures.lock().await.push(body.clone());
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error":{"message":"FreeTierError","type":"FreeTierError"}})),
+        )
+            .into_response();
+    }
     let mut captures = peer.captures.lock().await;
     let stage = captures.len();
     captures.push(body.clone());
@@ -183,7 +209,8 @@ async fn provider(State(peer): State<Peer>, Json(body): Json<Value>) -> Response
         )
             .into_response();
     }
-    let terminal = peer.guarded || stage >= if peer.correction { 2 } else { 1 };
+    let terminal =
+        peer.guarded || peer.immediate_terminal || stage >= if peer.correction { 2 } else { 1 };
     let args = if peer.correction && stage == 0 {
         "{\"command\":42,\"unknown\":true}"
     } else {
@@ -204,6 +231,24 @@ async fn provider(State(peer): State<Peer>, Json(body): Json<Value>) -> Response
         }
         let first = json!({"id":"chatcmpl-peer","object":"chat.completion.chunk","created":0,"model":body["model"],"choices":[{"index":0,"delta":delta,"finish_reason":null}]});
         let last = json!({"id":"chatcmpl-peer","object":"chat.completion.chunk","created":0,"model":body["model"],"choices":[{"index":0,"delta":{},"finish_reason":finish}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}});
+        if peer.echo_extensions {
+            let mut first = first;
+            first["system_fingerprint"] = json!("fp_peer");
+            first["service_tier"] = json!("tier-a");
+            first["choices"][0]["logprobs"] =
+                json!({"content":[{"token":"a","logprob":-1.0}],"refusal":null});
+            first["choices"][0]["delta"]["mirror"] = json!("kept");
+            let middle = json!({"id":"chatcmpl-peer","object":"chat.completion.chunk","created":0,"model":body["model"],"choices":[{"index":0,"delta":{},"logprobs":{"content":[{"token":"b","logprob":-2.0}],"refusal":null},"finish_reason":null}]});
+            let mut last = last;
+            last["service_tier"] = json!("tier-a");
+            last["choices"][0]["logprobs"] =
+                json!({"content":null,"refusal":[{"token":"c","logprob":-3.0}]});
+            return (
+                [("content-type", "text/event-stream")],
+                format!("data: {first}\n\ndata: {middle}\n\ndata: {last}\n\ndata: [DONE]\n\n"),
+            )
+                .into_response();
+        }
         (
             [("content-type", "text/event-stream")],
             format!("data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n"),
@@ -257,7 +302,7 @@ version = 3
 [servers.test]
 bind = "127.0.0.1"
 port = {server_port}
-endpoints = ["responses"]
+endpoints = ["responses", "openai_chat", "anthropic"]
 [servers.test.routes.default]
 tiers = [[{{use="zenpeer/model"}}]]
 {}
@@ -359,6 +404,102 @@ async fn roundtrip(native: &'static str, stream: bool, correction: bool, guarded
     roundtrip_with_image(native, stream, correction, guarded, false).await;
 }
 
+async fn send_raw(
+    client: &reqwest::Client,
+    port: u16,
+    path: &str,
+    body: &Value,
+) -> (reqwest::StatusCode, String, String) {
+    let reply = client
+        .post(format!("http://127.0.0.1:{port}{path}"))
+        .json(body)
+        .send()
+        .await
+        .expect("public request must reach the client boundary");
+    let status = reply.status();
+    let content_type = reply
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let raw = reply.text().await.unwrap_or_default();
+    (status, content_type, raw)
+}
+
+struct ZenHarness {
+    root: tempfile::TempDir,
+    port: u16,
+    peer: Peer,
+    handle: V3ServerAggregateHandle,
+    shutdown_tx: oneshot::Sender<()>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl ZenHarness {
+    async fn start(peer: Peer) -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let provider_port = listener.local_addr().unwrap().port();
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(provider).with_state(peer.clone()),
+        );
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+        let port = free_port();
+        let manifest = store(root.path(), port, provider_port)
+            .load_manifest()
+            .unwrap();
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+        Self {
+            root,
+            port,
+            peer,
+            handle,
+            shutdown_tx,
+            task,
+        }
+    }
+
+    async fn stop(self) {
+        let ZenHarness {
+            root: _root,
+            port: _port,
+            peer: _peer,
+            handle,
+            shutdown_tx,
+            task,
+        } = self;
+        handle.shutdown().await;
+        let _ = shutdown_tx.send(());
+        task.await.unwrap();
+    }
+}
+
+fn contract_peer(immediate_terminal: bool, reject: bool) -> Peer {
+    Peer {
+        captures: Arc::new(Mutex::new(Vec::new())),
+        errors: Arc::new(Mutex::new(Vec::new())),
+        native: "bash",
+        arguments: "{}".to_string(),
+        correction: false,
+        guarded: false,
+        image: false,
+        declared_tools: false,
+        immediate_terminal,
+        reject,
+        echo_extensions: false,
+    }
+}
+
 async fn roundtrip_with_image(
     native: &'static str,
     stream: bool,
@@ -396,6 +537,10 @@ async fn roundtrip_with_image(
         correction,
         guarded,
         image,
+        declared_tools: true,
+        immediate_terminal: false,
+        reject: false,
+        echo_extensions: false,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let provider_port = listener.local_addr().unwrap().port();
@@ -540,4 +685,205 @@ async fn zen_tcm_direct_shell_file_write_history_roundtrip() {
 #[tokio::test]
 async fn zen_tcm_latest_view_image_and_read_followup_preserve_bytes_and_pairing() {
     roundtrip_with_image("read", true, false, false, true).await;
+}
+
+#[tokio::test]
+async fn zen_tcm_free_tier_forces_upstream_stream_and_keeps_client_json() {
+    let _lock = TEST_LOCK.lock().await;
+    let harness = ZenHarness::start(contract_peer(true, false)).await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap();
+
+    let (status, content_type, raw) = send_raw(
+        &client,
+        harness.port,
+        "/v1/chat/completions",
+        &json!({"model":"zenpeer.model","stream":false,"messages":[{"role":"user","content":"hi"}]}),
+    )
+    .await;
+    assert!(
+        status.is_success(),
+        "chat JSON client status: {status} body: {raw}"
+    );
+    assert!(
+        content_type.contains("application/json"),
+        "chat JSON client content-type: {content_type}"
+    );
+    let chat: Value =
+        serde_json::from_str(&raw).expect("chat JSON client must receive a JSON body");
+    assert_eq!(chat["choices"][0]["message"]["content"], MARKER);
+
+    let (status, content_type, raw) = send_raw(
+        &client,
+        harness.port,
+        "/v1/responses",
+        &json!({"model":"zenpeer.model","stream":false,"input":[{"role":"user","content":"hi"}]}),
+    )
+    .await;
+    assert!(
+        status.is_success(),
+        "responses JSON client status: {status} body: {raw}"
+    );
+    assert!(
+        content_type.contains("application/json"),
+        "responses JSON client content-type: {content_type}"
+    );
+    let responses: Value =
+        serde_json::from_str(&raw).expect("responses JSON client must receive a JSON body");
+    assert!(
+        raw.contains(MARKER),
+        "responses JSON client lost the model answer: {responses}"
+    );
+
+    let (status, content_type, raw) = send_raw(
+        &client,
+        harness.port,
+        "/v1/messages",
+        &json!({"model":"zenpeer.model","max_tokens":64,"stream":false,"messages":[{"role":"user","content":"hi"}]}),
+    )
+    .await;
+    assert!(
+        status.is_success(),
+        "anthropic JSON client status: {status} body: {raw}"
+    );
+    assert!(
+        content_type.contains("application/json"),
+        "anthropic JSON client content-type: {content_type}"
+    );
+    let message: Value =
+        serde_json::from_str(&raw).expect("anthropic JSON client must receive a JSON body");
+    assert_eq!(
+        message["type"], "message",
+        "anthropic JSON client shape: {message}"
+    );
+    assert_eq!(message["content"][0]["text"], MARKER);
+
+    let captures = harness.peer.captures.lock().await;
+    assert_eq!(
+        captures.len(),
+        3,
+        "one provider attempt per entry: {captures:?}"
+    );
+    for (index, captured) in captures.iter().enumerate() {
+        assert_eq!(
+            captured["stream"], true,
+            "attempt {index} must force upstream stream: {captured}"
+        );
+    }
+    drop(captures);
+    assert!(harness.peer.errors.lock().await.is_empty());
+    harness.stop().await;
+}
+
+#[tokio::test]
+async fn zen_tcm_forced_sse_collapse_keeps_chat_extensions_for_json_client() {
+    let _lock = TEST_LOCK.lock().await;
+    let mut peer = contract_peer(true, false);
+    peer.echo_extensions = true;
+    let harness = ZenHarness::start(peer).await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap();
+    let (status, content_type, raw) = send_raw(
+        &client,
+        harness.port,
+        "/v1/chat/completions",
+        &json!({"model":"zenpeer.model","stream":false,"messages":[{"role":"user","content":"hi"}]}),
+    )
+    .await;
+    assert!(
+        status.is_success(),
+        "chat JSON client status: {status} body: {raw}"
+    );
+    assert!(
+        content_type.contains("application/json"),
+        "chat JSON client content-type: {content_type}"
+    );
+    let chat: Value =
+        serde_json::from_str(&raw).expect("chat JSON client must receive a JSON body");
+    assert_eq!(chat["choices"][0]["message"]["content"], MARKER);
+    assert_eq!(
+        chat["system_fingerprint"], "fp_peer",
+        "envelope fingerprint lost in the SSE-to-JSON collapse: {chat}"
+    );
+    assert_eq!(
+        chat["service_tier"], "tier-a",
+        "envelope extension lost in the SSE-to-JSON collapse: {chat}"
+    );
+    assert_eq!(
+        chat["choices"][0]["logprobs"]["content"][0]["token"], "a",
+        "choice extension lost in the SSE-to-JSON collapse: {chat}"
+    );
+    assert_eq!(
+        chat["choices"][0]["logprobs"]["content"][1]["token"], "b",
+        "cross-chunk logprobs must be merged in stream order: {chat}"
+    );
+    assert_eq!(
+        chat["choices"][0]["logprobs"]["refusal"][0]["token"], "c",
+        "a later logprobs field must survive a null observation of another field: {chat}"
+    );
+    assert_eq!(
+        chat["choices"][0]["message"]["mirror"], "kept",
+        "delta extension lost in the SSE-to-JSON collapse: {chat}"
+    );
+    harness.stop().await;
+}
+
+#[tokio::test]
+async fn zen_tcm_provider_403_never_projects_an_error_payload_to_the_client() {
+    let _lock = TEST_LOCK.lock().await;
+    let harness = ZenHarness::start(contract_peer(false, true)).await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap();
+    let outcome = client
+        .post(format!(
+            "http://127.0.0.1:{}/v1/chat/completions",
+            harness.port
+        ))
+        .json(&json!({"model":"zenpeer.model","stream":false,"messages":[{"role":"user","content":"hi"}]}))
+        .send()
+        .await;
+    // A provider 403 leaves no provider for this request, so the client
+    // transport must terminate before any response status or body is
+    // committed. A completed reply of any status (empty 200, {}, a 502
+    // substitute error, or a projected error payload) is a contract
+    // violation, and a client timeout or connect failure is not the declared
+    // termination.
+    let error = match outcome {
+        Ok(reply) => {
+            let status = reply.status();
+            let content_type = reply
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            let raw = reply.text().await.unwrap_or_default();
+            panic!(
+                "provider 403 must not commit any client response: status={status} content-type={content_type} body={raw}"
+            );
+        }
+        Err(error) => error,
+    };
+    assert!(
+        !error.is_timeout(),
+        "provider 403 left the client waiting: {error}"
+    );
+    assert!(
+        !error.is_connect(),
+        "test client failed to reach the server: {error}"
+    );
+    let captures = harness.peer.captures.lock().await;
+    assert_eq!(
+        captures.len(),
+        1,
+        "one provider attempt must reach the peer before exhaustion: {captures:?}"
+    );
+    drop(captures);
+    harness.stop().await;
 }

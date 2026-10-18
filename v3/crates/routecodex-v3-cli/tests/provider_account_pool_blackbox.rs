@@ -682,12 +682,16 @@ async fn run_json_sse_success(scenario: Scenario, mode: Mode) {
                 .collect::<Vec<_>>(),
             (1..=11).collect::<Vec<_>>()
         );
+        // The relay provider declares chat:opencode-zen-tcm, whose contract forces the
+        // upstream request to SSE regardless of the client intent. The client response
+        // is still projected with the client's own intent by the assertions above.
+        let expected_provider_stream = matches!(mode, Mode::Relay) || stream;
         for receipt in &received {
             assert!(ACCOUNTS
                 .iter()
                 .any(|account| receipt.authorization == bearer(account)));
             assert_eq!(receipt.model, "wire-pool-model");
-            assert!(receipt.body["stream"] == json!(stream));
+            assert!(receipt.body["stream"] == json!(expected_provider_stream));
         }
         server.shutdown().await;
         peer_task.abort();

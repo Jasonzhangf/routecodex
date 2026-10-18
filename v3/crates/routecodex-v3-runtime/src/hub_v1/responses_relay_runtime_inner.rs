@@ -570,6 +570,11 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
             };
             let target =
                 handle_error_before_resp03!(provider_target(manifest, req07.selected_target()));
+            // 声明必须走上游 SSE 的 provider 契约（如 OpenCode Zen 免费层）会强制
+            // provider transport intent 为 SSE，客户端响应格式仍按客户端 intent 投影。
+            let upstream_requires_sse = crate::hub_v1::v3_provider_profile_requires_upstream_sse(
+                target.compatibility_profile.as_deref(),
+            );
             let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
                 Ok(projected) => record_projected_drops(&projection_drop_context, projected),
                 Err(error) => {
@@ -608,8 +613,15 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                     handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Target(error));
                 }
             };
+            // 声明契约可以强制 provider transport intent 为 SSE。守卫保留并改为对照该
+            // 期望值，这样契约被破坏时仍在本地点出，而不是静默放行。
+            let expected_provider_request_transport_intent = if upstream_requires_sse {
+                V3HubTransportIntent::Sse
+            } else {
+                provider_request_transport_intent
+            };
             if let Err(error) = validate_v3_responses_relay_provider_request_transport_intent(
-                provider_request_transport_intent,
+                expected_provider_request_transport_intent,
                 transport_request.stream_intent(),
             ) {
                 handle_provider_request_failure!(error);

@@ -58,10 +58,15 @@ fn probe_request_body(target: &V3ResponsesProviderTarget) -> Result<serde_json::
 /// 与 probe 请求共用同一条 URL / 协议 header / 超时 / 并发准入路径：真实 provider 请求
 /// 的构造只在这里实现一次，调用方只提供协议请求体。
 pub fn build_v3_provider_global_request(
-    target: V3ResponsesProviderTarget,
+    mut target: V3ResponsesProviderTarget,
     request_id: String,
     body: serde_json::Value,
 ) -> Result<V3Transport13ResponsesRequest, String> {
+    crate::stamp_opencode_zen_dynamic_request_headers(
+        &target.provider_type,
+        target.compatibility_profile.as_deref(),
+        &mut target.headers,
+    );
     let provider_type = target.provider_type.clone();
     let provider_headers: Vec<V3ProviderRequestHeader> = target
         .headers
@@ -186,11 +191,30 @@ mod tests {
         );
         let mut zen = target;
         zen.compatibility_profile = Some(provider_compat_core::opencode_zen_tcm::PROFILE.into());
+        zen.headers.insert(
+            "x-opencode-session".to_string(),
+            "ses_static_placeholder".to_string(),
+        );
         let request = build_v3_provider_global_probe_request(zen, "probe-zen".into()).unwrap();
         assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Sse);
         assert_eq!(request.body()["stream"], true);
         assert!(request.body().get("max_tokens").is_none());
         assert_eq!(request.body()["tools"][0]["function"]["name"], "bash");
         assert_eq!(request.body()["tools"][1]["function"]["name"], "read");
+        let headers = request
+            .provider_headers()
+            .iter()
+            .map(|header| (header.name(), header.value()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_ne!(
+            headers.get("x-opencode-session").copied(),
+            Some("ses_static_placeholder")
+        );
+        assert!(headers
+            .get("x-opencode-session")
+            .is_some_and(|value| value.starts_with("ses_") && value.len() == 30));
+        assert!(headers
+            .get("x-opencode-request")
+            .is_some_and(|value| value.starts_with("msg_") && value.len() == 30));
     }
 }
