@@ -11,9 +11,35 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 
 #[path = "direct_response_hooks_dsml.rs"]
 mod dsml;
+pub(crate) use dsml::RawObject as V3DirectRawObject;
 pub(crate) use dsml::{
     normalize_v3_direct_dsml_response, rewrite_v3_direct_dsml_attempt, V3DirectDsmlContext,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3DirectResponseHookFailure {
+    UnharvestableToolMarkup,
+}
+
+pub(crate) fn normalize_v3_direct_complete_json_response(
+    payload: &mut serde_json::Value,
+    context: &V3DirectDsmlContext,
+) -> Result<(), V3DirectResponseHookFailure> {
+    normalize_v3_direct_dsml_response(payload, context)?;
+    crate::shared_direct_thinking_compat::normalize_v3_direct_thinking_json(payload);
+    Ok(())
+}
+
+pub(crate) fn rewrite_v3_direct_complete_response_attempt(
+    frames: &[Vec<u8>],
+    context: &V3DirectDsmlContext,
+) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure> {
+    let serialized_tools = rewrite_v3_direct_dsml_attempt(frames, context)?;
+    let normalized = serialized_tools
+        .as_ref()
+        .map_or(frames, |(frames, _)| frames.as_slice());
+    Ok(crate::kernel::rewrite_v3_direct_thinking_attempt(normalized).or(serialized_tools))
+}
 
 /// The sole Direct response payload hook for protocol-neutral response cleanup.
 /// Both buffered JSON and SSE consumers call this owner; neither transport

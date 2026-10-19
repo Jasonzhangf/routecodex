@@ -572,7 +572,9 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         .and_then(|error| error.status)
         .filter(|external_status| *external_status >= 400)
         .unwrap_or(status);
-    let is_request_local_compat_failure =
+    let is_response_processing_failure =
+        routecodex_v3_error::is_v3_recoverable_response_processing_source(&source);
+    let is_health_neutral_failure = is_response_processing_failure ||
         crate::provider_failure_runtime_policy::is_health_neutral_request_compat_failure(
             source.source_stage,
             source
@@ -581,11 +583,15 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 .and_then(|error| error.code.as_deref()),
         );
     let failed_key = candidate_key(&selected.candidate);
-    let health_record = if is_request_local_compat_failure {
+    let health_record = if is_health_neutral_failure {
         V3ProviderFailureRecord {
             scope_label: failed_key.clone(),
             provider_key: failed_key.clone(),
-            state: "request_local_provider_compat".to_string(),
+            state: if is_response_processing_failure {
+                "request_local_response_processing"
+            } else {
+                "request_local_provider_compat"
+            }.to_string(),
             failure_count: 0,
             cooldown_until_ms: None,
             reason: (!source.message.trim().is_empty()).then(|| source.message.clone()),
@@ -692,7 +698,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         auth_alias: selected.candidate.auth_alias.clone(),
         model_id: selected.candidate.model_id.clone(),
     };
-    let recovery_record = if remaining > 0 && !is_request_local_compat_failure {
+    let recovery_record = if remaining > 0 && !is_health_neutral_failure {
         Some(
             context
                 .provider_health
@@ -764,7 +770,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             // Candidate-scoped request/provider compatibility failures are
             // health-neutral and must reselect immediately without entering
             // the provider action gate.
-            retryable_transient: is_request_local_compat_failure,
+            retryable_transient: is_health_neutral_failure,
         });
     }
     if matches!(
@@ -802,7 +808,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 direct_policy_failure(&source, "V3ProviderActionGateAdmission", error)
             })?;
     }
-    let admission = if is_request_local_compat_failure {
+    let admission = if is_health_neutral_failure {
         None
     } else {
         Some(
@@ -850,12 +856,14 @@ fn build_v3_direct_provider_failure_observation(
     next_provider_key: Option<String>,
     wait_ms: Option<u64>,
 ) -> V3RuntimeProviderFailureObservation {
-    let observed_status = source
+    let response_processing_failure =
+        routecodex_v3_error::is_v3_recoverable_response_processing_source(source);
+    let observed_status = if response_processing_failure { 599 } else { source
         .external_error
         .as_ref()
         .and_then(|external| external.status)
         .filter(|external_status| *external_status >= 400)
-        .unwrap_or(status);
+        .unwrap_or(status) };
     V3RuntimeProviderFailureObservation {
         provider_key: candidate_key(&selected.candidate),
         provider_id: selected.candidate.provider_id.clone(),
@@ -874,7 +882,8 @@ fn build_v3_direct_provider_failure_observation(
         external_error_status: source
             .external_error
             .as_ref()
-            .and_then(|external| external.status),
+            .and_then(|external| external.status)
+            .or_else(|| response_processing_failure.then_some(status)),
         internal_code: source
             .internal_error
             .as_ref()

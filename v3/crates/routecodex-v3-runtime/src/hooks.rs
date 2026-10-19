@@ -1,4 +1,7 @@
-use crate::direct_response_hooks::V3DirectResponseCompatContext;
+use crate::direct_response_hooks::{
+    normalize_v3_direct_complete_json_response, rewrite_v3_direct_complete_response_attempt,
+    V3DirectResponseCompatContext, V3DirectResponseHookFailure,
+};
 use crate::kernel::direct_request_key_hooks::{
     apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog,
     V3DirectRequestKeyEdits, V3DirectRequestKeyHookCatalog, V3DirectRequestKeyKind,
@@ -13,8 +16,9 @@ use crate::operation_runner::V3Err01SourceInput;
 use crate::projection_drop_log::V3ProjectionDropContext;
 use crate::provider_failure_runtime_policy::raise_v3_source_via_err01;
 use crate::shared::{
+    project_provider_raw_to_client_payload_for_complete_response_hooks,
     project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context,
-    V3DirectSourceResult, V3ProviderAttemptBody, V3ProviderResponseProjection,
+    V3DirectSourceError, V3DirectSourceResult, V3ProviderAttemptBody, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error01SourceRaised, V3Error05ExecutionDecision,
@@ -81,10 +85,15 @@ type ResponseProjectionFuture =
     Pin<Box<dyn Future<Output = V3DirectSourceResult<V3ProviderResponseProjection>> + Send>>;
 type ContextualResponseProjectionHook =
     fn(V3ProviderResp14Raw, V3DirectResponseCompatContext) -> ResponseProjectionFuture;
-type CompleteResponseSseHook = fn(
-    &[Vec<u8>],
+type CompleteResponseSseHook =
+    fn(
+        &[Vec<u8>],
+        &crate::direct_response_hooks::V3DirectDsmlContext,
+    ) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure>;
+type CompleteResponseJsonHook = fn(
+    &mut Value,
     &crate::direct_response_hooks::V3DirectDsmlContext,
-) -> Option<(Vec<Vec<u8>>, usize)>;
+) -> Result<(), V3DirectResponseHookFailure>;
 type ErrorHook = fn(
     V3Error01SourceRaised,
     V3ErrorActionScope,
@@ -106,9 +115,53 @@ pub struct V3HookRegistry {
     direct_sse_typed_hooks: V3DirectSseTypedHookCatalog,
     provider_transport: ProviderTransportHook,
     contextual_response_projection: ContextualResponseProjectionHook,
-    complete_response_json: fn(&mut Value, &crate::direct_response_hooks::V3DirectDsmlContext),
+    complete_response_json: CompleteResponseJsonHook,
     complete_response_sse: CompleteResponseSseHook,
     error: ErrorHook,
+}
+
+#[derive(Debug)]
+pub(crate) enum V3DirectCompleteResponseError {
+    Normalization(V3DirectResponseHookFailure),
+    Store(crate::execution_control::V3AttemptStoreError),
+}
+
+impl From<crate::execution_control::V3AttemptStoreError> for V3DirectCompleteResponseError {
+    fn from(error: crate::execution_control::V3AttemptStoreError) -> Self {
+        Self::Store(error)
+    }
+}
+
+pub(crate) fn direct_complete_response_error_source(
+    error: V3DirectCompleteResponseError,
+) -> V3DirectSourceError {
+    match error {
+        V3DirectCompleteResponseError::Normalization(failure) => {
+            direct_complete_response_hook_failure_source(failure)
+        }
+        V3DirectCompleteResponseError::Store(error) => crate::shared::direct_plain_error(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3DirectResp14ProviderProjectionPrepared",
+            "direct_response_hook_store",
+            error.to_string(),
+        ),
+    }
+}
+
+pub(crate) fn direct_complete_response_hook_failure_source(
+    failure: V3DirectResponseHookFailure,
+) -> V3DirectSourceError {
+    match failure {
+        V3DirectResponseHookFailure::UnharvestableToolMarkup => {
+            crate::shared::direct_internal_error(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3DirectResp14ProviderProjectionPrepared",
+                "direct_tool_markup_unharvestable",
+                "direct response contains tool markup that cannot be harvested into a native call",
+                V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup,
+            )
+        }
+    }
 }
 
 impl std::fmt::Debug for V3HookRegistry {
@@ -125,16 +178,20 @@ impl V3HookRegistry {
         &self,
         payload: &mut Value,
         context: &crate::direct_response_hooks::V3DirectDsmlContext,
-    ) {
-        (self.complete_response_json)(payload, context);
+    ) -> Result<(), V3DirectCompleteResponseError> {
+        (self.complete_response_json)(payload, context)
+            .map_err(V3DirectCompleteResponseError::Normalization)
     }
 
     pub(crate) fn project_complete_direct_sse(
         &self,
         builder: &mut crate::execution_control::V3CommittedClientSseBuilder,
         context: &crate::direct_response_hooks::V3DirectDsmlContext,
-    ) -> Result<(), crate::execution_control::V3AttemptStoreError> {
-        builder.rewrite_complete_attempt(|frames| (self.complete_response_sse)(frames, context))
+    ) -> Result<(), V3DirectCompleteResponseError> {
+        builder.rewrite_complete_attempt(|frames| {
+            (self.complete_response_sse)(frames, context)
+                .map_err(V3DirectCompleteResponseError::Normalization)
+        })
     }
     pub fn hooks(&self) -> &'static [V3RegisteredHook] {
         self.hooks
@@ -291,8 +348,8 @@ pub(crate) fn register_responses_direct_hooks_with_key_catalog(
         direct_sse_typed_hooks,
         provider_transport: responses_direct_provider_transport_hook,
         contextual_response_projection: responses_direct_response_projection_hook_with_context,
-        complete_response_json: crate::direct_response_hooks::normalize_v3_direct_dsml_response,
-        complete_response_sse: crate::direct_response_hooks::rewrite_v3_direct_dsml_attempt,
+        complete_response_json: normalize_v3_direct_complete_json_response,
+        complete_response_sse: rewrite_v3_direct_complete_response_attempt,
         error: responses_direct_error_hook,
     }
 }
@@ -723,7 +780,7 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
             )
             .map(|(_, source)| source)
         })?;
-        let mut projection = project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
+        let mut projection = project_provider_raw_to_client_payload_for_complete_response_hooks(
             raw,
             &plan,
             context.tool_thinking_enabled,

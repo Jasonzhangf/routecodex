@@ -627,6 +627,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/provider_error_policy_matching.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs
@@ -688,6 +689,8 @@ features:
   - v3-de-24
   entry_symbols:
   - execute_v3_foundation_pending_runtime
+  - is_v3_recoverable_response_processing_source
+  - V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup
   - execute_v3_responses_direct_dry_run_runtime
   - execute_v3_anthropic_relay_response_dry_run_runtime
   - V3DryRunNoNetworkTransport::send
@@ -799,6 +802,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/direct_response_hooks_dsml.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
   - v3/crates/routecodex-v3-runtime/src/shared_direct_thinking_compat.rs
@@ -832,6 +836,11 @@ features:
   entry_symbols:
   - normalize_v3_direct_dsml_response
   - rewrite_v3_direct_dsml_attempt
+  - normalize_v3_direct_complete_json_response
+  - rewrite_v3_direct_complete_response_attempt
+  - normalize_v3_direct_thinking_json
+  - rewrite_v3_direct_thinking_attempt
+  - enforce_v3_provider_json_attempt_admission
   - execute_v3_responses_direct_runtime_kernel
   - execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug
   - V3Execution11ProtocolDecision

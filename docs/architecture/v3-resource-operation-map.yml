@@ -3052,6 +3052,8 @@ resources:
       whole_attempt_admission: deliverability is checked across the complete buffered Direct SSE attempt after every registered response rewrite, including memory envelope stripping, and before terminal seal or client commit
       empty_after_non_client_removal: if declared non-client envelope removal leaves no text, tool call, reasoning, refusal, or content_filter result, return ProviderFailure/provider_response_empty as internal 502 into Error01
       representable_business_failure: if a real representable business result is lost, corrupted, or rejected during rewrite, projection, or framing, return RuntimeFailure/internal 599 into Error01 instead of upstream blame or an empty success
+      unharvestable_tool_markup: recognized attempted tool markup that cannot be represented as a complete native call rejects the entire attempt through the registered Direct response hook and existing typed response-processing Error recovery, even with visible prose; no control flag enters the payload
+      recovery_identity: V3DirectResp14UnharvestableToolMarkup internal code 500-211 is the sole new health-neutral RuntimeFailure recovery identity; Error02-05 owns eligibility, exact candidate exclusion and exhaustion, and keeps internal599 separate from actual upstream200
       preservation_rule: tool-call-only, reasoning, refusal, content_filter, and visible text remain deliverable without semantic judgment
     may_enter_provider_body: false
     may_enter_client_body: false

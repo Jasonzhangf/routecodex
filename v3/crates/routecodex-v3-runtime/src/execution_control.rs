@@ -649,11 +649,14 @@ impl V3CommittedClientSseBuilder {
 
     /// Whole-attempt response hooks run before sealing and remain inside the
     /// same reservation, frame limit and byte limit as the original attempt.
-    pub(crate) fn rewrite_complete_attempt(
+    pub(crate) fn rewrite_complete_attempt<E>(
         &mut self,
-        rewrite: impl FnOnce(&[Vec<u8>]) -> Option<(Vec<Vec<u8>>, usize)>,
-    ) -> Result<(), V3AttemptStoreError> {
-        let Some((frames, terminal)) = rewrite(&self.frames) else {
+        rewrite: impl FnOnce(&[Vec<u8>]) -> Result<Option<(Vec<Vec<u8>>, usize)>, E>,
+    ) -> Result<(), E>
+    where
+        E: From<V3AttemptStoreError>,
+    {
+        let Some((frames, terminal)) = rewrite(&self.frames)? else {
             return Ok(());
         };
         let bytes = frames
@@ -667,15 +670,19 @@ impl V3CommittedClientSseBuilder {
         if frames.len() > self.limits.attempt_max_frames || bytes > self.limits.attempt_max_bytes {
             return Err(V3AttemptStoreError::LocalResourceExhausted(
                 "rewritten attempt exceeds configured limits".into(),
-            ));
+            )
+            .into());
         }
         if terminal >= frames.len() || frames.iter().any(Vec::is_empty) {
             return Err(V3AttemptStoreError::InvalidAttemptState(
                 "rewritten attempt requires nonempty frames and a terminal".into(),
-            ));
+            )
+            .into());
         }
         if bytes > self.byte_len {
-            self.reservation.reserve(bytes - self.byte_len)?;
+            self.reservation
+                .reserve(bytes - self.byte_len)
+                .map_err(E::from)?;
         } else {
             self.reservation.budget.release(self.byte_len - bytes);
             self.reservation.bytes = bytes;
@@ -684,6 +691,10 @@ impl V3CommittedClientSseBuilder {
         self.frames = frames;
         self.terminal_frame_index = Some(terminal);
         Ok(())
+    }
+
+    pub(crate) fn frames(&self) -> &[Vec<u8>] {
+        &self.frames
     }
 
     pub(crate) fn seal_after_validated_terminal(

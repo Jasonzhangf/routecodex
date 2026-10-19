@@ -363,20 +363,21 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
                 )
             })?;
             if disposition == V3SseFrameDisposition::LegalCloseout {
+                let _ = rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(
+                    |error| {
+                        direct_attempt_store_error_source(
+                            error,
+                            "V3ExecutionAttemptPayloadStore",
+                            "direct_sse_memory_strip_failed",
+                        )
+                    },
+                )?;
+                apply_complete_response_hook(&mut committed, response_hook)?;
                 has_business_content =
-                    rewrite_direct_sse_memory(&mut committed, manifest, request_id)
-                        .map_err(|error| {
-                            direct_attempt_store_error_source(
-                                error,
-                                "V3ExecutionAttemptPayloadStore",
-                                "direct_sse_memory_strip_failed",
-                            )
-                        })?
-                        .unwrap_or(has_business_content);
+                    direct_sse_frames_have_business_content(provider_protocol, committed.frames());
                 if !has_business_content {
                     return Err(direct_sse_empty_attempt_failure());
                 }
-                apply_complete_response_hook(&mut committed, response_hook)?;
                 let sealed = committed.seal_after_validated_terminal();
                 let sealed = sealed.map_err(|error| {
                     crate::shared::direct_plain_error(
@@ -409,19 +410,20 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
                     )
                 })?;
         }
-        has_business_content = rewrite_direct_sse_memory(&mut committed, manifest, request_id)
-            .map_err(|error| {
+        let _ =
+            rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|error| {
                 direct_attempt_store_error_source(
                     error,
                     "V3ExecutionAttemptPayloadStore",
                     "direct_sse_memory_strip_failed",
                 )
-            })?
-            .unwrap_or(has_business_content);
+            })?;
+        apply_complete_response_hook(&mut committed, response_hook)?;
+        has_business_content =
+            direct_sse_frames_have_business_content(provider_protocol, committed.frames());
         if !has_business_content {
             return Err(direct_sse_empty_attempt_failure());
         }
-        apply_complete_response_hook(&mut committed, response_hook)?;
         let sealed = committed.seal_after_validated_terminal();
         let sealed = sealed.map_err(|error| {
             crate::shared::direct_plain_error(
@@ -451,15 +453,34 @@ fn apply_complete_response_hook(
     if let Some((registry, context)) = hook {
         registry
             .project_complete_direct_sse(committed, context)
-            .map_err(|error| {
-                direct_attempt_store_error_source(
-                    error,
-                    "V3DirectResp14ProviderProjectionPrepared",
-                    "direct_response_hook_budget",
-                )
+            .map_err(|error| match error {
+                crate::hooks::V3DirectCompleteResponseError::Normalization(failure) => {
+                    crate::hooks::direct_complete_response_hook_failure_source(failure)
+                }
+                crate::hooks::V3DirectCompleteResponseError::Store(error) => {
+                    direct_attempt_store_error_source(
+                        error,
+                        "V3DirectResp14ProviderProjectionPrepared",
+                        "direct_response_hook_budget",
+                    )
+                }
             })?;
     }
     Ok(())
+}
+
+fn direct_sse_frames_have_business_content(
+    provider_protocol: V3HubProviderWireProtocol,
+    frames: &[Vec<u8>],
+) -> bool {
+    frames.iter().any(|frame| {
+        parse_direct_sse_json_frames(frame).iter().any(|value| {
+            crate::hub_v1::v3_provider_event_has_deliverable_business_content(
+                provider_protocol,
+                value,
+            )
+        })
+    })
 }
 
 /// Typed provider-failure source for a complete Direct SSE attempt that carries

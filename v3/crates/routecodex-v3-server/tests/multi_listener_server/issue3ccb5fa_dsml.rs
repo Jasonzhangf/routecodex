@@ -7,6 +7,10 @@ enum DsmlCase {
     OpaqueSse,
     Nested,
     Discovered,
+    Residue,
+    Alternate,
+    ToolCall,
+    CallsResidueSse,
 }
 
 #[derive(Clone)]
@@ -42,6 +46,19 @@ fn client_tools(case: DsmlCase) -> Value {
         DsmlCase::Discovered => {
             json!([{"type":"function","name":"read_image","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}])
         }
+        DsmlCase::Alternate | DsmlCase::ToolCall | DsmlCase::CallsResidueSse => json!([{
+            "type":"function",
+            "name":"exec_command",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "cmd":{"type":"string"},
+                    "max_output_tokens":{"type":"integer"},
+                    "yield_time_ms":{"type":"integer"}
+                },
+                "required":["cmd","max_output_tokens","yield_time_ms"]
+            }
+        }]),
         _ => {
             json!([{"type":"function","name":"read_image","parameters":{"type":"object","properties":{"file_path":{"type":"string"},"options":{"type":"array"}}}}])
         }
@@ -52,6 +69,7 @@ fn invoke_name(case: DsmlCase) -> &'static str {
     match case {
         DsmlCase::Nested => NESTED_WIRE,
         DsmlCase::Discovered => DISCOVERED_WIRE,
+        DsmlCase::Alternate | DsmlCase::ToolCall | DsmlCase::CallsResidueSse => "exec_command",
         _ => "read_image",
     }
 }
@@ -60,6 +78,7 @@ fn expected_leaf(case: DsmlCase) -> &'static str {
     match case {
         DsmlCase::Nested => NESTED_LEAF,
         DsmlCase::Discovered => DISCOVERED_LEAF,
+        DsmlCase::Alternate | DsmlCase::ToolCall | DsmlCase::CallsResidueSse => "exec_command",
         _ => "read_image",
     }
 }
@@ -108,30 +127,122 @@ async fn upstream(
     let turn = peer.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     assert_provider_declaration(&body, peer.case);
     let output = if turn == 0 {
-        let invoke = invoke_name(peer.case);
-        let parameters = if peer.case == DsmlCase::RoundTrip {
-            format!(
+        if peer.case == DsmlCase::Alternate {
+            json!([{
+                "id":"message_alternate",
+                "type":"message",
+                "role":"assistant",
+                "status":"completed",
+                "content":[{
+                    "type":"output_text",
+                    "text":"Continue.\n<|DSML|tool_calls>\n<|exec_command\">\n<cmd>printf 42</cmd>\n<max_output_tokens>4000</max_output_tokens>\n<yield_time_ms>30000</yield_time_ms>\n</exec_command>\n_command>",
+                    "annotations":[]
+                }]
+            }])
+        } else if peer.case == DsmlCase::ToolCall {
+            json!([{
+                "id":"message_tool_call",
+                "type":"message",
+                "role":"assistant",
+                "status":"completed",
+                "content":[{
+                    "type":"output_text",
+                    "text":"Continue.\n calls><tool_call>exec_command<arg_key>cmd</arg_key><arg_value>printf 42</arg_value></tool_call>",
+                    "annotations":[]
+                }]
+            }])
+        } else if peer.case == DsmlCase::CallsResidueSse {
+            json!([
+                {
+                    "id":"reasoning_terminal",
+                    "type":"reasoning",
+                    "summary":[{"type":"summary_text","text":"bounded reasoning"}]
+                },
+                {
+                    "id":"message_stable",
+                    "type":"message",
+                    "role":"assistant",
+                    "status":"completed",
+                    "content":[{"type":"output_text","text":" calls>","annotations":[]}]
+                },
+                {
+                    "id":"fc_terminal",
+                    "type":"function_call",
+                    "call_id":"reordered_call",
+                    "name":"exec_command",
+                    "arguments":"{\"cmd\":\"printf 42\"}",
+                    "status":"completed"
+                }
+            ])
+        } else {
+            let invoke = invoke_name(peer.case);
+            let parameters = if peer.case == DsmlCase::RoundTrip {
+                format!(
                 "<｜｜DSML｜｜ parameter name=\"file_path\" string=\"true\">{}</｜｜DSML｜｜ parameter><｜｜DSML｜｜ parameter name=\"options\" string=\"false\">[true,2,null]</｜｜DSML｜｜ parameter>",
                 peer.path
             )
-        } else {
-            format!(
+            } else {
+                format!(
                 "<｜｜DSML｜｜ parameter name=\"file_path\" string=\"true\">{}</｜｜DSML｜｜ parameter>",
                 peer.path
             )
-        };
-        let text = format!("Before\n<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name=\"{invoke}\">{parameters}</｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>\nAfter");
-        let text = if peer.case == DsmlCase::Literal {
-            format!("```xml\n{text}\n```")
-        } else {
-            text
-        };
-        json!([{"id":"message_dsml","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text,"annotations":[]}]}])
+            };
+            let text = format!("Before\n<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name=\"{invoke}\">{parameters}</｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>\nAfter");
+            let text = if peer.case == DsmlCase::Residue {
+                format!("<thinking>{text}\n<|end▁of▁analysis|>\n<|DSML|tool_calls>\n")
+            } else if peer.case == DsmlCase::Literal {
+                format!("```xml\n{text}\n```")
+            } else {
+                text
+            };
+            json!([{"id":"message_dsml","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text,"annotations":[]}]}])
+        }
     } else {
         assert_eq!(turn, 1, "no retry or duplicate attempt allowed");
         let input = body["input"].as_array().unwrap();
         let call = input.iter().find(|i| i["type"] == "function_call").unwrap();
         let leaf = expected_leaf(peer.case);
+        if matches!(
+            peer.case,
+            DsmlCase::Alternate | DsmlCase::ToolCall | DsmlCase::CallsResidueSse
+        ) {
+            assert_eq!(call["name"], "exec_command");
+            assert_eq!(
+                serde_json::from_str::<Value>(call["arguments"].as_str().unwrap()).unwrap(),
+                if peer.case == DsmlCase::Alternate {
+                    json!({
+                        "cmd":"printf 42",
+                        "max_output_tokens":4000,
+                        "yield_time_ms":30000
+                    })
+                } else {
+                    json!({"cmd":"printf 42"})
+                }
+            );
+            let result = input
+                .iter()
+                .find(|i| i["type"] == "function_call_output")
+                .unwrap();
+            assert_eq!(result["call_id"], call["call_id"]);
+            assert_eq!(result["output"], "42");
+            return Response::builder()
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "id":"resp_alternate_followup",
+                        "object":"response",
+                        "status":"completed",
+                        "output":[{
+                        "id":"final_alternate",
+                        "type":"message",
+                        "role":"assistant",
+                        "status":"completed",
+                        "content":[{"type":"output_text","text":"Command output is 42.","annotations":[]}]
+                    }]}))
+                    .unwrap(),
+                ))
+                .unwrap();
+        }
         // A follow-up history item may be sent as the restored client identity
         // or projected back to the provider wire name; both are faithful.
         let name = call["name"].as_str().unwrap_or_default();
@@ -193,6 +304,138 @@ async fn upstream(
         json!({"type":"response.created","response":{"id":response["id"],"status":"in_progress","output":[]}}),
         false,
     );
+    if peer.case == DsmlCase::CallsResidueSse {
+        emit(
+            json!({
+                "type":"response.output_item.added",
+                "output_index":0,
+                "item":{"id":"reasoning_wire","type":"reasoning","summary":[]}
+            }),
+            true,
+        );
+        emit(
+            json!({
+                "type":"response.output_item.done",
+                "output_index":0,
+                "item":output[0]
+            }),
+            true,
+        );
+        emit(
+            json!({
+                "type":"response.output_item.added",
+                "output_index":1,
+                "item":{
+                    "id":"fc_wire",
+                    "type":"function_call",
+                    "call_id":"reordered_call",
+                    "name":"exec_command",
+                    "arguments":"",
+                    "status":"in_progress"
+                }
+            }),
+            true,
+        );
+        emit(
+            json!({
+                "type":"response.function_call_arguments.delta",
+                "output_index":1,
+                "item_id":"fc_wire",
+                "call_id":"reordered_call",
+                "delta":"{\"cmd\":\"printf 42\"}"
+            }),
+            true,
+        );
+        emit(
+            json!({
+                "type":"response.function_call_arguments.done",
+                "output_index":1,
+                "item_id":"fc_wire",
+                "call_id":"reordered_call",
+                "arguments":"{\"cmd\":\"printf 42\"}"
+            }),
+            true,
+        );
+        emit(
+            json!({
+                "type":"response.output_item.done",
+                "output_index":1,
+                "item":{
+                    "id":"fc_wire",
+                    "type":"function_call",
+                    "call_id":"reordered_call",
+                    "name":"exec_command",
+                    "arguments":"{\"cmd\":\"printf 42\"}",
+                    "status":"completed"
+                }
+            }),
+            true,
+        );
+        emit(
+            json!({
+                "type":"response.output_item.added",
+                "output_index":2,
+                "item":{"id":"message_stable","type":"message","role":"assistant","content":[]}
+            }),
+            true,
+        );
+        emit(
+            json!({
+                "type":"response.content_part.added",
+                "output_index":2,
+                "content_index":0,
+                "item_id":"message_stable",
+                "part":{"type":"output_text","text":"","annotations":[]}
+            }),
+            true,
+        );
+        emit(
+            json!({
+                "type":"response.output_text.delta",
+                "output_index":2,
+                "content_index":0,
+                "item_id":"message_stable",
+                "delta":" calls>"
+            }),
+            true,
+        );
+        emit(
+            json!({
+                "type":"response.output_text.done",
+                "output_index":2,
+                "content_index":0,
+                "item_id":"message_stable",
+                "text":" calls>"
+            }),
+            true,
+        );
+        emit(
+            json!({
+                "type":"response.content_part.done",
+                "output_index":2,
+                "content_index":0,
+                "item_id":"message_stable",
+                "part":output[1]["content"][0]
+            }),
+            true,
+        );
+        emit(
+            json!({
+                "type":"response.output_item.done",
+                "output_index":2,
+                "item":output[1]
+            }),
+            true,
+        );
+        emit(
+            json!({"type":"response.completed","response":response}),
+            false,
+        );
+        return Response::builder()
+            .header("content-type", "text/event-stream")
+            .body(Body::from(wire))
+            .unwrap();
+    }
     for (index, item) in output.as_array().unwrap().iter().enumerate() {
         emit(
             json!({"type":"response.output_item.added","output_index":index,"item":{"id":item["id"],"type":"message","role":"assistant","content":[]}}),
@@ -372,6 +615,120 @@ async fn run(case: DsmlCase, sse: bool) {
         std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
         return;
     }
+    if case == DsmlCase::CallsResidueSse {
+        assert_eq!(calls.len(), 1, "native call was lost: {result}");
+        assert!(
+            !output.iter().any(|item| item["type"] == "message"),
+            "known CLOSE message survived: {result}"
+        );
+        assert!(
+            output.iter().any(|item| item["type"] == "reasoning"),
+            "native reasoning was lost: {result}"
+        );
+        let call = calls[0];
+        assert_eq!(call["id"], "fc_terminal");
+        assert_eq!(call["call_id"], "reordered_call");
+        assert_eq!(
+            serde_json::from_str::<Value>(call["arguments"].as_str().unwrap()).unwrap(),
+            json!({"cmd":"printf 42"})
+        );
+        let executed = std::process::Command::new("printf")
+            .arg("42")
+            .output()
+            .unwrap();
+        assert!(executed.status.success());
+        let stdout = String::from_utf8(executed.stdout).unwrap();
+        assert_eq!(stdout, "42");
+        let mut input = first_input(case).as_array().unwrap().clone();
+        input.extend(output.clone());
+        input.push(json!({
+            "type":"function_call_output",
+            "call_id":call["call_id"],
+            "output":stdout
+        }));
+        let second = client
+            .post(&endpoint)
+            .json(&json!({"model":"client-test","input":input,"tools":tools,"stream":false}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(second.status(), 200);
+        assert!(second
+            .text()
+            .await
+            .unwrap()
+            .contains("Command output is 42."));
+        assert_eq!(peer.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        handle.shutdown().await;
+        task.abort();
+        fs::remove_file(fixture).unwrap();
+        std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+        return;
+    }
+    if matches!(case, DsmlCase::Alternate | DsmlCase::ToolCall) {
+        let visible: String = output
+            .iter()
+            .filter(|item| item["type"] == "message")
+            .filter_map(|item| item["content"].as_array())
+            .flatten()
+            .filter_map(|part| part["text"].as_str())
+            .collect();
+        assert_eq!(visible, "Continue.\n", "tool envelope or prefix leaked");
+        assert_eq!(
+            calls.len(),
+            1,
+            "alternate grammar must become a native call: {result}"
+        );
+        let call = calls[0];
+        assert_eq!(call["name"], "exec_command");
+        assert_eq!(output[0]["content"][0]["text"], "Continue.\n");
+        assert_eq!(
+            serde_json::from_str::<Value>(call["arguments"].as_str().unwrap()).unwrap(),
+            if case == DsmlCase::Alternate {
+                json!({
+                    "cmd":"printf 42",
+                    "max_output_tokens":4000,
+                    "yield_time_ms":30000
+                })
+            } else {
+                json!({"cmd":"printf 42"})
+            }
+        );
+        // Execute only the controlled safe fixture command. No screenshot
+        // business command is ever run.
+        let executed = std::process::Command::new("printf")
+            .arg("42")
+            .output()
+            .unwrap();
+        assert!(executed.status.success());
+        let stdout = String::from_utf8(executed.stdout).unwrap();
+        assert_eq!(stdout, "42");
+        let mut input = first_input(case).as_array().unwrap().clone();
+        input.extend(output.clone());
+        input.push(json!({
+            "type":"function_call_output",
+            "call_id":call["call_id"],
+            "output":stdout
+        }));
+        let second = client
+            .post(&endpoint)
+            .json(&json!({"model":"client-test","input":input,"tools":tools,"stream":false}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(second.status(), 200);
+        assert!(second
+            .text()
+            .await
+            .unwrap()
+            .contains("Command output is 42."));
+        assert_eq!(peer.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        handle.shutdown().await;
+        task.abort();
+        fs::remove_file(fixture).unwrap();
+        std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+        return;
+    }
     assert_eq!(calls.len(), 1, "DSML must become a native call: {result}");
     let call = calls[0];
     assert_eq!(call["name"], expected_leaf(case));
@@ -379,7 +736,20 @@ async fn run(case: DsmlCase, sse: bool) {
     assert_eq!(result["provider_extension"], json!({"keep":true}));
     assert_eq!(result["usage"]["output_tokens"], 2);
     assert_eq!(output[0]["content"][0]["text"], "Before\n");
-    assert_eq!(output[2]["content"][0]["text"], "\nAfter");
+    if case == DsmlCase::Residue {
+        assert!(
+            !output.iter().any(|item| item["type"] == "reasoning"),
+            "half thinking beside harvested tool must remain text"
+        );
+        assert!(!wire.contains("<thinking>"), "half thinking marker leaked");
+    }
+    if case == DsmlCase::Residue {
+        // The marker lines and their terminators are removed; the retained
+        // prose span keeps its exact source text.
+        assert_eq!(output[2]["content"][0]["text"], "\nAfter\n");
+    } else {
+        assert_eq!(output[2]["content"][0]["text"], "\nAfter");
+    }
     if sse {
         let events: Vec<Value> = wire
             .lines()
@@ -477,4 +847,39 @@ async fn responses_direct_dsml_discovered_function_sse_tool_round_trip() {
 #[tokio::test]
 async fn responses_direct_dsml_opaque_carrier_extensions_sse_preserved() {
     run(DsmlCase::OpaqueSse, true).await
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_residue_json_tool_round_trip() {
+    run(DsmlCase::Residue, false).await
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_residue_sse_tool_round_trip() {
+    run(DsmlCase::Residue, true).await
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_alternate_json_tool_round_trip() {
+    run(DsmlCase::Alternate, false).await
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_alternate_sse_tool_round_trip() {
+    run(DsmlCase::Alternate, true).await
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_tool_call_arg_key_value_json_tool_round_trip() {
+    run(DsmlCase::ToolCall, false).await
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_tool_call_arg_key_value_sse_tool_round_trip() {
+    run(DsmlCase::ToolCall, true).await
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_sse_reordered_native_calls_close_round_trip() {
+    run(DsmlCase::CallsResidueSse, true).await
 }

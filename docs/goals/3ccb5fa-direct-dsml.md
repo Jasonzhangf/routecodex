@@ -16,11 +16,61 @@ discovery channels. A separate narrower declaration walk is not authoritative.
 It converts complete, representable DSML envelopes into native calls, preserving
 text before and after each envelope, string whitespace, JSON parameter types,
 native items, extensions, call identities and matching follow-up results.
-Quoted, fenced, incomplete, unknown or duplicate fields remain text. No provider
-failure, retry, health mutation or semantic parameter validation is added.
+Quoted, fenced and opaque-associated examples remain unchanged. Recognized
+executable markup that cannot be harvested rejects the complete attempt through
+the existing typed response-processing Error/reselection path, even if prose
+survives. Native calls with model-generated invalid arguments remain business
+content; schema conformance is not an admission test.
+
+The 2026-10-19 user policy extends this owner to demonstrated orphan DSML and
+analysis marker lines and bounded alternate invocation markup. Complete
+invocations are harvested through current declarations. Incomplete outer labels
+do not prevent harvest of fully delimited calls. Remove only known label spans;
+preserve exact retained prose and native calls. A separate unharvestable attempted
+invocation rejects the attempt even beside complete calls. Label-only results
+enter existing provider_response_empty recovery after normalization. Exhaustion
+ends only that request transport without error payload or empty success.
+Harvested calls use the target protocol's tool-call termination. Chat ends with
+finish_reason=tool_calls; Responses exposes native function/custom_tool_call
+items and legal status, without inventing a nonstandard finish_reason field.
+Any existing explicit finish-reason field must agree with the harvested call.
+
+Observed response-only marker inventory includes fullwidth calls open/close,
+bare fullwidth DSML, ASCII DSML tool_calls, end_of_analysis and end▁of▁analysis,
+and malformed exec_command opener with delimited cmd and numeric parameters.
+The post-load 4914 audit additionally binds exact standalone ` calls>` and
+`｜｜DSML｜｜ calls>` remnants, and the bounded
+`<tool_call>name<arg_key>key</arg_key><arg_value>value</arg_value></tool_call>`
+grammar. Its name and parameter types use the same declaration registry and
+exact attempt inverse. Complete invocations leave visible prose; an incomplete
+recognized invocation rejects the complete attempt. Literal examples remain
+business text. Tests use only safe fixture commands.
+The demonstrated standalone bare `>` lines immediately followed by the exact
+fullwidth closing label form one closing residue sequence. Remove that known
+sequence; retain explicit blockquote lines such as `> </｜｜DSML｜｜ calls>`.
+The exact line prefix ` calls>` directly attached to a complete `<tool_call>`
+belongs to that invocation and leaves no visible residue after harvest.
+The user's subsequent two screenshots match inferai Responses Direct requests
+`073716826-1399765-13953` (complete write_stdin text envelope),
+`074639936-1399903-14091` (missing-open fullwidth label), and
+`074949254-1399935-14123` (closing residue). Their complete request IDs and
+private archives are retained in the issue run. No screenshot command is run.
+The latest screenshot matches retained request
+openai-responses-router-gpt-5.5-20261019T054307010-1395997-10185, inferai Responses
+Direct deepseek-v4.1-flash. It has reasoning/message and no native call. Tests use
+sanitized safe command text and preserve the demonstrated shape; raw samples
+remain private. Earlier opener-only request 053212806-1395643-9831 is inxk.
+
+Thinking normalization reuses the existing thinking owner (issue d94731e).
+Complete wrappers are harvested. With complete tools and half thinking/text
+labels, remove labels only and preserve the body. If the reasoning start cannot
+be located, keep the body as text. An isolated closing label is removed without
+deleting text before or after it, per the explicit user clarification.
 
 JSON and fully buffered SSE use the same owner. The existing attempt store calls
-the registered complete-response hook before sealing. SSE projects consistent
+the registered complete-response hook before final business admission and sealing.
+Both JSON kernels and both SSE exits propagate hook failure to the existing
+reselection loop. SSE projects consistent
 added/delta/done/terminal events and never emits converted DSML text first.
 Opaque fields on replaced item, part and text events must retain their complete
 values and association. When an association cannot be represented faithfully,
@@ -29,6 +79,22 @@ Empty standard `logprobs` arrays on text events and content parts carry no
 token data and permit conversion. Nonempty logprobs retain the original
 association. The SSE round-trip fixtures include these empty arrays, matching
 the observed inferai stream.
+
+The 4914 audit also proves that event output indexes are not terminal output
+indexes. An observed native function is wire slot 1 and terminal slot 2, while
+the stable-ID message is wire slot 2 and terminal slot 1. Protection, carrier
+replacement, survivor indexes, snapshots and raw rendering must share one
+attempt-local identity association. Stable item IDs and unique call IDs supply
+associations; content, type order and neighboring positions do not. Retain each
+original native carrier ID and argument bytes. Ambiguous opaque associations
+remain protected rather than guessed. A controlled fixture with the already
+recognized fullwidth close isolates this causal regression from vocabulary.
+
+These observations invalidate a complete-acceptance claim for 4914. The issue
+remains open until the amended source and public-entry cases pass, followed by
+actual runtime acceptance and the remaining delivery gates. Relay marker
+leakage after candidate recovery is separately tracked as issue `4effed6` and
+belongs to Relay Chat Process; it must not be handled by this Direct hook.
 
 Regression IDs and commands:
 
@@ -40,6 +106,8 @@ Regression IDs and commands:
 - `responses_direct_dsml_discovered_function_json_tool_round_trip`
 - `responses_direct_dsml_discovered_function_sse_tool_round_trip`
 - `responses_direct_dsml_opaque_carrier_extensions_sse_preserved`
+- `responses_direct_dsml_residue_json_tool_round_trip`
+- `responses_direct_dsml_residue_sse_tool_round_trip`
 - `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_dsml_ -- --nocapture`
 - `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_dsml_ -- --nocapture`
 
@@ -47,6 +115,12 @@ The public-entry upstream validates both rounds. The client executes a safe
 owned-file image read and returns its real dimensions with the matching call ID.
 Raw sample commands are never executed. Exact original read_image generation is
 not retained; three analogous inferai Responses Direct samples establish scope.
+
+Residual-policy RED, before runtime owner edits: five focused owner tests gave
+one literal-preservation PASS and four FAIL for orphan cleanup, mixed marker
+lines, screenshot alternate harvest and SSE deletion/remapping. Both public
+residue cases failed because the retained After text still included trailing
+analysis/DSML markers. These are failure receipts, not current GREEN claims.
 
 ## Historical author evidence before combined-candidate acceptance
 

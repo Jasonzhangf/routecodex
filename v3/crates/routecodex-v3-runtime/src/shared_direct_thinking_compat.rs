@@ -14,14 +14,13 @@ pub(crate) struct V3ThinkingTagTextProjection {
 pub(crate) struct V3DirectThinkingOutputItemPlan {
     pub(crate) item_id: Option<String>,
     pub(crate) output_index: usize,
-    pub(crate) visible_parts: Vec<String>,
     pub(crate) visible: String,
     pub(crate) reasoning: Vec<String>,
     pub(crate) pure_reasoning: bool,
-    pub(crate) changed: bool,
 }
 
-pub(crate) fn project_v3_thinking_tag_text(text: &str) -> V3ThinkingTagTextProjection {
+#[cfg(test)]
+fn project_v3_thinking_tag_text(text: &str) -> V3ThinkingTagTextProjection {
     project_v3_thinking_tag_text_with_tools(text, false)
 }
 
@@ -98,11 +97,9 @@ pub(crate) fn analyze_v3_direct_thinking_output(
                         .and_then(Value::as_str)
                         .map(ToOwned::to_owned),
                     output_index,
-                    visible_parts,
                     pure_reasoning: !reasoning.is_empty() && visible.is_empty(),
                     visible,
                     reasoning,
-                    changed: true,
                 }
             })
         })
@@ -110,22 +107,38 @@ pub(crate) fn analyze_v3_direct_thinking_output(
 }
 
 pub(crate) fn normalize_v3_direct_thinking_json(value: &mut Value) -> bool {
+    normalize_thinking_json_with_tool_context(value, None)
+}
+
+pub(crate) fn normalize_thinking_json_with_tool_context(
+    value: &mut Value,
+    has_tools: Option<bool>,
+) -> bool {
     let Some(object) = value.as_object_mut() else {
         return false;
     };
     if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
-        if normalize_v3_direct_thinking_object(response) {
+        if normalize_v3_direct_thinking_object(response, has_tools) {
             return true;
         }
     }
-    normalize_v3_direct_thinking_object(object)
+    normalize_v3_direct_thinking_object(object, has_tools)
 }
 
-fn normalize_v3_direct_thinking_object(object: &mut Map<String, Value>) -> bool {
+fn normalize_v3_direct_thinking_object(
+    object: &mut Map<String, Value>,
+    has_tools: Option<bool>,
+) -> bool {
     let Some(output) = object.get_mut("output").and_then(Value::as_array_mut) else {
         return false;
     };
-    let has_tools = output.iter().any(output_item_has_complete_tool);
+    let original_text: String = output
+        .iter()
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .collect();
+    let has_tools = has_tools.unwrap_or_else(|| output.iter().any(output_item_has_complete_tool));
     let mut transformed = Vec::with_capacity(output.len());
     let mut appended_reasoning = Vec::new();
     let mut changed = false;
@@ -159,6 +172,15 @@ fn normalize_v3_direct_thinking_object(object: &mut Map<String, Value>) -> bool 
     }
     transformed.extend(appended_reasoning);
     *output = transformed;
+    let visible_text: String = output
+        .iter()
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .collect();
+    if object.get("output_text").and_then(Value::as_str) == Some(original_text.as_str()) {
+        object.insert("output_text".to_owned(), Value::String(visible_text));
+    }
     true
 }
 
@@ -166,10 +188,40 @@ fn project_output_item_texts(
     item: &Value,
     has_complete_tools: bool,
 ) -> Option<(Vec<String>, Vec<String>, bool)> {
+    let fields = item.as_object()?;
+    if fields.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "id" | "type" | "role" | "status" | "content" | "text"
+        )
+    }) {
+        return None;
+    }
     let item_type = item.get("type").and_then(Value::as_str)?;
     match item_type {
         "message" => {
             if let Some(content) = item.get("content").and_then(Value::as_array) {
+                if item.get("role").is_some_and(|role| role != "assistant")
+                    || content.iter().any(|part| {
+                        part["type"] != "output_text"
+                            || !part["text"].is_string()
+                            || part.as_object().is_none_or(|fields| {
+                                fields.keys().any(|key| {
+                                    !matches!(
+                                        key.as_str(),
+                                        "type" | "text" | "annotations" | "logprobs"
+                                    )
+                                })
+                            })
+                            || ["annotations", "logprobs"].iter().any(|key| {
+                                part.get(*key).is_some_and(|value| {
+                                    value.as_array().is_none_or(|a| !a.is_empty())
+                                })
+                            })
+                    })
+                {
+                    return None;
+                }
                 let texts = content
                     .iter()
                     .filter(|part| {
@@ -271,7 +323,7 @@ fn reasoning_summary_value(reasoning: &[String]) -> Value {
     )
 }
 
-fn output_item_has_complete_tool(item: &Value) -> bool {
+pub(crate) fn output_item_has_complete_tool(item: &Value) -> bool {
     matches!(
         item.get("type").and_then(Value::as_str),
         Some(

@@ -26,17 +26,22 @@ fn direct_dsml_complete_rewrite_keeps_budget_and_terminal_reservation() {
     builder.push(vec![1, 2]).unwrap();
     builder.mark_last_frame_as_terminal().unwrap();
     builder
-        .rewrite_complete_attempt(|_| Some((vec![vec![3, 4], vec![5, 6]], 1)))
+        .rewrite_complete_attempt::<V3AttemptStoreError>(|_| {
+            Ok(Some((vec![vec![3, 4], vec![5, 6]], 1)))
+        })
         .unwrap();
     assert_eq!(process.load(Ordering::Acquire), 4);
     assert_eq!(builder.terminal_frame_index, Some(1));
     assert!(matches!(
-        builder.rewrite_complete_attempt(|_| Some((vec![vec![0; 9]], 0))),
+        builder.rewrite_complete_attempt(|_| Ok::<_, V3AttemptStoreError>(Some((
+            vec![vec![0; 9]],
+            0
+        )))),
         Err(V3AttemptStoreError::LocalResourceExhausted(_))
     ));
     assert_eq!(process.load(Ordering::Acquire), 4);
     builder
-        .rewrite_complete_attempt(|_| Some((vec![vec![7]], 0)))
+        .rewrite_complete_attempt::<V3AttemptStoreError>(|_| Ok(Some((vec![vec![7]], 0))))
         .unwrap();
     assert_eq!(process.load(Ordering::Acquire), 1);
     drop(builder);

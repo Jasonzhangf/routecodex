@@ -1,4 +1,5 @@
 //! Complete Responses Direct tool-envelope projection. No routing or error policy.
+use super::V3DirectResponseHookFailure;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -9,6 +10,16 @@ const INVOKE: &str = "<｜｜DSML｜｜ invoke";
 const END_INVOKE: &str = "</｜｜DSML｜｜ invoke>";
 const PARAM: &str = "<｜｜DSML｜｜ parameter";
 const END_PARAM: &str = "</｜｜DSML｜｜ parameter>";
+const BARE_DSML: &str = "<｜｜DSML｜｜>";
+const ASCII_TOOL_CALLS: &str = "<|DSML|tool_calls>";
+const ANALYSIS_CLOSINGS: &[&str] = &["<|end_of_analysis|>", "<|end▁of▁analysis|>"];
+const CLOSING_FRAGMENTS: &[&str] = &[" calls>", "｜｜DSML｜｜ calls>"];
+const TOOL_CALL_OPEN: &str = "<tool_call>";
+const TOOL_CALL_CLOSE: &str = "</tool_call>";
+const ARG_KEY_OPEN: &str = "<arg_key>";
+const ARG_KEY_CLOSE: &str = "</arg_key>";
+const ARG_VALUE_OPEN: &str = "<arg_value>";
+const ARG_VALUE_CLOSE: &str = "</arg_value>";
 
 #[derive(Default)]
 pub(crate) struct V3DirectDsmlContext {
@@ -20,6 +31,54 @@ struct DsmlToolIdentity {
     namespace: Option<String>,
     leaf: String,
     kind: provider_compat_core::namespace_tools::ToolKind,
+    parameter_kinds: HashMap<String, ParamKind>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ParamKind {
+    String,
+    Number,
+    Boolean,
+    Array,
+    Object,
+    Other,
+}
+
+impl ParamKind {
+    fn declared(value: &str) -> Self {
+        match value {
+            "string" => Self::String,
+            "integer" | "number" => Self::Number,
+            "boolean" => Self::Boolean,
+            "array" => Self::Array,
+            "object" => Self::Object,
+            _ => Self::Other,
+        }
+    }
+}
+
+fn declared_parameter_objects(source: &Value) -> Option<&Map<String, Value>> {
+    source
+        .get("parameters")
+        .or_else(|| source.pointer("/function/parameters"))
+        .and_then(|parameters| parameters.get("properties"))
+        .and_then(Value::as_object)
+}
+
+fn declared_parameter_kinds(source: &Value) -> HashMap<String, ParamKind> {
+    declared_parameter_objects(source)
+        .map(|properties| {
+            properties
+                .iter()
+                .filter_map(|(name, schema)| {
+                    schema
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .map(|kind| (name.clone(), ParamKind::declared(kind)))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 impl V3DirectDsmlContext {
@@ -47,6 +106,7 @@ impl V3DirectDsmlContext {
                 namespace: namespace.clone(),
                 leaf: identity.leaf_name.clone(),
                 kind: identity.kind,
+                parameter_kinds: declared_parameter_kinds(&identity.source),
             };
             // The exact attempt inverse is authoritative for the wire name.
             // A plain declaration whose wire name equals its leaf keeps the
@@ -174,19 +234,7 @@ fn envelope<'a>(text: &'a str, context: &V3DirectDsmlContext) -> Option<(Vec<Val
             .and_then(Value::as_str)
             .map(str::to_owned)
             .unwrap_or_else(|| fresh_id("call"));
-        let arguments = format!(
-            "{{{}}}",
-            arguments
-                .iter()
-                .map(|(name, value)| format!("{}:{value}", Value::String(name.clone())))
-                .collect::<Vec<_>>()
-                .join(",")
-        );
-        let mut call = json!({"id":fresh_id("fc"),"type":"function_call","call_id":call_id,"name":identity.leaf.clone(),"arguments":arguments,"status":"completed"});
-        if let Some(namespace) = &identity.namespace {
-            call["namespace"] = namespace.clone().into();
-        }
-        calls.push(call);
+        calls.push(dsml_function_call(identity, arguments, call_id));
     }
 }
 
@@ -195,8 +243,245 @@ enum Segment {
     Calls(Vec<Value>),
 }
 
-fn segments(text: &str, context: &V3DirectDsmlContext) -> Vec<Segment> {
-    let mut result = Vec::new();
+fn dsml_function_call(
+    identity: &DsmlToolIdentity,
+    arguments: Vec<(String, String)>,
+    call_id: String,
+) -> Value {
+    let arguments = format!(
+        "{{{}}}",
+        arguments
+            .iter()
+            .map(|(name, value)| format!("{}:{value}", Value::String(name.clone())))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let mut call = json!({"id":fresh_id("fc"),"type":"function_call","call_id":call_id,"name":identity.leaf.clone(),"arguments":arguments,"status":"completed"});
+    if let Some(namespace) = &identity.namespace {
+        call["namespace"] = namespace.clone().into();
+    }
+    call
+}
+
+struct Scan {
+    segments: Vec<Segment>,
+    removed_label: bool,
+    opener_label: bool,
+    truncated: bool,
+}
+
+fn line_content(line: &str) -> &str {
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    line.strip_suffix('\r').unwrap_or(line)
+}
+
+/// Exact demonstrated standalone protocol labels. The bool is tool-intent.
+fn removable_label(content: &str) -> Option<bool> {
+    if content == OPEN || content == ASCII_TOOL_CALLS {
+        Some(true)
+    } else if content == CLOSE
+        || content == BARE_DSML
+        || ANALYSIS_CLOSINGS.contains(&content)
+        || CLOSING_FRAGMENTS.contains(&content)
+    {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn close_residue_end(text: &str, start: usize) -> Option<usize> {
+    let mut cursor = start;
+    let mut bare_closings = 0;
+    for line in text.get(start..)?.split_inclusive('\n') {
+        cursor += line.len();
+        match line_content(line) {
+            ">" => bare_closings += 1,
+            CLOSE if bare_closings > 0 => return Some(cursor),
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// The demonstrated malformed alternate opener is `<|name">`. A normal
+/// `<name>` XML shape is deliberately not recognized.
+fn alternate_opener_name(content: &str) -> Option<&str> {
+    let name = content.strip_prefix("<|")?.strip_suffix("\">")?;
+    (!name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+        && !name.starts_with('|'))
+    .then_some(name)
+}
+
+fn alternate_close_residue(name: &str) -> Option<String> {
+    name.find('_').map(|index| format!("{}>", &name[index..]))
+}
+
+fn render_alternate_value(text: &str, kind: Option<ParamKind>) -> String {
+    let valid_json = serde_json::from_str::<serde::de::IgnoredAny>(text).is_ok();
+    let number = matches!(text.as_bytes().first().copied(), Some(b'-' | b'0'..=b'9')) && valid_json;
+    let string = || serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_owned());
+    match kind {
+        Some(ParamKind::String) => string(),
+        Some(ParamKind::Number) if number => text.to_owned(),
+        Some(ParamKind::Boolean) if matches!(text, "true" | "false") => text.to_owned(),
+        Some(ParamKind::Array) if text.starts_with('[') && valid_json => text.to_owned(),
+        Some(ParamKind::Object) if text.starts_with('{') && valid_json => text.to_owned(),
+        Some(ParamKind::Other) | None if valid_json && !text.starts_with('"') => text.to_owned(),
+        _ => string(),
+    }
+}
+
+fn valid_grammar_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+}
+
+/// Harvest the demonstrated bounded `<tool_call>` grammar. Every argument is
+/// delimited, typed only by the current declaration registry, and retained in
+/// its source order. A recognized but incomplete invocation is not text.
+fn parse_tool_call_invocation(
+    text: &str,
+    start: usize,
+    context: &V3DirectDsmlContext,
+) -> Option<(Value, usize)> {
+    let rest = text.get(start..)?.strip_prefix(TOOL_CALL_OPEN)?;
+    let argument_start = rest.find(ARG_KEY_OPEN)?;
+    let name = &rest[..argument_start];
+    let mut rest = &rest[argument_start..];
+    if !valid_grammar_name(name) {
+        return None;
+    }
+    let identity = context.tools.get(name)?;
+    if identity.kind != provider_compat_core::namespace_tools::ToolKind::Function {
+        return None;
+    }
+    let mut arguments = Vec::new();
+    loop {
+        if let Some(after) = rest.strip_prefix(TOOL_CALL_CLOSE) {
+            if arguments.is_empty() {
+                return None;
+            }
+            return Some((
+                dsml_function_call(identity, arguments, fresh_id("call")),
+                text.len() - after.len(),
+            ));
+        }
+        let after = rest.strip_prefix(ARG_KEY_OPEN)?;
+        let (key, after) = after.split_once(ARG_KEY_CLOSE)?;
+        if !valid_grammar_name(key)
+            || arguments
+                .iter()
+                .any(|(existing, _): &(String, String)| existing == key)
+        {
+            return None;
+        }
+        let after = after.strip_prefix(ARG_VALUE_OPEN)?;
+        let (value, after) = after.split_once(ARG_VALUE_CLOSE)?;
+        arguments.push((
+            key.to_owned(),
+            render_alternate_value(value, identity.parameter_kinds.get(key).copied()),
+        ));
+        rest = after;
+    }
+}
+
+struct AlternateHarvest {
+    calls: Vec<Value>,
+    end: usize,
+}
+
+/// A bounded alternate invocation has one malformed opener line, one or more
+/// fully delimited `<parameter>value</parameter>` lines, one matching close
+/// line, and at most one directly associated close residue line.
+fn parse_alternate_invocation(
+    text: &str,
+    body_start: usize,
+    name: &str,
+    identity: Option<&DsmlToolIdentity>,
+) -> Option<AlternateHarvest> {
+    let identity = identity?;
+    if identity.kind != provider_compat_core::namespace_tools::ToolKind::Function {
+        return None;
+    }
+    let mut offset = body_start;
+    let mut arguments = Vec::new();
+    loop {
+        let rest = text.get(offset..)?;
+        let line = rest.split_inclusive('\n').next()?;
+        let content = line_content(line);
+        let line_end = offset + line.len();
+        if let Some(close_name) = content.strip_prefix("</") {
+            if close_name.strip_suffix('>')? != name {
+                return None;
+            }
+            let mut end = line_end;
+            if let Some(residue) = alternate_close_residue(name) {
+                let tail = text.get(end..).unwrap_or_default();
+                if !tail.is_empty() {
+                    let residue_line = tail.split_inclusive('\n').next().unwrap_or_default();
+                    if line_content(residue_line) == residue {
+                        end += residue_line.len();
+                    }
+                }
+            }
+            return Some(AlternateHarvest {
+                calls: vec![dsml_function_call(identity, arguments, fresh_id("call"))],
+                end,
+            });
+        }
+        let (parameter, value_and_close) = content.strip_prefix('<')?.split_once('>')?;
+        if parameter.is_empty()
+            || !parameter
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return None;
+        }
+        let value = value_and_close.strip_suffix(format!("</{parameter}>").as_str())?;
+        if arguments.iter().any(|(existing, _)| existing == parameter) {
+            return None;
+        }
+        arguments.push((
+            parameter.to_owned(),
+            render_alternate_value(value, identity.parameter_kinds.get(parameter).copied()),
+        ));
+        offset = line_end;
+    }
+}
+
+/// A declared function invocation that failed the complete fullwidth envelope
+/// parse and has no outer close is recognized executable truncation rather
+/// than literal text. Complete but unrepresentable envelopes stay preserved.
+fn recognized_truncated_fullwidth(text: &str, context: &V3DirectDsmlContext) -> bool {
+    let Some(rest) = text.strip_prefix(OPEN) else {
+        return false;
+    };
+    let Some((attrs, after)) = attributes(rest.trim_start(), INVOKE) else {
+        return false;
+    };
+    if attrs.keys().any(|key| key != "name" && key != "call_id") {
+        return false;
+    }
+    let Some(name) = attrs.get("name").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(identity) = context.tools.get(name) else {
+        return false;
+    };
+    identity.kind == provider_compat_core::namespace_tools::ToolKind::Function
+        && !after.contains(CLOSE)
+}
+
+fn segments(text: &str, context: &V3DirectDsmlContext) -> Scan {
+    let mut segments = Vec::new();
+    let mut removed_label = false;
+    let mut opener_label = false;
     let mut consumed = 0;
     let mut cursor = 0;
     let mut fence: Option<(char, usize)> = None;
@@ -204,17 +489,23 @@ fn segments(text: &str, context: &V3DirectDsmlContext) -> Vec<Segment> {
     let mut quote = None;
     let mut skip_until = 0;
     let mut blockquote = false;
+    let mut truncated = false;
+    let mut line_start = 0;
     for line in text.split_inclusive('\n') {
-        let line_start = cursor;
+        let current_line_start = line_start;
         let line_end = line_start + line.len();
-        cursor = cursor.max(consumed.max(skip_until)).min(line_end);
+        cursor = cursor
+            .max(current_line_start)
+            .max(consumed.max(skip_until))
+            .min(line_end);
+        line_start = line_end;
         if cursor == line_end {
             continue;
         }
         let trimmed = line.trim_start();
         // Envelope arguments are consumed atomically. Their Markdown-like
         // contents must not change the lexical scope of subsequent text.
-        if cursor == line_start {
+        if cursor == current_line_start {
             if trimmed.trim().is_empty() {
                 blockquote = false;
             }
@@ -235,6 +526,58 @@ fn segments(text: &str, context: &V3DirectDsmlContext) -> Vec<Segment> {
                 fence = Some((marker, run));
                 cursor = line_end;
                 continue;
+            }
+            if fence.is_none() && inline.is_none() && quote.is_none() && !blockquote {
+                let content = line_content(line);
+                if let Some(end) = close_residue_end(text, current_line_start) {
+                    if cursor > consumed {
+                        segments.push(Segment::Text(text[consumed..cursor].to_owned()));
+                    }
+                    consumed = end;
+                    cursor = line_end;
+                    removed_label = true;
+                    continue;
+                }
+                if let Some(tool_intent) = removable_label(content) {
+                    // Complete representable envelopes keep atomic conversion
+                    // priority even when their open wrapper is on its own line.
+                    let complete_fullwidth_follows = content == OPEN
+                        && text
+                            .get(line_end..)
+                            .map(str::trim_start)
+                            .is_some_and(|rest| rest.starts_with(INVOKE));
+                    if !complete_fullwidth_follows {
+                        if cursor > consumed {
+                            segments.push(Segment::Text(text[consumed..cursor].to_owned()));
+                        }
+                        consumed = line_end;
+                        cursor = line_end;
+                        removed_label = true;
+                        opener_label |= tool_intent;
+                        continue;
+                    }
+                }
+                if let Some(name) = alternate_opener_name(content) {
+                    match parse_alternate_invocation(text, line_end, name, context.tools.get(name))
+                    {
+                        Some(harvest) => {
+                            if cursor > consumed {
+                                segments.push(Segment::Text(text[consumed..cursor].to_owned()));
+                            }
+                            segments.push(Segment::Calls(harvest.calls));
+                            consumed = harvest.end;
+                            // Keep the line iterator aligned: later physical
+                            // lines are skipped by the consumed offset above,
+                            // just like a multi-line fullwidth envelope.
+                            cursor = line_end;
+                        }
+                        None => {
+                            truncated = true;
+                            break;
+                        }
+                    }
+                    continue;
+                }
             }
             blockquote |= trimmed.starts_with('>');
             if blockquote {
@@ -294,12 +637,15 @@ fn segments(text: &str, context: &V3DirectDsmlContext) -> Vec<Segment> {
             if inline.is_none() && quote.is_none() && tail.starts_with(OPEN) {
                 if let Some((calls, rest)) = envelope(tail, context) {
                     if cursor > consumed {
-                        result.push(Segment::Text(text[consumed..cursor].to_owned()));
+                        segments.push(Segment::Text(text[consumed..cursor].to_owned()));
                     }
-                    result.push(Segment::Calls(calls));
+                    segments.push(Segment::Calls(calls));
                     consumed = text.len() - rest.len();
                     cursor = consumed.min(line_end);
                     continue;
+                }
+                if recognized_truncated_fullwidth(tail, context) {
+                    truncated = true;
                 }
                 // Do not extract a nested call from an envelope that failed
                 // atomic parsing. The original complete span remains visible.
@@ -310,13 +656,40 @@ fn segments(text: &str, context: &V3DirectDsmlContext) -> Vec<Segment> {
                 cursor = skip_until.min(line_end);
                 continue;
             }
+            let paired_tool_start = (cursor == current_line_start
+                && tail.starts_with(" calls><tool_call>"))
+            .then_some(cursor + " calls>".len());
+            if inline.is_none()
+                && quote.is_none()
+                && !blockquote
+                && (tail.starts_with(TOOL_CALL_OPEN) || paired_tool_start.is_some())
+            {
+                let tool_start = paired_tool_start.unwrap_or(cursor);
+                if let Some((call, end)) = parse_tool_call_invocation(text, tool_start, context) {
+                    if cursor > consumed {
+                        segments.push(Segment::Text(text[consumed..cursor].to_owned()));
+                    }
+                    segments.push(Segment::Calls(vec![call]));
+                    consumed = end;
+                    cursor = end.min(line_end);
+                } else {
+                    truncated = true;
+                    cursor += ch.len_utf8();
+                }
+                continue;
+            }
             cursor += ch.len_utf8();
         }
     }
     if consumed < text.len() {
-        result.push(Segment::Text(text[consumed..].to_owned()));
+        segments.push(Segment::Text(text[consumed..].to_owned()));
     }
-    result
+    Scan {
+        segments,
+        removed_label,
+        opener_label,
+        truncated,
+    }
 }
 
 struct Replacement {
@@ -325,8 +698,46 @@ struct Replacement {
     items: Vec<Value>,
 }
 
-fn normalize(payload: &mut Value, context: &V3DirectDsmlContext) -> Vec<Replacement> {
+fn normalize(
+    payload: &mut Value,
+    context: &V3DirectDsmlContext,
+) -> Result<Vec<Replacement>, V3DirectResponseHookFailure> {
     normalize_with_protected(payload, context, &HashSet::new())
+}
+
+fn complete_native_call(item: &Value) -> bool {
+    // A native model call remains business content even when its name or
+    // arguments are invalid. Only serialized text needs harvesting here.
+    matches!(
+        item["type"].as_str(),
+        Some("function_call" | "custom_tool_call")
+    )
+}
+
+fn only_removable_labels_remain(output: &[Value]) -> bool {
+    output.iter().all(|item| {
+        item["type"] == "message"
+            && item["content"].as_array().is_some_and(|parts| {
+                parts
+                    .iter()
+                    .all(|part| part["text"].as_str().is_some_and(|text| text.is_empty()))
+            })
+    })
+}
+
+fn rewrite_finish_reason(payload: &mut Value) {
+    for path in [
+        "/finish_reason",
+        "/response/finish_reason",
+        "/choices/0/finish_reason",
+    ] {
+        let Some(slot) = payload.pointer_mut(path) else {
+            continue;
+        };
+        if slot.as_str() == Some("stop") {
+            *slot = "tool_calls".into();
+        }
+    }
 }
 
 /// Output indexes whose carrier events carry opaque extensions that the
@@ -336,13 +747,17 @@ fn normalize_with_protected(
     payload: &mut Value,
     context: &V3DirectDsmlContext,
     protected: &HashSet<usize>,
-) -> Vec<Replacement> {
+) -> Result<Vec<Replacement>, V3DirectResponseHookFailure> {
     let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let old_text = joined_text(output);
+    let native_complete_call = output.iter().any(complete_native_call);
     let mut next = Vec::new();
     let mut plans = Vec::new();
+    let mut opening_tool_label = false;
+    let mut harvested_calls = 0usize;
+    let mut truncated_invocation = false;
     for (index, item) in output.iter().enumerate() {
         if protected.contains(&index) {
             next.push(item.clone());
@@ -360,7 +775,11 @@ fn normalize_with_protected(
         let mut content = Vec::new();
         let mut changed = false;
         for part in parts {
-            for segment in segments(part["text"].as_str().unwrap(), context) {
+            let scan = segments(part["text"].as_str().unwrap(), context);
+            changed |= scan.removed_label;
+            opening_tool_label |= scan.opener_label;
+            truncated_invocation |= scan.truncated;
+            for segment in scan.segments {
                 match segment {
                     Segment::Text(text) => {
                         let mut p = part.clone();
@@ -369,6 +788,7 @@ fn normalize_with_protected(
                     }
                     Segment::Calls(calls) => {
                         changed = true;
+                        harvested_calls += calls.len();
                         flush_message(item, &mut content, &mut items);
                         items.extend(calls);
                     }
@@ -387,11 +807,22 @@ fn normalize_with_protected(
             next.push(item.clone());
         }
     }
+    if truncated_invocation
+        || (opening_tool_label
+            && !native_complete_call
+            && harvested_calls == 0
+            && !only_removable_labels_remain(&next))
+    {
+        return Err(V3DirectResponseHookFailure::UnharvestableToolMarkup);
+    }
     if !plans.is_empty() {
         *output = next;
         refresh_matching_aggregate(payload, &old_text);
+        if harvested_calls > 0 {
+            rewrite_finish_reason(payload);
+        }
     }
-    plans
+    Ok(plans)
 }
 
 fn known_message_item(item: &Value) -> bool {
@@ -459,8 +890,8 @@ fn flush_message(original: &Value, content: &mut Vec<Value>, items: &mut Vec<Val
 pub(crate) fn normalize_v3_direct_dsml_response(
     payload: &mut Value,
     context: &V3DirectDsmlContext,
-) {
-    normalize(payload, context);
+) -> Result<(), V3DirectResponseHookFailure> {
+    normalize(payload, context).map(|_| ())
 }
 
 /// The event-level extension keys the synthesized replacement events keep.
@@ -491,20 +922,207 @@ fn event_has_unrepresentable_extension(event: &Value) -> bool {
         || event.get("part").is_some_and(|part| !known_text_part(part))
 }
 
+fn unique_terminal_indexes(
+    items: &[Value],
+    key: impl Fn(&Value) -> Option<String>,
+) -> HashMap<String, Option<usize>> {
+    let mut indexes = HashMap::new();
+    for (index, item) in items.iter().enumerate() {
+        let Some(key) = key(item) else {
+            continue;
+        };
+        indexes
+            .entry(key)
+            .and_modify(|slot: &mut Option<usize>| *slot = None)
+            .or_insert(Some(index));
+    }
+    indexes
+}
+
+struct TerminalAssociation {
+    types: Vec<Option<String>>,
+    by_id: HashMap<String, Option<usize>>,
+    by_call_id: HashMap<String, Option<usize>>,
+    by_wire_index: HashMap<usize, Option<usize>>,
+}
+
+fn bind_association<K: Eq + std::hash::Hash>(
+    bindings: &mut HashMap<K, Option<usize>>,
+    key: K,
+    index: usize,
+) {
+    bindings
+        .entry(key)
+        .and_modify(|slot| {
+            if *slot != Some(index) {
+                *slot = None;
+            }
+        })
+        .or_insert(Some(index));
+}
+
+impl TerminalAssociation {
+    fn new(items: &[Value]) -> Self {
+        Self {
+            types: items
+                .iter()
+                .map(|item| item["type"].as_str().map(str::to_owned))
+                .collect(),
+            by_id: unique_terminal_indexes(items, |item| item["id"].as_str().map(str::to_owned)),
+            by_call_id: unique_terminal_indexes(items, |item| {
+                item["call_id"].as_str().map(str::to_owned)
+            }),
+            by_wire_index: HashMap::new(),
+        }
+    }
+
+    fn bind_events<'a>(&mut self, events: impl Iterator<Item = &'a Value>) {
+        let events: Vec<_> = events.collect();
+        // A native item may have a new terminal ID while its call ID remains
+        // stable. Bind its wire ID once for subsequent argument-only events.
+        for event in &events {
+            if let Some(item) = event.get("item") {
+                if let (Some(index), Some(id)) = (self.item_index(item), item["id"].as_str()) {
+                    bind_association(&mut self.by_id, id.to_owned(), index);
+                }
+            }
+        }
+        for event in events {
+            let index = if let Some(item) = event.get("item") {
+                self.item_index(item)
+            } else {
+                self.lookup(event["item_id"].as_str(), event["call_id"].as_str(), None)
+            };
+            if let (Some(index), Some(wire)) = (index, event["output_index"].as_u64()) {
+                bind_association(&mut self.by_wire_index, wire as usize, index);
+            }
+        }
+    }
+
+    fn lookup(
+        &self,
+        id: Option<&str>,
+        call_id: Option<&str>,
+        item_type: Option<&str>,
+    ) -> Option<usize> {
+        let by_id = id.and_then(|id| self.by_id.get(id).copied().flatten());
+        let by_call = call_id.and_then(|id| self.by_call_id.get(id).copied().flatten());
+        if matches!((by_id, by_call), (Some(left), Some(right)) if left != right) {
+            return None;
+        }
+        by_id.or(by_call).filter(|index| {
+            item_type.is_none_or(|item_type| {
+                self.types
+                    .get(*index)
+                    .and_then(Option::as_deref)
+                    .is_none_or(|terminal_type| terminal_type == item_type)
+            })
+        })
+    }
+
+    fn item_index(&self, item: &Value) -> Option<usize> {
+        self.lookup(
+            item["id"].as_str(),
+            item["call_id"].as_str(),
+            item["type"].as_str(),
+        )
+    }
+
+    fn event_index(&self, event: &Value) -> Option<usize> {
+        let identity = if let Some(item) = event.get("item") {
+            self.item_index(item)
+        } else {
+            self.lookup(event["item_id"].as_str(), event["call_id"].as_str(), None)
+        };
+        identity.or_else(|| {
+            event["output_index"]
+                .as_u64()
+                .and_then(|wire| self.by_wire_index.get(&(wire as usize)).copied().flatten())
+        })
+    }
+}
+
+fn event_requires_message_association(event: &Value) -> bool {
+    if let Some(item) = event.get("item") {
+        return item["type"] == "message";
+    }
+    if event.get("part").is_some() {
+        return event
+            .get("part")
+            .is_some_and(|part| part["type"] == "output_text");
+    }
+    matches!(
+        event["type"].as_str(),
+        Some(
+            "response.content_part.added"
+                | "response.content_part.done"
+                | "response.output_text.delta"
+                | "response.output_text.done"
+        )
+    )
+}
+
+fn projected_terminal_index(index: usize, plans: &[Replacement]) -> usize {
+    plans.iter().find(|plan| plan.old == index).map_or_else(
+        || {
+            let shift: isize = plans
+                .iter()
+                .filter(|plan| plan.old < index)
+                .map(|plan| plan.items.len() as isize - 1)
+                .sum();
+            (index as isize + shift).max(0) as usize
+        },
+        |plan| plan.start,
+    )
+}
+
+fn rewrite_snapshot(
+    snapshot: &mut Vec<Value>,
+    plans: &[Replacement],
+    association: &TerminalAssociation,
+) -> bool {
+    let original = std::mem::take(snapshot);
+    let mut unknown = Vec::new();
+    let mut associated = Vec::new();
+    for item in original {
+        if let Some(index) = association.item_index(&item) {
+            associated.push((index, item));
+        } else if item["type"] == "message" {
+            return false;
+        } else {
+            if !associated.is_empty() {
+                return false;
+            }
+            unknown.push(item);
+        }
+    }
+    associated.sort_by_key(|(index, _)| *index);
+    let mut next = unknown;
+    for (index, item) in associated {
+        if let Some(plan) = plans.iter().find(|plan| plan.old == index) {
+            next.extend(plan.items.clone());
+        } else {
+            next.push(item);
+        }
+    }
+    *snapshot = next;
+    true
+}
+
 pub(crate) fn rewrite_v3_direct_dsml_attempt(
     frames: &[Vec<u8>],
     context: &V3DirectDsmlContext,
-) -> Option<(Vec<Vec<u8>>, usize)> {
+) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure> {
     use routecodex_v3_sse::{
         build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
     };
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut events = Vec::new();
     for bytes in frames {
-        for frame in decoder
-            .push(build_v3_sse_transport_in_01_raw_chunk(bytes))
-            .ok()?
-        {
+        let Ok(decoded) = decoder.push(build_v3_sse_transport_in_01_raw_chunk(bytes)) else {
+            return Ok(None);
+        };
+        for frame in decoded {
             let data = frame
                 .frame()
                 .fields()
@@ -519,40 +1137,101 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
             events.push((frame, value));
         }
     }
-    decoder.finish().ok()?;
-    let terminal = events.iter().position(|(_, v)| {
+    if decoder.finish().is_err() {
+        return Ok(None);
+    }
+    let Some(terminal) = events.iter().position(|(_, v)| {
         v.as_ref().is_some_and(|v| {
             matches!(
                 v["type"].as_str(),
                 Some("response.completed" | "response.incomplete")
             )
         })
-    })?;
-    // A replaced item/part/text carrier may carry opaque event-level data.
-    // Those values have no defined association with the synthesized tool
-    // events, so the affected item keeps its original provider text.
-    let protected: HashSet<usize> = events
-        .iter()
-        .filter_map(|(_, value)| value.as_ref())
-        .filter(|event| {
-            matches!(
-                event["type"].as_str(),
-                Some(
-                    "response.output_item.added"
-                        | "response.output_item.done"
-                        | "response.content_part.added"
-                        | "response.content_part.done"
-                        | "response.output_text.delta"
-                        | "response.output_text.done"
-                )
-            ) && event_has_unrepresentable_extension(event)
-        })
-        .filter_map(|event| event["output_index"].as_u64().map(|index| index as usize))
-        .collect();
-    let mut response = events[terminal].1.as_ref()?["response"].clone();
-    let plans = normalize_with_protected(&mut response, context, &protected);
+    }) else {
+        return Ok(None);
+    };
+    let Some(terminal_response) = events[terminal].1.as_ref().map(|event| &event["response"])
+    else {
+        return Ok(None);
+    };
+    let terminal_items = terminal_response["output"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut association = TerminalAssociation::new(&terminal_items);
+    association.bind_events(events.iter().filter_map(|(_, value)| value.as_ref()));
+    let mut protected: HashSet<usize> = HashSet::new();
+    let mut unbound_wire_indexes = Vec::new();
+    for (_, value) in events.iter() {
+        let Some(event) = value.as_ref() else {
+            continue;
+        };
+        let carrier = matches!(
+            event["type"].as_str(),
+            Some(
+                "response.output_item.added"
+                    | "response.output_item.done"
+                    | "response.content_part.added"
+                    | "response.content_part.done"
+                    | "response.output_text.delta"
+                    | "response.output_text.done"
+            )
+        );
+        if carrier && event_has_unrepresentable_extension(event) {
+            if let Some(index) = association.event_index(event) {
+                protected.insert(index);
+            } else if event_requires_message_association(event) {
+                return Ok(None);
+            } else if let Some(index) = event["output_index"].as_u64() {
+                unbound_wire_indexes.push(index as usize);
+            }
+        }
+        let snapshot = matches!(
+            event["type"].as_str(),
+            Some(
+                "response.created"
+                    | "response.in_progress"
+                    | "response.queued"
+                    | "response.completed"
+                    | "response.incomplete"
+            )
+        );
+        if carrier || snapshot {
+            continue;
+        }
+        // An unrecognized event with an item association cannot be regenerated
+        // or safely re-indexed by this owner. Its affected item keeps provider
+        // text so the association remains faithful.
+        let index = association.event_index(event);
+        if let Some(index) = index {
+            protected.insert(index);
+        } else if let Some(index) = event["output_index"].as_u64() {
+            unbound_wire_indexes.push(index as usize);
+        }
+    }
+    let mut response = terminal_response.clone();
+    let plans = normalize_with_protected(&mut response, context, &protected)?;
     if plans.is_empty() {
-        return None;
+        return Ok(None);
+    }
+    // An unbound earlier carrier keeps its original wire slot. A rewrite
+    // before it could change that association, so retain the original attempt
+    // when the affected ordering cannot be established from identities.
+    if !unbound_wire_indexes.is_empty() {
+        let first_changed_wire = association
+            .by_wire_index
+            .iter()
+            .filter_map(|(wire, index)| {
+                index
+                    .filter(|index| plans.iter().any(|plan| plan.old == *index))
+                    .map(|_| *wire)
+            })
+            .min();
+        if first_changed_wire
+            .is_none_or(|first| unbound_wire_indexes.iter().any(|index| *index >= first))
+        {
+            return Ok(None);
+        }
     }
     let mut output = Vec::new();
     let mut emitted = vec![false; plans.len()];
@@ -572,8 +1251,12 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
             );
             continue;
         };
-        let index = event["output_index"].as_u64().map(|v| v as usize);
-        if let Some((pi, plan)) = plans.iter().enumerate().find(|(_, p)| Some(p.old) == index) {
+        let index = association.event_index(&event);
+        if let Some((pi, plan)) = plans
+            .iter()
+            .enumerate()
+            .find(|(_, plan)| Some(plan.old) == index)
+        {
             // Known item/content events are replaced together. Unknown extension events survive.
             if matches!(
                 event["type"].as_str(),
@@ -588,7 +1271,10 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
             ) {
                 let transport = frame.frame().fields().iter().filter(|f| !matches!(f, SseField::Named{name,..} if name == "event" || name == "data")).cloned().collect::<Vec<_>>();
                 if !transport.is_empty() {
-                    output.push(encode_fields(transport)?);
+                    let Some(encoded) = encode_fields(transport) else {
+                        return Ok(None);
+                    };
+                    output.push(encoded);
                 }
                 if !emitted[pi] {
                     emit_items(&mut output, &mut sequence, plan);
@@ -598,12 +1284,9 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
             }
         }
         if let Some(index) = index {
-            let shift: usize = plans
-                .iter()
-                .filter(|p| p.old < index)
-                .map(|p| p.items.len() - 1)
-                .sum();
-            event["output_index"] = (index + shift).into();
+            if let Some(slot) = event.get_mut("output_index") {
+                *slot = projected_terminal_index(index, &plans).into();
+            }
         }
         if position == terminal {
             for (pi, plan) in plans.iter().enumerate() {
@@ -623,13 +1306,9 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
                     .and_then(Value::as_array_mut)
                 {
                     let old_text = joined_text(snapshot);
-                    let mut next = Vec::new();
-                    for (index, item) in snapshot.iter().enumerate() {
-                        if let Some(plan) = plans.iter().find(|p| p.old == index) {
-                            next.extend(plan.items.clone());
-                        } else {
-                            next.push(item.clone());
-                        }
+                    let mut next = snapshot.clone();
+                    if !rewrite_snapshot(&mut next, &plans, &association) {
+                        return Ok(None);
                     }
                     *snapshot = next;
                     refresh_matching_aggregate(snapshot_response, &old_text);
@@ -638,14 +1317,17 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
         }
         event["sequence_number"] = sequence.into();
         sequence += 1;
-        output.push(render_original_event(&frame, &event, &plans)?);
+        let Some(rendered) = render_original_event(&frame, &event, &plans, &association) else {
+            return Ok(None);
+        };
+        output.push(rendered);
     }
-    Some((output, terminal_index))
+    Ok(Some((output, terminal_index)))
 }
 
 /// Preserve untouched JSON values as raw text, including numbers outside f64
 /// precision and duplicate opaque fields. Only declared protocol fields change.
-struct RawObject(Vec<(String, Box<serde_json::value::RawValue>)>);
+pub(crate) struct RawObject(Vec<(String, Box<serde_json::value::RawValue>)>);
 
 impl<'de> serde::Deserialize<'de> for RawObject {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -671,12 +1353,12 @@ impl<'de> serde::Deserialize<'de> for RawObject {
 }
 
 impl RawObject {
-    fn get(&self, name: &str) -> Option<&serde_json::value::RawValue> {
+    pub(crate) fn get(&self, name: &str) -> Option<&serde_json::value::RawValue> {
         let mut matches = self.0.iter().filter(|(key, _)| key == name);
         let (_, value) = matches.next()?;
         matches.next().is_none().then_some(value.as_ref())
     }
-    fn set(&mut self, name: &str, json: String) -> Option<()> {
+    pub(crate) fn set(&mut self, name: &str, json: String) -> Option<()> {
         let value = serde_json::value::RawValue::from_string(json).ok()?;
         let mut slots = self.0.iter_mut().filter(|(key, _)| key == name);
         if let Some((_, slot)) = slots.next() {
@@ -689,7 +1371,7 @@ impl RawObject {
         }
         Some(())
     }
-    fn render(&self) -> String {
+    pub(crate) fn render(&self) -> String {
         format!(
             "{{{}}}",
             self.0
@@ -701,10 +1383,76 @@ impl RawObject {
     }
 }
 
+fn planned_output_item(item: &Value, plans: &[Replacement]) -> bool {
+    plans
+        .iter()
+        .flat_map(|plan| plan.items.iter())
+        .any(|planned| planned == item)
+}
+
+fn render_rewritten_output(
+    original_items: &[Value],
+    original_raw: &[Box<serde_json::value::RawValue>],
+    rewritten: &[Value],
+    plans: &[Replacement],
+    association: &TerminalAssociation,
+) -> Option<String> {
+    if original_raw.len() != original_items.len() {
+        return None;
+    }
+    let mut output = Vec::new();
+    for item in rewritten {
+        if planned_output_item(item, plans) {
+            output.push(item.to_string());
+            continue;
+        }
+        let mut candidates = Vec::new();
+        if let Some(index) = association.item_index(item) {
+            candidates.extend(
+                original_items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, original)| association.item_index(original) == Some(index))
+                    .map(|(index, _)| index),
+            );
+        }
+        if candidates.is_empty() {
+            if let Some(id) = item["id"].as_str() {
+                candidates.extend(
+                    original_items
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, original)| original["id"].as_str() == Some(id))
+                        .map(|(index, _)| index),
+                );
+            }
+        }
+        if candidates.is_empty() {
+            if let Some(call_id) = item["call_id"].as_str() {
+                candidates.extend(
+                    original_items
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, original)| original["call_id"].as_str() == Some(call_id))
+                        .map(|(index, _)| index),
+                );
+            }
+        }
+        candidates.dedup();
+        if let [index] = candidates.as_slice() {
+            output.push(original_raw[*index].get().to_owned());
+        } else {
+            return None;
+        }
+    }
+    Some(format!("[{}]", output.join(",")))
+}
+
 fn render_original_event(
     frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
     event: &Value,
     plans: &[Replacement],
+    association: &TerminalAssociation,
 ) -> Option<Vec<u8>> {
     use routecodex_v3_sse::*;
     let data = frame
@@ -726,21 +1474,47 @@ fn render_original_event(
     }
     if event.get("response") != original.get("response") {
         let mut response: RawObject = serde_json::from_str(raw.get("response")?.get()).ok()?;
-        let items: Vec<Box<serde_json::value::RawValue>> =
+        let original_response: Value = serde_json::from_str(raw.get("response")?.get()).ok()?;
+        let original_items = original_response["output"].as_array()?;
+        let original_raw: Vec<Box<serde_json::value::RawValue>> =
             serde_json::from_str(response.get("output")?.get()).ok()?;
-        let mut output = Vec::new();
-        for (index, item) in items.iter().enumerate() {
-            if let Some(plan) = plans.iter().find(|p| p.old == index) {
-                output.extend(plan.items.iter().map(Value::to_string));
-            } else {
-                output.push(item.get().to_owned());
-            }
-        }
-        response.set("output", format!("[{}]", output.join(",")))?;
+        let rewritten = event["response"]["output"].as_array()?;
+        let output =
+            render_rewritten_output(original_items, &original_raw, rewritten, plans, association)?;
+        response.set("output", output)?;
         if event["response"].get("output_text") != original["response"].get("output_text") {
             response.set("output_text", event["response"]["output_text"].to_string())?;
         }
+        if event["response"].get("finish_reason") != original["response"].get("finish_reason") {
+            response.set(
+                "finish_reason",
+                event["response"]["finish_reason"].to_string(),
+            )?;
+        }
         raw.set("response", response.render())?;
+    }
+    if event.get("finish_reason") != original.get("finish_reason") {
+        raw.set("finish_reason", event.get("finish_reason")?.to_string())?;
+    }
+    if event.get("choices") != original.get("choices") && original.get("choices").is_some() {
+        let mut choices: Vec<RawObject> = serde_json::from_str(raw.get("choices")?.get()).ok()?;
+        if let Some(first) = choices.first_mut() {
+            first.set(
+                "finish_reason",
+                event.pointer("/choices/0/finish_reason")?.to_string(),
+            )?;
+        }
+        raw.set(
+            "choices",
+            format!(
+                "[{}]",
+                choices
+                    .iter()
+                    .map(RawObject::render)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        )?;
     }
     let mut inserted = false;
     let mut fields = Vec::new();
@@ -889,7 +1663,7 @@ mod tests {
         let mut payload = sample(&text);
         payload["output"].as_array_mut().unwrap().push(json!({"id":"native","type":"function_call","call_id":"original","name":"other","arguments":"invalid but model owned"}));
         let native = payload["output"][1].clone();
-        normalize_v3_direct_dsml_response(&mut payload, &context());
+        normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
         assert_eq!(payload["output"][0]["content"][0]["text"], "Before\n");
         assert_eq!(
             serde_json::from_str::<Value>(payload["output"][1]["arguments"].as_str().unwrap())
@@ -918,7 +1692,6 @@ mod tests {
             format!("\"quoted {block}\""),
             format!("'{block}'"),
             format!("> {block}"),
-            block.replace(CLOSE, ""),
             block.replace("name=\"read_image\"", "name=\"undeclared\""),
             block.replace(
                 "name=\"read_image\"",
@@ -928,9 +1701,38 @@ mod tests {
         ] {
             let mut payload = sample(&text);
             let original = payload.clone();
-            normalize_v3_direct_dsml_response(&mut payload, &context());
+            normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
             assert_eq!(payload, original, "must preserve literal: {text}");
         }
+    }
+
+    #[test]
+    fn direct_dsml_truncated_declared_invocation_is_rejected_not_preserved() {
+        // The complete outer envelope is missing, but the declared function
+        // invocation and its delimited parameter are recognized executable
+        // leakage rather than literal text.
+        let text = call("x").replace(CLOSE, "");
+        let mut payload = sample(&text);
+        let error = normalize_v3_direct_dsml_response(&mut payload, &context())
+            .expect_err("a truncated declared invocation must reject the attempt");
+        assert!(matches!(
+            error,
+            V3DirectResponseHookFailure::UnharvestableToolMarkup
+        ));
+    }
+
+    #[test]
+    fn direct_dsml_truncated_invocation_beside_complete_call_rejects_whole_attempt() {
+        let complete = call("keep");
+        let truncated_fullwidth = call("lost").replace(CLOSE, "");
+        let text = format!("{complete}\n{truncated_fullwidth}");
+        let mut payload = sample(&text);
+        let error = normalize_v3_direct_dsml_response(&mut payload, &context())
+            .expect_err("a truncated sibling invocation must reject the attempt");
+        assert!(matches!(
+            error,
+            V3DirectResponseHookFailure::UnharvestableToolMarkup
+        ));
     }
 
     #[test]
@@ -948,7 +1750,7 @@ mod tests {
         let second =
             call("second").replace("name=\"read_image\"", "name=\"functions__read_image\"");
         let mut payload = sample(&format!("{first}\n{second}"));
-        normalize_v3_direct_dsml_response(&mut payload, &context);
+        normalize_v3_direct_dsml_response(&mut payload, &context).unwrap();
         let calls: Vec<_> = payload["output"]
             .as_array()
             .unwrap()
@@ -967,7 +1769,8 @@ mod tests {
         normalize_v3_direct_dsml_response(
             &mut literal,
             &V3DirectDsmlContext::from_request(&disabled, &inverse),
-        );
+        )
+        .unwrap();
         assert_eq!(literal, original);
     }
 
@@ -992,6 +1795,990 @@ mod tests {
             .expect("DSML must become a native call")
     }
 
+    fn message(id: &str, text: &str) -> Value {
+        json!({
+            "id": id,
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{"type":"output_text","text":text,"annotations":[]}]
+        })
+    }
+
+    fn sse_frame(event: Value) -> Vec<u8> {
+        format!(
+            "event: {}\ndata: {event}\n\n",
+            event["type"].as_str().unwrap()
+        )
+        .into_bytes()
+    }
+
+    fn sse_events(frames: &[Vec<u8>]) -> Vec<Value> {
+        String::from_utf8(frames.concat())
+            .unwrap()
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    }
+
+    #[test]
+    fn direct_dsml_native_invalid_business_fields_do_not_trigger_markup_failure() {
+        let native = json!({"type":"function_call","name":"","call_id":"invalid_call","arguments":{"model_generated":"invalid"}});
+        let mut payload = sample(ASCII_TOOL_CALLS);
+        payload["output"]
+            .as_array_mut()
+            .unwrap()
+            .push(native.clone());
+        normalize_v3_direct_dsml_response(&mut payload, &context())
+            .expect("native business result must remain available for client correction");
+        assert_eq!(payload["output"], json!([native]));
+    }
+
+    #[test]
+    fn direct_dsml_calls_close_residue_keeps_native_calls_and_literals() {
+        let native = json!({"type":"function_call","id":"native","name":"exec_command","call_id":"native_call","arguments":"{\"cmd\":\"printf 42\"}","status":"completed"});
+        for text in [
+            " calls>",
+            "Before\n calls>\nAfter",
+            "Before\r\n calls>\r\nAfter",
+        ] {
+            let mut payload = sample(text);
+            payload["output"]
+                .as_array_mut()
+                .unwrap()
+                .push(native.clone());
+            normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
+            assert_eq!(payload["output"].as_array().unwrap().last(), Some(&native));
+            assert!(
+                !joined_text(payload["output"].as_array().unwrap()).contains(" calls>"),
+                "residue leaked: {payload}"
+            );
+        }
+        for text in [
+            "The token calls> is discussed here.",
+            "\" calls>\"",
+            "` calls>`",
+            "```text\n calls>\n```",
+            "    calls>",
+            "> calls>",
+        ] {
+            let mut payload = sample(text);
+            payload["output"]
+                .as_array_mut()
+                .unwrap()
+                .push(native.clone());
+            let original = payload.clone();
+            normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
+            assert_eq!(payload, original, "literal changed");
+        }
+    }
+
+    #[test]
+    fn direct_dsml_exact_standalone_closing_fragments() {
+        for text in [" calls>", "｜｜DSML｜｜ calls>"] {
+            let mut payload = sample(text);
+            normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
+            assert_eq!(
+                payload["output"],
+                json!([]),
+                "standalone closing fragment must be removed: {text:?}"
+            );
+            assert_eq!(payload["output_text"], "");
+        }
+        for (text, expected) in [
+            ("Before\n calls>\nAfter", "Before\nAfter"),
+            ("Before\r\n calls>\r\nAfter", "Before\r\nAfter"),
+            ("Before\n｜｜DSML｜｜ calls>\nAfter", "Before\nAfter"),
+        ] {
+            let mut payload = sample(text);
+            normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
+            let actual = payload["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|item| item["type"] == "message")
+                .flat_map(|item| item["content"].as_array().unwrap())
+                .filter_map(|part| part["text"].as_str())
+                .collect::<String>();
+            assert_eq!(actual, expected);
+        }
+        let native = json!({"type":"function_call","id":"native","name":"exec_command","call_id":"native_call","arguments":"not-json","status":"completed"});
+        for text in [
+            "The token calls> is discussed here.",
+            "\" calls>\"",
+            "\"｜｜DSML｜｜ calls>\"",
+            "` calls>`",
+            "```text\n calls>\n｜｜DSML｜｜ calls>\n```",
+            "    calls>",
+            "> ｜｜DSML｜｜ calls>",
+        ] {
+            let mut payload = sample(text);
+            payload["output"]
+                .as_array_mut()
+                .unwrap()
+                .push(native.clone());
+            let original = payload.clone();
+            normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
+            assert_eq!(
+                payload, original,
+                "literal closing fragment changed: {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn direct_dsml_ambiguous_native_raw_items_are_not_reserialized() {
+        let wire = concat!(
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[",
+            "{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\" calls>\"}]},",
+            "{\"id\":\"duplicate\",\"type\":\"function_call\",\"call_id\":\"duplicate\",\"name\":\"\",\"arguments\":{},\"opaque\":123456789012345678901234567890,\"vendor\":1,\"vendor\":2},",
+            "{\"id\":\"duplicate\",\"type\":\"function_call\",\"call_id\":\"duplicate\",\"name\":\"\",\"arguments\":{},\"opaque\":987654321098765432109876543210,\"vendor\":3,\"vendor\":4}",
+            "]}}\n\n"
+        );
+        assert!(
+            rewrite_v3_direct_dsml_attempt(&[wire.as_bytes().to_vec()], &context())
+                .unwrap()
+                .is_none(),
+            "ambiguous original items must keep their raw values and duplicate fields"
+        );
+    }
+
+    #[test]
+    fn direct_dsml_reordered_index_only_opaque_event_protects_its_message() {
+        let message = message("stable_message", CLOSE);
+        let native = json!({"id":"native_terminal","type":"function_call","call_id":"stable_call","name":"read_image","arguments":"{}"});
+        let frames = vec![
+            sse_frame(
+                json!({"type":"response.output_item.added","output_index":0,"item":{"id":"native_wire","type":"function_call","call_id":"stable_call","name":"read_image","arguments":""}}),
+            ),
+            sse_frame(
+                json!({"type":"response.output_item.added","output_index":1,"item":message.clone()}),
+            ),
+            sse_frame(
+                json!({"type":"response.vendor.association","output_index":1,"opaque":"preserve message association"}),
+            ),
+            sse_frame(
+                json!({"type":"response.completed","response":{"status":"completed","output":[message,native]}}),
+            ),
+        ];
+        assert!(
+            rewrite_v3_direct_dsml_attempt(&frames, &context())
+                .unwrap()
+                .is_none(),
+            "index-only opaque event lost its associated original message"
+        );
+    }
+
+    #[test]
+    fn direct_dsml_demonstrated_close_sequence_and_tool_prefix_are_removed() {
+        let native =
+            json!({"type":"function_call","name":"read_image","call_id":"keep","arguments":"{}"});
+        let mut payload = sample("Before\n\n>\n>\n</｜｜DSML｜｜ calls>");
+        payload["output"]
+            .as_array_mut()
+            .unwrap()
+            .push(native.clone());
+        normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
+        assert_eq!(
+            joined_text(payload["output"].as_array().unwrap()),
+            "Before\n\n"
+        );
+        assert_eq!(payload["output"].as_array().unwrap().last(), Some(&native));
+
+        let mut payload = sample("Before\n calls><tool_call>read_image<arg_key>file_path</arg_key><arg_value>x</arg_value></tool_call>\nAfter");
+        normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
+        assert_eq!(
+            joined_text(payload["output"].as_array().unwrap()),
+            "Before\n\nAfter"
+        );
+        assert!(payload["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["type"] == "function_call"));
+    }
+
+    #[test]
+    fn direct_dsml_tool_call_arg_key_value_grammar_uses_declared_types() {
+        let request = json!({"tools":[
+            {
+                "type":"function",
+                "name":"exec_command",
+                "parameters":{"type":"object","properties":{
+                    "cmd":{"type":"string"},
+                    "max_output_tokens":{"type":"integer"},
+                    "yield_time_ms":{"type":"integer"}
+                }}
+            },
+            {
+                "type":"function",
+                "name":"write_stdin",
+                "parameters":{"type":"object","properties":{
+                    "chars":{"type":"string"},
+                    "session_id":{"type":"integer"},
+                    "yield_time_ms":{"type":"integer"}
+                }}
+            }
+        ]});
+        let context = dispatch_context(&request);
+        let text = concat!(
+            "Run it.\n",
+            "<tool_call>exec_command",
+            "<arg_key>cmd</arg_key><arg_value>printf 42</arg_value>",
+            "</tool_call>\n",
+            "<tool_call>write_stdin",
+            "<arg_key>chars</arg_key><arg_value></arg_value>",
+            "<arg_key>session_id</arg_key><arg_value>123456789012345678901234567890</arg_value>",
+            "<arg_key>yield_time_ms</arg_key><arg_value>30000</arg_value>",
+            "</tool_call>\nDone."
+        );
+        let mut payload = sample(text);
+        normalize_v3_direct_dsml_response(&mut payload, &context).unwrap();
+        let calls: Vec<_> = payload["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["type"] == "function_call")
+            .collect();
+        assert_eq!(calls.len(), 2, "{payload}");
+        assert_eq!(calls[0]["name"], "exec_command");
+        assert_eq!(
+            serde_json::from_str::<Value>(calls[0]["arguments"].as_str().unwrap()).unwrap(),
+            json!({"cmd":"printf 42"})
+        );
+        assert_eq!(calls[1]["name"], "write_stdin");
+        let write_stdin = calls[1]["arguments"].as_str().unwrap();
+        assert_eq!(
+            write_stdin,
+            "{\"chars\":\"\",\"session_id\":123456789012345678901234567890,\"yield_time_ms\":30000}"
+        );
+        assert!(!payload.to_string().contains("<tool_call>"));
+        assert!(!payload.to_string().contains("<arg_key>"));
+    }
+
+    #[test]
+    fn direct_dsml_unharvestable_tool_call_rejects_beside_prose_and_native_sibling() {
+        let native = json!({"type":"function_call","id":"native","name":"exec_command","call_id":"native_call","arguments":"not-json","status":"completed"});
+        for text in [
+            "Continue.\n<tool_call>exec_command<arg_key>cmd</arg_key><arg_value>printf 42</arg_value>",
+            "Continue.\n<tool_call>undeclared<arg_key>cmd</arg_key><arg_value>printf 42</arg_value></tool_call>",
+            "Continue.\n<tool_call>exec_command<arg_key>cmd</arg_key><arg_value>printf 42</arg_value><arg_key>cmd</arg_key><arg_value>x</arg_value></tool_call>",
+        ] {
+            let mut payload = sample(text);
+            payload["output"].as_array_mut().unwrap().push(native.clone());
+            let error = normalize_v3_direct_dsml_response(
+                &mut payload,
+                &dispatch_context(&json!({"tools":[{"type":"function","name":"exec_command"}]})),
+            )
+            .expect_err("recognized unharvestable tool_call must reject the attempt");
+            assert!(matches!(
+                error,
+                V3DirectResponseHookFailure::UnharvestableToolMarkup
+            ));
+        }
+    }
+
+    #[test]
+    fn direct_dsml_tool_call_literal_counterexamples_remain_text() {
+        let invocation = "<tool_call>exec_command<arg_key>cmd</arg_key><arg_value>printf 42</arg_value></tool_call>";
+        let context =
+            dispatch_context(&json!({"tools":[{"type":"function","name":"exec_command"}]}));
+        let native = json!({"type":"function_call","id":"native","name":"exec_command","call_id":"native_call","arguments":"not-json","status":"completed"});
+        for text in [
+            format!("\"{invocation}\""),
+            format!("`{invocation}`"),
+            format!("```text\n{invocation}\n```"),
+            format!("    {invocation}"),
+            format!("> {invocation}"),
+        ] {
+            let mut payload = sample(&text);
+            payload["output"]
+                .as_array_mut()
+                .unwrap()
+                .push(native.clone());
+            let original = payload.clone();
+            normalize_v3_direct_dsml_response(&mut payload, &context).unwrap();
+            assert_eq!(payload, original, "literal invocation changed: {text}");
+        }
+    }
+
+    #[test]
+    fn direct_dsml_sse_reordered_native_association_uses_stable_identity() {
+        let reasoning_terminal = json!({
+            "id":"reasoning_terminal",
+            "type":"reasoning",
+            "summary":[{"type":"summary_text","text":"keep reasoning"}]
+        });
+        let message_terminal = message("message_stable", CLOSE);
+        let native_terminal = json!({
+            "id":"fc_terminal",
+            "type":"function_call",
+            "call_id":"call_stable",
+            "name":"exec_command",
+            "arguments":"{\"cmd\":\"printf 42\"}",
+            "status":"completed"
+        });
+        let response = json!({
+            "id":"resp_reordered",
+            "object":"response",
+            "status":"completed",
+            "output_text":CLOSE,
+            "output":[
+                reasoning_terminal.clone(),
+                message_terminal.clone(),
+                native_terminal.clone()
+            ],
+            "usage":{"output_tokens":3}
+        });
+        let opaque_number = "123456789012345678901234567890";
+        let frames = vec![
+            sse_frame(json!({
+                "type":"response.created",
+                "response":{
+                    "id":"resp_reordered",
+                    "status":"in_progress",
+                    "output":[
+                        {"id":"reasoning_wire","type":"reasoning","summary":[]},
+                        {"id":"fc_wire","type":"function_call","call_id":"call_stable","name":"exec_command","arguments":"","status":"in_progress"},
+                        {"id":"message_stable","type":"message","role":"assistant","content":[]}
+                    ]
+                }
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.added",
+                "output_index":0,
+                "item":{"id":"reasoning_wire","type":"reasoning","summary":[]}
+            })),
+            sse_frame(json!({
+                "type":"response.reasoning_summary_text.delta",
+                "output_index":0,
+                "item_id":"reasoning_wire",
+                "summary_index":0,
+                "delta":"retained reasoning prefix"
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.added",
+                "output_index":1,
+                "item":{
+                    "id":"fc_wire",
+                    "type":"function_call",
+                    "call_id":"call_stable",
+                    "name":"exec_command",
+                    "arguments":"",
+                    "status":"in_progress",
+                    "vendor_data":{"business":"native-carrier-kept"}
+                }
+            })),
+            format!(
+                "event: response.vendor.native\ndata: {{\"type\":\"response.vendor.native\",\"output_index\":1,\"item_id\":\"fc_wire\",\"call_id\":\"call_stable\",\"opaque_number\":{opaque_number}}}\n\n"
+            )
+            .into_bytes(),
+            sse_frame(json!({
+                "type":"response.function_call_arguments.delta",
+                "output_index":1,
+                "item_id":"fc_wire",
+                "call_id":"call_stable",
+                "delta":"{\"cmd\":\"printf 42\"}"
+            })),
+            sse_frame(json!({
+                "type":"response.function_call_arguments.done",
+                "output_index":1,
+                "item_id":"fc_wire",
+                "call_id":"call_stable",
+                "arguments":"{\"cmd\":\"printf 42\"}"
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.done",
+                "output_index":1,
+                "item":{
+                    "id":"fc_wire",
+                    "type":"function_call",
+                    "call_id":"call_stable",
+                    "name":"exec_command",
+                    "arguments":"{\"cmd\":\"printf 42\"}",
+                    "status":"completed",
+                    "vendor_data":{"business":"native-done-kept"}
+                }
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.added",
+                "output_index":2,
+                "item":{"id":"message_stable","type":"message","role":"assistant","content":[]}
+            })),
+            sse_frame(json!({
+                "type":"response.output_text.delta",
+                "output_index":2,
+                "content_index":0,
+                "item_id":"message_stable",
+                "delta":CLOSE
+            })),
+            sse_frame(json!({
+                "type":"response.output_text.done",
+                "output_index":2,
+                "content_index":0,
+                "item_id":"message_stable",
+                "text":CLOSE
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.done",
+                "output_index":2,
+                "item":message_terminal.clone()
+            })),
+            sse_frame(json!({"type":"response.completed","response":response})),
+        ];
+        let (rewritten, _) = rewrite_v3_direct_dsml_attempt(&frames, &context())
+            .unwrap()
+            .expect("reordered native and message identities must be rewritten");
+        let wire = String::from_utf8(rewritten.concat()).unwrap();
+        assert!(!wire.contains(CLOSE), "known CLOSE leaked: {wire}");
+        assert!(wire.contains("native-carrier-kept"), "{wire}");
+        assert!(wire.contains("native-done-kept"), "{wire}");
+        assert!(
+            wire.contains(&format!("\"opaque_number\":{opaque_number}")),
+            "opaque raw number changed: {wire}"
+        );
+        let events = sse_events(&rewritten);
+        let terminal = events
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .unwrap();
+        assert_eq!(
+            terminal["response"]["output"],
+            json!([reasoning_terminal, native_terminal])
+        );
+        let native_added: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                event["type"] == "response.output_item.added"
+                    && event["item"]["type"] == "function_call"
+            })
+            .collect();
+        assert_eq!(native_added.len(), 1, "{wire}");
+        assert_eq!(native_added[0]["output_index"], 1, "{wire}");
+        assert!(events.iter().all(|event| {
+            event["type"] != "response.output_text.delta"
+                || !event["delta"].as_str().unwrap().contains(CLOSE)
+        }));
+    }
+
+    #[test]
+    fn direct_dsml_sse_reordered_expansion_shifts_native_and_snapshots() {
+        let native_terminal = json!({
+            "id":"fc_terminal",
+            "type":"function_call",
+            "call_id":"call_stable",
+            "name":"exec_command",
+            "arguments":"{\"cmd\":\"printf 42\"}",
+            "status":"completed"
+        });
+        let expanded_text = format!("Before\n{}\nAfter", call("owned.png"));
+        let message_terminal = message("message_stable", &expanded_text);
+        let response = json!({
+            "id":"resp_expand",
+            "object":"response",
+            "status":"completed",
+            "output_text":expanded_text,
+            "output":[native_terminal.clone(), message_terminal.clone()],
+            "usage":{"output_tokens":4}
+        });
+        let frames = vec![
+            sse_frame(json!({
+                "type":"response.created",
+                "response":{
+                    "id":"resp_expand",
+                    "status":"in_progress",
+                    "output":[
+                        {"id":"message_stable","type":"message","role":"assistant","content":[]},
+                        {"id":"fc_wire","type":"function_call","call_id":"call_stable","name":"exec_command","arguments":"","status":"in_progress"}
+                    ]
+                }
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.added",
+                "output_index":0,
+                "item":{"id":"message_stable","type":"message","role":"assistant","content":[]}
+            })),
+            sse_frame(json!({
+                "type":"response.output_text.delta",
+                "output_index":0,
+                "content_index":0,
+                "item_id":"message_stable",
+                "delta":expanded_text
+            })),
+            sse_frame(json!({
+                "type":"response.output_text.done",
+                "output_index":0,
+                "content_index":0,
+                "item_id":"message_stable",
+                "text":expanded_text
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.done",
+                "output_index":0,
+                "item":message_terminal
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.added",
+                "output_index":1,
+                "item":{"id":"fc_wire","type":"function_call","call_id":"call_stable","name":"exec_command","arguments":""}
+            })),
+            sse_frame(json!({
+                "type":"response.function_call_arguments.delta",
+                "output_index":1,
+                "item_id":"fc_wire",
+                "call_id":"call_stable",
+                "delta":"{\"cmd\":\"printf 42\"}"
+            })),
+            sse_frame(json!({
+                "type":"response.function_call_arguments.done",
+                "output_index":1,
+                "item_id":"fc_wire",
+                "call_id":"call_stable",
+                "arguments":"{\"cmd\":\"printf 42\"}"
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.done",
+                "output_index":1,
+                "item":native_terminal.clone()
+            })),
+            sse_frame(json!({"type":"response.completed","response":response})),
+        ];
+        let (rewritten, _) = rewrite_v3_direct_dsml_attempt(&frames, &context())
+            .unwrap()
+            .expect("reordered expansion must rewrite every associated carrier");
+        let events = sse_events(&rewritten);
+        let terminal = events
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .unwrap();
+        assert_eq!(terminal["response"]["output"][0], native_terminal);
+        assert_eq!(terminal["response"]["output"][1]["type"], "message");
+        assert_eq!(
+            terminal["response"]["output"][1]["content"][0]["text"],
+            "Before\n"
+        );
+        assert_eq!(terminal["response"]["output"][2]["type"], "function_call");
+        assert_eq!(terminal["response"]["output"][3]["type"], "message");
+        let native_added = events
+            .iter()
+            .find(|event| {
+                event["type"] == "response.output_item.added"
+                    && event["item"]["type"] == "function_call"
+                    && event["item"]["call_id"] == "call_stable"
+            })
+            .unwrap();
+        assert_eq!(native_added["output_index"], 0);
+        let created = events
+            .iter()
+            .find(|event| event["type"] == "response.created")
+            .unwrap();
+        assert_eq!(created["response"]["output"][0]["call_id"], "call_stable");
+        assert_eq!(created["response"]["output"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn direct_dsml_red_orphan_labels_are_removed_and_native_items_preserved() {
+        let reasoning = json!({
+            "id": "reasoning_keep",
+            "type": "reasoning",
+            "summary": [{"type":"summary_text","text":"native reasoning"}]
+        });
+        let native_call = json!({
+            "id": "fc_keep",
+            "type": "function_call",
+            "call_id": "call_keep",
+            "name": "read_image",
+            "arguments": "{\"file_path\":\"owned.png\"}",
+            "status": "completed"
+        });
+        let label_messages = [
+            message("open_only", OPEN),
+            message("close_only", CLOSE),
+            message("close_residue", ">\n</｜｜DSML｜｜ calls>"),
+            message("bare_marker", "<｜｜DSML｜｜>"),
+        ];
+        let mut output = vec![label_messages[0].clone(), reasoning.clone()];
+        output.push(label_messages[1].clone());
+        output.push(native_call.clone());
+        output.extend(label_messages[2..].iter().cloned());
+        let mut payload = json!({
+            "status": "completed",
+            "output_text": label_messages
+                .iter()
+                .map(|item| item["content"][0]["text"].as_str().unwrap())
+                .collect::<String>(),
+            "output": output,
+            "usage": {"output_tokens": 8},
+            "extension": {"keep": true}
+        });
+
+        normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
+
+        let survivors: Vec<_> = payload["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["type"] != "message")
+            .cloned()
+            .collect();
+        assert_eq!(
+            survivors,
+            vec![reasoning, native_call],
+            "orphan labels changed native reasoning or native tool items: {payload}"
+        );
+        assert!(
+            payload["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item["type"] != "message"),
+            "text-only orphan labels must leave zero output messages: {payload}"
+        );
+        assert_eq!(payload["output_text"], "");
+        assert_eq!(payload["usage"]["output_tokens"], 8);
+        assert_eq!(payload["extension"], json!({"keep":true}));
+    }
+
+    #[test]
+    fn direct_dsml_red_ascii_labels_and_analysis_lines_are_removed_from_prose() {
+        for text in [
+            "<|DSML|tool_calls>",
+            "<|end▁of▁analysis|>",
+            "<|end_of_analysis|>",
+        ] {
+            let mut payload = sample(text);
+            normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
+            assert!(
+                payload["output"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|item| item["type"] != "message"),
+                "label-only text must leave zero messages: {payload}"
+            );
+            assert_eq!(payload["output_text"], "");
+        }
+        for (name, text, expected) in [
+            (
+                "observed-analysis-spelling",
+                "Observed.\n<|end▁of▁analysis|>\n",
+                "Observed.\n",
+            ),
+            (
+                "screenshot-analysis-spelling",
+                "Earlier screenshot.\n<|end_of_analysis|>\n",
+                "Earlier screenshot.\n",
+            ),
+        ] {
+            let mut payload = sample(text);
+            normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
+            let message = payload["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["type"] == "message")
+                .unwrap_or_else(|| panic!("{name}: prose must survive"));
+            assert_eq!(message["content"][0]["text"], expected, "{name}");
+        }
+        for text in [
+            "Business text.\n<|DSML|tool_calls>\n".to_owned(),
+            "Continue.\n<|end▁of▁analysis|>\n<|DSML|tool_calls>\n".to_owned(),
+            format!("Business text.\n{OPEN}\n"),
+        ] {
+            let mut payload = sample(&text);
+            let error = normalize_v3_direct_dsml_response(&mut payload, &context())
+                .expect_err("tool intent without a complete call must reject");
+            assert!(matches!(
+                error,
+                V3DirectResponseHookFailure::UnharvestableToolMarkup
+            ));
+        }
+
+        let native = json!({
+            "id": "fc_keep",
+            "type": "function_call",
+            "call_id": "call_keep",
+            "name": "read_image",
+            "arguments": "{\"file_path\":\"owned.png\"}",
+            "status": "completed"
+        });
+        let mut payload = sample("Business text.\n<|DSML|tool_calls>\n");
+        payload["output"]
+            .as_array_mut()
+            .unwrap()
+            .push(native.clone());
+        normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
+        assert_eq!(
+            payload["output"][0]["content"][0]["text"],
+            "Business text.\n"
+        );
+        assert_eq!(payload["output"][1], native);
+    }
+
+    #[test]
+    fn direct_dsml_red_screenshot_exec_command_shape_is_harvested() {
+        let request = json!({"tools":[{
+            "type":"function",
+            "name":"exec_command",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "cmd":{"type":"string"},
+                    "max_output_tokens":{"type":"integer"},
+                    "yield_time_ms":{"type":"integer"}
+                },
+                "required":["cmd","max_output_tokens","yield_time_ms"]
+            }
+        }]});
+        let text = "Continue.\n<|DSML|tool_calls>\n<|exec_command\">\n<cmd>printf 42</cmd>\n<max_output_tokens>4000</max_output_tokens>\n<yield_time_ms>30000</yield_time_ms>\n</exec_command>\n_command>";
+        let mut payload = sample(text);
+        payload["finish_reason"] = "stop".into();
+
+        normalize_v3_direct_dsml_response(&mut payload, &dispatch_context(&request)).unwrap();
+
+        let call = payload["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "function_call")
+            .unwrap_or_else(|| {
+                panic!("safe screenshot shape must become a native call: {payload}")
+            });
+        assert_eq!(call["name"], "exec_command");
+        assert_eq!(
+            serde_json::from_str::<Value>(call["arguments"].as_str().unwrap()).unwrap(),
+            json!({
+                "cmd":"printf 42",
+                "max_output_tokens":4000,
+                "yield_time_ms":30000
+            })
+        );
+        let prose = payload["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "message")
+            .and_then(|item| item["content"][0]["text"].as_str());
+        assert_eq!(prose, Some("Continue.\n"));
+        let serialized = payload.to_string();
+        for residue in [
+            "<|DSML|tool_calls>",
+            "<|exec_command\">",
+            "<cmd>",
+            "</cmd>",
+            "<max_output_tokens>",
+            "<yield_time_ms>",
+            "</exec_command>",
+            "_command>",
+        ] {
+            assert!(
+                !serialized.contains(residue),
+                "harvested screenshot residue {residue:?} leaked: {payload}"
+            );
+        }
+        assert_eq!(
+            payload["finish_reason"], "tool_calls",
+            "an explicit stop terminal must follow the harvested call"
+        );
+    }
+
+    #[test]
+    fn direct_dsml_unresolvable_alternate_opener_rejects_attempt() {
+        for text in [
+            "Continue.\n<|undeclared_tool\">".to_owned(),
+            "Continue.\n<|exec_command\">".to_owned(),
+            "Continue.\n<|exec_command\">\n<cmd>printf 42</cmd>".to_owned(),
+        ] {
+            let mut payload = sample(&text);
+            let error = normalize_v3_direct_dsml_response(&mut payload, &context())
+                .expect_err("an unharvestable alternate invocation must reject");
+            assert!(matches!(
+                error,
+                V3DirectResponseHookFailure::UnharvestableToolMarkup
+            ));
+        }
+    }
+
+    #[test]
+    fn direct_dsml_harvest_finish_reason_rewrites_stop_to_tool_calls() {
+        let request = json!({"tools":[{"type":"function","name":"exec_command","parameters":{"type":"object","properties":{"cmd":{"type":"string"},"n":{"type":"integer"}}}}]});
+        let context = dispatch_context(&request);
+        let text = "Done.\n<|exec_command\">\n<cmd>printf 42</cmd>\n<n>123456789012345678901234567890</n>\n</exec_command>";
+
+        let mut json_payload = sample(text);
+        json_payload["finish_reason"] = "stop".into();
+        normalize_v3_direct_dsml_response(&mut json_payload, &context).unwrap();
+        assert_eq!(json_payload["finish_reason"], "tool_calls");
+        let arguments = function_call(&json_payload)["arguments"].as_str().unwrap();
+        assert!(
+            arguments.contains("123456789012345678901234567890"),
+            "numeric argument changed: {arguments}"
+        );
+
+        let mut response = sample(text);
+        response["finish_reason"] = "stop".into();
+        let frames = vec![
+            sse_frame(json!({
+                "type":"response.created",
+                "response":{"id":"resp_finish","status":"in_progress","output":[]}
+            })),
+            sse_frame(json!({"type":"response.completed","response":response})),
+        ];
+        let (rewritten, _) = rewrite_v3_direct_dsml_attempt(&frames, &context)
+            .unwrap()
+            .expect("complete alternate harvest must rewrite the SSE terminal");
+        let terminal = sse_events(&rewritten)
+            .into_iter()
+            .find(|event| event["type"] == "response.completed")
+            .unwrap();
+        assert!(
+            terminal["response"]["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["type"] == "function_call"),
+            "{terminal}"
+        );
+        assert_eq!(terminal["response"]["finish_reason"], "tool_calls");
+    }
+
+    #[test]
+    fn direct_dsml_red_sse_deletion_before_native_item_keeps_index_and_terminal() {
+        let residue = ">\n</｜｜DSML｜｜ calls>";
+        let native = json!({
+            "id": "fc_keep",
+            "type": "function_call",
+            "call_id": "call_keep",
+            "name": "read_image",
+            "arguments": "{\"file_path\":\"owned.png\"}",
+            "status": "completed"
+        });
+        let residue_message = message("message_remove", residue);
+        let response = json!({
+            "id": "resp_residue",
+            "object": "response",
+            "status": "completed",
+            "output_text": residue,
+            "output": [residue_message.clone(), native.clone()],
+            "usage": {"output_tokens": 2}
+        });
+        let frames = vec![
+            sse_frame(json!({
+                "type":"response.created",
+                "response":{"id":"resp_residue","status":"in_progress","output":[
+                    residue_message.clone(),
+                    native.clone()
+                ]}
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.added",
+                "output_index":0,
+                "item":{"id":"message_remove","type":"message","role":"assistant","content":[]}
+            })),
+            sse_frame(json!({
+                "type":"response.content_part.added",
+                "output_index":0,
+                "item_id":"message_remove",
+                "content_index":0,
+                "part":{"type":"output_text","text":"","annotations":[]}
+            })),
+            sse_frame(json!({
+                "type":"response.output_text.delta",
+                "output_index":0,
+                "item_id":"message_remove",
+                "content_index":0,
+                "delta":residue
+            })),
+            sse_frame(json!({
+                "type":"response.output_text.done",
+                "output_index":0,
+                "item_id":"message_remove",
+                "content_index":0,
+                "text":residue
+            })),
+            sse_frame(json!({
+                "type":"response.content_part.done",
+                "output_index":0,
+                "item_id":"message_remove",
+                "content_index":0,
+                "part":residue_message["content"][0]
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.done",
+                "output_index":0,
+                "item":residue_message
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.added",
+                "output_index":1,
+                "item":{"id":"fc_keep","type":"function_call","call_id":"call_keep","name":"read_image","arguments":""}
+            })),
+            sse_frame(json!({
+                "type":"response.function_call_arguments.delta",
+                "output_index":1,
+                "item_id":"fc_keep",
+                "call_id":"call_keep",
+                "delta":native["arguments"]
+            })),
+            sse_frame(json!({
+                "type":"response.function_call_arguments.done",
+                "output_index":1,
+                "item_id":"fc_keep",
+                "call_id":"call_keep",
+                "arguments":native["arguments"]
+            })),
+            sse_frame(json!({
+                "type":"response.output_item.done",
+                "output_index":1,
+                "item":native.clone()
+            })),
+            sse_frame(json!({"type":"response.completed","response":response})),
+        ];
+
+        let (rewritten, _) = rewrite_v3_direct_dsml_attempt(&frames, &context())
+            .unwrap()
+            .expect("deletion-only SSE normalization must preserve the surviving native item");
+        let wire = String::from_utf8(rewritten.concat()).unwrap();
+        assert!(!wire.contains("DSML"), "deleted SSE residue leaked: {wire}");
+        let events = sse_events(&rewritten);
+        assert!(
+            events.iter().any(|event| {
+                event["type"] == "response.output_item.added"
+                    && event["item"]["type"] == "function_call"
+                    && event["output_index"] == 0
+            }),
+            "native item was not shifted into index zero: {wire}"
+        );
+        let terminal = events
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .unwrap();
+        assert_eq!(terminal["response"]["output"], json!([native]));
+        assert_eq!(terminal["response"]["output_text"], "");
+        for snapshot in events.iter().filter(|event| {
+            matches!(
+                event["type"].as_str(),
+                Some("response.created" | "response.in_progress" | "response.queued")
+            )
+        }) {
+            assert_eq!(snapshot["response"]["output"], json!([native]));
+        }
+    }
+
+    #[test]
+    fn direct_dsml_red_inline_and_code_marker_counterexamples_remain_text() {
+        let text = "Inline <|DSML|tool_calls> mention.\n`<|end▁of▁analysis|>`\n```text\n<｜｜DSML｜｜>\n<|end_of_analysis|>\n```\n> </｜｜DSML｜｜ calls>";
+        let mut payload = sample(text);
+        let original = payload.clone();
+        normalize_v3_direct_dsml_response(&mut payload, &dispatch_context(&json!({"tools":[]})))
+            .unwrap();
+        assert_eq!(
+            payload, original,
+            "inline and code marker counterexamples must remain text"
+        );
+    }
+
     #[test]
     fn direct_dsml_nested_namespace_declared_identity_dispatches() {
         let request = json!({"tools":[{"type":"namespace","name":"mcp__mcpx","tools":[
@@ -1002,7 +2789,7 @@ mod tests {
         let text = call("note.md").replace("name=\"read_image\"", "name=\"read\"");
         let mut payload = sample(&text);
         let context = dispatch_context(&request);
-        normalize_v3_direct_dsml_response(&mut payload, &context);
+        normalize_v3_direct_dsml_response(&mut payload, &context).unwrap();
         let call_item = function_call(&payload);
         assert_eq!(call_item["namespace"], "mcp__mcpx.workspace");
         assert_eq!(call_item["name"], "read");
@@ -1037,7 +2824,7 @@ mod tests {
             let text = call("found.txt").replace("name=\"read_image\"", "name=\"found\"");
             let mut payload = sample(&text);
             let context = dispatch_context(&request);
-            normalize_v3_direct_dsml_response(&mut payload, &context);
+            normalize_v3_direct_dsml_response(&mut payload, &context).unwrap();
             let call_item = function_call(&payload);
             assert_eq!(call_item["namespace"], "search_ns");
             assert_eq!(call_item["name"], "found");
@@ -1054,7 +2841,7 @@ mod tests {
         let text = call("x").replace("name=\"read_image\"", "name=\"shell\"");
         let mut payload = sample(&text);
         let original = payload.clone();
-        normalize_v3_direct_dsml_response(&mut payload, &dispatch_context(&request));
+        normalize_v3_direct_dsml_response(&mut payload, &dispatch_context(&request)).unwrap();
         assert_eq!(payload, original);
     }
 
@@ -1063,7 +2850,7 @@ mod tests {
         let number = "123456789012345678901234567890";
         let text = call(number).replace("string=\"true\"", "string=\"false\"");
         let mut payload = sample(&text);
-        normalize_v3_direct_dsml_response(&mut payload, &context());
+        normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
         let arguments = payload["output"][0]["arguments"]
             .as_str()
             .expect("native tool call");
@@ -1074,7 +2861,7 @@ mod tests {
     fn direct_dsml_opaque_output_text_is_not_assumed_to_be_an_aggregate() {
         let mut payload = sample(&call("x"));
         payload["output_text"] = "provider-specific supplemental text".into();
-        normalize_v3_direct_dsml_response(&mut payload, &context());
+        normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
         assert_eq!(payload["output"][0]["type"], "function_call");
         assert_eq!(
             payload["output_text"],
@@ -1093,6 +2880,7 @@ mod tests {
             &[added.as_bytes().to_vec(), wire.into_bytes()],
             &context(),
         )
+        .unwrap()
         .unwrap();
         let wire = String::from_utf8(frames.concat()).unwrap();
         assert!(
@@ -1125,6 +2913,7 @@ mod tests {
                 &[opaque.as_bytes().to_vec(), terminal.into_bytes()],
                 &context(),
             )
+            .unwrap()
             .unwrap();
             assert!(String::from_utf8(frames.concat())
                 .unwrap()
@@ -1140,7 +2929,7 @@ mod tests {
             call("second")
         );
         let mut payload = sample(&text);
-        normalize_v3_direct_dsml_response(&mut payload, &context());
+        normalize_v3_direct_dsml_response(&mut payload, &context()).unwrap();
         let calls: Vec<_> = payload["output"]
             .as_array()
             .unwrap()
@@ -1187,6 +2976,7 @@ mod tests {
         // An event-level extension has no defined association with the
         // synthesized tool events, so the complete attempt keeps provider text.
         let output = rewrite_v3_direct_dsml_attempt(&frames, &context())
+            .unwrap()
             .map(|(frames, _)| frames)
             .unwrap_or_else(|| frames.clone());
         let wire = String::from_utf8(output.concat()).unwrap();
@@ -1233,6 +3023,7 @@ mod tests {
                 .into_bytes(),
             ];
             let output = rewrite_v3_direct_dsml_attempt(&frames, &context())
+                .unwrap()
                 .map(|(frames, _)| frames)
                 .unwrap_or_else(|| frames.clone());
             let wire = String::from_utf8(output.concat()).unwrap();
@@ -1264,7 +3055,7 @@ mod tests {
         for name in ["provider_alias_a", "provider_alias_b"] {
             let text = call("x").replacen("name=\"read_image\"", &format!("name=\"{name}\""), 1);
             let mut payload = sample(&text);
-            normalize_v3_direct_dsml_response(&mut payload, &context);
+            normalize_v3_direct_dsml_response(&mut payload, &context).unwrap();
             assert_eq!(
                 payload["output"][0]["type"], "function_call",
                 "exact attempt binding {name} was lost"

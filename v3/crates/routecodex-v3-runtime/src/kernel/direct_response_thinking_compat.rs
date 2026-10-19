@@ -145,6 +145,15 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
     if plans.is_empty() {
         return None;
     }
+    // Opaque carrier values have no defined association with synthesized
+    // reasoning events. Preserve the complete attempt rather than lose them.
+    if frames.iter().any(|frame| direct_thinking_event_value(frame).is_some_and(|event| {
+        direct_thinking_plan_for_event(&plans, &event).is_some()
+            && (!thinking_carrier_can_rewrite(&event)
+                || std::str::from_utf8(frame).is_ok_and(|wire| wire.lines().any(|line| {
+                    !line.is_empty() && !line.starts_with("data:") && !line.starts_with("event:")
+                })))
+    })) { return None; }
     let mut normalized_terminal = terminal.clone();
     if !crate::shared_direct_thinking_compat::normalize_v3_direct_thinking_json(
         &mut normalized_terminal,
@@ -166,6 +175,23 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
     let mut terminal_index = None;
     for (frame_index, frame) in frames.iter().enumerate() {
         if frame_index == terminal_position {
+            for (index, item) in transformed_output.iter().enumerate().skip(original_output.len()) {
+                let mut added = item.clone();
+                added["summary"] = json!([]);
+                rewritten.push(direct_thinking_event_frame("response.output_item.added", json!({
+                    "type":"response.output_item.added", "output_index":index, "item":added
+                })));
+                if let Some(original_plan) = plans.iter().find(|plan| !plan.pure_reasoning && !plan.reasoning.is_empty()
+                    && item["id"].as_str() == Some(format!("rs_compat_{}", plan.item_id.clone().unwrap_or_else(|| plan.output_index.to_string())).as_str())) {
+                    let mut reasoning_plan = original_plan.clone();
+                    reasoning_plan.output_index = index;
+                    reasoning_plan.item_id = item["id"].as_str().map(str::to_owned);
+                    rewritten.extend(direct_thinking_reasoning_summary_frames(&reasoning_plan, response_id.as_deref()));
+                }
+                rewritten.push(direct_thinking_event_frame("response.output_item.done", json!({
+                    "type":"response.output_item.done", "output_index":index, "item":item
+                })));
+            }
             terminal_index = Some(rewritten.len());
             rewritten.push(replace_v3_direct_thinking_event_data(
                 frame,
@@ -177,6 +203,15 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
             rewritten.push(frame.clone());
             continue;
         };
+        if matches!(value["type"].as_str(), Some("response.created" | "response.in_progress" | "response.queued"))
+            && value["response"]["output"].is_array() {
+            let mut snapshot = value.clone();
+            let has_tools = original_output.iter().any(crate::shared_direct_thinking_compat::output_item_has_complete_tool);
+            if crate::shared_direct_thinking_compat::normalize_thinking_json_with_tool_context(&mut snapshot, Some(has_tools)) {
+                rewritten.push(replace_v3_direct_thinking_event_data(frame, &snapshot));
+            } else { rewritten.push(frame.clone()); }
+            continue;
+        }
         let Some(plan) = direct_thinking_plan_for_event(&plans, &value) else {
             rewritten.push(frame.clone());
             continue;
@@ -248,24 +283,34 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
 }
 
 fn direct_thinking_event_value(frame: &[u8]) -> Option<Value> {
+    let data = direct_thinking_event_data(frame)?;
+    serde_json::from_str(&data).ok()
+}
+
+fn direct_thinking_event_data(frame: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(frame).ok()?;
-    text.lines().find_map(|line| {
-        let data = line
-            .trim_end_matches('\r')
-            .strip_prefix("data:")?
-            .strip_prefix(' ')
-            .unwrap_or_else(|| line.trim_end_matches('\r').strip_prefix("data:").unwrap_or_default());
-        (data != "[DONE]")
-            .then(|| serde_json::from_str::<Value>(data).ok())
-            .flatten()
-    })
+    Some(text.lines().filter_map(|line| line.strip_prefix("data:")
+        .map(|data| data.strip_prefix(' ').unwrap_or(data))).collect::<Vec<_>>().join("\n"))
+}
+
+fn thinking_carrier_can_rewrite(event: &Value) -> bool {
+    let plain_part = |part: &Value| part.as_object().is_some_and(|fields| fields.keys().all(|key| matches!(key.as_str(), "type" | "text" | "annotations" | "logprobs")))
+        && ["annotations", "logprobs"].iter().all(|key| part.get(*key).is_none_or(|value| value.as_array().is_some_and(Vec::is_empty)));
+    let known = matches!(event["type"].as_str(), Some("response.output_item.added" | "response.output_item.done"
+        | "response.content_part.added" | "response.content_part.done" | "response.output_text.delta" | "response.output_text.done"));
+    known && event.as_object().is_some_and(|fields| fields.keys().all(|key| matches!(key.as_str(),
+        "type" | "sequence_number" | "response_id" | "output_index" | "item_id" | "content_index" | "item" | "part" | "delta" | "text" | "logprobs")))
+        && event.get("logprobs").is_none_or(|value| value.as_array().is_some_and(Vec::is_empty))
+        && event.get("item").is_none_or(|item| item.as_object().is_some_and(|fields| fields.keys().all(|key| matches!(key.as_str(), "id" | "type" | "role" | "status" | "content")))
+            && item.get("content").is_none_or(|content| content.as_array().is_some_and(|parts| parts.iter().all(plain_part))))
+        && event.get("part").is_none_or(plain_part)
 }
 
 fn replace_v3_direct_thinking_event_data(frame: &[u8], value: &Value) -> Vec<u8> {
     let Ok(text) = std::str::from_utf8(frame) else {
         return frame.to_vec();
     };
-    let Ok(encoded) = serde_json::to_string(value) else {
+    let Some(encoded) = direct_thinking_preserved_event_json(frame, value) else {
         return frame.to_vec();
     };
     let mut output = String::with_capacity(text.len());
@@ -273,20 +318,44 @@ fn replace_v3_direct_thinking_event_data(frame: &[u8], value: &Value) -> Vec<u8>
     for line in text.split_inclusive('\n') {
         let line_without_ending = line.trim_end_matches(['\r', '\n']);
         let ending = &line[line_without_ending.len()..];
-        if !replaced {
-            if let Some(data) = line_without_ending.strip_prefix("data:") {
+        if let Some(data) = line_without_ending.strip_prefix("data:") {
+            if !replaced {
                 let spacing = if data.starts_with(' ') { " " } else { "" };
                 output.push_str("data:");
                 output.push_str(spacing);
                 output.push_str(&encoded);
                 output.push_str(ending);
                 replaced = true;
-                continue;
             }
+            continue;
         }
         output.push_str(line);
     }
     output.into_bytes()
+}
+
+fn direct_thinking_preserved_event_json(frame: &[u8], value: &Value) -> Option<String> {
+    use crate::direct_response_hooks::V3DirectRawObject;
+    let data = direct_thinking_event_data(frame)?;
+    let original: Value = serde_json::from_str(&data).ok()?;
+    let mut raw: V3DirectRawObject = serde_json::from_str(&data).ok()?;
+    for key in ["text", "item", "part"] {
+        if value.get(key) != original.get(key) { raw.set(key, value.get(key)?.to_string())?; }
+    }
+    if value.get("response") != original.get("response") {
+        let mut response: V3DirectRawObject = serde_json::from_str(raw.get("response")?.get()).ok()?;
+        let old_items: Vec<Box<serde_json::value::RawValue>> = serde_json::from_str(response.get("output")?.get()).ok()?;
+        let items = value["response"]["output"].as_array()?.iter().enumerate().map(|(index, item)| {
+            old_items.get(index).filter(|_| original["response"]["output"].get(index) == Some(item))
+                .map(|item| item.get().to_owned()).unwrap_or_else(|| item.to_string())
+        }).collect::<Vec<_>>();
+        response.set("output", format!("[{}]", items.join(",")))?;
+        if value["response"].get("output_text") != original["response"].get("output_text") {
+            response.set("output_text", value["response"].get("output_text")?.to_string())?;
+        }
+        raw.set("response", response.render())?;
+    }
+    Some(raw.render())
 }
 
 fn direct_thinking_plan_for_event<'a>(

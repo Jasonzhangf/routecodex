@@ -1150,7 +1150,11 @@ features:
   - docs/goals/v3-responses-direct-mvp-test-design.md
   - docs/goals/v3-direct-thinking-tag-response-compat-test-design.md
   required_contract:
-  - Complete declared DSML tool envelopes are normalized only by the registered Responses Direct response hook; quoted, incomplete and unrepresentable envelopes remain text. JSON and complete SSE attempts preserve surrounding content, arguments, native calls and matched follow-up results.
+  - Complete declared DSML and demonstrated bounded alternate tool envelopes are harvested only by the registered Responses Direct response hook; quoted, code and opaque-associated examples remain intact. JSON and buffered SSE preserve retained prose, arguments, native calls and paired follow-up results. Recognized unharvestable attempted invocations reject the entire attempt through existing typed Error recovery even beside prose or a complete sibling call; native invalid model arguments remain business content.
+  - Demonstrated orphan fullwidth/ASCII DSML and analysis lines, including the exact standalone closing residue ' calls>', are removed outside literal contexts. Labels alone trigger provider_response_empty only after complete hook normalization. Both JSON callers and both SSE sealing exits adjudicate the final normalized attempt before success; exhaustion detectably terminates request transport without error payload or normal empty completion.
+  - Thinking governance reuses the existing owner; complete wrappers harvest, complete tools with partial thinking/text labels keep the body, and unknown-start reasoning stays text. Isolated closing labels remove only the label and preserve all surrounding text.
+  - Thinking SSE preserves opaque carrier associations and raw unrelated values; modified snapshots and appended reasoning events agree with terminal output, and matching output_text aggregates are refreshed after normalization.
+  - Direct DSML SSE protection, replacement, survivor indexing, snapshots and raw rendering share exact item-ID or unique call-ID association across reordered wire and terminal outputs; raw output_index is never assumed to identify a terminal array slot. Native IDs, call IDs, argument bytes and opaque associations remain faithful. Exact demonstrated closing fragments and bounded tool_call/arg_key/arg_value invocation grammar have owner and public-entry regressions.
   - DSML dispatch uses the shared declaration registry and exact attempt inverse, including nested namespaces and supported additional_tools/tool_search_output discovery channels; tool kind, full namespace and every bound wire alias are preserved.
   - Replaced SSE item/part/text carriers retain opaque fields and snapshot associations; an unrepresentable association leaves the affected message as original provider text, without dropping fields or blocking otherwise convertible messages.
   - P6 owns only adjacent transitions V3Target10ConcreteProviderSelected through V3Server16HttpFrame, with V3Execution11ProtocolDecision between Target10 and Direct policy
@@ -1174,6 +1178,10 @@ features:
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_dsml_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_dsml_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_thinking_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_tool_markup_recovery_is_exact_and_health_neutral -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_d94731e_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox responses_direct_ -- --nocapture
   - npm run render:v3-mainline-caller-flow
   - npm run verify:v3-mainline-caller-flow
   - npm run test:v3-mainline-caller-flow-red-fixtures
@@ -1331,6 +1339,9 @@ features:
   change_risk: high
   owner_kind: rust_project_v3
   owner_scope: P3 global Debug plus P4 global Error and Provider-owned session-isolated health/availability foundation
+  recovery_delta_contract:
+  - Only typed V3DirectResp14UnharvestableToolMarkup (500-211), RuntimeFailure/internal599, gains health-neutral request-local Error02-05 reselection; actual upstream200 remains a separate witness.
+  - Other RuntimeFailure codes remain terminal. Native model-generated invalid arguments remain business content. Direct never excludes candidates outside the existing Error05-authorized recovery path.
   owner_modules:
   - v3/crates/routecodex-v3-debug
   - v3/crates/routecodex-v3-error

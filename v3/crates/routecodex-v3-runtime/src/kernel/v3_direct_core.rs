@@ -1222,7 +1222,8 @@ where
                         );
                     }
                     Err(Ok(source))
-                        if source.source_kind != V3ErrorSourceKind::ProviderFailure =>
+                        if source.source_kind != V3ErrorSourceKind::ProviderFailure
+                            && !routecodex_v3_error::is_v3_recoverable_response_processing_source(&source) =>
                     {
                         if let Err(error) = runtime_timing.finish_external_if_active() {
                             return direct_runtime_helpers_stream::source_failure_output(
@@ -1261,7 +1262,7 @@ where
                             },
                             C::policy_target(&policy),
                             source,
-                            502,
+                            provider_status,
                             &mut V3DirectProviderFailurePolicyState {
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
@@ -1391,8 +1392,125 @@ where
             }
             V3ProviderAttemptBody::Json(mut body) => {
                 if C::ENTRY_PROTOCOL == "responses" {
-                    crate::hooks::register_responses_direct_hooks()
-                        .project_complete_direct_json(&mut body, &direct_dsml_context);
+                    let normalization = crate::hooks::register_responses_direct_hooks()
+                        .project_complete_direct_json(&mut body, &direct_dsml_context)
+                        .map_err(crate::hooks::direct_complete_response_error_source);
+                    if let Err(source) = normalization.and_then(|()| crate::shared::enforce_v3_provider_json_attempt_admission(
+                        response_projection.compat_plan.provider_protocol,
+                        &body,
+                        &C::policy_target(&policy).candidate.provider_id,
+                        provider_status,
+                    )) {
+                        let source = match source {
+                            Ok(source) => source,
+                            Err(fault) => {
+                                return direct_runtime_helpers_stream::source_failure_output(
+                                    Err(fault),
+                                    last_external_http.clone(),
+                                    trace,
+                                    &crate::hooks::register_responses_direct_hooks(),
+                                )
+                            }
+                        };
+                        drop(provider_action_permit.take());
+                        let policy_result = match run_v3_direct_provider_failure_policy(
+                            &V3DirectProviderFailurePolicyContext {
+                                failure_session_scope: &direct_failure_session_scope,
+                                provider_health: &provider_health,
+                                availability: &availability,
+                                expanded: Some(&expanded),
+                                provider_pinned: false,
+                                now_epoch_ms,
+                            },
+                            C::policy_target(&policy),
+                            source,
+                            provider_status,
+                            &mut V3DirectProviderFailurePolicyState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                trace: &mut trace,
+                            },
+                        )
+                        .await
+                        {
+                            Ok(result) => result,
+                            Err(failure) => {
+                                return direct_runtime_helpers_stream::policy_failure_output_with_observability(
+                                    failure,
+                                    last_external_http,
+                                    trace,
+                                    None,
+                                )
+                            }
+                        };
+                        if let Some(event) = policy_result.event.clone() {
+                            provider_failure_events.push(event.clone());
+                            publish_v3_direct_provider_failure_event(
+                                provider_failure_event_sink,
+                                C::policy_target(&policy),
+                                C::ENTRY_PROTOCOL,
+                                "json",
+                                event.external_error_status,
+                                &provider_failure_events,
+                                &event,
+                                total_attempts(&accumulator, send_attempts),
+                            );
+                        }
+                        match &policy_result.decision.action {
+                            V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                                if !policy_result.retryable_transient {
+                                    pending_provider_action_recovery = Some(recovery.clone());
+                                }
+                                continue;
+                            }
+                            V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
+                                retry_selected =
+                                    policy_result.retry_selected.map(|selected| *selected);
+                                if !policy_result.retryable_transient {
+                                    pending_provider_action_recovery = Some(recovery.clone());
+                                }
+                                continue;
+                            }
+                            V3Error05ExecutionAction::ProjectTerminal => {
+                                let mut observability = build_v3_direct_runtime_observability(
+                                    C::policy_target(&policy),
+                                    C::ENTRY_PROTOCOL,
+                                    "json",
+                                    policy_result.event.as_ref().map(|event| event.status),
+                                    "failed",
+                                    provider_failure_events.clone(),
+                                );
+                                observability.attempts =
+                                    Some(total_attempts(&accumulator, send_attempts));
+                                return direct_runtime_helpers_stream::provider_terminal_output(
+                                    policy_result.decision,
+                                    last_external_http,
+                                    trace,
+                                    Some(observability),
+                                    provider_request_snapshot,
+                                    provider_response_snapshot,
+                                );
+                            }
+                            V3Error05ExecutionAction::ClientDisconnected => {
+                                return direct_runtime_helpers_stream::client_disconnect_terminal_output(
+                                    policy_result.decision,
+                                    trace,
+                                    None,
+                                );
+                            }
+                            V3Error05ExecutionAction::RejectNonProviderError => {
+                                return direct_runtime_helpers_stream::source_failure_output(
+                                    runtime_source(
+                                        "V3Error05ExecutionDecision",
+                                        "post-hook admission entered a non-provider Error05 lane",
+                                    ),
+                                    last_external_http.clone(),
+                                    trace,
+                                    &crate::hooks::register_responses_direct_hooks(),
+                                )
+                            }
+                        }
+                    }
                 }
                 (
                     V3ClientBody::Json(body),

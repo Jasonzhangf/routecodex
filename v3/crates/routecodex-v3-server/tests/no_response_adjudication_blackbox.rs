@@ -27,6 +27,7 @@ mod test_ports;
 mod fa22072_test_home;
 static TEST_LOCK: fa22072_test_home::ServerTestLock = fa22072_test_home::ServerTestLock::new();
 const KEY_ENV: &str = "V3_NO_RESPONSE_TEST_KEY";
+const RECOVERY_KEY_ENV: &str = "V3_NO_RESPONSE_RECOVERY_KEY";
 
 struct ProviderState {
     kind: String,
@@ -7037,5 +7038,337 @@ async fn genuine_http_and_native_sse_errors_break_transport_without_client_error
             );
         }
     }
+    std::env::remove_var(KEY_ENV);
+}
+
+// --- Recovery / exhaustion public entry for unharvestable tool markup ---
+
+/// The public client request declares `exec_command` as a function tool with a
+/// string `cmd` parameter. The Response Direct composition resolves an
+/// attempted invocation only from declarations the request actually carried.
+fn exec_command_tools() -> Value {
+    json!([{
+        "type": "function",
+        "name": "exec_command",
+        "description": "Run one bounded command.",
+        "parameters": {
+            "type": "object",
+            "properties": {"cmd": {"type": "string"}},
+            "required": ["cmd"]
+        }
+    }])
+}
+
+async fn post_exec_command_request(
+    client: &reqwest::Client,
+    endpoint: &str,
+    model: &str,
+) -> Result<reqwest::Response, reqwest::Error> {
+    client
+        .post(endpoint)
+        .json(&json!({
+            "model": model,
+            "input": "controlled unharvestable tool markup regression",
+            "stream": true,
+            "tools": exec_command_tools()
+        }))
+        .send()
+        .await
+}
+
+/// Build one controlled provider attempt. JSON is a complete response object.
+/// SSE with `closeout` uses the legal-closeout seal; without it the attempts
+/// end at the terminal/EOF seal.
+fn attempt_wire(content_type: &str, text: &str, closeout: bool) -> String {
+    if content_type == "application/json" {
+        text_response(text).to_string()
+    } else if closeout {
+        format!("{}data: [DONE]\n\n", response_sse(&text_response(text)))
+    } else {
+        response_sse(&text_response(text))
+    }
+}
+
+fn assert_provider_declares_exec_command(request: &Value) {
+    assert_eq!(request["model"], "wire-test", "{request}");
+    let tools = request["tools"]
+        .as_array()
+        .expect("provider-bound Responses request must carry tools");
+    let tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "exec_command")
+        .unwrap_or_else(|| panic!("exec_command declaration must reach the provider: {request}"));
+    assert_eq!(tool["type"], "function", "{request}");
+    assert_eq!(
+        tool["parameters"]["properties"]["cmd"]["type"], "string",
+        "{request}"
+    );
+}
+
+async fn recv_attempt(captures: &mut mpsc::UnboundedReceiver<Value>) -> Value {
+    tokio::time::timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("provider attempt within timeout")
+        .expect("provider attempt captured")
+}
+
+fn assert_no_error_payload(body: &str) {
+    for forbidden in [
+        "\"error\"",
+        "event: error",
+        "response.failed",
+        "response.error",
+        "network_error",
+        "provider_response_empty",
+        "500-211",
+        "internal_599",
+        "\"502\"",
+    ] {
+        assert!(
+            !body.contains(forbidden),
+            "client must not receive {forbidden:?}: {body}"
+        );
+    }
+}
+
+/// A recovered attempt must deliver no native tool item and no attempted tool
+/// text. Request declarations echoed in a response envelope are not business
+/// output, so only delivered items, deltas, and text parts are inspected.
+fn assert_no_native_or_attempted_tool(body: &str) {
+    for event in events(body) {
+        let null = Value::Null;
+        let first_output = event["response"]["output"]
+            .as_array()
+            .and_then(|items| items.first())
+            .unwrap_or(&null);
+        for item in [&event["item"], first_output] {
+            assert_ne!(
+                item["type"], "function_call",
+                "native call delivered: {event}"
+            );
+            assert_ne!(
+                item["type"], "custom_tool_call",
+                "native call delivered: {event}"
+            );
+            assert_ne!(
+                item["name"], "exec_command",
+                "attempted tool delivered: {event}"
+            );
+        }
+        let text = event["delta"]["text"]
+            .as_str()
+            .or_else(|| event["delta"].as_str())
+            .or_else(|| event["text"].as_str())
+            .or_else(|| event["item"]["content"][0]["text"].as_str())
+            .unwrap_or_default();
+        assert!(
+            !text.contains("exec_command") && !text.contains("<|DSML|"),
+            "attempted tool markup leaked into business text: {event}"
+        );
+    }
+}
+
+/// Two eligible candidates: the first returns `first_text`, the second returns
+/// `recovered_text`. The client must see only the second business text, in JSON
+/// and SSE upstream form, after exactly two attempts on distinct keys.
+async fn assert_direct_recovery(
+    first_text: &str,
+    recovered_text: &str,
+    forbidden: &[&str],
+    red_id: &str,
+) {
+    std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret-b");
+    for (content_type, closeout) in [("application/json", false), ("text/event-stream", true)] {
+        let options = EntryOptions {
+            attempt_bodies: vec![
+                attempt_wire(content_type, first_text, closeout),
+                attempt_wire(content_type, recovered_text, closeout),
+            ],
+            auth_entries: vec![
+                ("first-key".to_string(), KEY_ENV.to_string()),
+                ("second-key".to_string(), RECOVERY_KEY_ENV.to_string()),
+            ],
+            capture_headers: true,
+            ..EntryOptions::default()
+        };
+        let (endpoint, handle, mut captures, headers, shutdown) = start_entry_configured(
+            "responses",
+            "direct",
+            StatusCode::OK,
+            content_type,
+            String::new(),
+            options,
+        )
+        .await;
+        let mut headers = headers.expect("recovery fixture must capture provider auth headers");
+        let consumed =
+            consume_response(post_exec_command_request(&client(), &endpoint, "test.test").await)
+                .await;
+        let first = recv_attempt(&mut captures).await;
+        let second = recv_attempt(&mut captures).await;
+        let third = captures.try_recv().ok();
+        let first_auth = headers.try_recv().expect("first candidate auth captured");
+        let second_auth = headers.try_recv().expect("second candidate auth captured");
+        stop_entry(handle, shutdown).await;
+
+        assert_provider_declares_exec_command(&first);
+        assert_provider_declares_exec_command(&second);
+        assert!(
+            third.is_none(),
+            "{red_id} {content_type}: exactly two eligible attempts: {third:?}"
+        );
+        assert_ne!(
+            first_auth, second_auth,
+            "{red_id} {content_type}: the second attempt must use the next eligible key"
+        );
+        assert!(
+            consumed.transport_error.is_none(),
+            "{red_id} {content_type}: recovered transport must complete: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains(recovered_text),
+            "{red_id} {content_type}: second candidate business text must reach the client: {consumed:?}"
+        );
+        for marker in forbidden {
+            assert!(
+                !consumed.body.contains(*marker),
+                "{red_id} {content_type}: first attempt content {marker:?} must not reach the client: {consumed:?}"
+            );
+        }
+        assert_no_native_or_attempted_tool(&consumed.body);
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(RECOVERY_KEY_ENV);
+}
+
+/// Stable RED public ID (JSON + SSE upstream): recognized unharvestable tool
+/// markup beside surviving prose rejects the whole first attempt. The next
+/// eligible candidate supplies business text. The first attempt's prose,
+/// marker, or native call must never reach the client.
+#[tokio::test]
+async fn responses_direct_unharvestable_tool_markup_recovers_json_and_sse() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    const MARKUP: &str = "must-never-be-delivered\n<|DSML|tool_calls>\n<|exec_command\">";
+    assert_direct_recovery(
+        MARKUP,
+        "faithful recovery answer",
+        &[
+            "must-never-be-delivered",
+            "<|DSML|tool_calls>",
+            "<|exec_command",
+        ],
+        "responses_direct_unharvestable_tool_markup_recovers_json_and_sse",
+    )
+    .await;
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable RED public ID (JSON + SSE upstream): a sole recognized tool label
+/// leaves no business content after normalization, so the existing internal
+/// `provider_response_empty` recovery must select the next candidate. The
+/// label and every internal error marker stay out of the client response.
+#[tokio::test]
+async fn responses_direct_sole_dsml_label_recovers_empty_attempt_json_and_sse() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    assert_direct_recovery(
+        "<|DSML|tool_calls>",
+        "label recovery answer",
+        &["<|DSML|tool_calls>"],
+        "responses_direct_sole_dsml_label_recovers_empty_attempt_json_and_sse",
+    )
+    .await;
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable RED public ID (JSON + SSE upstream): when every eligible candidate
+/// returns the same unharvestable tool markup, the request ends in a finite
+/// detectable transport termination. No marker, error payload, client error
+/// number, or normal empty completion may reach the client, and independent
+/// traffic on the same listener still succeeds.
+#[tokio::test]
+async fn responses_direct_unharvestable_tool_markup_exhaustion_json_and_sse() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret-b");
+    const MARKUP: &str = "must-never-be-delivered\n<|DSML|tool_calls>\n<|exec_command\">";
+    for (content_type, closeout) in [("application/json", false), ("text/event-stream", false)] {
+        let options = EntryOptions {
+            auth_entries: vec![
+                ("first-key".to_string(), KEY_ENV.to_string()),
+                ("second-key".to_string(), RECOVERY_KEY_ENV.to_string()),
+            ],
+            capture_headers: true,
+            ..EntryOptions::default()
+        };
+        let (endpoint, handle, mut captures, headers, shutdown) = start_entry_configured(
+            "responses",
+            "direct",
+            StatusCode::OK,
+            content_type,
+            attempt_wire(content_type, MARKUP, closeout),
+            options,
+        )
+        .await;
+        let mut headers = headers.expect("exhaustion fixture must capture provider auth headers");
+        let consumed =
+            consume_response(post_exec_command_request(&client(), &endpoint, "test.test").await)
+                .await;
+        let first = recv_attempt(&mut captures).await;
+        let second = recv_attempt(&mut captures).await;
+        let extra = captures.try_recv().ok();
+        let first_auth = headers.try_recv().expect("first candidate auth captured");
+        let second_auth = headers.try_recv().expect("second candidate auth captured");
+        assert_provider_declares_exec_command(&first);
+        assert_provider_declares_exec_command(&second);
+        assert!(
+            extra.is_none(),
+            "{content_type}: finite attempts, no repeated failed candidate: {extra:?}"
+        );
+        assert_ne!(
+            first_auth, second_auth,
+            "{content_type}: each candidate identity is attempted once"
+        );
+        assert!(
+            consumed.transport_error.is_some(),
+            "{content_type}: exhaustion must terminate the client transport: {consumed:?}"
+        );
+        assert!(
+            consumed.status.is_none() || consumed.status == Some(StatusCode::OK),
+            "{content_type}: no client HTTP error number: {consumed:?}"
+        );
+        assert!(
+            !consumed.body.contains("must-never-be-delivered")
+                && !consumed.body.contains("<|DSML|tool_calls>")
+                && !consumed.body.contains("<|exec_command")
+                && !consumed.body.contains("exec_command")
+                && !consumed.body.contains("function_call")
+                && !consumed.body.contains("custom_tool_call"),
+            "{content_type}: failed attempt content must not reach the client: {consumed:?}"
+        );
+        assert!(
+            !consumed.body.contains("response.completed") && !consumed.body.contains("[DONE]"),
+            "{content_type}: no normal empty completion may be delivered: {consumed:?}"
+        );
+        assert_no_error_payload(&consumed.body);
+
+        // The listener and an unrelated pinned identity remain healthy after
+        // the exhausted request.
+        let independent =
+            successful_body(post_request(&client(), &endpoint, "independent.test").await).await;
+        assert_one_attempt(&mut captures, "wire-independent").await;
+        let payloads = events(&independent);
+        let terminal = payloads
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .expect("independent request completes after exhaustion");
+        assert_eq!(
+            terminal["response"]["output"],
+            text_response("independent ok")["output"]
+        );
+        stop_entry(handle, shutdown).await;
+    }
+    std::env::remove_var(RECOVERY_KEY_ENV);
     std::env::remove_var(KEY_ENV);
 }
