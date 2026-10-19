@@ -91,6 +91,9 @@ for (const [from, to, direction] of [
 }
 
 const contract = fieldMatrix?.outbound_projection_contract;
+if (contract?.control_provenance !== 'typed_owner_not_business_key_spelling') {
+  failures.push(`${paths.fieldMatrix}: only typed owner provenance can identify control; business names must remain opaque`);
+}
 for (const status of ['mapped', 'transformed', 'consumed_by_transform', 'target_unsupported', 'control_forbidden']) {
   if (!contract?.legacy_outbound_consumption_statuses?.[status]) failures.push(`${paths.fieldMatrix}: missing legacy outbound projection status bridge ${status}`);
 }

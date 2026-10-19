@@ -11350,6 +11350,7 @@ canonical_extension_registry:
       URL, inline data, and MIME branches map to their payload rows.
 outbound_projection_contract:
   owner_feature_id: v3.protocol_conversion_field_parity
+  control_provenance: typed_owner_not_business_key_spelling
   projector_owner: adjacent_outbound_codec
   projectors:
     openai_chat_and_responses: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
@@ -11364,9 +11365,10 @@ outbound_projection_contract:
       protocol; forward the original business value opaquely to the provider and
       retain its source path and inverse association. The provider decides whether
       it accepts the value; local shape validation does not reject the request.
-    control_forbidden: RouteCodex-owned internal control fields must raise
-      ControlFieldLeak with exact JSON paths before provider send; payload-owned
-      underscore fields such as `_id` remain data-plane.
+    control_forbidden: Actual RouteCodex-owned typed control values must remain
+      outside business payload at their producing owner. ControlFieldLeak diagnoses
+      a proven writer leak, not a business key spelling. Same-name client fields,
+      schemas, tool arguments and results remain complete opaque data-plane values.
   projection_class_bridge:
     mapped: mapped_exact
     transformed: Every transformed field must separately declare mapped_exact or

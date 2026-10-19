@@ -1000,8 +1000,6 @@ pub enum V3HubRelayResponseError {
     ExecutionModeNotRelay,
     #[error("provider response must be an object")]
     ProviderResponseNotObject,
-    #[error("provider response leaked RouteCodex side-channel field: {key}")]
-    SideChannelLeaked { key: &'static str },
     #[error("provider response output must be an array")]
     ProviderResponseOutputNotArray,
     #[error("malformed tool call at output index {index}: {reason}")]
@@ -1087,9 +1085,6 @@ fn normalize_v3_hub_relay_response(
     }
     if !input.payload.0.is_object() {
         return Err(V3HubRelayResponseError::ProviderResponseNotObject);
-    }
-    if let Some(key) = find_v3_hub_side_channel_key(&input.payload.0) {
-        return Err(V3HubRelayResponseError::SideChannelLeaked { key });
     }
     let compat =
         build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(input).map_err(|error| {

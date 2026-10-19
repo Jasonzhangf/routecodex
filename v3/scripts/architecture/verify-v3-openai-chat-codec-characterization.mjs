@@ -24,11 +24,11 @@ requireAll(source, sourcePath, [
   'V3OpenAiChatCodecStage', 'ClientInputToHubSemantic', 'HubSemanticToProviderWire',
   'ProviderRawToHubResponseSemantic', 'HubResponseSemanticToClientProjection',
   'V3HubEntryProtocol::OpenAiChat', 'V3HubProviderWireProtocol::OpenAiChat',
-  'MessagesNotArray', 'validate_sse_event', 'reject_side_channel_fields',
+  'MessagesNotArray', 'validate_sse_event',
   'MalformedProviderError', 'MalformedSseEvent',
-  'V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS', 'provider_protocol',
 ]);
 forbidAll(source, sourcePath, [
+  /reject_side_channel_fields/, /V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS/,
   /compile_v3_hub_v1_static_registry/, /compile_v3_hub_relay_(?:request|response)_hooks/,
   /V3HubStaticHookRegistry/, /V3HubRelay(?:Request|Response)Hook/, /routecodex-v3-server/,
   /V3HubEntryProtocol::(?:Responses|Anthropic|Gemini)/, /fallback/i, /materializ/i,
@@ -37,7 +37,7 @@ forbidAll(source, sourcePath, [
 ]);
 requireAll(tests, 'focused OpenAI Chat codec tests', [
   'multiple_tool_calls', 'not_normalization', 'finish_reason', 'V3HubTransportIntent::Sse',
-  'MalformedProviderError', 'SideChannelLeaked', 'ProviderProtocolNotOpenAiChat',
+  'MalformedProviderError', 'business_names_preserved', 'ProviderProtocolNotOpenAiChat',
 ]);
 for (const path of [
   ...filesBelow('v3/crates/routecodex-v3-server/src'),

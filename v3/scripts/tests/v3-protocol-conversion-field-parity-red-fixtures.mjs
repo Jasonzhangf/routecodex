@@ -188,9 +188,10 @@ const cases = [
     to: '   "moderation",\n   "client_metadata",\n   "previous_response_id",\n   "reasoning_effort",', diagnostic: /previous_response_id/u,
   },
   {
-    name: 'Outbound projection contract drops control forbidden status', file: matrix,
-    from: '    control_forbidden: RouteCodex-owned internal control fields must raise\n      ControlFieldLeak with exact JSON paths before provider send; payload-owned\n      underscore fields such as `_id` remain data-plane.\n', to: '',
-    diagnostic: /missing legacy outbound projection status bridge control_forbidden/u,
+    name: 'Outbound projection contract loses typed control provenance', file: matrix,
+    from: '  control_provenance: typed_owner_not_business_key_spelling',
+    to: '  control_provenance: business_key_spelling',
+    diagnostic: /typed owner provenance/u,
   },
   {
     name: 'Anthropic refusal finish-reason registry loses content_filter identity', file: 'v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json',

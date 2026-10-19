@@ -2868,8 +2868,12 @@ data: [DONE]
 }
 
 #[tokio::test]
-async fn request_side_channel_is_rejected_before_provider_transport() {
-    let error = execute_v3_openai_chat_relay_runtime(
+async fn request_business_names_are_preserved_before_provider_transport() {
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
         &manifest(),
         V3OpenAiChatRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -2887,11 +2891,13 @@ async fn request_side_channel_is_rejected_before_provider_transport() {
                 "stream":false
             }),
         },
-        &ErrorTransport,
+        &transport,
     )
     .await
-    .unwrap_err();
-    assert!(error.to_string().contains("metadata_center"));
+    .unwrap();
+    assert_eq!(output.status, 200);
+    let body = transport.captured_body.lock().unwrap().clone().unwrap();
+    assert_eq!(body["metadata_center"], json!({"route":"must-not-leak"}));
 }
 
 #[tokio::test]

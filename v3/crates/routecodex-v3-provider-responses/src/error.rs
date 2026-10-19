@@ -34,13 +34,6 @@ pub enum V3ProviderError {
         expected_model: String,
         actual_model: Option<String>,
     },
-    #[error(
-        "Responses wire body for request {request_id} contains RouteCodex control field {field}"
-    )]
-    ControlFieldInWireBody {
-        request_id: String,
-        field: &'static str,
-    },
     #[error("Responses stream flag for request {request_id} must be boolean")]
     InvalidStreamIntent { request_id: String },
     #[error("namespace tool flattening failed for request {request_id}: {detail}")]

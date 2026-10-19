@@ -108,8 +108,6 @@ pub enum V3AnthropicCodecError {
     ProviderProtocolNotAnthropic,
     #[error("Anthropic codec payload must be an object")]
     PayloadNotObject,
-    #[error("Anthropic codec payload leaked RouteCodex side-channel field: {field}")]
-    SideChannelLeaked { field: &'static str },
     #[error("Anthropic request messages must be an array")]
     MessagesNotArray,
     #[error("Anthropic response content must be an array")]
@@ -160,7 +158,6 @@ pub fn validate_v3_anthropic_client_input_payload(
     if entry_protocol != V3HubEntryProtocol::Anthropic {
         return Err(V3AnthropicCodecError::EntryProtocolNotAnthropic);
     }
-    reject_side_channel_fields(payload)?;
     require_object(payload)?;
     require_messages_array(payload)
 }
@@ -173,7 +170,6 @@ pub fn validate_v3_anthropic_provider_response_payload(
     if provider_protocol != V3HubProviderWireProtocol::Anthropic {
         return Err(V3AnthropicCodecError::ProviderProtocolNotAnthropic);
     }
-    reject_side_channel_fields(payload)?;
     require_object(payload)?;
     match transport_intent {
         V3HubTransportIntent::Json => validate_json_response(payload),
@@ -281,7 +277,18 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
     let object = input
         .as_object()
         .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
-    let mut output = Map::new();
+    let mut output = object.clone();
+    for mapped in [
+        "messages",
+        "system",
+        "max_tokens",
+        "stop_sequences",
+        "thinking",
+        "output_config",
+        "metadata",
+    ] {
+        output.remove(mapped);
+    }
     output.insert(
         "model".to_string(),
         object.get("model").cloned().unwrap_or(Value::Null),
@@ -424,7 +431,6 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
 pub fn encode_v3_responses_semantic_as_anthropic_request(
     input: Value,
 ) -> Result<Value, V3AnthropicCodecError> {
-    reject_side_channel_fields(&input)?;
     namespace_tool_names::validate_anthropic_declared_tool_names(&input)
         .map_err(|reason| V3AnthropicCodecError::AmbiguousToolDispatch { reason })?;
     let mut input = input;
@@ -936,7 +942,6 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
     payload: &Value,
     context: &V3AnthropicResponsesProjectionContext,
 ) -> Result<Value, V3AnthropicCodecError> {
-    reject_side_channel_fields(payload)?;
     let object = payload
         .as_object()
         .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
@@ -1253,7 +1258,6 @@ pub fn characterize_v3_anthropic_client_input_to_hub_semantic(
     if entry_protocol != V3HubEntryProtocol::Anthropic {
         return Err(V3AnthropicCodecError::EntryProtocolNotAnthropic);
     }
-    reject_side_channel_fields(&payload)?;
     require_object(&payload)?;
     require_messages_array(&payload)?;
     Ok(V3AnthropicHubRequestSemantic {
@@ -1268,7 +1272,6 @@ pub fn characterize_v3_anthropic_client_input_to_hub_semantic(
 pub fn characterize_v3_anthropic_hub_semantic_to_provider_wire(
     semantic: V3AnthropicHubRequestSemantic,
 ) -> Result<V3AnthropicProviderWirePayload, V3AnthropicCodecError> {
-    reject_side_channel_fields(&semantic.payload)?;
     require_object(&semantic.payload)?;
     require_messages_array(&semantic.payload)?;
     let V3AnthropicHubRequestSemantic {
@@ -1293,7 +1296,6 @@ pub fn characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
     if provider_protocol != V3HubProviderWireProtocol::Anthropic {
         return Err(V3AnthropicCodecError::ProviderProtocolNotAnthropic);
     }
-    reject_side_channel_fields(&payload)?;
     require_object(&payload)?;
     match transport_intent {
         V3HubTransportIntent::Json => validate_json_response(&payload)?,
@@ -1333,7 +1335,6 @@ pub fn validate_v3_anthropic_hub_response_payload_for_client_projection(
     if entry_protocol != V3HubEntryProtocol::Anthropic {
         return Err(V3AnthropicCodecError::EntryProtocolNotAnthropic);
     }
-    reject_side_channel_fields(payload)?;
     require_object(payload)?;
     match transport_intent {
         V3HubTransportIntent::Json => validate_json_response(payload)?,
@@ -1468,45 +1469,5 @@ fn into_object(value: Value) -> Result<Map<String, Value>, V3AnthropicCodecError
     match value {
         Value::Object(object) => Ok(object),
         _ => Err(V3AnthropicCodecError::PayloadNotObject),
-    }
-}
-
-fn reject_side_channel_fields(value: &Value) -> Result<(), V3AnthropicCodecError> {
-    let object = require_object(value)?;
-    reject_side_channel_object_keys(object)
-}
-
-fn reject_side_channel_object_keys(
-    object: &Map<String, Value>,
-) -> Result<(), V3AnthropicCodecError> {
-    for key in object.keys() {
-        if is_internal_side_channel_field(key) {
-            return Err(V3AnthropicCodecError::SideChannelLeaked {
-                field: side_channel_label(key),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn is_internal_side_channel_field(key: &str) -> bool {
-    matches!(
-        key,
-        "routecodex_internal"
-            | "metadata_center"
-            | "debug_snapshot"
-            | "provider_protocol"
-            | "resource_handle"
-    )
-}
-
-fn side_channel_label(key: &str) -> &'static str {
-    match key {
-        "routecodex_internal" => "routecodex_internal",
-        "metadata_center" => "metadata_center",
-        "debug_snapshot" => "debug_snapshot",
-        "provider_protocol" => "provider_protocol",
-        "resource_handle" => "resource_handle",
-        _ => "unknown",
     }
 }

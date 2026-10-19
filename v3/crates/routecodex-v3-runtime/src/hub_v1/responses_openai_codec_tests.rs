@@ -831,8 +831,8 @@ fn responses_web_search_call_normalizes_to_chat_extension_at_req_inbound() {
     );
 }
 #[test]
-fn responses_web_search_call_rejects_side_channel_before_tool_result_stringification() {
-    let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
+fn responses_web_search_call_preserves_business_names_before_tool_result_stringification() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "model": "gpt-5.5",
         "input": [{
             "type": "web_search_call",
@@ -841,15 +841,10 @@ fn responses_web_search_call_rejects_side_channel_before_tool_result_stringifica
             "routeHint": "debug-control"
         }]
     }))
-    .expect_err(
-        "RouteCodex control fields must fail before provider tool-result JSON stringification",
-    );
-    assert!(
-        error.contains("side-channel field") && error.contains("routeHint"),
-        "unexpected error: {error}"
-    );
+    .expect("hosted tool business fields remain representable");
+    assert!(request.to_string().contains("debug-control"));
 
-    let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "model": "gpt-5.5",
         "input": [{
             "type": "web_search_call",
@@ -857,15 +852,10 @@ fn responses_web_search_call_rejects_side_channel_before_tool_result_stringifica
             "action": {"type": "search", "query": "RouteCodex", "routeHint": "nested-control"}
         }]
     }))
-    .expect_err("nested typed control fields must fail before tool-result stringification");
-    assert!(
-        error.contains("side-channel field") && error.contains("routeHint"),
-        "unexpected error: {error}"
-    );
+    .expect("nested business fields remain representable");
+    assert!(request.to_string().contains("nested-control"));
 
-    // `_debug` 是 runtime 出站控制键集合里的精确键：它必须在进入 provider
-    // tool-call arguments/result 字符串之前被拦下（不能只靠下游 outbound 剥离）。
-    let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "model": "gpt-5.5",
         "input": [{
             "type": "web_search_call",
@@ -873,11 +863,8 @@ fn responses_web_search_call_rejects_side_channel_before_tool_result_stringifica
             "action": {"type": "search", "query": "RouteCodex", "_debug": true}
         }]
     }))
-    .expect_err("typed `_debug` control key must fail before tool-result stringification");
-    assert!(
-        error.contains("side-channel field") && error.contains("_debug"),
-        "unexpected error: {error}"
-    );
+    .expect("underscore business names remain representable");
+    assert!(request.to_string().contains("_debug"));
 }
 
 #[test]

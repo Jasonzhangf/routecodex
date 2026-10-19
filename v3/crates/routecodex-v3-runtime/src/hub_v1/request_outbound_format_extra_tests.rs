@@ -254,7 +254,7 @@ fn openai_chat_wire_passes_through_same_protocol_thinking_field() {
 }
 
 #[test]
-fn responses_openai_chat_field_parity_include_is_dropped_from_chat_wire() {
+fn responses_openai_chat_field_parity_include_is_preserved_opaquely_in_chat_wire() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
@@ -262,25 +262,23 @@ fn responses_openai_chat_field_parity_include_is_dropped_from_chat_wire() {
     });
 
     let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect("OpenAI Chat wire cannot represent Responses include: drop it, do not fail");
+        .expect("Responses include remains opaque business data in Chat wire");
 
-    assert!(wire.get("include").is_none(), "{wire}");
+    assert_eq!(wire["include"], payload["include"]);
 }
 
 #[test]
-fn outbound_projection_rejects_control_fields_with_precise_path() {
+fn outbound_projection_preserves_business_fields_with_control_names() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": [{"type":"text", "text":"hello", "_debug": true}]}],
         "metadata_center": {"route": "internal"}
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("control fields must fail before provider send");
-
-    assert!(error.contains("ControlFieldLeak"), "{error}");
-    assert!(error.contains("$.metadata_center"), "{error}");
-    assert!(error.contains("$.messages[0].content[0]._debug"), "{error}");
+    let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("business spelling cannot establish control provenance");
+    assert_eq!(wire["metadata_center"], payload["metadata_center"]);
+    assert_eq!(wire["messages"], payload["messages"]);
 }
 
 #[test]
