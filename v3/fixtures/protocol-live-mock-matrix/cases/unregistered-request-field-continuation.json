@@ -12,8 +12,8 @@
     "paths": ["/v1/chat/completions"],
     "method": "POST",
     "auth_required": true,
-    "body_must": {"model": "chat-model", "messages.0.content": "hello", "stream": false},
-    "body_must_not": ["routecodex_unregistered_probe", "keep-out-of-wire", "routecodex_internal", "metadata_center", "debug_snapshot"],
+    "body_must": {"model": "chat-model", "messages.0.content": "hello", "stream": false, "routecodex_unregistered_probe": {"nested": ["keep-out-of-wire"]}},
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
     "exact": null
   },
   "upstream_response": {
@@ -30,14 +30,14 @@
     "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center", "routecodex_unregistered_probe"],
     "semantic_terminal_required": true
   },
-  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": false},
   "source": {
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/optional_fields_test.go"],
     "tests": ["internal/gateway/optional_fields_test.go::TestOptionalFieldUnsupportedRetried"],
-    "adaptation": "Only the input field is borrowed. The expected RCC behavior is drop-with-warning-and-continue, not provider-fault-driven deletion or retry."
+    "adaptation": "Only the input field is borrowed. RCC preserves the complete client business value on the first attempt. This case intentionally uses a routecodex_ spelling as business data, so the name-only control-marker scan is inapplicable; the exact captured business value, independent auth, one-attempt count and normal response are required."
   },
   "contract_differences": [
-    {"source_behavior": "Magpie removes the refused optional field and retries against the provider.", "rcc_requirement": "Unregistered request fields are not sent, warn and sediment locally, and the request continues without live repair."}
+    {"source_behavior": "Magpie removes the refused optional field and retries against the provider.", "rcc_requirement": "Preserve complete unregistered client business fields on the first attempt. A field name is not typed control authority and cannot authorize deletion or rejection."}
   ]
 }
