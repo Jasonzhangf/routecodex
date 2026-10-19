@@ -1,10 +1,18 @@
 # 3ccb5fa: Direct DSML response hook
 
+Current delivery status belongs to canonical issue `3ccb5fa` and PR #425.
+The version-specific observations below are historical evidence, not a live
+status mirror. Build, install, load, behavior, review and merge remain separate
+claims in their actual receipts.
+
 The existing response graph is SESE and remains unchanged. The observed path is
 Responses Direct, with DSML already in inferai's raw output_text. The registered
 Direct response hook owns conversion; Relay Chat Process is outside this fix.
 
 The hook reads current request tool declarations and complete response output.
+Tool identities must come from the existing shared declaration registry and
+the exact attempt inverse binding, including nested namespaces and supported
+discovery channels. A separate narrower declaration walk is not authoritative.
 It converts complete, representable DSML envelopes into native calls, preserving
 text before and after each envelope, string whitespace, JSON parameter types,
 native items, extensions, call identities and matching follow-up results.
@@ -14,12 +22,20 @@ failure, retry, health mutation or semantic parameter validation is added.
 JSON and fully buffered SSE use the same owner. The existing attempt store calls
 the registered complete-response hook before sealing. SSE projects consistent
 added/delta/done/terminal events and never emits converted DSML text first.
+Opaque fields on replaced item, part and text events must retain their complete
+values and association. When an association cannot be represented faithfully,
+the original envelope remains text instead of losing event data.
 
 Regression IDs and commands:
 
 - `responses_direct_dsml_json_tool_round_trip`
 - `responses_direct_dsml_sse_tool_round_trip`
 - `responses_direct_dsml_literal_text_preserved`
+- `responses_direct_dsml_nested_namespace_json_tool_round_trip`
+- `responses_direct_dsml_nested_namespace_sse_tool_round_trip`
+- `responses_direct_dsml_discovered_function_json_tool_round_trip`
+- `responses_direct_dsml_discovered_function_sse_tool_round_trip`
+- `responses_direct_dsml_opaque_carrier_extensions_sse_preserved`
 - `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_dsml_ -- --nocapture`
 - `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_dsml_ -- --nocapture`
 
@@ -28,7 +44,7 @@ owned-file image read and returns its real dimensions with the matching call ID.
 Raw sample commands are never executed. Exact original read_image generation is
 not retained; three analogous inferai Responses Direct samples establish scope.
 
-## Author evidence and current delivery boundary
+## Historical author evidence before combined-candidate acceptance
 
 The first public-entry run failed before runtime edits: JSON had zero native
 calls, and SSE contained the serialized DSML envelope in early text events.
@@ -92,7 +108,7 @@ passed again, 12/12, after the final lexical correction. This build was not
 reinstalled after the known control challenge timeout. The canonical bug comment
 records the OPEN disposition and retained resources.
 
-## User-restart verification
+## Historical user-restart verification
 
 User reported restart completion. Both listeners were healthy on 0.90.4907,
 which differs from the issue's previous build. A real inferai SSE replay

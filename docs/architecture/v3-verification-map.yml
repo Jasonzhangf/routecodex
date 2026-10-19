@@ -1151,6 +1151,8 @@ features:
   - docs/goals/v3-direct-thinking-tag-response-compat-test-design.md
   required_contract:
   - Complete declared DSML tool envelopes are normalized only by the registered Responses Direct response hook; quoted, incomplete and unrepresentable envelopes remain text. JSON and complete SSE attempts preserve surrounding content, arguments, native calls and matched follow-up results.
+  - DSML dispatch uses the shared declaration registry and exact attempt inverse, including nested namespaces and supported additional_tools/tool_search_output discovery channels; tool kind, full namespace and every bound wire alias are preserved.
+  - Replaced SSE item/part/text carriers retain opaque fields and snapshot associations; an unrepresentable association leaves the affected message as original provider text, without dropping fields or blocking otherwise convertible messages.
   - P6 owns only adjacent transitions V3Target10ConcreteProviderSelected through V3Server16HttpFrame, with V3Execution11ProtocolDecision between Target10 and Direct policy
   - Runtime remains the only complete lifecycle executor
   - routecodex-v3-provider-responses is generic and contains no deployment provider ID or provider-family branch

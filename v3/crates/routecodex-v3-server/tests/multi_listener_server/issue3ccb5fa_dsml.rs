@@ -1,11 +1,104 @@
 use super::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DsmlCase {
+    RoundTrip,
+    Literal,
+    OpaqueSse,
+    Nested,
+    Discovered,
+}
+
 #[derive(Clone)]
 struct DsmlPeer {
     path: String,
     calls: Arc<std::sync::atomic::AtomicUsize>,
     sse: bool,
-    literal: bool,
+    case: DsmlCase,
+}
+
+const NESTED_NAMESPACE: &str = "mcp__mcpx.workspace";
+const NESTED_LEAF: &str = "read";
+const NESTED_WIRE: &str = "mcp__mcpx__workspace__read";
+const DISCOVERED_NAMESPACE: &str = "search_ns";
+const DISCOVERED_LEAF: &str = "found";
+const DISCOVERED_WIRE: &str = "search_ns__found";
+
+fn discovery_item() -> Value {
+    json!({"type":"tool_search_output","call_id":"discovery_call_1","tools":[
+        {"type":"namespace","name":"search_ns","tools":[
+            {"type":"function","name":"found","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}
+        ]}
+    ]})
+}
+
+fn client_tools(case: DsmlCase) -> Value {
+    match case {
+        DsmlCase::Nested => json!([{"type":"namespace","name":"mcp__mcpx","tools":[
+            {"type":"namespace","name":"workspace","tools":[
+                {"type":"function","name":"read","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}
+            ]}
+        ]}]),
+        DsmlCase::Discovered => {
+            json!([{"type":"function","name":"read_image","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}])
+        }
+        _ => {
+            json!([{"type":"function","name":"read_image","parameters":{"type":"object","properties":{"file_path":{"type":"string"},"options":{"type":"array"}}}}])
+        }
+    }
+}
+
+fn invoke_name(case: DsmlCase) -> &'static str {
+    match case {
+        DsmlCase::Nested => NESTED_WIRE,
+        DsmlCase::Discovered => DISCOVERED_WIRE,
+        _ => "read_image",
+    }
+}
+
+fn expected_leaf(case: DsmlCase) -> &'static str {
+    match case {
+        DsmlCase::Nested => NESTED_LEAF,
+        DsmlCase::Discovered => DISCOVERED_LEAF,
+        _ => "read_image",
+    }
+}
+
+fn expected_namespace(case: DsmlCase) -> Option<&'static str> {
+    match case {
+        DsmlCase::Nested => Some(NESTED_NAMESPACE),
+        DsmlCase::Discovered => Some(DISCOVERED_NAMESPACE),
+        _ => None,
+    }
+}
+
+fn first_input(case: DsmlCase) -> Value {
+    let mut input = vec![json!({"role":"user","content":"Read the owned image"})];
+    if case == DsmlCase::Discovered {
+        input.push(discovery_item());
+    }
+    Value::Array(input)
+}
+
+fn wire_tool_names(body: &Value) -> Vec<String> {
+    body["tools"]
+        .as_array()
+        .map(|tools| {
+            tools
+                .iter()
+                .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn assert_provider_declaration(body: &Value, case: DsmlCase) {
+    let names = wire_tool_names(body);
+    let expected = invoke_name(case);
+    assert!(
+        names.iter().any(|name| name == expected),
+        "provider wire tools must declare {expected:?}, got {names:?}"
+    );
 }
 
 async fn upstream(
@@ -13,10 +106,22 @@ async fn upstream(
     axum::Json(body): axum::Json<Value>,
 ) -> Response<Body> {
     let turn = peer.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(body["tools"][0]["name"], "read_image");
+    assert_provider_declaration(&body, peer.case);
     let output = if turn == 0 {
-        let text = format!("Before\n<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name=\"read_image\"><｜｜DSML｜｜ parameter name=\"file_path\" string=\"true\">{}</｜｜DSML｜｜ parameter><｜｜DSML｜｜ parameter name=\"options\" string=\"false\">[true,2,null]</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>\nAfter", peer.path);
-        let text = if peer.literal {
+        let invoke = invoke_name(peer.case);
+        let parameters = if peer.case == DsmlCase::RoundTrip {
+            format!(
+                "<｜｜DSML｜｜ parameter name=\"file_path\" string=\"true\">{}</｜｜DSML｜｜ parameter><｜｜DSML｜｜ parameter name=\"options\" string=\"false\">[true,2,null]</｜｜DSML｜｜ parameter>",
+                peer.path
+            )
+        } else {
+            format!(
+                "<｜｜DSML｜｜ parameter name=\"file_path\" string=\"true\">{}</｜｜DSML｜｜ parameter>",
+                peer.path
+            )
+        };
+        let text = format!("Before\n<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name=\"{invoke}\">{parameters}</｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>\nAfter");
+        let text = if peer.case == DsmlCase::Literal {
             format!("```xml\n{text}\n```")
         } else {
             text
@@ -26,10 +131,24 @@ async fn upstream(
         assert_eq!(turn, 1, "no retry or duplicate attempt allowed");
         let input = body["input"].as_array().unwrap();
         let call = input.iter().find(|i| i["type"] == "function_call").unwrap();
-        assert_eq!(call["name"], "read_image");
+        let leaf = expected_leaf(peer.case);
+        // A follow-up history item may be sent as the restored client identity
+        // or projected back to the provider wire name; both are faithful.
+        let name = call["name"].as_str().unwrap_or_default();
+        assert!(
+            name == leaf || name == invoke_name(peer.case),
+            "unexpected follow-up tool name {name:?}"
+        );
+        if name == leaf {
+            assert_eq!(call["namespace"].as_str(), expected_namespace(peer.case));
+        }
+        let mut expected = json!({"file_path":peer.path});
+        if peer.case == DsmlCase::RoundTrip {
+            expected["options"] = json!([true, 2, null]);
+        }
         assert_eq!(
             serde_json::from_str::<Value>(call["arguments"].as_str().unwrap()).unwrap(),
-            json!({"file_path":peer.path,"options":[true,2,null]})
+            expected
         );
         let result = input
             .iter()
@@ -42,7 +161,11 @@ async fn upstream(
         );
         json!([{"id":"final","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Image is 3 by 2.","annotations":[]}]}])
     };
-    let response = json!({"id":format!("resp_dsml_{turn}"),"object":"response","model":"wire-protocol","status":"completed","output":output,"usage":{"input_tokens":1,"output_tokens":2},"provider_extension":{"keep":true}});
+    let mut response = json!({"id":format!("resp_dsml_{turn}"),"object":"response","model":"wire-protocol","status":"completed","output":output,"usage":{"input_tokens":1,"output_tokens":2},"provider_extension":{"keep":true}});
+    if peer.case == DsmlCase::OpaqueSse {
+        // A large opaque value on the terminal response must survive untouched.
+        response["vendor_terminal"] = json!({"business":"terminal-kept","raw":"T".repeat(4096)});
+    }
     if !peer.sse {
         return Response::builder()
             .header("content-type", "application/json")
@@ -50,42 +173,67 @@ async fn upstream(
             .unwrap();
     }
     let mut wire = String::new();
-    let mut event = |value: Value| {
+    let mut emit = |mut value: Value, carrier: bool| {
+        if carrier && peer.case == DsmlCase::OpaqueSse {
+            value["vendor_data"] = json!({"business":"carrier-kept","raw":"C".repeat(4096)});
+        }
         wire.push_str(&format!(
             "event: {}\ndata: {}\n\n",
             value["type"].as_str().unwrap(),
             value
         ));
     };
-    event(
+    emit(
         json!({"type":"response.created","response":{"id":response["id"],"status":"in_progress","output":[]}}),
+        false,
     );
     for (index, item) in output.as_array().unwrap().iter().enumerate() {
-        event(
+        emit(
             json!({"type":"response.output_item.added","output_index":index,"item":{"id":item["id"],"type":"message","role":"assistant","content":[]}}),
+            true,
         );
         let text = item["content"][0]["text"].as_str().unwrap();
+        emit(
+            json!({"type":"response.content_part.added","output_index":index,"content_index":0,"item_id":item["id"],"part":{"type":"output_text","text":"","annotations":[]}}),
+            true,
+        );
         for ch in text.chars() {
-            event(
+            emit(
                 json!({"type":"response.output_text.delta","output_index":index,"content_index":0,"item_id":item["id"],"delta":ch.to_string()}),
+                true,
             );
         }
-        event(
+        emit(
             json!({"type":"response.output_text.done","output_index":index,"content_index":0,"item_id":item["id"],"text":text}),
+            true,
         );
-        event(json!({"type":"response.output_item.done","output_index":index,"item":item}));
+        emit(
+            json!({"type":"response.content_part.done","output_index":index,"content_index":0,"item_id":item["id"],"part":item["content"][0]}),
+            true,
+        );
+        emit(
+            json!({"type":"response.output_item.done","output_index":index,"item":item}),
+            true,
+        );
     }
-    event(json!({"type":"response.completed","response":response}));
+    emit(
+        json!({"type":"response.completed","response":response}),
+        false,
+    );
     Response::builder()
         .header("content-type", "text/event-stream")
         .body(Body::from(wire))
         .unwrap()
 }
 
-async fn run(sse: bool, literal: bool) {
+async fn run(case: DsmlCase, sse: bool) {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_PROTOCOL_DECISION_KEY", "dsml-test-key");
-    let fixture = std::env::temp_dir().join(format!("rcc-dsml-{}-{sse}.png", std::process::id()));
+    let fixture = std::env::temp_dir().join(format!(
+        "rcc-dsml-{}-{}-{sse}.png",
+        std::process::id(),
+        case as u8
+    ));
     // Valid PNG fixture: the client reads the actual file and decodes IHDR dimensions.
     let png = [
         137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 3, 0, 0, 0, 2, 8, 2,
@@ -98,7 +246,7 @@ async fn run(sse: bool, literal: bool) {
         path: fixture.to_str().unwrap().to_owned(),
         calls: Arc::default(),
         sse,
-        literal,
+        case,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -118,12 +266,17 @@ async fn run(sse: bool, literal: bool) {
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    let tool = json!({"type":"function","name":"read_image","parameters":{"type":"object","properties":{"file_path":{"type":"string"},"options":{"type":"array"}}}});
-    let first = client.post(&endpoint).json(&json!({"model":"client-test","input":"Read the owned image","tools":[tool.clone()],"stream":sse})).send().await.unwrap();
+    let tools = client_tools(case);
+    let first = client
+        .post(&endpoint)
+        .json(&json!({"model":"client-test","input":first_input(case),"tools":tools,"stream":sse}))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(first.status(), 200);
     let wire = first.text().await.unwrap();
     let result: Value = if sse {
-        if !literal {
+        if case != DsmlCase::Literal && case != DsmlCase::OpaqueSse {
             assert!(
                 !wire.contains("DSML"),
                 "converted envelope leaked in early SSE: {wire}"
@@ -143,7 +296,7 @@ async fn run(sse: bool, literal: bool) {
         .iter()
         .filter(|i| i["type"] == "function_call")
         .collect();
-    if literal {
+    if case == DsmlCase::Literal {
         assert!(
             calls.is_empty(),
             "quoted example must never execute: {result}"
@@ -159,8 +312,64 @@ async fn run(sse: bool, literal: bool) {
         std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
         return;
     }
+    if case == DsmlCase::OpaqueSse {
+        assert!(
+            calls.is_empty(),
+            "an event-level extension has no faithful association, so provider text must survive: {result}"
+        );
+        let text = output[0]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("Before\n<｜｜DSML｜｜ calls>"));
+        assert!(text.ends_with("\nAfter"));
+        assert!(text.contains(&peer.path));
+        assert_eq!(result["vendor_terminal"]["business"], "terminal-kept");
+        assert_eq!(
+            result["vendor_terminal"]["raw"].as_str().unwrap().len(),
+            4096
+        );
+        let events: Vec<Value> = wire
+            .lines()
+            .filter_map(|l| l.strip_prefix("data: "))
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
+        let carriers: Vec<_> = events
+            .iter()
+            .filter(|v| {
+                matches!(
+                    v["type"].as_str(),
+                    Some(
+                        "response.output_item.added"
+                            | "response.output_item.done"
+                            | "response.content_part.added"
+                            | "response.content_part.done"
+                            | "response.output_text.delta"
+                            | "response.output_text.done"
+                    )
+                )
+            })
+            .collect();
+        assert!(!carriers.is_empty());
+        for carrier in carriers {
+            assert_eq!(
+                carrier["vendor_data"]["business"], "carrier-kept",
+                "an opaque carrier extension was dropped: {carrier}"
+            );
+            assert_eq!(
+                carrier["vendor_data"]["raw"].as_str().unwrap().len(),
+                4096,
+                "an opaque carrier value changed: {carrier}"
+            );
+        }
+        assert_eq!(peer.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        handle.shutdown().await;
+        task.abort();
+        fs::remove_file(fixture).unwrap();
+        std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+        return;
+    }
     assert_eq!(calls.len(), 1, "DSML must become a native call: {result}");
     let call = calls[0];
+    assert_eq!(call["name"], expected_leaf(case));
+    assert_eq!(call["namespace"].as_str(), expected_namespace(case));
     assert_eq!(result["provider_extension"], json!({"keep":true}));
     assert_eq!(result["usage"]["output_tokens"], 2);
     assert_eq!(output[0]["content"][0]["text"], "Before\n");
@@ -195,17 +404,22 @@ async fn run(sse: bool, literal: bool) {
         }
     }
     let args: Value = serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
-    assert_eq!(args, json!({"file_path":peer.path,"options":[true,2,null]}));
+    let mut expected = json!({"file_path":peer.path});
+    if case == DsmlCase::RoundTrip {
+        expected["options"] = json!([true, 2, null]);
+    }
+    assert_eq!(args, expected);
+    // The client actually executes the declared local tool: read and decode the PNG.
     let bytes = fs::read(args["file_path"].as_str().unwrap()).unwrap();
     assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
     let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
     let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
-    let mut input = vec![json!({"role":"user","content":"Read the owned image"})];
+    let mut input = first_input(case).as_array().unwrap().clone();
     input.extend(output.clone());
     input.push(json!({"type":"function_call_output","call_id":call["call_id"],"output":json!({"width":width,"height":height}).to_string()}));
     let second = client
         .post(&endpoint)
-        .json(&json!({"model":"client-test","input":input,"tools":[tool],"stream":false}))
+        .json(&json!({"model":"client-test","input":input,"tools":tools,"stream":false}))
         .send()
         .await
         .unwrap();
@@ -220,16 +434,41 @@ async fn run(sse: bool, literal: bool) {
 
 #[tokio::test]
 async fn responses_direct_dsml_json_tool_round_trip() {
-    run(false, false).await
+    run(DsmlCase::RoundTrip, false).await
 }
 
 #[tokio::test]
 async fn responses_direct_dsml_sse_tool_round_trip() {
-    run(true, false).await
+    run(DsmlCase::RoundTrip, true).await
 }
 
 #[tokio::test]
 async fn responses_direct_dsml_literal_text_preserved() {
-    run(false, true).await;
-    run(true, true).await;
+    run(DsmlCase::Literal, false).await;
+    run(DsmlCase::Literal, true).await;
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_nested_namespace_json_tool_round_trip() {
+    run(DsmlCase::Nested, false).await
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_nested_namespace_sse_tool_round_trip() {
+    run(DsmlCase::Nested, true).await
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_discovered_function_json_tool_round_trip() {
+    run(DsmlCase::Discovered, false).await
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_discovered_function_sse_tool_round_trip() {
+    run(DsmlCase::Discovered, true).await
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_opaque_carrier_extensions_sse_preserved() {
+    run(DsmlCase::OpaqueSse, true).await
 }

@@ -296,31 +296,35 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     );
     assert!(sse_failure_capture.body.get("metadata_center").is_none());
 
+    let opaque_business = json!({"route":"business-route","requiredCapabilities":["read"]});
     let isolation_response = client
         .post(&endpoint)
         .json(&json!({
             "model":"chat-client-alias",
             "messages":[{"role":"user","content":"isolation"}],
-            "metadata_center":{"route":"must-not-leak"}
+            "metadata_center":opaque_business.clone()
         }))
         .send()
-        .await;
-    assert!(
-        isolation_response.is_err(),
-        "a rejected control-plane leak must close transport without a client error response"
+        .await
+        .unwrap();
+    assert_eq!(isolation_response.status(), StatusCode::OK);
+    let isolation_body: Value = isolation_response.json().await.unwrap();
+    assert_eq!(
+        isolation_body["choices"][0]["message"]["content"],
+        "controlled json"
     );
-    if let Ok(Some(capture)) =
-        tokio::time::timeout(Duration::from_millis(100), captures_rx.recv()).await
-    {
-        assert_ne!(
-            capture
-                .body
-                .pointer("/messages/0/content")
-                .and_then(Value::as_str),
-            Some("isolation"),
-            "client isolation request must not reach provider"
-        );
-    }
+    let isolation_capture = captures_rx.recv().await.unwrap();
+    assert_eq!(isolation_capture.body["metadata_center"], opaque_business);
+    assert_eq!(
+        isolation_capture.body["messages"][0]["content"],
+        "isolation"
+    );
+    // Typed route/model/auth stay independent from the ordinary business field.
+    assert_eq!(isolation_capture.body["model"], "chat-wire-model");
+    assert_eq!(
+        isolation_capture.authorization.as_deref(),
+        Some("Bearer controlled-secret")
+    );
 
     let unlisted_model_response = client
         .post(&endpoint)

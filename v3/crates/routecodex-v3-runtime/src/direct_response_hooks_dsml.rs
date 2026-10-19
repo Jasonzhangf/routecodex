@@ -12,53 +12,65 @@ const END_PARAM: &str = "</｜｜DSML｜｜ parameter>";
 
 #[derive(Default)]
 pub(crate) struct V3DirectDsmlContext {
-    tools: HashMap<String, (Option<String>, String)>,
+    tools: HashMap<String, DsmlToolIdentity>,
+}
+
+#[derive(Clone, PartialEq)]
+struct DsmlToolIdentity {
+    namespace: Option<String>,
+    leaf: String,
+    kind: provider_compat_core::namespace_tools::ToolKind,
 }
 
 impl V3DirectDsmlContext {
+    /// Resolve dispatch identities through the single declaration owner
+    /// (`NamespaceToolIdentityRegistry`) and bind them to the exact attempt
+    /// inverse (provider wire name -> client namespace + leaf). The registry
+    /// owns nested namespace recursion and every supported discovery channel;
+    /// this module never traverses declarations itself.
     pub(crate) fn from_request(body: &Value, inverse: &HashMap<String, (String, String)>) -> Self {
+        use provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry;
         let mut result = Self::default();
         if body["tool_choice"] == "none" {
             return result;
         }
+        let Ok(registry) = NamespaceToolIdentityRegistry::from_request(body, "openai-responses")
+        else {
+            return result;
+        };
         let mut ambiguous = HashSet::new();
-        if let Some(tools) = body.get("tools").and_then(Value::as_array) {
-            for tool in tools {
-                if tool["type"] == "function" {
-                    if let Some(name) = tool["name"].as_str() {
-                        result
-                            .tools
-                            .insert(name.to_owned(), (None, name.to_owned()));
-                    }
-                } else if tool["type"] == "namespace" {
-                    if let (Some(namespace), Some(children)) =
-                        (tool["name"].as_str(), tool["tools"].as_array())
-                    {
-                        for child in children {
-                            if child["type"] != "function" {
-                                continue;
-                            }
-                            if let Some(name) = child["name"].as_str() {
-                                for (wire, (ns, leaf)) in inverse {
-                                    if ns == namespace && leaf == name {
-                                        let identity = (Some(ns.clone()), leaf.clone());
-                                        if result
-                                            .tools
-                                            .get(leaf)
-                                            .is_some_and(|old| old != &identity)
-                                        {
-                                            ambiguous.insert(leaf.clone());
-                                        }
-                                        result.tools.insert(leaf.clone(), identity.clone());
-                                        result
-                                            .tools
-                                            .insert(wire.clone(), (Some(ns.clone()), leaf.clone()));
-                                    }
-                                }
-                            }
-                        }
-                    }
+        for identity in registry.identities() {
+            let namespace = identity
+                .is_namespaced()
+                .then(|| identity.client_namespace());
+            let resolved = DsmlToolIdentity {
+                namespace: namespace.clone(),
+                leaf: identity.leaf_name.clone(),
+                kind: identity.kind,
+            };
+            // The exact attempt inverse is authoritative for the wire name.
+            // A plain declaration whose wire name equals its leaf keeps the
+            // leaf binding; a renamed plain declaration also keeps its wire.
+            let keys = std::iter::once(identity.leaf_name.clone())
+                .chain(
+                    inverse
+                        .iter()
+                        .filter(|(_, (ns, leaf))| {
+                            leaf == &identity.leaf_name
+                                && Some(ns.as_str()) == namespace.as_deref().or(Some(""))
+                        })
+                        .map(|(wire, _)| wire.clone()),
+                )
+                .chain(
+                    identity
+                        .is_namespaced()
+                        .then(|| identity.actual_wire_name.clone()),
+                );
+            for key in keys {
+                if result.tools.get(&key).is_some_and(|old| old != &resolved) {
+                    ambiguous.insert(key.clone());
                 }
+                result.tools.insert(key, resolved.clone());
             }
         }
         for name in ambiguous {
@@ -120,7 +132,13 @@ fn envelope<'a>(text: &'a str, context: &V3DirectDsmlContext) -> Option<(Vec<Val
             return None;
         }
         let name = attrs.get("name")?.as_str()?;
-        let (namespace, leaf) = context.tools.get(name)?;
+        let identity = context.tools.get(name)?;
+        // A custom declaration takes freeform `input`, not the DSML parameter
+        // map. Emitting a function call would change the declared kind, so the
+        // complete envelope stays provider text.
+        if identity.kind != provider_compat_core::namespace_tools::ToolKind::Function {
+            return None;
+        }
         rest = after;
         let mut arguments: Vec<(String, String)> = Vec::new();
         loop {
@@ -164,8 +182,8 @@ fn envelope<'a>(text: &'a str, context: &V3DirectDsmlContext) -> Option<(Vec<Val
                 .collect::<Vec<_>>()
                 .join(",")
         );
-        let mut call = json!({"id":fresh_id("fc"),"type":"function_call","call_id":call_id,"name":leaf,"arguments":arguments,"status":"completed"});
-        if let Some(namespace) = namespace {
+        let mut call = json!({"id":fresh_id("fc"),"type":"function_call","call_id":call_id,"name":identity.leaf.clone(),"arguments":arguments,"status":"completed"});
+        if let Some(namespace) = &identity.namespace {
             call["namespace"] = namespace.clone().into();
         }
         calls.push(call);
@@ -308,6 +326,17 @@ struct Replacement {
 }
 
 fn normalize(payload: &mut Value, context: &V3DirectDsmlContext) -> Vec<Replacement> {
+    normalize_with_protected(payload, context, &HashSet::new())
+}
+
+/// Output indexes whose carrier events carry opaque extensions that the
+/// synthesized replacement events cannot faithfully inherit keep their original
+/// provider text and payload.
+fn normalize_with_protected(
+    payload: &mut Value,
+    context: &V3DirectDsmlContext,
+    protected: &HashSet<usize>,
+) -> Vec<Replacement> {
     let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
         return Vec::new();
     };
@@ -315,20 +344,15 @@ fn normalize(payload: &mut Value, context: &V3DirectDsmlContext) -> Vec<Replacem
     let mut next = Vec::new();
     let mut plans = Vec::new();
     for (index, item) in output.iter().enumerate() {
+        if protected.contains(&index) {
+            next.push(item.clone());
+            continue;
+        }
         let Some(parts) = item.get("content").and_then(Value::as_array) else {
             next.push(item.clone());
             continue;
         };
-        if item["type"] != "message"
-            || item["role"] != "assistant"
-            || item.get("id").is_some_and(|v| !v.is_string())
-            || item.get("status").is_some_and(|v| !v.is_string())
-            || !parts.iter().all(known_text_part)
-            || item.as_object().is_some_and(|o| {
-                o.keys()
-                    .any(|k| !matches!(k.as_str(), "id" | "type" | "role" | "status" | "content"))
-            })
-        {
+        if !known_message_item(item) {
             next.push(item.clone());
             continue;
         }
@@ -368,6 +392,20 @@ fn normalize(payload: &mut Value, context: &V3DirectDsmlContext) -> Vec<Replacem
         refresh_matching_aggregate(payload, &old_text);
     }
     plans
+}
+
+fn known_message_item(item: &Value) -> bool {
+    item["type"] == "message"
+        && item["role"] == "assistant"
+        && item.get("id").is_none_or(Value::is_string)
+        && item.get("status").is_none_or(Value::is_string)
+        && item["content"]
+            .as_array()
+            .is_some_and(|parts| parts.iter().all(known_text_part))
+        && item.as_object().is_some_and(|o| {
+            o.keys()
+                .all(|k| matches!(k.as_str(), "id" | "type" | "role" | "status" | "content"))
+        })
 }
 
 fn known_text_part(part: &Value) -> bool {
@@ -418,6 +456,32 @@ pub(crate) fn normalize_v3_direct_dsml_response(
     normalize(payload, context);
 }
 
+/// The event-level extension keys the synthesized replacement events keep.
+/// A replaced carrier event that carries any other data field cannot have it
+/// associated with the projected result, so its item keeps provider text.
+const KNOWN_EVENT_FIELDS: &[&str] = &[
+    "type",
+    "output_index",
+    "content_index",
+    "item_id",
+    "delta",
+    "text",
+    "item",
+    "part",
+    "sequence_number",
+];
+
+fn event_has_unrepresentable_extension(event: &Value) -> bool {
+    event.as_object().is_some_and(|object| {
+        object
+            .keys()
+            .any(|key| !KNOWN_EVENT_FIELDS.contains(&key.as_str()))
+    }) || event
+        .get("item")
+        .is_some_and(|item| !known_message_item(item))
+        || event.get("part").is_some_and(|part| !known_text_part(part))
+}
+
 pub(crate) fn rewrite_v3_direct_dsml_attempt(
     frames: &[Vec<u8>],
     context: &V3DirectDsmlContext,
@@ -455,8 +519,29 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
             )
         })
     })?;
+    // A replaced item/part/text carrier may carry opaque event-level data.
+    // Those values have no defined association with the synthesized tool
+    // events, so the affected item keeps its original provider text.
+    let protected: HashSet<usize> = events
+        .iter()
+        .filter_map(|(_, value)| value.as_ref())
+        .filter(|event| {
+            matches!(
+                event["type"].as_str(),
+                Some(
+                    "response.output_item.added"
+                        | "response.output_item.done"
+                        | "response.content_part.added"
+                        | "response.content_part.done"
+                        | "response.output_text.delta"
+                        | "response.output_text.done"
+                )
+            ) && event_has_unrepresentable_extension(event)
+        })
+        .filter_map(|event| event["output_index"].as_u64().map(|index| index as usize))
+        .collect();
     let mut response = events[terminal].1.as_ref()?["response"].clone();
-    let plans = normalize(&mut response, context);
+    let plans = normalize_with_protected(&mut response, context, &protected);
     if plans.is_empty() {
         return None;
     }
@@ -865,6 +950,93 @@ mod tests {
         assert_eq!(literal, original);
     }
 
+    fn dispatch_context(request: &Value) -> V3DirectDsmlContext {
+        V3DirectDsmlContext::from_request(
+            request,
+            &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+                request,
+                "openai-responses",
+            )
+            .unwrap()
+            .restore_identities(),
+        )
+    }
+
+    fn function_call(payload: &Value) -> &Value {
+        payload["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "function_call")
+            .expect("DSML must become a native call")
+    }
+
+    #[test]
+    fn direct_dsml_nested_namespace_declared_identity_dispatches() {
+        let request = json!({"tools":[{"type":"namespace","name":"mcp__mcpx","tools":[
+            {"type":"namespace","name":"workspace","tools":[
+                {"type":"function","name":"read","parameters":{"type":"object"}}
+            ]}
+        ]}]});
+        let text = call("note.md").replace("name=\"read_image\"", "name=\"read\"");
+        let mut payload = sample(&text);
+        let context = dispatch_context(&request);
+        normalize_v3_direct_dsml_response(&mut payload, &context);
+        let call_item = function_call(&payload);
+        assert_eq!(call_item["namespace"], "mcp__mcpx.workspace");
+        assert_eq!(call_item["name"], "read");
+        assert_eq!(
+            serde_json::from_str::<Value>(call_item["arguments"].as_str().unwrap()).unwrap(),
+            json!({"file_path":"note.md"})
+        );
+    }
+
+    #[test]
+    fn direct_dsml_discovered_declaration_channels_dispatch() {
+        let discovered = json!([
+            {"type":"namespace","name":"search_ns","tools":[
+                {"type":"function","name":"found","parameters":{"type":"object"}}
+            ]}
+        ]);
+        for request in [
+            json!({"tools":[{"type":"function","name":"read_image"}],"input":[
+                {"type":"additional_tools","tools":discovered.clone()}
+            ]}),
+            json!({"tools":[{"type":"function","name":"read_image"}],"input":[
+                {"type":"tool_search_output","call_id":"discovery_1","tools":discovered.clone()}
+            ]}),
+            json!({"tools":[{"type":"function","name":"read_image"}],"messages":[
+                {
+                    "role":"tool",
+                    "content":discovered.to_string(),
+                    "routecodex_chat_extension":{"responses_tool_output_type":"tool_search_output"}
+                }
+            ]}),
+        ] {
+            let text = call("found.txt").replace("name=\"read_image\"", "name=\"found\"");
+            let mut payload = sample(&text);
+            let context = dispatch_context(&request);
+            normalize_v3_direct_dsml_response(&mut payload, &context);
+            let call_item = function_call(&payload);
+            assert_eq!(call_item["namespace"], "search_ns");
+            assert_eq!(call_item["name"], "found");
+            assert_eq!(
+                serde_json::from_str::<Value>(call_item["arguments"].as_str().unwrap()).unwrap(),
+                json!({"file_path":"found.txt"})
+            );
+        }
+    }
+
+    #[test]
+    fn direct_dsml_custom_kind_is_not_misreported_as_a_function_call() {
+        let request = json!({"tools":[{"type":"custom","name":"shell"}]});
+        let text = call("x").replace("name=\"read_image\"", "name=\"shell\"");
+        let mut payload = sample(&text);
+        let original = payload.clone();
+        normalize_v3_direct_dsml_response(&mut payload, &dispatch_context(&request));
+        assert_eq!(payload, original);
+    }
+
     #[test]
     fn direct_dsml_keeps_large_json_numbers_without_float_rounding() {
         let number = "123456789012345678901234567890";
@@ -967,5 +1139,117 @@ mod tests {
             serde_json::from_str::<Value>(calls[1]["arguments"].as_str().unwrap()).unwrap(),
             json!({"file_path":"second"})
         );
+    }
+
+    #[test]
+    fn direct_dsml_replaced_sse_carrier_event_extensions_survive() {
+        let keep = "opaque-carrier-value-0123456789".repeat(24);
+        let source = sample(&format!("Before\n{}\nAfter", call("x")));
+        let data = |event: Value| -> String {
+            let mut event = event;
+            event["vendor_data"] = json!({"business":"kept","raw":keep});
+            format!(
+                "event: {}\ndata: {}\n\n",
+                event["type"].as_str().unwrap(),
+                event
+            )
+        };
+        let frames = vec![
+            data(json!({"type":"response.output_item.added","output_index":0,"item":{"id":"m","type":"message","role":"assistant","content":[]}})).into_bytes(),
+            data(json!({"type":"response.content_part.added","output_index":0,"item_id":"m","content_index":0,"part":{"type":"output_text","text":""}})).into_bytes(),
+            data(json!({"type":"response.output_text.delta","output_index":0,"item_id":"m","content_index":0,"delta":"Before\n"})).into_bytes(),
+            data(json!({"type":"response.output_text.done","output_index":0,"item_id":"m","content_index":0,"text":"Before\n"})).into_bytes(),
+            data(json!({"type":"response.content_part.done","output_index":0,"item_id":"m","content_index":0,"part":{"type":"output_text","text":"Before\n","annotations":[]}})).into_bytes(),
+            data(json!({"type":"response.output_item.done","output_index":0,"item":{"id":"m","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Before\n<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name=\"read_image\"><｜｜DSML｜｜ parameter name=\"file_path\" string=\"true\">x</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>\nAfter","annotations":[]}]}})).into_bytes(),
+            data(json!({"type":"response.completed","response":source})).into_bytes(),
+        ];
+        // An event-level extension has no defined association with the
+        // synthesized tool events, so the complete attempt keeps provider text.
+        let output = rewrite_v3_direct_dsml_attempt(&frames, &context())
+            .map(|(frames, _)| frames)
+            .unwrap_or_else(|| frames.clone());
+        let wire = String::from_utf8(output.concat()).unwrap();
+        assert_eq!(
+            wire.matches("\"vendor_data\"").count(),
+            frames.len(),
+            "an event-level extension was dropped: {wire}"
+        );
+        let terminal = wire
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .find(|event| event["type"] == "response.completed")
+            .unwrap();
+        assert_eq!(terminal["response"]["output"][0]["type"], "message");
+        assert!(terminal["response"]["output"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains(OPEN));
+    }
+
+    #[test]
+    fn direct_dsml_snapshot_extensions_keep_original_association() {
+        for (kind, field, snapshot) in [
+            (
+                "response.output_item.added",
+                "item",
+                json!({"id":"m","type":"message","role":"assistant","content":[],"vendor_data":{"business":"snapshot-kept"}}),
+            ),
+            (
+                "response.content_part.added",
+                "part",
+                json!({"type":"output_text","text":"","vendor_data":{"business":"snapshot-kept"}}),
+            ),
+        ] {
+            let mut event = json!({"type":kind,"output_index":0});
+            event[field] = snapshot;
+            let frames = vec![
+                format!("data: {event}\n\n").into_bytes(),
+                format!(
+                    "data: {}\n\n",
+                    json!({"type":"response.completed","response":sample(&call("x"))})
+                )
+                .into_bytes(),
+            ];
+            let output = rewrite_v3_direct_dsml_attempt(&frames, &context())
+                .map(|(frames, _)| frames)
+                .unwrap_or_else(|| frames.clone());
+            let wire = String::from_utf8(output.concat()).unwrap();
+            assert!(
+                wire.contains("snapshot-kept"),
+                "{kind} lost its opaque snapshot field"
+            );
+            assert!(
+                wire.contains(OPEN),
+                "{kind} changed an unrepresentable association"
+            );
+        }
+    }
+
+    #[test]
+    fn direct_dsml_all_exact_attempt_aliases_dispatch() {
+        let request = json!({"tools":[{"type":"namespace","name":"workspace","tools":[{"type":"function","name":"read_image","parameters":{"type":"object"}}]}]});
+        let inverse = HashMap::from([
+            (
+                "provider_alias_a".into(),
+                ("workspace".into(), "read_image".into()),
+            ),
+            (
+                "provider_alias_b".into(),
+                ("workspace".into(), "read_image".into()),
+            ),
+        ]);
+        let context = V3DirectDsmlContext::from_request(&request, &inverse);
+        for name in ["provider_alias_a", "provider_alias_b"] {
+            let text = call("x").replacen("name=\"read_image\"", &format!("name=\"{name}\""), 1);
+            let mut payload = sample(&text);
+            normalize_v3_direct_dsml_response(&mut payload, &context);
+            assert_eq!(
+                payload["output"][0]["type"], "function_call",
+                "exact attempt binding {name} was lost"
+            );
+            assert_eq!(payload["output"][0]["namespace"], "workspace");
+            assert_eq!(payload["output"][0]["name"], "read_image");
+        }
     }
 }
