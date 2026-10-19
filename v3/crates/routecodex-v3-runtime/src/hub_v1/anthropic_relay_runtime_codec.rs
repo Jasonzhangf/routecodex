@@ -808,10 +808,8 @@ mod tests {
         assert_eq!(delta["data"]["index"], 0);
         assert_eq!(delta["data"]["delta"]["type"], "input_json_delta");
         assert_eq!(
-            serde_json::from_str::<Value>(
-                delta["data"]["delta"]["partial_json"].as_str().unwrap()
-            )
-            .unwrap(),
+            serde_json::from_str::<Value>(delta["data"]["delta"]["partial_json"].as_str().unwrap())
+                .unwrap(),
             input
         );
         assert_eq!(

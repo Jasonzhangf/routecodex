@@ -1327,7 +1327,8 @@ async fn codex_sample_final_body_capture_persists_exact_large_sse_wire() {
         "x".repeat(200_000)
     )
     .into_bytes();
-    let terminal = b"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n".to_vec();
+    let terminal =
+        b"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n".to_vec();
     let expected = [keepalive.clone(), event.clone(), terminal.clone()].concat();
     let response = test_sse_response(futures_util::stream::iter(vec![
         Ok::<Bytes, io::Error>(Bytes::from(keepalive)),
@@ -1335,9 +1336,8 @@ async fn codex_sample_final_body_capture_persists_exact_large_sse_wire() {
         Ok(Bytes::from(terminal)),
     ]));
     let response = capture.observe_response(response);
-    let response_path = root.join(
-        ".rcc/codex-samples/openai-responses/ports/5555/final-body-exact-wire/response.json",
-    );
+    let response_path = root
+        .join(".rcc/codex-samples/openai-responses/ports/5555/final-body-exact-wire/response.json");
     assert!(
         !response_path.exists(),
         "final-body capture must not write a placeholder before the stream ends"
@@ -1379,7 +1379,9 @@ async fn codex_sample_final_body_capture_persists_source_error_and_preserves_bus
     let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
     let request_id = "final-body-source-error";
     let capture = test_final_body_sse_capture(&state, request_id);
-    let prefix = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\"}\n\n".to_vec();
+    let prefix =
+        b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\"}\n\n"
+            .to_vec();
     let response = test_sse_response(futures_util::stream::iter(vec![
         Ok::<Bytes, io::Error>(Bytes::from(prefix.clone())),
         Err(io::Error::other("provider source error")),
@@ -1436,10 +1438,8 @@ async fn codex_sample_final_body_capture_persists_drop_prefix_with_stream_error(
     let capture = test_final_body_sse_capture(&state, request_id);
     let prefix = b"event: message_delta\ndata: {\"type\":\"message_delta\"}\n\n".to_vec();
     let response = test_sse_response(
-        futures_util::stream::iter(vec![Ok::<Bytes, io::Error>(Bytes::from(
-            prefix.clone(),
-        ))])
-        .chain(futures_util::stream::pending()),
+        futures_util::stream::iter(vec![Ok::<Bytes, io::Error>(Bytes::from(prefix.clone()))])
+            .chain(futures_util::stream::pending()),
     );
     let response = capture.observe_response(response);
     let mut body = response.into_body().into_data_stream();
@@ -1447,9 +1447,8 @@ async fn codex_sample_final_body_capture_persists_drop_prefix_with_stream_error(
     drop(body);
 
     sample_worker.wait_until_idle().await.unwrap();
-    let response_path = root.join(
-        ".rcc/codex-samples/openai-responses/ports/5555/final-body-drop/response.json",
-    );
+    let response_path =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/final-body-drop/response.json");
     let persisted: Value =
         serde_json::from_str(&fs::read_to_string(response_path).unwrap()).unwrap();
     assert_eq!(
@@ -1490,7 +1489,8 @@ async fn codex_sample_final_body_capture_write_failure_does_not_change_sse_wire(
         ".rcc/codex-samples/openai-responses/ports/5555/final-body-write-failure/response.json",
     );
     fs::create_dir_all(&response_path).unwrap();
-    let wire = b": keepalive\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec();
+    let wire =
+        b": keepalive\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec();
     let response = test_sse_response(futures_util::stream::iter(vec![Ok::<Bytes, io::Error>(
         Bytes::from(wire.clone()),
     )]));

@@ -1446,14 +1446,13 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                     output.stream_observation.is_none(),
                 );
             }
-            let client_response_capture =
-                V3LiveSnapFinalSseResponseCapture::from_openai_chat_relay(
-                    &state,
-                    entry_protocol,
-                    &path,
-                    &request_id,
-                    &output,
-                );
+            let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_openai_chat_relay(
+                &state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &output,
+            );
             let response = openai_chat_relay_output_response(
                 output,
                 stream_console_finalizer,
@@ -1596,14 +1595,13 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                     );
                 }
             }
-            let client_response_capture =
-                V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(
-                    &state,
-                    entry_protocol,
-                    &path,
-                    &request_id,
-                    &output,
-                );
+            let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(
+                &state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &output,
+            );
             let response = anthropic_relay_output_response(output, requested_stream);
             return match client_response_capture {
                 Some(capture) => capture.observe_response(response),

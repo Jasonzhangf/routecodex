@@ -2051,7 +2051,8 @@ async fn anthropic_empty_signature_tool_followup_reaches_first_provider_attempt(
     for signature in [None, Some(""), Some("sig_nonempty")] {
         for next_kind in ["openai_chat", "anthropic"] {
             let wire =
-                probe_native_followup_attempt(next_kind, thinking, call_id, &input, signature).await;
+                probe_native_followup_attempt(next_kind, thinking, call_id, &input, signature)
+                    .await;
             assert_native_followup_thinking_and_tool_history(
                 next_kind, &wire, thinking, call_id, &input,
             );
@@ -2122,13 +2123,16 @@ async fn controlled_upstream(
         };
         let request_content_type = parts.headers.get(CONTENT_TYPE).cloned();
         let completed = live_forward.captures.lock().unwrap().len();
-        let has_tool_result = serde_json::from_slice::<Value>(&request_body).ok()
+        let has_tool_result = serde_json::from_slice::<Value>(&request_body)
+            .ok()
             .and_then(|body| body["messages"].as_array().cloned())
             .is_some_and(|messages| messages.iter().any(|message| message["role"] == "tool"));
         if completed >= 2 || (completed == 1 && !has_tool_result) {
             eprintln!("LIVE_PROBE_STOP: retry or extra generation outside the two-turn case");
-            return Response::builder().status(StatusCode::BAD_REQUEST)
-                .body(Body::from("live probe stopped; original exchange retained")).unwrap();
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from("live probe stopped; original exchange retained"))
+                .unwrap();
         }
         let mut request = live_forward
             .client
@@ -2172,8 +2176,16 @@ async fn controlled_upstream(
         let mut captured = live_forward.captures.lock().unwrap();
         let number = captured.len() + 1;
         let evidence_dir = live_native_evidence_dir();
-        write_live_evidence(&evidence_dir, &format!("claude-live-native-candidate-wire-{number}.json"), &exchange.request_body);
-        write_live_evidence(&evidence_dir, &format!("claude-live-native-rcc-response-{number}.body"), &exchange.response_body);
+        write_live_evidence(
+            &evidence_dir,
+            &format!("claude-live-native-candidate-wire-{number}.json"),
+            &exchange.request_body,
+        );
+        write_live_evidence(
+            &evidence_dir,
+            &format!("claude-live-native-rcc-response-{number}.body"),
+            &exchange.response_body,
+        );
         write_live_evidence(&evidence_dir, &format!("claude-live-native-exchange-{number}.meta.json"),
             json!({"rcc_status":exchange.response_status.map(|status|status.as_u16()),
                 "rcc_content_type":exchange.response_content_type,"transport_error":exchange.transport_error}).to_string().as_bytes());
@@ -2183,7 +2195,8 @@ async fn controlled_upstream(
             Some((status, content_type, body)) => {
                 let mut builder = Response::builder().status(status);
                 if let Some(content_type) = content_type {
-                    builder = builder.header(CONTENT_TYPE, HeaderValue::from_str(&content_type).unwrap());
+                    builder =
+                        builder.header(CONTENT_TYPE, HeaderValue::from_str(&content_type).unwrap());
                 }
                 builder.body(Body::from(body)).unwrap()
             }
@@ -5480,11 +5493,17 @@ async fn c8e707e_native_claude_cli_executes_bash_and_follows_up() {
             }]},"finish_reason":"tool_calls"}],
             "usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}})
     );
-    let (endpoint, handle, mut captures, shutdown) =
-        start_entry("openai_chat", "chat", StatusCode::OK, "text/event-stream", upstream).await;
+    let (endpoint, handle, mut captures, shutdown) = start_entry(
+        "openai_chat",
+        "chat",
+        StatusCode::OK,
+        "text/event-stream",
+        upstream,
+    )
+    .await;
     let base_url = endpoint.strip_suffix("/v1/responses").unwrap();
-    let config_home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
-        .join("native-claude");
+    let config_home =
+        std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("native-claude");
     std::fs::create_dir(&config_home).unwrap();
     let mut child = tokio::process::Command::new("/Users/fanzhang/.local/bin/claude");
     child
@@ -5506,32 +5525,71 @@ async fn c8e707e_native_claude_cli_executes_bash_and_follows_up() {
     let result = tokio::time::timeout(Duration::from_secs(90), child.output()).await;
     stop_entry(handle, shutdown).await;
     std::env::remove_var(KEY_ENV);
-    let output = result.expect("native Claude timeout").expect("native Claude launch");
+    let output = result
+        .expect("native Claude timeout")
+        .expect("native Claude launch");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(output.status.success(), "native Claude failed: {stdout}\n{stderr}");
-    let first = captures.recv().await.expect("native Claude first provider request");
+    assert!(
+        output.status.success(),
+        "native Claude failed: {stdout}\n{stderr}"
+    );
+    let first = captures
+        .recv()
+        .await
+        .expect("native Claude first provider request");
     let tools = first["tools"].as_array().expect("native tool declarations");
-    let bash = tools.iter().find(|tool| tool["function"]["name"] == "Bash")
+    let bash = tools
+        .iter()
+        .find(|tool| tool["function"]["name"] == "Bash")
         .expect("native Bash declaration reaches the selected provider");
-    assert!(bash.pointer("/function/parameters/properties/command").is_some(), "{bash}");
-    let followup = captures.recv().await.expect("native Claude paired follow-up");
+    assert!(
+        bash.pointer("/function/parameters/properties/command")
+            .is_some(),
+        "{bash}"
+    );
+    let followup = captures
+        .recv()
+        .await
+        .expect("native Claude paired follow-up");
     let messages = followup["messages"].as_array().unwrap();
-    let call = messages.iter().filter_map(|message| message["tool_calls"].as_array())
-        .flatten().find(|call| call["id"] == "call_native_claude")
+    let call = messages
+        .iter()
+        .filter_map(|message| message["tool_calls"].as_array())
+        .flatten()
+        .find(|call| call["id"] == "call_native_claude")
         .expect("original native call remains paired");
     assert_eq!(call["function"]["name"], "Bash");
-    assert_eq!(serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap()).unwrap(),
-        json!({"command": command}));
-    let tool_result = messages.iter().find(|message|
-        message["role"] == "tool" && message["tool_call_id"] == "call_native_claude")
+    assert_eq!(
+        serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap()).unwrap(),
+        json!({"command": command})
+    );
+    let tool_result = messages
+        .iter()
+        .find(|message| {
+            message["role"] == "tool" && message["tool_call_id"] == "call_native_claude"
+        })
         .expect("the native client must return the executed tool result");
     let actual = tool_result["content"].to_string();
-    assert!(actual.contains("CLAUDE_NATIVE_TOOL_PROBE"), "missing actual execution: {actual}\n{stdout}");
-    assert!(!actual.contains("InputValidationError") && !actual.contains("command is missing"), "{actual}");
-    assert!(stdout.contains("chat roundtrip complete"), "native final response: {stdout}");
-    assert!(matches!(captures.try_recv(), Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)),
-        "one accepted provider attempt per native turn");
+    assert!(
+        actual.contains("CLAUDE_NATIVE_TOOL_PROBE"),
+        "missing actual execution: {actual}\n{stdout}"
+    );
+    assert!(
+        !actual.contains("InputValidationError") && !actual.contains("command is missing"),
+        "{actual}"
+    );
+    assert!(
+        stdout.contains("chat roundtrip complete"),
+        "native final response: {stdout}"
+    );
+    assert!(
+        matches!(
+            captures.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+        ),
+        "one accepted provider attempt per native turn"
+    );
     eprintln!("CLAUDE_NATIVE_EXECUTION_AND_FOLLOWUP_OK");
 }
 
@@ -5557,9 +5615,11 @@ fn collect_json_blocks(value: &Value, block_type: &str, out: &mut Vec<Value>) {
 fn live_native_evidence_dir() -> std::path::PathBuf {
     std::env::var_os("CLAUDE_NATIVE_EVIDENCE_DIR")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from(
-            "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012",
-        ))
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(
+                "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012",
+            )
+        })
 }
 
 fn write_live_evidence(run_dir: &std::path::Path, name: &str, bytes: &[u8]) {
@@ -5623,8 +5683,8 @@ async fn c8e707e_native_claude_cli_live_rcc_bash_and_followup() {
         .expect("candidate base url")
         .to_string();
 
-    let child_home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
-        .join("claude-native-live");
+    let child_home =
+        std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("claude-native-live");
     let config_home = child_home.join("claude-config");
     std::fs::create_dir_all(&config_home).expect("fresh claude config home");
 
@@ -5663,8 +5723,14 @@ async fn c8e707e_native_claude_cli_live_rcc_bash_and_followup() {
     let status = match tokio::time::timeout(Duration::from_secs(120), child.wait()).await {
         Ok(status) => status.expect("native Claude live wait"),
         Err(_) => {
-            child.kill().await.expect("stop timed out owned native child");
-            child.wait().await.expect("reap timed out owned native child")
+            child
+                .kill()
+                .await
+                .expect("stop timed out owned native child");
+            child
+                .wait()
+                .await
+                .expect("reap timed out owned native child")
         }
     };
     stop_entry(handle, shutdown).await;
@@ -5707,7 +5773,10 @@ async fn c8e707e_native_claude_cli_live_rcc_bash_and_followup() {
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
         .collect();
-    assert!(!events.is_empty(), "native Claude stream-json events missing:\n{stdout}");
+    assert!(
+        !events.is_empty(),
+        "native Claude stream-json events missing:\n{stdout}"
+    );
     let mut tool_uses = Vec::new();
     collect_json_blocks(&Value::Array(events.clone()), "tool_use", &mut tool_uses);
     let bash_call = tool_uses
@@ -5720,16 +5789,20 @@ async fn c8e707e_native_claude_cli_live_rcc_bash_and_followup() {
         bash_call["input"]["command"], command,
         "native Bash call must be the exact allowed command: {bash_call}\nstdout:\n{stdout}"
     );
-    let call_id = bash_call["id"].as_str().expect("real generated tool call id");
+    let call_id = bash_call["id"]
+        .as_str()
+        .expect("real generated tool call id");
     assert!(!call_id.is_empty());
     let mut tool_results = Vec::new();
-    collect_json_blocks(&Value::Array(events.clone()), "tool_result", &mut tool_results);
+    collect_json_blocks(
+        &Value::Array(events.clone()),
+        "tool_result",
+        &mut tool_results,
+    );
     let matched_result = tool_results
         .iter()
         .find(|block| block["tool_use_id"] == call_id)
-        .unwrap_or_else(|| {
-            panic!("native tool_result for {call_id} missing:\nstdout:\n{stdout}")
-        });
+        .unwrap_or_else(|| panic!("native tool_result for {call_id} missing:\nstdout:\n{stdout}"));
     let result_text = matched_result["content"].to_string();
     assert!(
         result_text.contains("CLAUDE_NATIVE_TOOL_PROBE"),
@@ -5741,20 +5814,27 @@ async fn c8e707e_native_claude_cli_live_rcc_bash_and_followup() {
     );
     assert!(
         events.iter().any(|event| {
-            event["type"] == "result" && event["subtype"] == "success" && event["is_error"] != json!(true)
+            event["type"] == "result"
+                && event["subtype"] == "success"
+                && event["is_error"] != json!(true)
         }),
         "native final result turn missing or failed:\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
 
-    let first: Value = serde_json::from_slice(&exchanges[0].request_body).expect("first candidate wire");
-    assert_eq!(first["model"], route_model, "candidate must project the explicit route label");
+    let first: Value =
+        serde_json::from_slice(&exchanges[0].request_body).expect("first candidate wire");
+    assert_eq!(
+        first["model"], route_model,
+        "candidate must project the explicit route label"
+    );
     let tools = first["tools"].as_array().expect("native tool declarations");
     let bash = tools
         .iter()
         .find(|tool| tool["function"]["name"] == "Bash")
         .expect("native Bash declaration reaches the selected provider");
     assert!(
-        bash.pointer("/function/parameters/properties/command").is_some(),
+        bash.pointer("/function/parameters/properties/command")
+            .is_some(),
         "{bash}"
     );
     assert_eq!(
@@ -5775,7 +5855,8 @@ async fn c8e707e_native_claude_cli_live_rcc_bash_and_followup() {
         .expect("native follow-up keeps the real generated call id");
     assert_eq!(paired_call["function"]["name"], "Bash");
     assert_eq!(
-        serde_json::from_str::<Value>(paired_call["function"]["arguments"].as_str().unwrap()).unwrap(),
+        serde_json::from_str::<Value>(paired_call["function"]["arguments"].as_str().unwrap())
+            .unwrap(),
         bash_call["input"]
     );
     let paired_result = messages
@@ -5783,7 +5864,9 @@ async fn c8e707e_native_claude_cli_live_rcc_bash_and_followup() {
         .find(|message| message["role"] == "tool" && message["tool_call_id"] == call_id)
         .expect("native follow-up keeps the matching tool result");
     assert!(
-        paired_result["content"].to_string().contains("CLAUDE_NATIVE_TOOL_PROBE"),
+        paired_result["content"]
+            .to_string()
+            .contains("CLAUDE_NATIVE_TOOL_PROBE"),
         "paired native result must carry the real command output: {paired_result}"
     );
     assert_eq!(

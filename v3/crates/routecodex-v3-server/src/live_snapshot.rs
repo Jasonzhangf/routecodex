@@ -1,13 +1,13 @@
 use crate::*;
-use routecodex_v3_runtime::hub_v1::{V3AnthropicRelayClientBody, V3GeminiRelayClientBody};
 use axum::body::{Body, BodyDataStream, Bytes};
 use axum::http::Response;
 use futures_util::StreamExt;
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use routecodex_v3_runtime::hub_v1::{V3AnthropicRelayClientBody, V3GeminiRelayClientBody};
 use routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput;
 use serde_json::{json, Value};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 
 pub(crate) fn start_v3_live_snapshot_session(
     state: &V3ListenerState,
@@ -275,9 +275,9 @@ impl Drop for V3LiveSnapFinalSseBodyStream {
             return;
         }
         if let Some(core) = self.core.take() {
-            if let Err(error) = core.persist_terminal(Some(
-                "client disconnected before response stream completed",
-            )) {
+            if let Err(error) =
+                core.persist_terminal(Some("client disconnected before response stream completed"))
+            {
                 eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
             }
         }
@@ -332,10 +332,10 @@ impl V3LiveSnapFinalSseResponseCapture {
         request_id: &str,
         output: &V3OpenAiChatRelayRuntimeOutput,
     ) -> Option<Self> {
-        let capture_client_response =
-            state.debug.should_capture_snapshot_stage("client-response");
-        let capture_provider_response =
-            state.debug.should_capture_snapshot_stage("provider-response");
+        let capture_client_response = state.debug.should_capture_snapshot_stage("client-response");
+        let capture_provider_response = state
+            .debug
+            .should_capture_snapshot_stage("provider-response");
         if !capture_client_response && !capture_provider_response {
             return None;
         }
@@ -398,10 +398,10 @@ impl V3LiveSnapFinalSseResponseCapture {
         request_id: &str,
         output: &V3GeminiRelayRuntimeOutput,
     ) -> Option<Self> {
-        let capture_client_response =
-            state.debug.should_capture_snapshot_stage("client-response");
-        let capture_provider_response =
-            state.debug.should_capture_snapshot_stage("provider-response");
+        let capture_client_response = state.debug.should_capture_snapshot_stage("client-response");
+        let capture_provider_response = state
+            .debug
+            .should_capture_snapshot_stage("provider-response");
         if !capture_client_response && !capture_provider_response {
             return None;
         }
@@ -895,9 +895,7 @@ pub(crate) fn capture_v3_gemini_relay_response(
     request_id: &str,
     output: &mut V3GeminiRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
-    let capture_client_response = state
-        .debug
-        .should_capture_snapshot_stage("client-response");
+    let capture_client_response = state.debug.should_capture_snapshot_stage("client-response");
     let capture_provider_response = state
         .debug
         .should_capture_snapshot_stage("provider-response");

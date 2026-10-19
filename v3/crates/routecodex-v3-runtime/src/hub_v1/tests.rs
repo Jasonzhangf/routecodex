@@ -591,7 +591,10 @@ fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_wire_s
         messages[1]["routecodex_chat_extension"]["responses_reasoning_encrypted_content"],
         "opaque-reasoning"
     );
-    let wire = super::request_outbound_format::build_v3_openai_chat_standard_request_from_chat_canonical(&request)
+    let wire =
+        super::request_outbound_format::build_v3_openai_chat_standard_request_from_chat_canonical(
+            &request,
+        )
         .expect("canonical Chat must project to the provider wire");
     let serialized = serde_json::to_string(&wire).expect("OpenAI Chat provider wire JSON");
     assert!(!serialized.contains("opaque-reasoning"));

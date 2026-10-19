@@ -493,15 +493,13 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             error_status,
         );
     }
-    if let Some(response) =
-        capture_v3_non_responses_direct_client_response(
-            state,
-            "openai_chat",
-            &path,
-            &request_id,
-            &mut frame,
-        )
-    {
+    if let Some(response) = capture_v3_non_responses_direct_client_response(
+        state,
+        "openai_chat",
+        &path,
+        &request_id,
+        &mut frame,
+    ) {
         return response;
     }
     let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_direct_frame(
@@ -738,15 +736,13 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
     );
     frame.observability = output.observability;
     frame.stream_observation = output.stream_observation;
-    if let Some(response) =
-        capture_v3_non_responses_direct_client_response(
-            state,
-            "anthropic",
-            &path,
-            &request_id,
-            &mut frame,
-        )
-    {
+    if let Some(response) = capture_v3_non_responses_direct_client_response(
+        state,
+        "anthropic",
+        &path,
+        &request_id,
+        &mut frame,
+    ) {
         return response;
     }
     let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_direct_frame(
@@ -870,13 +866,9 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
         ) {
             return response;
         }
-        if let Some(response) = capture_v3_gemini_relay_response(
-            state,
-            "gemini",
-            &path,
-            &request_id,
-            &mut relay_output,
-        ) {
+        if let Some(response) =
+            capture_v3_gemini_relay_response(state, "gemini", &path, &request_id, &mut relay_output)
+        {
             return response;
         }
         let finalizer = match (
@@ -963,15 +955,13 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
     );
     frame.observability = output.observability;
     frame.stream_observation = output.stream_observation;
-    if let Some(response) =
-        capture_v3_non_responses_direct_client_response(
-            state,
-            "gemini",
-            &path,
-            &request_id,
-            &mut frame,
-        )
-    {
+    if let Some(response) = capture_v3_non_responses_direct_client_response(
+        state,
+        "gemini",
+        &path,
+        &request_id,
+        &mut frame,
+    ) {
         return response;
     }
     let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_direct_frame(

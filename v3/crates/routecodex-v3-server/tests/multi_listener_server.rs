@@ -10,8 +10,7 @@ use axum::{
 };
 use futures_util::{future::join_all, SinkExt, StreamExt};
 use routecodex_v3_config::{
-    compile_v3_config_05_manifest, parse_v3_config_02_authoring,
-    V3EntryProtocolExecutionMode,
+    compile_v3_config_05_manifest, parse_v3_config_02_authoring, V3EntryProtocolExecutionMode,
 };
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
@@ -606,10 +605,7 @@ fn read_responses_sample_response_by_request_marker(
     panic!("no Codex sample request contains marker {request_marker}");
 }
 
-fn read_snapall_sample_dir(
-    samples_root: &std::path::Path,
-    request_marker: &str,
-) -> PathBuf {
+fn read_snapall_sample_dir(samples_root: &std::path::Path, request_marker: &str) -> PathBuf {
     let entries = fs::read_dir(samples_root)
         .unwrap_or_else(|error| panic!("sample root must exist at {samples_root:?}: {error}"))
         .collect::<Result<Vec<_>, _>>()
@@ -689,10 +685,8 @@ async fn assert_snapall_protocol_json_and_sse(
         .wait_for_codex_sample_persistence()
         .await
         .expect("accepted snapall samples must finish before disk inspection");
-    let samples_root = home_guard.codex_samples_root_for(
-        endpoint_name,
-        handle.listeners[0].addr.port(),
-    );
+    let samples_root =
+        home_guard.codex_samples_root_for(endpoint_name, handle.listeners[0].addr.port());
     let json_dir = read_snapall_sample_dir(&samples_root, json_marker);
     let sse_dir = read_snapall_sample_dir(&samples_root, sse_marker);
     assert_snapall_four_stage_artifacts("JSON request", &json_dir);
@@ -2658,7 +2652,10 @@ async fn start_controlled_openai_chat_upstream() -> (
     let (captures_tx, captures_rx) = mpsc::unbounded_channel();
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let app = Router::new()
-        .route("/v1/chat/completions", post(controlled_openai_chat_upstream))
+        .route(
+            "/v1/chat/completions",
+            post(controlled_openai_chat_upstream),
+        )
         .with_state(Arc::new(ProviderState {
             captures: captures_tx,
         }));
@@ -2673,10 +2670,7 @@ async fn start_controlled_openai_chat_upstream() -> (
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
 }
 
-fn controlled_snapall_json_response(
-    provider: &str,
-    text: &str,
-) -> Response<Body> {
+fn controlled_snapall_json_response(provider: &str, text: &str) -> Response<Body> {
     let value = match provider {
         "responses" => json!({
             "id": "resp_json",
@@ -12219,10 +12213,7 @@ async fn snapall_openai_chat_direct_persists_complete_four_stage_wire() {
     manifest.debug.full_codex_sampling = true;
     manifest.debug.snapshot_direct = true;
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let endpoint = format!(
-        "http://{}/v1/chat/completions",
-        handle.listeners[0].addr
-    );
+    let endpoint = format!("http://{}/v1/chat/completions", handle.listeners[0].addr);
     let client = reqwest::Client::new();
     let large_marker = format!("snapall-chat-direct-{}", "x".repeat(200_000));
 
@@ -12261,10 +12252,8 @@ async fn snapall_openai_chat_direct_persists_complete_four_stage_wire() {
         .wait_for_codex_sample_persistence()
         .await
         .expect("accepted snapall samples must finish before disk inspection");
-    let samples_root = home_guard.codex_samples_root_for(
-        "openai-chat-completions",
-        handle.listeners[0].addr.port(),
-    );
+    let samples_root = home_guard
+        .codex_samples_root_for("openai-chat-completions", handle.listeners[0].addr.port());
     let mut json_sample_dir = None;
     let mut sse_sample_dir = None;
     for entry in fs::read_dir(&samples_root)
@@ -12439,8 +12428,14 @@ async fn snapall_relay_matrix_persists_four_stage_exact_wire_for_all_protocols()
     let mut manifest = snapall_all_protocols_manifest(free_port(), free_port(), &upstream_base);
     set_snapall_entry_protocol_modes(&mut manifest, V3EntryProtocolExecutionMode::Relay);
     enable_snapall_full_sampling(&mut manifest);
-    manifest.debug.retention.insert("raw_requests".to_string(), 0);
-    manifest.debug.retention.insert("raw_responses".to_string(), 0);
+    manifest
+        .debug
+        .retention
+        .insert("raw_requests".to_string(), 0);
+    manifest
+        .debug
+        .retention
+        .insert("raw_responses".to_string(), 0);
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
     let base = format!("http://{}", handle.listeners[0].addr);
@@ -12572,25 +12567,57 @@ async fn snapall_direct_relay_handoffs_persist_four_stage_exact_wire() {
     .await;
 
     for (marker, direct_model, relay_model) in [
-        ("snapall handoff chat json", Some("chat-alpha-wire"), "responses-wire"),
-        ("snapall handoff chat sse", Some("chat-alpha-wire"), "responses-wire"),
-        ("snapall handoff anthropic json", Some("anthropic-alpha-wire"), "chat-ok-wire"),
-        ("snapall handoff anthropic sse", Some("anthropic-alpha-wire"), "chat-ok-wire"),
+        (
+            "snapall handoff chat json",
+            Some("chat-alpha-wire"),
+            "responses-wire",
+        ),
+        (
+            "snapall handoff chat sse",
+            Some("chat-alpha-wire"),
+            "responses-wire",
+        ),
+        (
+            "snapall handoff anthropic json",
+            Some("anthropic-alpha-wire"),
+            "chat-ok-wire",
+        ),
+        (
+            "snapall handoff anthropic sse",
+            Some("anthropic-alpha-wire"),
+            "chat-ok-wire",
+        ),
         ("snapall handoff gemini json", None, "chat-ok-wire"),
         ("snapall handoff gemini sse", None, "chat-ok-wire"),
     ] {
-        let direct = captures.try_recv().expect("the failing Direct provider must be attempted");
-        let relay = captures.try_recv().expect("the Relay provider must recover that request");
-        assert!(direct.body.to_string().contains(marker), "Direct attempt must preserve its request: {direct:?}");
-        assert!(relay.body.to_string().contains(marker), "Relay attempt must preserve the same request: {relay:?}");
+        let direct = captures
+            .try_recv()
+            .expect("the failing Direct provider must be attempted");
+        let relay = captures
+            .try_recv()
+            .expect("the Relay provider must recover that request");
+        assert!(
+            direct.body.to_string().contains(marker),
+            "Direct attempt must preserve its request: {direct:?}"
+        );
+        assert!(
+            relay.body.to_string().contains(marker),
+            "Relay attempt must preserve the same request: {relay:?}"
+        );
         if let Some(model) = direct_model {
             assert_eq!(direct.body["model"], model);
         } else {
-            assert!(direct.body["contents"].is_array(), "the first Gemini attempt must use the actual Gemini wire");
+            assert!(
+                direct.body["contents"].is_array(),
+                "the first Gemini attempt must use the actual Gemini wire"
+            );
         }
         assert_eq!(relay.body["model"], relay_model);
     }
-    assert!(captures.try_recv().is_err(), "handoff must not create extra provider attempts");
+    assert!(
+        captures.try_recv().is_err(),
+        "handoff must not create extra provider attempts"
+    );
 
     let failures = handle.shutdown().await;
     assert!(failures.is_empty(), "sample writes failed: {failures:?}");
