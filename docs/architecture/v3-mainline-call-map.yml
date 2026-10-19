@@ -10326,8 +10326,8 @@ chains:
     producer: ErrorErr05ExecutionDecision
     legal_values: [retry, terminal_client_error]
     retry:
-      consumers: [ErrorErr06ClientProjected, RuntimeRetryLaunch, RuntimeAttemptCleanup, V3OperationRunnerNormalizeRequest]
-      effect: Error06 stages no client error; Runtime discards that empty result, releases failed attempt context through typed attempt_cleanup, and re-enters the request graph; RuntimeRequestFinalizer is not triggered
+      consumers: [RuntimeRetryLaunch, RuntimeAttemptCleanup, V3OperationRunnerNormalizeRequest]
+      effect: Error05 returns the recoverable decision without invoking Error06; Runtime releases only failed attempt context through typed attempt_cleanup and launches a new attempt outside the static graph; RuntimeRequestFinalizer is not triggered
     terminal_client_error:
       consumers: [ErrorErr06ClientProjected, RuntimeAttemptCleanup, RuntimeRequestFinalizer]
       effect: Error06 records internal failure evidence; Runtime terminates the affected transport through Server/SSE without committing a client error
@@ -10731,6 +10731,12 @@ chains:
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
     status: anchored
     owner_feature_id: v3.provider_response_error_policy_closeout
+    whole_attempt_contract:
+      phase: after_all_declared_rewrites_before_terminal_seal
+      current_binding: post_rewrite_whole_attempt_public_blackbox_candidate
+      empty: ProviderFailure/provider_response_empty/internal_502
+      processing_failure: RuntimeFailure/internal_599
+      internal_followup: typed_servertool_followup_without_client_commit
     resource_flow:
       consumes: [v3.response.provider_raw, v3.sse.direct.full_attempt_buffer]
       produces: [v3.error.source]

@@ -1263,7 +1263,7 @@ resources:
     semantic_contract:
       owner: ErrorErr05ExecutionDecision
       legal_values: [retry, terminal_client_error]
-      retry_rule: retry remains a typed control decision; the fixed Error graph still reaches Error06, which emits no error projection, RuntimeRetryLaunch consumes the decision and runs typed attempt_cleanup, then re-enters the request graph without client SSE commit and without RuntimeRequestFinalizer
+      retry_rule: recoverable retry/reselect decisions exit at Error05 without invoking Error06; RuntimeRetryLaunch consumes the decision and runs typed attempt_cleanup, then launches a new attempt outside the static graph without client SSE commit and without RuntimeRequestFinalizer
       terminal_rule: the legacy terminal_client_error value means terminal no-commit; Error06 retains internal diagnostic evidence only, Server consumes the typed transport outcome and ends the affected transport without error bytes or success completion; RuntimeAttemptCleanup releases attempt scope before RuntimeRequestFinalizer releases request scope
       payload_rule: this decision is typed control resource; it is never reconstructed from response payload or debug state
     allowed_writers: [build_v3_error_05_execution_decision_from_v3_error_04, execute_v3_operation_runner_error_err05_execution_decision, run_v3_error_02_to_05_decision_operators]
@@ -3042,9 +3042,14 @@ resources:
     owner_node: V3CommittedClientSseBuilder
     identity: [requestId, attemptId, providerKey, protocol]
     allowed_writers: [V3CommittedClientSseBuilder::push, V3CommittedClientSseBuilder::seal, V3CommittedClientSseBuilder::drop, collect_direct_sse_attempt_after_terminal]
-    allowed_readers: [collect_direct_sse_attempt_after_terminal, V3CommittedClientSseStream, collapse_direct_client_sse_to_json]
+    allowed_readers: [collect_direct_sse_attempt_after_terminal, collect_direct_sse_attempt_after_terminal_with_memory, V3CommittedClientSseStream, collapse_direct_client_sse_to_json]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload, session.cache]
     must_pass_through: [V3ProviderResp14Raw, V3DirectResp14ProviderProjectionPrepared, Error01, Error03, Error04, Error05]
+    semantic_contract:
+      whole_attempt_admission: deliverability is checked across the complete buffered Direct SSE attempt after every registered response rewrite, including memory envelope stripping, and before terminal seal or client commit
+      empty_after_non_client_removal: if declared non-client envelope removal leaves no text, tool call, reasoning, refusal, or content_filter result, return ProviderFailure/provider_response_empty as internal 502 into Error01
+      representable_business_failure: if a real representable business result is lost, corrupted, or rejected during rewrite, projection, or framing, return RuntimeFailure/internal 599 into Error01 instead of upstream blame or an empty success
+      preservation_rule: tool-call-only, reasoning, refusal, content_filter, and visible text remain deliverable without semantic judgment
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -3548,8 +3553,12 @@ resources:
       producer: govern_v3_operation_runner_chat_response
       legal_values: [client_commit, servertool_followup]
       graph_rule: every response node runs once in fixed order; the disposition never changes graph topology or skips a node
-      client_commit_effect: RuntimeClientCommit may submit the staged client-frame-candidate only after the graph returns and this typed value is client_commit
-      servertool_effect: inverse and frame staging produce an empty candidate for servertool_followup; Runtime discards it, executes the declared sidecar, and re-enters the request graph
+      whole_attempt_rule: business deliverability is checked after every declared Direct or Relay response rewrite, across the complete attempt, without usage/output-token or last-frame inference
+      client_commit_effect: after all declared rewrites, the complete attempt must retain deliverable business content; RuntimeClientCommit may submit the staged client-frame-candidate only after the graph returns and this typed value is client_commit
+      empty_attempt_effect: if only a deliberately removed non-client control envelope remains after all declared rewrites, no frame is committed and ProviderFailure/provider_response_empty enters Error01 as internal 502
+      processing_failure_effect: loss or failure of representable business content during rewrite, inverse projection, or framing enters Error01 as RuntimeFailure/internal 599 instead of upstream blame or partial success
+      business_content_rule: ordinary text, tool-call-only, reasoning, refusal, and content_filter are deliverable business results
+      servertool_effect: inverse and frame staging produce an empty candidate for servertool_followup; Runtime discards it, executes the declared typed sidecar plan, and re-enters the request graph without client commit
       retry_rule: retry is owned by ErrorErr05ExecutionDecision through v3.error.execution_decision, not by Resp03
       cancel_rule: cancellation is owned by RuntimeCancellation, not produced by Resp03
       finalization: client_commit reaches RuntimeClientCommit and then RuntimeRequestFinalizer; terminal_client_error_cancel_and_disconnect run typed attempt_cleanup before RuntimeRequestFinalizer; servertool_followup runs RuntimeInternalFollowup, typed attempt_cleanup, and re-enters the request graph without request-scoped finalization
@@ -3587,7 +3596,10 @@ resources:
     identity: [requestId, successfulAttemptId, entryProtocol, frameSequence]
     semantic_contract:
       staging_only: this resource is a staged candidate produced by the fixed response graph; it is never written directly to a client body
-      committer: RuntimeClientCommit alone submits the staged candidate to Server/SSE after the graph returns and execution_disposition=client_commit
+      committer: RuntimeClientCommit alone submits the staged candidate to Server/SSE after all declared rewrites leave deliverable whole-attempt business content and execution_disposition=client_commit
+      deliverable_rule: ordinary text, tool-call-only, reasoning, refusal, and content_filter are business results; usage and the last frame alone do not establish deliverability
+      empty_attempt_rule: no candidate is committed when the complete attempt is empty after declared non-client envelope removal; ProviderFailure/provider_response_empty enters Error01 as internal 502
+      processing_failure_rule: loss or failure of representable business content enters Error01 as RuntimeFailure/internal 599, not as client success or upstream failure
       servertool_rule: RespOutbound and frame staging return an empty candidate for servertool_followup; Runtime discards it and re-enters the request graph
       terminal_rule: terminal failures produce no client frame candidate; Runtime consumes the typed no-commit decision and Server/SSE aborts the affected transport
       client_communication_owner: Server/SSE owns actual HTTP/WebSocket/SSE framing and final delivery; graph nodes do not communicate with the client
@@ -3630,8 +3642,8 @@ resources:
     identity: [requestId, decision, status, code, errorNode]
     semantic_contract:
       staging_only: this legacy-named resource carries internal error evidence only; it never contains a model-client error candidate
-      retry_rule: Error06 always runs but returns an empty candidate for retry; Runtime discards it and re-enters the request graph
-      terminal_rule: the legacy terminal_client_error decision means terminal no-commit; Runtime consumes the typed outcome, Server/SSE aborts the affected transport, and typed cleanup releases attempt and request scopes
+      retry_rule: recoverable retry/reselect decisions exit at Error05 without invoking Error06; RuntimeRetryLaunch performs typed attempt_cleanup and launches a new attempt outside the static graph
+      terminal_rule: only the terminal_client_error decision invokes Error06 to record this internal evidence; Runtime consumes the typed outcome, Server/SSE aborts the affected transport, and typed cleanup releases attempt and request scopes
       committer: Runtime consumes internal evidence only; Server/SSE receives successful business data or typed no-response intent, never an error payload
     allowed_writers: [ErrorErr06ClientProjected, build_v3_error_06_client_projected_from_v3_error_05]
     allowed_readers: [runtime_client_commit]
@@ -3639,7 +3651,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    release_point: runtime_client_commit_for_terminal_projection; attempt_cleanup_for_terminal_projection_before_request_finalizer; empty_retry_candidate_released_by_attempt_cleanup_before_request_reentry
+    release_point: attempt_cleanup_for_terminal_projection_before_request_finalizer; recoverable_attempt_cleanup_before_external_new_attempt; never_runtime_client_commit
     binding_status: design_pending
 
   - resource_id: v3.operation_runner.metadata_center_control
