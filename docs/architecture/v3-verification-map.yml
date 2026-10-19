@@ -1146,9 +1146,11 @@ features:
   - docs/goals/v3-responses-direct-mvp-implementation-plan.md
   - docs/goals/v3-vr-target-protocol-execution-decision-sop.md
   test_design:
+  - docs/goals/3ccb5fa-direct-dsml.md
   - docs/goals/v3-responses-direct-mvp-test-design.md
   - docs/goals/v3-direct-thinking-tag-response-compat-test-design.md
   required_contract:
+  - Complete declared DSML tool envelopes are normalized only by the registered Responses Direct response hook; quoted, incomplete and unrepresentable envelopes remain text. JSON and complete SSE attempts preserve surrounding content, arguments, native calls and matched follow-up results.
   - P6 owns only adjacent transitions V3Target10ConcreteProviderSelected through V3Server16HttpFrame, with V3Execution11ProtocolDecision between Target10 and Direct policy
   - Runtime remains the only complete lifecycle executor
   - routecodex-v3-provider-responses is generic and contains no deployment provider ID or provider-family branch
@@ -1168,6 +1170,8 @@ features:
     JSON as client SSE without treating provider inbound transport as client protocol truth
   - Client stream requests keep text/event-stream for Error06 and success frames; non-stream requests keep JSON while valid provider JSON may omit top-level finish_reason
   required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_dsml_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_dsml_ -- --nocapture
   - npm run render:v3-mainline-caller-flow
   - npm run verify:v3-mainline-caller-flow
   - npm run test:v3-mainline-caller-flow-red-fixtures

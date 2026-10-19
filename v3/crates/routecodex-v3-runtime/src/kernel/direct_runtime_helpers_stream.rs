@@ -249,11 +249,33 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal(
 }
 
 pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
+    stream: V3SseAttemptStream,
+    provider_protocol: V3HubProviderWireProtocol,
+    attempt_budget: crate::nodes::V3AttemptBudget,
+    manifest: Option<&V3Config05ManifestPublished>,
+    request_id: Option<&str>,
+) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
+    collect_direct_sse_attempt_after_terminal_with_hooks(
+        stream,
+        provider_protocol,
+        attempt_budget,
+        manifest,
+        request_id,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
     mut stream: V3SseAttemptStream,
     provider_protocol: V3HubProviderWireProtocol,
     attempt_budget: crate::nodes::V3AttemptBudget,
     manifest: Option<&V3Config05ManifestPublished>,
     request_id: Option<&str>,
+    response_hook: Option<(
+        &crate::hooks::V3HookRegistry,
+        &crate::direct_response_hooks::V3DirectDsmlContext,
+    )>,
 ) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
     let deadline = tokio::time::Instant::from_std(attempt_budget.residence_deadline());
     let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
@@ -354,6 +376,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                         )
                     },
                 )?;
+                apply_complete_response_hook(&mut committed, response_hook)?;
                 let sealed = committed.seal_after_validated_terminal();
                 let sealed = sealed.map_err(|error| {
                     crate::shared::direct_plain_error(
@@ -397,6 +420,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                 error.to_string(),
             )
         })?;
+        apply_complete_response_hook(&mut committed, response_hook)?;
         let sealed = committed.seal_after_validated_terminal();
         let sealed = sealed.map_err(|error| {
             crate::shared::direct_plain_error(
@@ -414,6 +438,27 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         "provider_response_sse_stream",
         "provider SSE ended without a protocol terminal",
     ))
+}
+
+fn apply_complete_response_hook(
+    committed: &mut crate::execution_control::V3CommittedClientSseBuilder,
+    hook: Option<(
+        &crate::hooks::V3HookRegistry,
+        &crate::direct_response_hooks::V3DirectDsmlContext,
+    )>,
+) -> crate::shared::V3DirectSourceResult<()> {
+    if let Some((registry, context)) = hook {
+        registry
+            .project_complete_direct_sse(committed, context)
+            .map_err(|error| {
+                direct_attempt_store_error_source(
+                    error,
+                    "V3DirectResp14ProviderProjectionPrepared",
+                    "direct_response_hook_budget",
+                )
+            })?;
+    }
+    Ok(())
 }
 
 /// Typed provider-failure source for a complete Direct SSE attempt that carries
@@ -691,6 +736,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
     request_id: &str,
     retain_response_cipher: bool,
     compat_plan: &crate::direct_response_hooks::V3DirectResponseCompatPlan,
+    dsml_context: &crate::direct_response_hooks::V3DirectDsmlContext,
     namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
     hook_registry: &V3HookRegistry,
     failure_session_scope: &V3ProviderFailureSessionScope,
@@ -721,12 +767,13 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
         true,
         namespace_tool_identities,
     );
-    collect_direct_sse_attempt_after_terminal_with_memory(
+    collect_direct_sse_attempt_after_terminal_with_hooks(
         projected,
         compat_plan.provider_protocol,
         attempt_budget,
         Some(manifest),
         Some(request_id),
+        Some((hook_registry, dsml_context)),
     )
     .await
 }

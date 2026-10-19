@@ -688,6 +688,7 @@ resources:
     owner_node: V3DirectResp14ProviderCompat
     identity: [providerProtocol, modelId, compatibilityProfile]
     semantic_contract:
+      serialized_tools: the complete Direct response hook reads current request declarations together with the exact attempt namespace inverse; no declaration context is reconstructed from response text, metadata or logs
       namespace_inverse: the exact attempt wire binding restores only declared namespace identities or renamed plain names; original kind and business arguments remain provider content
       namespace_scope: context is request-local, is rebuilt for each retry attempt, and is released on completion, cancellation or exhaustion; it never grants undeclared calls or overwrites a non-null namespace
     allowed_writers: [V3DirectResponseCompatContext]

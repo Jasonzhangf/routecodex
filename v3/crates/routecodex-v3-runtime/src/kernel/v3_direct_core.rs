@@ -401,8 +401,8 @@ where
         // 客户端声明的响应 transport intent（wire 构建后即固定）。provider 契约
         // 可能强制上游走 SSE（如 OpenCode Zen 免费层），但客户端响应格式仍由
         // 该 intent 决定：JSON 客户端必须拿到缓冲后的 JSON，而不是泄漏的 SSE。
-        let client_response_wants_json = wire.stream_intent()
-            == routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json;
+        let client_response_wants_json =
+            wire.stream_intent() == routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json;
         // 只有声明了“上游必须 SSE”的 provider 契约（如 OpenCode Zen 免费层）才会把
         // JSON 客户端的上游请求强制成 SSE，因此也只有该契约下的 JSON 客户端需要把
         // 上游 SSE 折叠回 JSON。其他 provider 保持既有直通行为不变。
@@ -1002,6 +1002,10 @@ where
         let direct_namespace_tool_identities = response_projection_context
             .namespace_tool_identities
             .clone();
+        let direct_dsml_context = crate::direct_response_hooks::V3DirectDsmlContext::from_request(
+            C::body(&standardized),
+            &direct_namespace_tool_identities,
+        );
         let mut response_projection = match C::run_response_projection(
             provider_raw,
             response_projection_context,
@@ -1188,12 +1192,14 @@ where
                     true,
                     direct_namespace_tool_identities,
                 );
-                let committed = match crate::kernel::direct_runtime_helpers_stream::collect_direct_sse_attempt_after_terminal_with_memory(
+                let response_hooks = crate::hooks::register_responses_direct_hooks();
+                let committed = match crate::kernel::direct_runtime_helpers_stream::collect_direct_sse_attempt_after_terminal_with_hooks(
                     projected,
                     response_projection.compat_plan.provider_protocol,
                     attempt_budget.clone(),
                     Some(manifest),
                     Some(C::request_id(&standardized)),
+                    (C::ENTRY_PROTOCOL == "responses").then_some((&response_hooks, &direct_dsml_context)),
                 )
                 .await
                 {
@@ -1383,10 +1389,16 @@ where
                     (V3ClientBody::CommittedSse(committed), receipt)
                 }
             }
-            V3ProviderAttemptBody::Json(body) => (
-                V3ClientBody::Json(body),
-                V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
-            ),
+            V3ProviderAttemptBody::Json(mut body) => {
+                if C::ENTRY_PROTOCOL == "responses" {
+                    crate::hooks::register_responses_direct_hooks()
+                        .project_complete_direct_json(&mut body, &direct_dsml_context);
+                }
+                (
+                    V3ClientBody::Json(body),
+                    V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
+                )
+            }
             V3ProviderAttemptBody::Bytes(body) => (
                 V3ClientBody::Bytes(body),
                 V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),

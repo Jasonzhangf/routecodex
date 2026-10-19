@@ -1128,6 +1128,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             ));
         }
 
+        let direct_dsml_context = crate::direct_response_hooks::V3DirectDsmlContext::from_request(
+            &standardized.body,
+            &ns_tool_identities,
+        );
         let compat_context = match v3_direct_protocol_codec::build_direct_response_compat_context(
             &policy.target,
             ns_tool_identities.clone(),
@@ -1334,6 +1338,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 _ => None,
             };
         if let V3ProviderAttemptBody::Json(body) = &mut response_projection.attempt_payload.body {
+            hook_registry.project_complete_direct_json(body, &direct_dsml_context);
             crate::direct_response_hooks::apply_v3_direct_response_projection_hooks(
                 body,
                 crate::shared::v3_strip_client_response_id_enabled_for_server(
@@ -1480,6 +1485,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &standardized.request_id,
                         retain_response_cipher,
                         &response_projection.compat_plan,
+                        &direct_dsml_context,
                         ns_tool_identities.clone(),
                         &hook_registry,
                         &direct_failure_session_scope,

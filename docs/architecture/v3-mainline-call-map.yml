@@ -2141,6 +2141,7 @@ chains:
     status: anchored
     owner_feature_id: v3.responses_direct_mvp_architecture
     semantic_contract:
+      - Both the Responses kernel and generic Direct kernel invoke the registered complete-response DSML hook before JSON delivery or SSE sealing; parsing belongs to direct_response_hooks, never the collector
       - Runtime builds the request-local Direct context from the exact provider wire inverse before response projection; it does not infer an alias from provider or namespace strings
       - JSON and SSE item and terminal projection consume the same inverse and preserve kind, call ID, input and arguments; retry uses the current attempt binding
     resource_flow:

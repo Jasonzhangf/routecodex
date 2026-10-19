@@ -647,6 +647,45 @@ impl V3CommittedClientSseBuilder {
         Ok(())
     }
 
+    /// Whole-attempt response hooks run before sealing and remain inside the
+    /// same reservation, frame limit and byte limit as the original attempt.
+    pub(crate) fn rewrite_complete_attempt(
+        &mut self,
+        rewrite: impl FnOnce(&[Vec<u8>]) -> Option<(Vec<Vec<u8>>, usize)>,
+    ) -> Result<(), V3AttemptStoreError> {
+        let Some((frames, terminal)) = rewrite(&self.frames) else {
+            return Ok(());
+        };
+        let bytes = frames
+            .iter()
+            .try_fold(0usize, |n, f| n.checked_add(f.len()))
+            .ok_or_else(|| {
+                V3AttemptStoreError::LocalResourceExhausted(
+                    "rewritten attempt byte count overflowed".into(),
+                )
+            })?;
+        if frames.len() > self.limits.attempt_max_frames || bytes > self.limits.attempt_max_bytes {
+            return Err(V3AttemptStoreError::LocalResourceExhausted(
+                "rewritten attempt exceeds configured limits".into(),
+            ));
+        }
+        if terminal >= frames.len() || frames.iter().any(Vec::is_empty) {
+            return Err(V3AttemptStoreError::InvalidAttemptState(
+                "rewritten attempt requires nonempty frames and a terminal".into(),
+            ));
+        }
+        if bytes > self.byte_len {
+            self.reservation.reserve(bytes - self.byte_len)?;
+        } else {
+            self.reservation.budget.release(self.byte_len - bytes);
+            self.reservation.bytes = bytes;
+        }
+        self.byte_len = bytes;
+        self.frames = frames;
+        self.terminal_frame_index = Some(terminal);
+        Ok(())
+    }
+
     pub(crate) fn seal_after_validated_terminal(
         self,
     ) -> Result<V3CommittedClientSseStream, V3AttemptStoreError> {

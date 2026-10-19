@@ -81,6 +81,10 @@ type ResponseProjectionFuture =
     Pin<Box<dyn Future<Output = V3DirectSourceResult<V3ProviderResponseProjection>> + Send>>;
 type ContextualResponseProjectionHook =
     fn(V3ProviderResp14Raw, V3DirectResponseCompatContext) -> ResponseProjectionFuture;
+type CompleteResponseSseHook = fn(
+    &[Vec<u8>],
+    &crate::direct_response_hooks::V3DirectDsmlContext,
+) -> Option<(Vec<Vec<u8>>, usize)>;
 type ErrorHook = fn(
     V3Error01SourceRaised,
     V3ErrorActionScope,
@@ -102,6 +106,8 @@ pub struct V3HookRegistry {
     direct_sse_typed_hooks: V3DirectSseTypedHookCatalog,
     provider_transport: ProviderTransportHook,
     contextual_response_projection: ContextualResponseProjectionHook,
+    complete_response_json: fn(&mut Value, &crate::direct_response_hooks::V3DirectDsmlContext),
+    complete_response_sse: CompleteResponseSseHook,
     error: ErrorHook,
 }
 
@@ -115,6 +121,21 @@ impl std::fmt::Debug for V3HookRegistry {
 }
 
 impl V3HookRegistry {
+    pub(crate) fn project_complete_direct_json(
+        &self,
+        payload: &mut Value,
+        context: &crate::direct_response_hooks::V3DirectDsmlContext,
+    ) {
+        (self.complete_response_json)(payload, context);
+    }
+
+    pub(crate) fn project_complete_direct_sse(
+        &self,
+        builder: &mut crate::execution_control::V3CommittedClientSseBuilder,
+        context: &crate::direct_response_hooks::V3DirectDsmlContext,
+    ) -> Result<(), crate::execution_control::V3AttemptStoreError> {
+        builder.rewrite_complete_attempt(|frames| (self.complete_response_sse)(frames, context))
+    }
     pub fn hooks(&self) -> &'static [V3RegisteredHook] {
         self.hooks
     }
@@ -247,6 +268,12 @@ pub(crate) fn register_responses_direct_hooks_with_key_catalog(
             output_node: "V3DirectResp14ProviderProjectionPrepared",
         },
         V3RegisteredHook {
+            hook_id: "ResponsesDirectSerializedToolsHook",
+            hook_point: V3HookPoint::ResponseProjection,
+            input_node: "V3DirectResp14ProviderProjectionPrepared",
+            output_node: "V3DirectResp14ProviderProjectionPrepared",
+        },
+        V3RegisteredHook {
             hook_id: "ResponsesDirectErrorHook",
             hook_point: V3HookPoint::Error,
             input_node: "V3Error01SourceRaised",
@@ -264,6 +291,8 @@ pub(crate) fn register_responses_direct_hooks_with_key_catalog(
         direct_sse_typed_hooks,
         provider_transport: responses_direct_provider_transport_hook,
         contextual_response_projection: responses_direct_response_projection_hook_with_context,
+        complete_response_json: crate::direct_response_hooks::normalize_v3_direct_dsml_response,
+        complete_response_sse: crate::direct_response_hooks::rewrite_v3_direct_dsml_attempt,
         error: responses_direct_error_hook,
     }
 }

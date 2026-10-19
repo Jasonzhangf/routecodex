@@ -9,6 +9,12 @@ use crate::hub_v1::V3ToolThinkingTurnContext;
 use crate::runtime_timing::V3RuntimeTimingState;
 use routecodex_v3_config::V3Config05ManifestPublished;
 
+#[path = "direct_response_hooks_dsml.rs"]
+mod dsml;
+pub(crate) use dsml::{
+    normalize_v3_direct_dsml_response, rewrite_v3_direct_dsml_attempt, V3DirectDsmlContext,
+};
+
 /// The sole Direct response payload hook for protocol-neutral response cleanup.
 /// Both buffered JSON and SSE consumers call this owner; neither transport
 /// layer may reimplement response-id or cipher projection.
