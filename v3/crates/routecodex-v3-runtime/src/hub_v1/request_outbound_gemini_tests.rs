@@ -293,7 +293,7 @@ fn gemini_wire_rejects_reasoning_effort_without_a_shared_level() {
 }
 
 #[test]
-fn gemini_wire_drops_reasoning_summary_policy_as_unrepresentable() {
+fn gemini_wire_preserves_reasoning_summary_policy_opaquely() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
@@ -301,12 +301,15 @@ fn gemini_wire_drops_reasoning_summary_policy_as_unrepresentable() {
     });
     let projected =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect("Gemini has no reasoning_summary_policy projection: drop it, do not fail");
-    assert!(projected.get("reasoning_summary_policy").is_none());
+            .expect("unknown policy fields remain opaque business data");
+    assert_eq!(
+        projected["reasoning_summary_policy"],
+        payload["reasoning_summary_policy"]
+    );
 }
 
 #[test]
-fn gemini_wire_drops_invalid_reasoning_summary_policy_as_unrepresentable() {
+fn gemini_wire_preserves_unknown_reasoning_summary_policy_opaquely() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
@@ -314,12 +317,15 @@ fn gemini_wire_drops_invalid_reasoning_summary_policy_as_unrepresentable() {
     });
     let projected =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect("Gemini has no reasoning_summary_policy projection: drop it, do not fail");
-    assert!(projected.get("reasoning_summary_policy").is_none());
+            .expect("unknown policy values remain opaque business data");
+    assert_eq!(
+        projected["reasoning_summary_policy"],
+        payload["reasoning_summary_policy"]
+    );
 }
 
 #[test]
-fn gemini_wire_drops_parallel_tool_calls_true_as_unrepresentable() {
+fn gemini_wire_preserves_parallel_tool_calls_true_opaquely() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
@@ -327,12 +333,15 @@ fn gemini_wire_drops_parallel_tool_calls_true_as_unrepresentable() {
     });
     let projected =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect("Gemini has no exact parallel_tool_calls projection: drop it, do not fail");
-    assert!(projected.get("parallel_tool_calls").is_none());
+            .expect("parallel tool intent remains opaque business data");
+    assert_eq!(
+        projected["parallel_tool_calls"],
+        payload["parallel_tool_calls"]
+    );
 }
 
 #[test]
-fn gemini_wire_drops_parallel_tool_calls_false_as_unrepresentable() {
+fn gemini_wire_preserves_parallel_tool_calls_false_opaquely() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
@@ -340,8 +349,11 @@ fn gemini_wire_drops_parallel_tool_calls_false_as_unrepresentable() {
     });
     let projected =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect("Gemini cannot enforce disabled parallel tool calls: drop it, do not fail");
-    assert!(projected.get("parallel_tool_calls").is_none());
+            .expect("parallel tool intent remains opaque business data");
+    assert_eq!(
+        projected["parallel_tool_calls"],
+        payload["parallel_tool_calls"]
+    );
 }
 
 #[test]
@@ -482,7 +494,7 @@ fn gemini_wire_preserves_user_owned_routecodex_chat_extension_schema_property() 
 // fields with a declared exact mapping. Other Responses-origin Chat semantics
 // must remain explicit unmapped errors rather than being silently stripped.
 #[test]
-fn gemini_wire_drops_unmapped_responses_origin_fields_reported_live() {
+fn gemini_wire_preserves_unmapped_responses_origin_fields_opaquely() {
     let payload = json!({
         "model": "gemini-3.8-flash",
         "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
@@ -495,9 +507,15 @@ fn gemini_wire_drops_unmapped_responses_origin_fields_reported_live() {
     });
     let projected =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect("unmapped Responses-origin Chat fields must drop, not fail the request");
-    assert!(projected.get("parallel_tool_calls").is_none());
-    assert!(projected.get("reasoning_summary_policy").is_none());
+            .expect("unmapped Responses-origin Chat fields retain their original values");
+    assert_eq!(
+        projected["parallel_tool_calls"],
+        payload["parallel_tool_calls"]
+    );
+    assert_eq!(
+        projected["reasoning_summary_policy"],
+        payload["reasoning_summary_policy"]
+    );
 }
 
 #[test]

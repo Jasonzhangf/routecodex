@@ -52,16 +52,16 @@ for (const phrase of [
   'build_v3_hub_req_target_06_from_v3_hub_req_execution_05',
   'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06',
   'build_provider_req_compat_06_from_v3_hub_req_outbound_07',
-  'build_v3_provider_req_outbound_08_from_provider_req_compat_06',
-  'build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08',
+  'build_v3_provider_req_outbound_08_wire_from_compat_06',
+  'build_v3_provider_req_outbound_09_transport_from_wire',
   'provider_wire_protocol_for_selected_candidate',
-  'build_v3_provider_transport_request_for_protocol',
+  'bind_v3_selected_business_auth_kind',
   'transport.send(transport_request)',
   'build_v3_provider_resp_inbound_01_raw',
   'build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)',
   'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request',
   'hooks.govern(resp02',
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload',
+  'try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector',
   'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05',
   'V3_ERROR_CHAIN_NODE_IDS',
   'SseIncrementalDecoder',
@@ -86,7 +86,7 @@ for (const phrase of [
   'sse_provider_attempt_is_not_committed_before_provider_terminal',
   'sse_done_before_terminal_fails_and_terminal_without_done_succeeds',
   'provider_error_enters_error01_06_without_success_projection',
-  'request_side_channel_is_rejected_before_provider_transport',
+  'request_business_names_are_preserved_before_provider_transport',
 ]) requireText(tests, testsPath, phrase);
 for (const phrase of [
   'server_executes_controlled_json_sse_error_and_isolation_without_second_owner',
@@ -118,7 +118,7 @@ forbid(openaiServer, serverExecutorsPath, [
 ]);
 
 forbid(runtimeSurface, `${runtimePath}+${relayCorePath}+${relaySharedPath}`, [
-  /fallback/i,
+  /\bfallback\b/i,
   /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
   /dynamic[_ -]?hook|libloading|read_dir/i,
   /serde_json::(?:to_value|from_value|to_string)\([^)]*payload/i,

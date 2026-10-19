@@ -64,11 +64,6 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
     const POLICY_STAGE: &'static str = "V3GeminiDirect11Policy";
 
     fn build_standardized(raw: V3Server03HttpRequestRaw) -> Result<Self::Standardized, String> {
-        if let Some(key) = crate::hub_v1::find_v3_hub_side_channel_key(&raw.body) {
-            return Err(format!(
-                "RouteCodex side-channel field {key} cannot enter Gemini request payload"
-            ));
-        }
         let (endpoint_model, requested_stream) = gemini_endpoint_binding(&raw.path)?;
         let mut body = raw.body;
         let object = body

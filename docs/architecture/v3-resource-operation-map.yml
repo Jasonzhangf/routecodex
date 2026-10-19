@@ -431,6 +431,9 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3Req04StandardizedResponses
     identity: [requestId, endpoint]
+    semantic_contract:
+      control_provenance: typed_owner_not_business_key_spelling
+      opaque_names: business schema, arguments, results and extensions remain complete even when their names match typed control members
     allowed_writers: [V3Req04StandardizedResponses, V3HubReqInbound02Normalized]
     allowed_readers: [V3Router05RequestClassified, V3ResponsesDirect11Policy, V3HubReqChatProcess04Governed]
     forbidden_writers: [V3ProviderResp14Raw, V3Resp15ClientPayload, V3DebugArtifact]

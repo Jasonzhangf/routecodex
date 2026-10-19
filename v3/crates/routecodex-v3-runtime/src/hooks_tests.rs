@@ -814,23 +814,6 @@ fn malformed_current_image_source_is_client_input_without_internal_or_external_i
 }
 
 #[test]
-fn control_field_leak_source_is_internal_wire_boundary_violation() {
-    let source = provider_error_source("V3Provider12ResponsesWirePayload")(
-        V3ProviderError::ControlFieldInWireBody {
-            request_id: "req".to_string(),
-            field: "metadata",
-        },
-    )
-    .expect("provider source must execute Error01 successfully");
-
-    assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
-    assert!(source.external_error.is_none());
-    let internal = source.internal_error.expect("internal wire boundary code");
-    assert_eq!(internal.internal_code, "500-150");
-    assert_eq!(internal.node_id, "V3Provider12ResponsesWirePayload");
-}
-
-#[test]
 fn invalid_request_provider_error_branch_preserves_client_input_identity() {
     let errors = [
         V3ProviderError::InvalidWireBody {

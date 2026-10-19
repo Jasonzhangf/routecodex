@@ -8508,6 +8508,13 @@ async fn responses_direct_followup_preserves_function_strict_presence() {
     // Only the user message is sent initially; these two items are provider output.
     let provider_output = original["input"].as_array().unwrap()[1..3].to_vec();
     original["input"].as_array_mut().unwrap().truncate(1);
+    // bug03df769: a business schema property is not a proxy control resource.
+    // The controlled peer compares the complete tools on both actual attempts.
+    original["tools"][0]["parameters"]["properties"]["assignmentFields"] = json!({
+        "type":"object",
+        "properties":{"requiredCapabilities":{"type":"array","items":{"type":"string"}}},
+        "required":["requiredCapabilities"]
+    });
 
     struct StrictRoundtripState {
         captures: mpsc::UnboundedSender<ProviderCapture>,

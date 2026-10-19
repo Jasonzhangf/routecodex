@@ -994,15 +994,6 @@ pub(crate) fn build_v3_provider_error_source(
                 stage,
             )),
         ),
-        V3ProviderError::ControlFieldInWireBody { .. } => crate::shared::direct_source_error(
-            V3ErrorSourceKind::RuntimeFailure,
-            stage,
-            "provider_wire_control_field_leaked",
-            message,
-            crate::operation_runner::V3Err01SourceInput::Internal(internal_error_code_for_stage(
-                stage,
-            )),
-        ),
         V3ProviderError::InvalidBaseUrl { .. }
         | V3ProviderError::MissingAuthSecret { .. }
         | V3ProviderError::AuthSecretRead { .. }
@@ -1080,7 +1071,6 @@ pub(crate) fn source_code_for_external_provider_error(error: &V3ProviderError) -
         V3ProviderError::MalformedSse { .. } => "provider_malformed_sse".to_string(),
         V3ProviderError::InvalidWireBody { .. }
         | V3ProviderError::ProviderModelBindingMismatch { .. }
-        | V3ProviderError::ControlFieldInWireBody { .. }
         | V3ProviderError::InvalidStreamIntent { .. }
         | V3ProviderError::InvalidDataImage { .. }
         | V3ProviderError::InternalTransport { .. }
@@ -1220,7 +1210,6 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
         },
         V3ProviderError::InvalidWireBody { .. }
         | V3ProviderError::ProviderModelBindingMismatch { .. }
-        | V3ProviderError::ControlFieldInWireBody { .. }
         | V3ProviderError::InvalidStreamIntent { .. }
         | V3ProviderError::InvalidDataImage { .. }
         | V3ProviderError::InternalTransport { .. }

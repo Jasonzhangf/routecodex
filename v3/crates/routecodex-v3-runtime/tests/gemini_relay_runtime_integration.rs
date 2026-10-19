@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderAvailabilityReader, V3ProviderError, V3ProviderHttpFailure,
@@ -1513,7 +1514,7 @@ async fn sse_client_disconnect_is_health_neutral_and_never_enters_action_wait() 
 }
 
 #[tokio::test]
-async fn response_side_channel_is_rejected_for_json_and_sse_before_client_success() {
+async fn response_business_names_are_preserved_for_json_and_sse() {
     let server_id = "gemini_json_response_side_channel";
     let json_output = execute_v3_gemini_relay_runtime(
         &manifest_for_action_gate_scope(server_id),
@@ -1545,42 +1546,53 @@ async fn response_side_channel_is_rejected_for_json_and_sse_before_client_succes
     )
     .await
     .unwrap();
-    assert_eq!(json_output.status, 502);
-    assert_eq!(json_output.error_chain.as_ref().unwrap().len(), 6);
+    assert_eq!(json_output.status, 200);
+    assert!(json_output.error_chain.is_none());
     let json_client_response = match json_output.client_body {
         V3GeminiRelayClientBody::Json(value) => value,
-        V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON error body"),
+        V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON business body"),
     };
     assert!(
-        json_client_response["error"]["code"] == "network_error"
-            && !json_client_response.to_string().contains("metadata_center")
-            && !json_client_response.to_string().contains("hidden"),
-        "side-channel-contaminated provider response must not be projected as client success"
+        json_client_response.to_string().contains("metadata_center")
+            && json_client_response.to_string().contains("hidden"),
+        "provider business fields remain visible"
     );
 
-    let (status, sse_client_response, node_trace, error_chain) = collect_sse_failure(vec![br#"data: {"metadata_center":{"route":"must-not-leak"},"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"hidden"}]},"finishReason":"STOP"}]}
+    let transport = StaticSseTransport { chunks: Mutex::new(Some(vec![br#"data: {"metadata_center":{"route":"must-not-leak"},"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"hidden"}]},"finishReason":"STOP"}]}
 
 "#
-    .to_vec()], "gemini_sse_response_isolation")
-    .await;
-    assert_eq!(status, 502);
-    assert_eq!(error_chain.len(), 6);
-    assert_eq!(node_trace.last(), Some(&"V3Error06ClientProjected"));
+    .to_vec()])) };
+    let output = execute_v3_gemini_relay_runtime(
+        &manifest_for_action_gate_scope("gemini_sse_response_isolation"),
+        V3GeminiRelayRuntimeInput {
+            server_id: "gemini_sse_response_isolation".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server", "test-group", concat!(module_path!(), ":", line!()),
+            ).unwrap(),
+            request_id: "business-sse".into(),
+            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+            payload: json!({"contents":[{"role":"user","parts":[{"text":"business"}]}],"stream":true}),
+        }, &transport,
+    ).await.unwrap();
+    assert_eq!(output.status, 200);
+    assert!(output.error_chain.is_none());
+    let V3GeminiRelayClientBody::Sse(chunks) = output.client_body else {
+        panic!("expected SSE business body")
+    };
+    let text = String::from_utf8(chunks.collect::<Vec<_>>().await.concat()).unwrap();
     assert!(
-        sse_client_response["error"]["code"] == "network_error"
-            && !sse_client_response.to_string().contains("metadata_center")
-            && !sse_client_response.to_string().contains("hidden"),
-        "SSE side-channel payload must not be projected as a client success"
+        text.contains("metadata_center") && text.contains("hidden"),
+        "{text}"
     );
 }
 
 #[tokio::test]
-async fn side_channel_request_fails_before_provider_send() {
+async fn business_names_reach_provider_without_steering_typed_target() {
     let transport = JsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
     };
-    let error = execute_v3_gemini_relay_runtime(
+    let output = execute_v3_gemini_relay_runtime(
         &manifest(),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -1600,9 +1612,13 @@ async fn side_channel_request_fails_before_provider_send() {
         &transport,
     )
     .await
-    .unwrap_err();
-    assert!(error.to_string().contains("metadata_center"));
-    assert!(transport.captured_body.lock().unwrap().is_none());
+    .unwrap();
+    assert_eq!(output.status, 200);
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    assert_eq!(
+        captured["metadata_center"],
+        json!({"route":"must-not-leak"})
+    );
 }
 
 #[tokio::test]

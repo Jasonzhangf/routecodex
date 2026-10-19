@@ -1454,9 +1454,6 @@ features:
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
     owner_boundary: shared enums/value types used by multiple nodes; no node-local
       builders/parsers
-  - file: v3/crates/routecodex-v3-runtime/src/hub_v1/side_channel.rs
-    owner_boundary: side-channel lookup helpers only; no normal request/response payload
-      construction
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
     owner_boundary: provider-compat shared protocol helpers; no Hub node builder ownership
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs
@@ -1543,7 +1540,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/side_channel.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
@@ -2897,6 +2893,9 @@ features:
     preserves metadata but must not forward non-standard client_metadata.
   - RouteCodex-created internal control fields fail-fast before provider/client payload
     projection.
+  - Only the typed producing owner proves control provenance. Business key spelling,
+    including nested schema and tool argument names, never authorizes rejection,
+    deletion or promotion into runtime control truth (bug03df769).
   - OpenAI Chat function.arguments is a string-valued payload field and preserves
     the exact source string at the adjacent codec even when its contents are not parseable
     JSON; protocol targets that require structured argument values keep their own

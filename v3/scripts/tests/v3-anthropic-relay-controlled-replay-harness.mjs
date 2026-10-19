@@ -37,10 +37,6 @@ const MISSING_ADJACENT_EDGES = [
   'ProviderRespCompat02ProviderCompat->V3HubRespInbound02Normalized',
   'V3HubRespOutbound05ClientSemantic->V3ServerRespOutbound06ClientFrame',
 ];
-const FORBIDDEN_FIELDS = new Set([
-  'routecodex_internal', 'metadata_center', 'debug_snapshot', 'provider_protocol',
-  'resource_handle', 'runtime_control', 'selected_target',
-]);
 
 const args = parseArgs(process.argv.slice(2));
 const fixtureRoot = args['fixture-root']
@@ -139,7 +135,6 @@ async function runWithDriver(driverPath, loaded) {
       else if (!deepEqual(captured[0], value.expected_upstream_request)) failures.push('provider capture differs from expected_upstream_request');
       if (!projection || !deepEqual(projection.client_response, value.expected_client_response)) failures.push('client projection differs from expected_client_response');
       if (!projection || !orderedSubsequence(value.expected_node_trace, projection.node_trace)) failures.push('node_trace misses or reorders fixture-required adjacent nodes');
-      if (captured.some(hasForbiddenField) || hasForbiddenField(projection?.client_response)) failures.push('side-channel field leaked into provider/client normal payload');
       results.push({
         case_id: value.case_id,
         status: failures.length ? 'failed' : 'passed',
@@ -241,11 +236,6 @@ function orderedSubsequence(required, actual) {
   let cursor = 0;
   for (const node of actual) if (node === required[cursor]) cursor += 1;
   return cursor === required.length;
-}
-function hasForbiddenField(value) {
-  if (Array.isArray(value)) return value.some(hasForbiddenField);
-  if (!value || typeof value !== 'object') return false;
-  return Object.entries(value).some(([key, nested]) => FORBIDDEN_FIELDS.has(key) || hasForbiddenField(nested));
 }
 function emitEvidence(path, evidence) {
   const encoded = `${JSON.stringify(evidence, null, 2)}\n`;

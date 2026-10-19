@@ -48,10 +48,8 @@ requireAll(source, sourcePath, [
   'V3GeminiCodecStage', 'ClientInputToHubSemantic', 'HubSemanticToProviderWire',
   'ProviderRawToHubResponseSemantic', 'HubResponseSemanticToClientProjection',
   'V3HubEntryProtocol::Gemini', 'V3HubProviderWireProtocol::Gemini',
-  'validate_content_shapes', 'validate_response', 'reject_side_channel_fields',
+  'validate_content_shapes', 'validate_response',
   'ContentsNotArray', 'MalformedProviderError', 'CandidatesNotArray',
-  'routecodex_internal', 'metadata_center', 'debug_snapshot', 'provider_protocol',
-  'resource_handle', 'continuation_owner',
   'collect_v3_gemini_request_shape_branch_semantics',
   'V3GeminiChatShapeBranchSemantic',
   'V3GeminiRequestShapeBranchSemantic',
@@ -145,6 +143,7 @@ forbidNear(source, sourcePath, '"request.generationConfig.responseLogprobs"', 'C
 forbidNear(source, sourcePath, '"request.generationConfig.logprobs"', 'ChatLogprobs');
 forbidNear(source, sourcePath, '"request.generationConfig.seed"', 'ChatTopLogprobs');
 forbidAll(source, sourcePath, [
+  /reject_side_channel_fields/,
   /compile_v3_hub_v1_static_registry/, /compile_v3_hub_relay_(?:request|response)_hooks/,
   /V3HubStaticHookRegistry/, /V3HubRelay(?:Request|Response)Hook/, /routecodex-v3-server/,
   /V3HubEntryProtocol::(?:Responses|Anthropic|OpenAiChat)/, /fallback/i, /materializ/i,
@@ -153,7 +152,7 @@ forbidAll(source, sourcePath, [
 ]);
 requireAll(tests, 'focused Gemini codec tests', [
   'functionResponse', 'not_normalization', 'finishReason', 'usageMetadata', 'V3HubTransportIntent::Sse',
-  'MalformedProviderError', 'SideChannelLeaked', 'ProviderProtocolNotGemini',
+  'MalformedProviderError', 'business_names_preserved', 'ProviderProtocolNotGemini',
   'gemini_inline_data_maps_to_chat_inline_media_data',
   'gemini_inline_mime_type_does_not_map_to_inline_media_data',
   'gemini_inline_and_file_mime_type_maps_to_chat_media_mime_type',

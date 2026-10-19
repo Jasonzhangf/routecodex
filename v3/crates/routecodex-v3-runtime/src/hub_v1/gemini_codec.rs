@@ -153,8 +153,6 @@ pub enum V3GeminiCodecError {
     ProviderProtocolNotGemini,
     #[error("Gemini codec payload must be an object")]
     PayloadNotObject,
-    #[error("Gemini codec payload leaked RouteCodex side-channel field: {field}")]
-    SideChannelLeaked { field: &'static str },
     #[error("Gemini request contents must be an array")]
     ContentsNotArray,
     #[error("Gemini content parts must be an array")]
@@ -549,7 +547,6 @@ fn trace(stage: V3GeminiCodecStage, transport_intent: V3HubTransportIntent) -> V
 }
 
 fn validate_request(payload: &Value) -> Result<(), V3GeminiCodecError> {
-    reject_side_channel_fields(payload)?;
     let contents = payload
         .get("contents")
         .and_then(Value::as_array)
@@ -711,7 +708,6 @@ fn push_optional_generation_string_list(
 }
 
 fn validate_response(payload: &Value) -> Result<(), V3GeminiCodecError> {
-    reject_side_channel_fields(payload)?;
     if payload.get("error").is_some() {
         return validate_provider_error(payload);
     }
@@ -761,24 +757,6 @@ fn validate_provider_error(payload: &Value) -> Result<(), V3GeminiCodecError> {
     } else {
         Err(V3GeminiCodecError::MalformedProviderError)
     }
-}
-
-fn reject_side_channel_fields(payload: &Value) -> Result<(), V3GeminiCodecError> {
-    for key in require_object(payload)?.keys() {
-        let label = match key.as_str() {
-            "routecodex_internal" => Some("routecodex_internal"),
-            "metadata_center" => Some("metadata_center"),
-            "debug_snapshot" => Some("debug_snapshot"),
-            "provider_protocol" => Some("provider_protocol"),
-            "resource_handle" => Some("resource_handle"),
-            "continuation_owner" => Some("continuation_owner"),
-            _ => None,
-        };
-        if let Some(field) = label {
-            return Err(V3GeminiCodecError::SideChannelLeaked { field });
-        }
-    }
-    Ok(())
 }
 
 fn require_object(payload: &Value) -> Result<&Map<String, Value>, V3GeminiCodecError> {

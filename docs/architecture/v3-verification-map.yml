@@ -1859,6 +1859,14 @@ features:
 - feature_id: v3.protocol_conversion_field_parity
   status: runtime_active_live_verified_5520
   change_risk: high
+  business_name_regression:
+    issue: 03df769
+    test: responses_direct_followup_preserves_function_strict_presence
+    contract: complete nested assignmentFields.properties.requiredCapabilities reaches the first provider attempt and the actual client tool execution plus paired follow-up; no business field name is control provenance
+    command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_followup_preserves_function_strict_presence -- --exact --nocapture --test-threads=1
+    typed_writer_test: bug03df769_typed_transport_writer_isolates_control_from_business_body
+    typed_writer_command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib bug03df769_ -- --nocapture
+    typed_writer_negative_control: A temporary production transport writer mutation copies typed target.base_url into business selected_target; exact body preservation must fail. The mutation is absent from delivered source.
   owner_kind: rust_v3_protocol_codec_field_parity
   owner_scope: Lossless field parity for V3 Relay protocol conversion and Responses Direct; structured latest user/tool images survive across Chat, Responses and Anthropic. Chat projects tool images to adjacent user content, Responses to function_call_output.output and Anthropic to tool_result.content, without server/SSE/MetadataCenter repair owners.
   compatibility_exceptions:
