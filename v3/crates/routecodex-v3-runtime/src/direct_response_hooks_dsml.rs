@@ -486,8 +486,8 @@ fn event_has_unrepresentable_extension(event: &Value) -> bool {
             .any(|key| !KNOWN_EVENT_FIELDS.contains(&key.as_str()))
     }) || !empty_logprobs(event)
         || event
-        .get("item")
-        .is_some_and(|item| !known_message_item(item))
+            .get("item")
+            .is_some_and(|item| !known_message_item(item))
         || event.get("part").is_some_and(|part| !known_text_part(part))
 }
 
