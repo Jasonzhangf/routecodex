@@ -49,6 +49,9 @@ mod issue231_stale_probe;
 #[path = "multi_listener_server/issue245_permission_search.rs"]
 mod issue245_permission_search;
 
+#[path = "multi_listener_server/issue_d94731e_thinking.rs"]
+mod issue_d94731e_thinking;
+
 async fn read_raw_content_length_response(socket: &mut TcpStream) -> Vec<u8> {
     let mut wire = Vec::new();
     while !wire.ends_with(b"\r\n\r\n") {

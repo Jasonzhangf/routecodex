@@ -1,5 +1,39 @@
 use super::*;
 
+fn message_output_item(id: &str, text: &str) -> Value {
+    json!({
+        "id": id,
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": text}]
+    })
+}
+
+fn normalize_json_response(output: Vec<Value>) -> Value {
+    let mut response = json!({
+        "id": "resp_d94731e",
+        "status": "completed",
+        "output": output
+    });
+    assert!(normalize_v3_direct_thinking_json(&mut response));
+    response
+}
+
+fn sse_frames(input: &[u8]) -> Vec<Vec<u8>> {
+    let mut frames = Vec::new();
+    let mut start = 0usize;
+    while let Some(end) = input[start..]
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|position| start + position + 2)
+    {
+        frames.push(input[start..end].to_vec());
+        start = end;
+    }
+    frames
+}
+
 fn tagged_sse(text_deltas: &[&str], final_text: &str) -> Vec<u8> {
     let mut wire = String::from(
         "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"status\":\"in_progress\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"\"}]}}\n\n",
@@ -42,6 +76,116 @@ fn tagged_sse(text_deltas: &[&str], final_text: &str) -> Vec<u8> {
 }
 
 #[test]
+fn direct_thinking_json_complete_pair_harvests_exact_body_and_keeps_text() {
+    let response = normalize_json_response(vec![message_output_item(
+        "msg_d94731e_complete",
+        "before <thinking> exact body </thinking> after",
+    )]);
+    assert_eq!(
+        response["output"][0]["content"][0]["text"],
+        "before  after"
+    );
+    assert_eq!(response["output"][1]["type"], "reasoning");
+    assert_eq!(
+        response["output"][1]["summary"][0]["text"],
+        " exact body "
+    );
+}
+
+#[test]
+fn direct_thinking_json_leading_unclosed_without_tools_becomes_reasoning() {
+    let response = normalize_json_response(vec![message_output_item(
+        "msg_d94731e_open",
+        "<thinking>leading body",
+    )]);
+    assert_eq!(response["output"][0]["type"], "reasoning");
+    assert_eq!(
+        response["output"][0]["summary"][0]["text"],
+        "leading body"
+    );
+}
+
+#[test]
+fn direct_thinking_json_leading_unclosed_with_native_tool_stays_text() {
+    let tool = json!({
+        "id": "call_d94731e",
+        "type": "function_call",
+        "status": "completed",
+        "call_id": "call_d94731e",
+        "name": "exec_command",
+        "arguments": {"cmd":["printf","keep"]}
+    });
+    let response = normalize_json_response(vec![
+        message_output_item("msg_d94731e_tool", "<thinking>half body"),
+        tool.clone(),
+    ]);
+    assert_eq!(
+        response["output"][0]["content"][0]["text"],
+        "half body"
+    );
+    assert_eq!(response["output"][0]["type"], "message");
+    assert_eq!(response["output"][1], tool);
+}
+
+#[test]
+fn direct_thinking_json_closing_only_removes_marker_and_preserves_surrounding_text() {
+    let response = normalize_json_response(vec![message_output_item(
+        "msg_d94731e_close",
+        "before </thinking> after",
+    )]);
+    assert_eq!(
+        response["output"][0]["content"][0]["text"],
+        "before  after"
+    );
+    assert_eq!(response["output"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn direct_thinking_json_protected_and_malformed_examples_are_unchanged() {
+    let text = concat!(
+        "Use `<thinking>inline</thinking>`, ",
+        "\"<thinking>quoted</thinking>\", ",
+        "and <thinkingNow I see: proposal patch line 329 removes current `error =>"
+    );
+    let mut response = json!({"output": [message_output_item("msg_d94731e_literal", text)]});
+    let original = response.clone();
+    assert!(!normalize_v3_direct_thinking_json(&mut response));
+    assert_eq!(response, original);
+}
+
+#[test]
+fn direct_thinking_json_preserves_native_reasoning_tool_and_refusal_items() {
+    let reasoning = json!({
+        "id": "rs_native",
+        "type": "reasoning",
+        "summary": [{"type": "summary_text", "text": "native reasoning"}]
+    });
+    let tool = json!({
+        "id": "call_native",
+        "type": "function_call",
+        "call_id": "call_native",
+        "name": "exec_command",
+        "arguments": "{\"cmd\":\"printf keep\"}"
+    });
+    let refusal = json!({
+        "id": "msg_refusal",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type":"refusal","refusal":"cannot comply"}]
+    });
+    let response = normalize_json_response(vec![
+        reasoning.clone(),
+        tool.clone(),
+        refusal.clone(),
+        message_output_item("msg_aux", "<thinking>aux reasoning"),
+    ]);
+    assert_eq!(response["output"][0], reasoning);
+    assert_eq!(response["output"][1], tool);
+    assert_eq!(response["output"][2], refusal);
+    assert_eq!(response["output"][3]["content"][0]["text"], "aux reasoning");
+}
+
+#[test]
 fn direct_sse_thinking_tag_compat_maps_paired_tag_split_across_deltas() {
     let input = tagged_sse(
         &["<thi", "nking>", "inspect", " owner", "</think", "ing>"],
@@ -61,16 +205,13 @@ fn direct_sse_thinking_tag_compat_maps_paired_tag_split_across_deltas() {
 }
 
 #[test]
-fn direct_sse_thinking_tag_compat_strips_unpaired_open_tag_only() {
+fn direct_sse_thinking_tag_compat_leading_open_without_tools_becomes_reasoning() {
     let input = tagged_sse(&["<thinking>", "keep visible"], "<thinking>keep visible");
     let output = rewrite_v3_direct_thinking_tag_sse_bytes(&input).unwrap();
     let text = String::from_utf8(output).unwrap();
-    assert!(text.contains("response.output_text.delta"), "{text}");
     assert!(text.contains("keep visible"), "{text}");
-    assert!(
-        !text.contains("response.reasoning_summary_text.delta"),
-        "{text}"
-    );
+    assert!(text.contains("response.reasoning_summary_text.delta"), "{text}");
+    assert!(!text.contains("response.output_text.delta"), "{text}");
     assert!(!text.contains("<thinking>"), "{text}");
 }
 
@@ -99,6 +240,49 @@ fn direct_sse_thinking_tag_compat_keeps_ordinary_response_byte_exact() {
         rewrite_v3_direct_thinking_tag_sse_bytes(&input).unwrap(),
         input
     );
+}
+
+#[test]
+fn direct_thinking_attempt_sse_split_open_without_tools_becomes_reasoning() {
+    let input = tagged_sse(&["<thin", "king>leading ", "body"], "<thinking>leading body");
+    let frames = sse_frames(&input);
+    let (rewritten, terminal_index) =
+        rewrite_v3_direct_thinking_attempt(&frames).expect("thinking attempt must change");
+    assert!(terminal_index < rewritten.len());
+    let text = rewritten
+        .iter()
+        .map(|frame| String::from_utf8_lossy(frame))
+        .collect::<String>();
+    assert!(text.contains("response.reasoning_summary_text.delta"), "{text}");
+    assert!(text.contains("leading body"), "{text}");
+    assert!(!text.contains("<thinking>"), "{text}");
+    assert!(!text.contains("response.output_text.delta"), "{text}");
+    let terminal = String::from_utf8_lossy(&rewritten[terminal_index]);
+    assert!(terminal.contains("\"type\":\"reasoning\""), "{terminal}");
+}
+
+#[test]
+fn direct_thinking_attempt_sse_tool_preserves_half_marker_body_as_text() {
+    let mut input = String::from_utf8(tagged_sse(
+        &["<thinking>half ", "body"],
+        "<thinking>half body",
+    ))
+    .unwrap();
+    input = input.replace(
+        "\"output\":[",
+        "\"output\":[{\"id\":\"call_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"exec_command\",\"arguments\":\"{}\"},",
+    );
+    let frames = sse_frames(input.as_bytes());
+    let (rewritten, _) =
+        rewrite_v3_direct_thinking_attempt(&frames).expect("thinking markers must be cleaned");
+    let text = rewritten
+        .iter()
+        .map(|frame| String::from_utf8_lossy(frame))
+        .collect::<String>();
+    assert!(text.contains("half body"), "{text}");
+    assert!(!text.contains("<thinking>"), "{text}");
+    assert!(!text.contains("response.reasoning_summary_text.delta"), "{text}");
+    assert!(text.contains("\"type\":\"function_call\""), "{text}");
 }
 
 #[tokio::test]
