@@ -269,9 +269,90 @@
         "version": 3
       },
       "version": 10
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "文本泄露还没有修好\n如果文本标签是唯一的 provider 输出，就报错Switch provider 就行，丢弃本次响应\n这是另外一种泄露",
+          "role": "user",
+          "source": "Current Codex conversation01a15232-2cb1-7692-affb-48c22d034ee2, user2026-10-19; screenshot attachments codex-clipboard-8390ee47-cc56-4752-bc7e-e5c29fb48925.png, codex-clipboard-70d4bba1-5498-4672-bfec-771bc5572205.png, codex-clipboard-396cdc2e-6e30-44e6-bad6-381e4049175f.png"
+        },
+        "base_version": 3,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261019-direct-protocol-artifact-recovery",
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。\n\n请求路径错误直接进入 Error 链，不因严重程度退出该请求的错误主线，也不继续构造成功响应。上游原本返回 200，但 RCC 响应处理过程产生内部 599 错误时，也进入 Error 链。请求路径错误、响应处理错误和空响应保留各自 typed 来源、内部分类及上游实际状态，统一由现有 Error 链决定恢复、重试或终止；不得旁路、吞错或把错误包装为成功空响应。\n\nResponses Direct 的已证实协议标签或控制包裹不作为客户端可见的业务正文。治理由唯一注册的 Direct response hook 执行：清理已证实的独立 DSML/analysis 标记，忠实保留普通正文、工具标识、参数、call_id、配对结果以及实际 reasoning、refusal、content_filter 等业务内容；明确的 thinking 包裹内容应保留为可表示的 reasoning，不泄露为可见 output_text。此规则不授权删除引用、代码示例或具有无法无损重关联的 opaque 数据。\n\n若完成全部已声明治理后，整次 provider 响应只有可移除的文本协议标签，没有其他可交付业务内容，则丢弃整次尝试，形成现有内部 provider_response_empty/502，进入 typed Error 链并切换其他 eligible provider。原上游状态保留为内部证据，不将标签、内部错误或伪造的空成功返回客户端；候选耗尽后，仅可检测地中止该请求传输。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "文本泄露还没有修好\n如果文本标签是唯一的 provider 输出，就报错Switch provider 就行，丢弃本次响应\n这是另外一种泄露",
+          "role": "user",
+          "source": "Current Codex conversation01a15232-2cb1-7692-affb-48c22d034ee2, user2026-10-19; screenshot attachments codex-clipboard-8390ee47-cc56-4752-bc7e-e5c29fb48925.png, codex-clipboard-70d4bba1-5498-4672-bfec-771bc5572205.png, codex-clipboard-396cdc2e-6e30-44e6-bad6-381e4049175f.png"
+        },
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "status": "active",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。\n\n请求路径错误直接进入 Error 链，不因严重程度退出该请求的错误主线，也不继续构造成功响应。上游原本返回 200，但 RCC 响应处理过程产生内部 599 错误时，也进入 Error 链。请求路径错误、响应处理错误和空响应保留各自 typed 来源、内部分类及上游实际状态，统一由现有 Error 链决定恢复、重试或终止；不得旁路、吞错或把错误包装为成功空响应。\n\nResponses Direct 的已证实协议标签或控制包裹不作为客户端可见的业务正文。治理由唯一注册的 Direct response hook 执行：清理已证实的独立 DSML/analysis 标记，忠实保留普通正文、工具标识、参数、call_id、配对结果以及实际 reasoning、refusal、content_filter 等业务内容；明确的 thinking 包裹内容应保留为可表示的 reasoning，不泄露为可见 output_text。此规则不授权删除引用、代码示例或具有无法无损重关联的 opaque 数据。\n\n若完成全部已声明治理后，整次 provider 响应只有可移除的文本协议标签，没有其他可交付业务内容，则丢弃整次尝试，形成现有内部 provider_response_empty/502，进入 typed Error 链并切换其他 eligible provider。原上游状态保留为内部证据，不将标签、内部错误或伪造的空成功返回客户端；候选耗尽后，仅可检测地中止该请求传输。",
+        "version": 4
+      },
+      "version": 11
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "策略很简单：1. 完整标记收割。2. 不完整剥离并有限收割；工具执行turn无法收割则丢弃、报传输错误、重传；工具完整则半截thinking/文本只清理标记。3. reasoning只有半截无法定位起始则直接当文本。4. 只去掉结束标记，保留前后文字。",
+          "role": "user",
+          "source": "Current Codex conversation01a15232-2cb1-7692-affb-48c22d034ee2, user2026-10-19; screenshot attachments codex-clipboard-8390ee47-cc56-4752-bc7e-e5c29fb48925.png, codex-clipboard-70d4bba1-5498-4672-bfec-771bc5572205.png, codex-clipboard-396cdc2e-6e30-44e6-bad6-381e4049175f.png; latest user strategy and clarification received through authorized peer; latest screenshot codex-clipboard-19af226d-2164-4011-8bdd-36ef59a2a666.png"
+        },
+        "base_version": 4,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261019-protocol-marker-harvest-policy",
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。\n\n请求路径错误直接进入 Error 链，不因严重程度退出该请求的错误主线，也不继续构造成功响应。上游原本返回 200，但 RCC 响应处理过程产生内部 599 错误时，也进入 Error 链。请求路径错误、响应处理错误和空响应保留各自 typed 来源、内部分类及上游实际状态，统一由现有 Error 链决定恢复、重试或终止；不得旁路、吞错或把错误包装为成功空响应。\n\nResponses Direct 的已证实协议标签或控制包裹不作为客户端可见的业务正文。治理由唯一注册的 Direct response hook 执行：清理已证实的独立 DSML/analysis 标记，忠实保留普通正文、工具标识、参数、call_id、配对结果以及实际 reasoning、refusal、content_filter 等业务内容；明确的 thinking 包裹内容应保留为可表示的 reasoning，不泄露为可见 output_text。此规则不授权删除引用、代码示例或具有无法无损重关联的 opaque 数据。\n\n若完成全部已声明治理后，整次 provider 响应只有可移除的文本协议标签，没有其他可交付业务内容，则丢弃整次尝试，形成现有内部 provider_response_empty/502，进入 typed Error 链并切换其他 eligible provider。原上游状态保留为内部证据，不将标签、内部错误或伪造的空成功返回客户端；候选耗尽后，仅可检测地中止该请求传输。\n\n文本标记治理按用户明确策略执行：完整的工具、reasoning 或文本包裹应在唯一文本治理 owner 中收割为可忠实表示的协议内容。残缺标记只允许剥离和有限收割；若已识别工具执行 turn 却无法还原工具调用，则丢弃本次 provider attempt，进入现有内部 typed Error/传输失败恢复链重试或重选，即使同时有普通正文也不得将残缺工具当正常响应交付。若工具完整，仅 thinking 或文本标签残缺，则清理这些标签并保留完整工具及前后文字。reasoning 残缺且无法定位起始时按文本保留；孤立结束标记只移除标记，保留前后文字。不得猜测缺失参数、工具身份或 reasoning 起点，不以业务参数无效为代理失败理由。Relay 的文本治理仍由 Chat Process 持有；Direct 的文本治理仅由注册 Direct hook 持有。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "策略很简单：1. 完整标记收割。2. 不完整剥离并有限收割；工具执行turn无法收割则丢弃、报传输错误、重传；工具完整则半截thinking/文本只清理标记。3. reasoning只有半截无法定位起始则直接当文本。4. 只去掉结束标记，保留前后文字。",
+          "role": "user",
+          "source": "Current Codex conversation01a15232-2cb1-7692-affb-48c22d034ee2, user2026-10-19; screenshot attachments codex-clipboard-8390ee47-cc56-4752-bc7e-e5c29fb48925.png, codex-clipboard-70d4bba1-5498-4672-bfec-771bc5572205.png, codex-clipboard-396cdc2e-6e30-44e6-bad6-381e4049175f.png; latest user strategy and clarification received through authorized peer; latest screenshot codex-clipboard-19af226d-2164-4011-8bdd-36ef59a2a666.png"
+        },
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "status": "active",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。\n\n请求路径错误直接进入 Error 链，不因严重程度退出该请求的错误主线，也不继续构造成功响应。上游原本返回 200，但 RCC 响应处理过程产生内部 599 错误时，也进入 Error 链。请求路径错误、响应处理错误和空响应保留各自 typed 来源、内部分类及上游实际状态，统一由现有 Error 链决定恢复、重试或终止；不得旁路、吞错或把错误包装为成功空响应。\n\nResponses Direct 的已证实协议标签或控制包裹不作为客户端可见的业务正文。治理由唯一注册的 Direct response hook 执行：清理已证实的独立 DSML/analysis 标记，忠实保留普通正文、工具标识、参数、call_id、配对结果以及实际 reasoning、refusal、content_filter 等业务内容；明确的 thinking 包裹内容应保留为可表示的 reasoning，不泄露为可见 output_text。此规则不授权删除引用、代码示例或具有无法无损重关联的 opaque 数据。\n\n若完成全部已声明治理后，整次 provider 响应只有可移除的文本协议标签，没有其他可交付业务内容，则丢弃整次尝试，形成现有内部 provider_response_empty/502，进入 typed Error 链并切换其他 eligible provider。原上游状态保留为内部证据，不将标签、内部错误或伪造的空成功返回客户端；候选耗尽后，仅可检测地中止该请求传输。\n\n文本标记治理按用户明确策略执行：完整的工具、reasoning 或文本包裹应在唯一文本治理 owner 中收割为可忠实表示的协议内容。残缺标记只允许剥离和有限收割；若已识别工具执行 turn 却无法还原工具调用，则丢弃本次 provider attempt，进入现有内部 typed Error/传输失败恢复链重试或重选，即使同时有普通正文也不得将残缺工具当正常响应交付。若工具完整，仅 thinking 或文本标签残缺，则清理这些标签并保留完整工具及前后文字。reasoning 残缺且无法定位起始时按文本保留；孤立结束标记只移除标记，保留前后文字。不得猜测缺失参数、工具身份或 reasoning 起点，不以业务参数无效为代理失败理由。Relay 的文本治理仍由 Chat Process 持有；Direct 的文本治理仅由注册 Direct hook 持有。",
+        "version": 5
+      },
+      "version": 12
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "如果是文本中的工具调用，需要收割，剥离，改 finish reason 为 tool call",
+          "role": "user",
+          "source": "Same user instruction relayed by explicitly authorized peer chat01a1345f-00c7-7f72-89b3-538b61fb4e66 during current task"
+        },
+        "base_version": 5,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261019-harvested-tool-terminal",
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。\n\n请求路径错误直接进入 Error 链，不因严重程度退出该请求的错误主线，也不继续构造成功响应。上游原本返回 200，但 RCC 响应处理过程产生内部 599 错误时，也进入 Error 链。请求路径错误、响应处理错误和空响应保留各自 typed 来源、内部分类及上游实际状态，统一由现有 Error 链决定恢复、重试或终止；不得旁路、吞错或把错误包装为成功空响应。\n\nResponses Direct 的已证实协议标签或控制包裹不作为客户端可见的业务正文。治理由唯一注册的 Direct response hook 执行：清理已证实的独立 DSML/analysis 标记，忠实保留普通正文、工具标识、参数、call_id、配对结果以及实际 reasoning、refusal、content_filter 等业务内容；明确的 thinking 包裹内容应保留为可表示的 reasoning，不泄露为可见 output_text。此规则不授权删除引用、代码示例或具有无法无损重关联的 opaque 数据。\n\n若完成全部已声明治理后，整次 provider 响应只有可移除的文本协议标签，没有其他可交付业务内容，则丢弃整次尝试，形成现有内部 provider_response_empty/502，进入 typed Error 链并切换其他 eligible provider。原上游状态保留为内部证据，不将标签、内部错误或伪造的空成功返回客户端；候选耗尽后，仅可检测地中止该请求传输。\n\n文本标记治理按用户明确策略执行：完整的工具、reasoning 或文本包裹应在唯一文本治理 owner 中收割为可忠实表示的协议内容。残缺标记只允许剥离和有限收割；若已识别工具执行 turn 却无法还原工具调用，则丢弃本次 provider attempt，进入现有内部 typed Error/传输失败恢复链重试或重选，即使同时有普通正文也不得将残缺工具当正常响应交付。若工具完整，仅 thinking 或文本标签残缺，则清理这些标签并保留完整工具及前后文字。reasoning 残缺且无法定位起始时按文本保留；孤立结束标记只移除标记，保留前后文字。不得猜测缺失参数、工具身份或 reasoning 起点，不以业务参数无效为代理失败理由。Relay 的文本治理仍由 Chat Process 持有；Direct 的文本治理仅由注册 Direct hook 持有。\n\n文本中的工具调用收割后，必须从可见正文剥离对应工具段，保留周围文字，并使用目标协议的工具调用终止语义：Chat finish_reason=tool_calls；Responses 返回原生 function/custom_tool_call 及其合法终态，内部或原有显式 finish reason 与工具调用一致，不添加非标准的 Responses 字段。必须验证完整参数、call_id 配对、实际安全工具执行及后续 turn。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "如果是文本中的工具调用，需要收割，剥离，改 finish reason 为 tool call",
+          "role": "user",
+          "source": "Same user instruction relayed by explicitly authorized peer chat01a1345f-00c7-7f72-89b3-538b61fb4e66 during current task"
+        },
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "status": "active",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。\n\n请求路径错误直接进入 Error 链，不因严重程度退出该请求的错误主线，也不继续构造成功响应。上游原本返回 200，但 RCC 响应处理过程产生内部 599 错误时，也进入 Error 链。请求路径错误、响应处理错误和空响应保留各自 typed 来源、内部分类及上游实际状态，统一由现有 Error 链决定恢复、重试或终止；不得旁路、吞错或把错误包装为成功空响应。\n\nResponses Direct 的已证实协议标签或控制包裹不作为客户端可见的业务正文。治理由唯一注册的 Direct response hook 执行：清理已证实的独立 DSML/analysis 标记，忠实保留普通正文、工具标识、参数、call_id、配对结果以及实际 reasoning、refusal、content_filter 等业务内容；明确的 thinking 包裹内容应保留为可表示的 reasoning，不泄露为可见 output_text。此规则不授权删除引用、代码示例或具有无法无损重关联的 opaque 数据。\n\n若完成全部已声明治理后，整次 provider 响应只有可移除的文本协议标签，没有其他可交付业务内容，则丢弃整次尝试，形成现有内部 provider_response_empty/502，进入 typed Error 链并切换其他 eligible provider。原上游状态保留为内部证据，不将标签、内部错误或伪造的空成功返回客户端；候选耗尽后，仅可检测地中止该请求传输。\n\n文本标记治理按用户明确策略执行：完整的工具、reasoning 或文本包裹应在唯一文本治理 owner 中收割为可忠实表示的协议内容。残缺标记只允许剥离和有限收割；若已识别工具执行 turn 却无法还原工具调用，则丢弃本次 provider attempt，进入现有内部 typed Error/传输失败恢复链重试或重选，即使同时有普通正文也不得将残缺工具当正常响应交付。若工具完整，仅 thinking 或文本标签残缺，则清理这些标签并保留完整工具及前后文字。reasoning 残缺且无法定位起始时按文本保留；孤立结束标记只移除标记，保留前后文字。不得猜测缺失参数、工具身份或 reasoning 起点，不以业务参数无效为代理失败理由。Relay 的文本治理仍由 Chat Process 持有；Direct 的文本治理仅由注册 Direct hook 持有。\n\n文本中的工具调用收割后，必须从可见正文剥离对应工具段，保留周围文字，并使用目标协议的工具调用终止语义：Chat finish_reason=tool_calls；Responses 返回原生 function/custom_tool_call 及其合法终态，内部或原有显式 finish reason 与工具调用一致，不添加非标准的 Responses 字段。必须验证完整参数、call_id 配对、实际安全工具执行及后续 turn。",
+        "version": 6
+      },
+      "version": 13
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 10
+  "version": 13
 }

@@ -1805,8 +1805,8 @@ fn responses_hosted_web_search_conflicting_identity_aliases_fail_before_anthropi
 }
 
 #[test]
-fn responses_hosted_web_search_action_side_channel_fails_before_anthropic_wire() {
-    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+fn responses_hosted_web_search_action_preserves_business_names_in_anthropic_wire() {
+    let wire = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "input":[{
             "type":"web_search_call",
@@ -1820,14 +1820,8 @@ fn responses_hosted_web_search_action_side_channel_fails_before_anthropic_wire()
             "result":{"title":"Ubuntu ARM64"}
         }]
     }))
-    .expect_err("nested RouteCodex side-channel must not reach Anthropic provider wire");
-
-    assert!(matches!(
-        error,
-        V3AnthropicCodecError::SideChannelLeaked {
-            field: "metadata_center"
-        }
-    ));
+    .expect("hosted tool action names remain business fields");
+    assert!(wire.to_string().contains("metadata_center"));
 }
 
 #[test]
@@ -2252,7 +2246,7 @@ fn nested_business_fields_named_like_side_channels_are_preserved() {
 }
 
 #[test]
-fn side_channel_and_protocol_fields_cannot_enter_anthropic_payloads() {
+fn business_names_are_preserved_and_wrong_entry_protocol_is_rejected() {
     for leaked in [
         "routecodex_internal",
         "metadata_center",
@@ -2265,14 +2259,13 @@ fn side_channel_and_protocol_fields_cannot_enter_anthropic_payloads() {
             .as_object_mut()
             .unwrap()
             .insert(leaked.to_string(), json!({"leak":true}));
-        assert!(matches!(
-            characterize_v3_anthropic_client_input_to_hub_semantic(
-                payload,
-                V3HubEntryProtocol::Anthropic,
-                V3HubTransportIntent::Json,
-            ),
-            Err(V3AnthropicCodecError::SideChannelLeaked { .. })
-        ));
+        let semantic = characterize_v3_anthropic_client_input_to_hub_semantic(
+            payload.clone(),
+            V3HubEntryProtocol::Anthropic,
+            V3HubTransportIntent::Json,
+        )
+        .expect("business names do not establish control provenance");
+        assert_eq!(semantic.payload(), &payload);
     }
     assert!(matches!(
         characterize_v3_anthropic_client_input_to_hub_semantic(

@@ -1210,6 +1210,17 @@ for (const fold of fieldProfiles?.fold_contract?.registered_folds ?? []) {
 }
 
 const lifecycleManifest = loadYaml('docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+// Recovery leaves at Error05; the terminal projection must not become a
+// retry dependency. Check the declared consumer edge, not source spelling.
+const errorDecisionContract = (mainlineMap.chains ?? [])
+  .find((chain) => chain.chain_id === 'v3.operation_runner.dagpipe.error')
+  ?.error_execution_decision;
+if ((errorDecisionContract?.retry?.consumers ?? []).includes('ErrorErr06ClientProjected')) {
+  failures.push('v3-mainline-call-map.yml: recoverable Error05 decision must not invoke Error06');
+}
+if (!(errorDecisionContract?.terminal_client_error?.consumers ?? []).includes('ErrorErr06ClientProjected')) {
+  failures.push('v3-mainline-call-map.yml: terminal Error05 decision must reach Error06');
+}
 if (lifecycleManifest.field_profiles !== fieldProfilesRel) {
   failures.push(`v3.operation_runner.lifecycle.manifest.yml: field_profiles must be ${fieldProfilesRel}`);
 }

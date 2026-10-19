@@ -240,25 +240,36 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .is_ok()
     {}
 
+    let opaque_business = json!({"route":"business-route","requiredCapabilities":["read"]});
     let isolation_response = client
         .post(&endpoint)
         .header("x-session-id", "gemini-controlled-test-session")
         .header("x-conversation-id", "gemini-controlled-test-conversation")
         .json(&json!({
             "contents":[{"role":"user","parts":[{"text":"isolation"}]}],
-            "metadata_center":{"route":"must-not-leak"}
+            "metadata_center":opaque_business.clone()
         }))
         .send()
-        .await;
-    assert!(
-        isolation_response.is_err(),
-        "a rejected control-plane leak must close transport without a client error response"
+        .await
+        .unwrap();
+    assert_eq!(isolation_response.status(), StatusCode::OK);
+    let isolation_body: Value = isolation_response.json().await.unwrap();
+    assert_eq!(
+        isolation_body["candidates"][0]["content"]["parts"][0]["text"],
+        "controlled json"
     );
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), captures_rx.recv())
-            .await
-            .is_err()
+    let isolation_capture = captures_rx.recv().await.unwrap();
+    assert_eq!(isolation_capture.body["metadata_center"], opaque_business);
+    assert_eq!(
+        isolation_capture.body["contents"][0]["parts"][0]["text"],
+        "isolation"
     );
+    // Business spelling must not alter the separately bound transport auth.
+    assert_eq!(
+        isolation_capture.api_key.as_deref(),
+        Some("controlled-secret")
+    );
+    assert!(isolation_capture.authorization.is_none());
 
     handle.shutdown().await;
     upstream_shutdown_tx.send(()).unwrap();

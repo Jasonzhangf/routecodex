@@ -1,5 +1,107 @@
 include!("../../tests/support/kernel_unit.rs");
 
+#[tokio::test]
+async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
+    let manifest = provider_concurrency_two_provider_manifest("markup_a", "markup_b", 50);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let scope = test_failure_session_scope("default");
+    let raw = crate::nodes::build_v3_server_03_http_request_raw(
+        "test".into(),
+        scope.clone(),
+        "markup-policy".into(),
+        "markup-execution".into(),
+        "POST".into(),
+        "/v1/responses".into(),
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw, health.clone(), 0);
+    let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
+        route: plan.expanded.route.clone(),
+        candidate: plan.expanded.candidates[0].clone(),
+        candidate_count: 2,
+        unavailable_candidates: vec![],
+        attempts: 1,
+        default_floor_protected: false,
+    };
+    let availability = health.session_bound_availability(&scope);
+    let before: Vec<_> = plan
+        .expanded
+        .candidates
+        .iter()
+        .map(|c| {
+            health.availability_for_interface(
+                &c.provider_id,
+                &c.interface_id,
+                Some(&c.auth_alias),
+                Some(&c.model_id),
+                0,
+            )
+        })
+        .collect();
+    let source = crate::hooks::direct_complete_response_hook_failure_source(
+        crate::direct_response_hooks::V3DirectResponseHookFailure::UnharvestableToolMarkup,
+    )
+    .expect("typed markup source");
+    let mut failed_candidates = BTreeSet::new();
+    let mut retries = std::collections::BTreeMap::new();
+    let mut trace = vec![];
+    let result = run_v3_direct_provider_failure_policy(
+        &V3DirectProviderFailurePolicyContext {
+            failure_session_scope: &scope,
+            provider_health: &health,
+            availability: &availability,
+            expanded: Some(&plan.expanded),
+            provider_pinned: false,
+            now_epoch_ms: 0,
+        },
+        &selected,
+        source.clone(),
+        200,
+        &mut V3DirectProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut retries,
+            trace: &mut trace,
+        },
+    )
+    .await
+    .expect("response processing recovery");
+    let V3Error05ExecutionAction::WaitThenReselect { recovery } = &result.decision.action else {
+        panic!(
+            "must reselect through Error05: {:?}",
+            result.decision.action
+        );
+    };
+    assert_eq!(recovery.normalized_error_family(), source.code);
+    assert_eq!(recovery.failure_session_scope(), &scope);
+    assert_eq!(
+        recovery.provider_runtime_identity(),
+        candidate_key(&selected.candidate)
+    );
+    assert_eq!(
+        failed_candidates,
+        BTreeSet::from([candidate_key(&selected.candidate)])
+    );
+    assert!(retries.is_empty());
+    assert!(trace.contains(&"V3Error01SourceRaised"));
+    assert!(trace.contains(&"V3Error05ExecutionDecision"));
+    let event = result.event.expect("typed failure observation");
+    assert_eq!(event.status, 599);
+    assert_eq!(event.external_error_status, Some(200));
+    assert_eq!(event.internal_code.as_deref(), Some("500-211"));
+    assert_eq!(event.failure_count, 0);
+    assert_eq!(event.cooldown_until_ms, None);
+    for (candidate, before) in plan.expanded.candidates.iter().zip(before) {
+        let after = health.availability_for_interface(
+            &candidate.provider_id,
+            &candidate.interface_id,
+            Some(&candidate.auth_alias),
+            Some(&candidate.model_id),
+            0,
+        );
+        assert_eq!(after, before, "no provider health mutation");
+    }
+}
+
 #[test]
 fn protocol_candidate_keys_raise_only_actual_failures() {
     let manifest = test_manifest();

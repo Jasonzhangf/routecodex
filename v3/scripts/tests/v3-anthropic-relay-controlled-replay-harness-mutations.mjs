@@ -11,7 +11,7 @@ const mutations = [
   ['unsorted manifest', 'v3/fixtures/anthropic-relay-controlled-upstream/manifest.json', '"json_thinking_tool_use",\n    "provider_error"', '"provider_error",\n    "json_thinking_tool_use"', /manifest cases/],
   ['missing SSE case', 'v3/fixtures/anthropic-relay-controlled-upstream/manifest.json', '    "sse_thinking_tool_use"', '    "sse_removed"', /manifest cases/],
   ['provider error becomes success', 'v3/fixtures/anthropic-relay-controlled-upstream/provider_error.json', '"status": 429', '"status": 200', /provider error scenario/],
-  ['provider side-channel leak', 'v3/fixtures/anthropic-relay-controlled-upstream/side_channel_isolation.json', '"model": "responses-wire-model"', '"model": "responses-wire-model", "metadata_center": {"leak": true}', /side-channel field/],
+  ['missing provider expectation', 'v3/fixtures/anthropic-relay-controlled-upstream/side_channel_isolation.json', '"expected_upstream_request":', '"removed_upstream_request":', /missing expected_upstream_request/],
 ];
 
 const failures = [];

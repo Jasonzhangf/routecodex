@@ -1,7 +1,7 @@
 use super::{
     build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02,
     build_v3_hub_req_inbound_01_client_raw,
-    build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
+    build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
     govern_v3_servertool_request_at_req04, V3HubEntryProtocol, V3HubInvocationSource,
     V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
     V3HubRequestSemanticProtocol, V3HubTransportIntent, V3ToolThinkingTurnContext,
@@ -126,8 +126,6 @@ pub enum V3HubRelayRequestError {
     ToolOutputKindMismatch { index: usize, call_id: String },
     #[error("current-turn payload boundary is invalid: start {start}, len {len}")]
     CurrentPayloadBoundaryInvalid { start: usize, len: usize },
-    #[error("side-channel field leaked into normal request payload: {key}")]
-    SideChannelLeaked { key: &'static str },
     #[error("required request hook failed: {hook_id}")]
     RequiredHookFailed { hook_id: &'static str },
     #[error("unknown static servertool request hook: {hook_id}")]
@@ -314,9 +312,6 @@ fn govern_chat_request_at_req04(
 ) -> Result<Box<GovernChatRequestSideOutput>, V3HubRelayRequestError> {
     events.push(V3HubRelayRequestHookEvent::Req04Entry);
     let current_payload_start = 0usize;
-    if let Some(key) = find_v3_hub_side_channel_key(normalized.payload()) {
-        return Err(V3HubRelayRequestError::SideChannelLeaked { key });
-    }
     super::normalize_v3_history_image_placeholders(Arc::make_mut(
         &mut normalized.previous.payload.0,
     ));
@@ -430,9 +425,6 @@ impl V3HubRelayRequestHooks {
         raw: V3HubReqInbound01ClientRaw,
         profile: &V3HubServertoolRequestProfile,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
-        if let Some(key) = find_v3_hub_side_channel_key(&raw.payload.0) {
-            return Err(V3HubRelayRequestError::SideChannelLeaked { key });
-        }
         let mut events = vec![
             V3HubRelayRequestHookEvent::Req01Entry,
             V3HubRelayRequestHookEvent::Req01Exit,

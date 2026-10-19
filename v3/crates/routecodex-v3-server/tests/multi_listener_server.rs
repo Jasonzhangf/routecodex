@@ -49,6 +49,12 @@ mod issue231_stale_probe;
 #[path = "multi_listener_server/issue245_permission_search.rs"]
 mod issue245_permission_search;
 
+#[path = "multi_listener_server/issue3ccb5fa_dsml.rs"]
+mod issue3ccb5fa_dsml;
+
+#[path = "multi_listener_server/issue_d94731e_thinking.rs"]
+mod issue_d94731e_thinking;
+
 async fn read_raw_content_length_response(socket: &mut TcpStream) -> Vec<u8> {
     let mut wire = Vec::new();
     while !wire.ends_with(b"\r\n\r\n") {
@@ -8508,6 +8514,13 @@ async fn responses_direct_followup_preserves_function_strict_presence() {
     // Only the user message is sent initially; these two items are provider output.
     let provider_output = original["input"].as_array().unwrap()[1..3].to_vec();
     original["input"].as_array_mut().unwrap().truncate(1);
+    // bug03df769: a business schema property is not a proxy control resource.
+    // The controlled peer compares the complete tools on both actual attempts.
+    original["tools"][0]["parameters"]["properties"]["assignmentFields"] = json!({
+        "type":"object",
+        "properties":{"requiredCapabilities":{"type":"array","items":{"type":"string"}}},
+        "required":["requiredCapabilities"]
+    });
 
     struct StrictRoundtripState {
         captures: mpsc::UnboundedSender<ProviderCapture>,

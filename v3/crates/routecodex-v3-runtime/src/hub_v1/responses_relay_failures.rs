@@ -445,7 +445,6 @@ pub(crate) fn is_v3_responses_provider_response_failure(
             | V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure { .. }
             | V3ResponsesRelayRuntimeError::Response(
                 V3HubRelayResponseError::ProviderResponseNotObject
-                    | V3HubRelayResponseError::SideChannelLeaked { .. }
                     | V3HubRelayResponseError::ProviderResponseOutputNotArray
                     | V3HubRelayResponseError::MalformedToolCall { .. }
                     | V3HubRelayResponseError::MissingStatus

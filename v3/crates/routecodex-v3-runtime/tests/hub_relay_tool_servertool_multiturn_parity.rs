@@ -5,8 +5,8 @@ use routecodex_v3_runtime::{
     build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05,
     compile_v3_hub_relay_request_hooks, compile_v3_hub_relay_response_hooks, V3HubEntryProtocol,
     V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayRequestError,
-    V3HubRelayResponseError, V3HubRelayResponseHookProfile, V3HubRelayToolKind,
-    V3HubServertoolRequestProfile, V3HubServertoolResponseAction, V3HubTransportIntent,
+    V3HubRelayResponseHookProfile, V3HubRelayToolKind, V3HubServertoolRequestProfile,
+    V3HubServertoolResponseAction, V3HubTransportIntent,
 };
 use serde_json::{json, Value};
 
@@ -605,7 +605,7 @@ fn responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order()
 }
 
 #[test]
-fn provider_and_client_payloads_reject_routecodex_control_leakage() {
+fn provider_and_client_payloads_preserve_business_control_names() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp01 = relay_response(
         json!({
@@ -616,19 +616,28 @@ fn provider_and_client_payloads_reject_routecodex_control_leakage() {
         }),
         V3HubTransportIntent::Json,
     );
-    assert!(matches!(
-        hooks.normalize(resp01),
-        Err(V3HubRelayResponseError::SideChannelLeaked { .. })
-    ));
+    let normalized = hooks
+        .normalize(resp01)
+        .expect("provider business names remain data");
+    let governed = hooks
+        .govern(normalized, &V3HubRelayResponseHookProfile::empty())
+        .expect("provider business names remain data through response governance");
+    assert_eq!(
+        governed.finalized_payload()["metadata_center"],
+        json!({"continuation_owner":"relay"})
+    );
 
-    assert!(matches!(
-        compile_v3_hub_relay_request_hooks().run(
+    let request = compile_v3_hub_relay_request_hooks()
+        .run(
             raw_request(json!({
                 "input":[{"role":"user","content":"continue"}],
                 "routecodex_internal":{"debug":true}
             })),
             &V3HubServertoolRequestProfile::disabled(),
-        ),
-        Err(V3HubRelayRequestError::SideChannelLeaked { .. })
-    ));
+        )
+        .expect("client business names remain data");
+    assert_eq!(
+        request.payload()["routecodex_internal"],
+        json!({"debug":true})
+    );
 }
