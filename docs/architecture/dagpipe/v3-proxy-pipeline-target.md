@@ -58,79 +58,104 @@ flowchart LR
 
 入口 ARC 是客户端请求及独立的类型化控制引用；唯一出口 ARC 是本次处理结果，标记上游成功响应、上游来源失败或入口/请求阶段来源失败。每个节点失败在业务目标上汇入同一类型化出口，再由生命周期送入错误图；Operator 不可自行终止而丢失 Error01/598 路径。DAGPipe 落地时须用类型化结果 ARC 或明确的 Runtime 转换承接失败，不能假设 Operator 抛错后下游失败节点仍会执行。模式选择是显式分支。Provider 失败后的重选由图外的请求生命周期发起**新尝试**，不在静态 DAG 中画回边。未出现合法候选时产出类型化来源失败，不静默换模型。
 
-## 响应图：一次上游成功响应 → 响应处理结果
+## 响应图：一次上游成功响应 → 唯一响应处理结果
 
 ```mermaid
-flowchart LR
-  A[收到完整上游成功响应] --> B[解码 provider 协议和私有兼容]
-  B --> C{执行模式}
-  C -->|Direct| D[运行已注册 Direct 响应钩子]
-  C -->|Relay| E[保真归一化响应语义]
-  E --> F[治理 Chat 响应和工具语义]
-  F --> G[保存已完成的 continuation]
-  D --> H[投影客户端协议结果]
-  G --> H
-  H --> I[生成 JSON 或 SSE 客户端帧]
-  I --> J[产出成功结果]
-  B -->|解码失败| K[产出响应阶段来源失败]
-  D -->|Direct 钩子失败| K
-  E -->|归一化失败| K
-  F -->|治理失败| K
-  G -->|保存失败| K
-  H -->|投影失败| K
-  I -->|成帧失败| K
-  J --> L[交付唯一响应处理结果]
-  K --> L
+flowchart TD
+  A([收到一次完整的上游成功响应]):::boundary --> B[应用 Provider 私有兼容并归一化完整尝试]:::action
+  B --> C[执行全部已声明响应改写]:::action
+  C --> D{改写后整次尝试的处置}:::decision
+  D -->|存在可交付业务内容| E[投影客户端语义并生成候选帧]:::action
+  E -->|投影或成帧失败| H
+  D -->|存在类型化内部跟随计划| F[生成内部跟随计划与空候选]:::data
+  D -->|无业务内容，含内部包络移除后为空| G[记录内部 502 空尝试来源]:::failure
+  D -->|改写、投影或成帧损坏可表示业务| H[记录内部 599 响应处理失败]:::failure
+  E --> I([交付唯一响应处理结果]):::success
+  F --> I
+  G --> I
+  H --> I
+
+  classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+  classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
+  classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
+  classDef data fill:#F3E8FF,stroke:#9333EA,color:#0F172A,stroke-width:1.5px
+  classDef success fill:#E8F7EE,stroke:#16A34A,color:#0F172A,stroke-width:1.5px
+  classDef failure fill:#FDECEC,stroke:#DC2626,color:#0F172A,stroke-width:1.5px
 ```
 
-入口 ARC 是上游成功响应，加同一请求的类型化模式/协议引用；唯一出口 ARC 是带成功客户端结果或类型化响应阶段来源失败的**响应处理结果**。失败由生命周期送入错误图，不在响应图内伪装成成功。Provider 尝试在提交客户端响应前完整缓冲。SSE 是客户端传输边界，按已确定的客户端语义成帧，不从 SSE 字节重建路由、错误或 continuation 控制状态。Direct 不进入 Relay Chat Process；Relay 的 continuation 保存只接受已完成响应。
+入口 ARC 是上游成功响应及同一请求的类型化模式/协议引用；唯一出口 ARC 是**响应处理结果**。业务可交付、内部跟随、内部 502 空尝试和内部 599 响应处理失败都只在出口汇合，不增加第二个对象源或第二个响应出口。失败结果由生命周期送入独立错误图，不在响应图内伪装成成功。Direct 和 Relay 的既有模式/协议引用选择同一响应源内的已声明改写 owner，不改变对象源或出口。
+
+整次尝试的判空发生在全部已声明响应改写完成之后，不依赖 usage、输出 token 或最后一帧。普通文本、仅工具调用、reasoning、refusal 和 `content_filter` 都是可交付业务结果。仅移除 `memory_raw_capture` 等非客户端内部控制包络后为空，映射为 `ProviderFailure` / `provider_response_empty` / 内部 502。真实可表示业务内容在改写、投影或成帧中丢失、损坏或报错，映射为响应处理阶段 `RuntimeFailure` / 内部 599，不归因给上游。
+
+Provider 尝试在提交客户端响应前完整缓冲。SSE 是客户端传输边界，按确定的客户端语义成帧，不从 SSE 字节重建路由、错误或 continuation 控制状态。Direct 不进入 Relay Chat Process；Relay 的 continuation 保存只接受已完成响应。
+
+| 业务责任 | 现有图节点或类型化资源参照 |
+| --- | --- |
+| Provider 私有响应调整 | `adjust_provider_private_response` |
+| 完整尝试归一化 | `normalize_provider_response`，写入 `v3.operation_runner.response_provenance` |
+| Direct / Relay 已声明响应改写 | Direct 注册钩子；Relay `govern_chat_response` |
+| 可交付结果与内部跟随决策 | `govern_chat_response`，写入 `v3.operation_runner.execution_disposition` 与 `v3.operation_runner.servertool_sidecar_plan` |
+| 内部 502 / 内部 599 | `v3.error.source` 进入 `error_err01_source_raised` |
+| 逆向投影与客户端候选帧 | `inverse_project_client_response`、`frame_committed_client_response`、`v3.operation_runner.client_frame_candidate` |
 
 ## 错误图：一次来源失败 → 唯一内部错误决策
 
 ```mermaid
 flowchart TD
-  A[收到类型化来源失败] --> B[分类来源阶段和真实外部状态]
-  B --> C{是否为已绑定身份的 provider 失败}
-  C -->|是| D[按类型化失败策略管理 provider 身份或仅排除本次候选]
-  D --> E[判断目标内候选及错误动作]
-  C -->|否| F[按来源阶段生成终端错误]
-  E -->|可重选| G[产出新尝试请求事件]
-  E -->|已耗尽或不可重选| F
-  F --> H[记录内部终态且禁止客户端错误响应]
-  G --> I[交付唯一错误决策]
-  H --> I
+  A([收到一次类型化来源失败]):::boundary --> B[记录原始来源并分类阶段与真实状态]:::action
+  B --> C{是否为已绑定身份的 Provider 失败}:::decision
+  C -->|是| D[按精确身份更新候选动作或本地排除]:::action
+  C -->|否| E[只形成本次请求的恢复动作]:::action
+  D --> F[判断目标内候选与恢复边界]:::action
+  E --> F
+  F --> G{Error05 执行决策}:::decision
+  G -->|可恢复重试或重选| H[在 Error05 形成恢复决策并交回 Runtime]:::action
+  G -->|恢复耗尽或不可恢复| I[Error06 记录唯一内部终态证据]:::failure
+  I --> J([交付唯一内部错误结论]):::failure
+  H --> J
+
+  classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+  classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
+  classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
+  classDef success fill:#E8F7EE,stroke:#16A34A,color:#0F172A,stroke-width:1.5px
+  classDef failure fill:#FDECEC,stroke:#DC2626,color:#0F172A,stroke-width:1.5px
 ```
 
 入口 ARC 是类型化来源失败；provider/模型/鉴权身份仅在来源确属该 provider 尝试时存在。唯一出口 ARC 是内部类型化错误决策，不存在到客户端业务响应的边。`新尝试请求事件` 由生命周期 owner 消费并创建新的尝试 ID，不是指向请求图内部节点的回边。仅在当前策略允许时发起新尝试。Provider 状态、SSE 解码错误及 Server/请求/响应阶段错误均只供内部分类和管理，禁止 HTTP 错误状态、错误体或协议错误事件；池空/耗尽也只能无响应或未完成传输。请求局部兼容失败只排除本次候选，不冷却 provider。调试日志、snapshot 和样本只记录证据，不承载决策真相。
 
-错误图的六个规范阶段依次是 Err01 原始来源上升、Err02 分类、Err03 目标内本地动作、Err04 目标耗尽判断、Err05 执行决策、Err06 终端内部结果。Err01 在真实失败边界保留原始来源事实，不另设 HostCaptured 阶段；Err02 到 Err05 逐步产出 typed 控制事实；Err06 只接收终端 Err05 决策并记录内部结果。规范图声明完整终端结构路径，不代表每次错误无条件执行全图：Runtime 按 Err01 来源切片和 Err02→Err05 顺序决策切片执行，可恢复结果在 `error-execution-decision` 退出并保留实时 Err05 决策，只有终态才执行 Err06 切片。不存在伪 Err06、额外分支/结果 Operator 或未实现的 SDK 条件能力。
+错误图的六个规范阶段依次是 `error_err01_source_raised`、`error_err02_classified`、`error_err03_target_local_action`、`error_err04_target_exhaustion`、`error_err05_execution_decision`、`error_err06_client_projected`。前五个节点在可恢复路径上形成 `Err01 -> Err02 -> Err03 -> Err04 -> Err05`；`Err05` 是唯一执行决策点，可恢复结果从 `error-execution-decision` 退出。`Err06` 只接收终端决策，不参与重试，也不产生客户端错误候选。静态图保留六节点终端结构路径，但 Runtime 必须让可恢复决策停在 Err05，释放失败尝试后在图外启动新尝试；只有 `terminal_client_error` 才执行 Err06 并记录内部终态证据。
+
+本节的节点使用业务语义标签；函数名和文件只作为现有 owner 的映射参照。静态图不能证明全图 SDK 已接线或真实运行。
 
 ## 请求生命周期状态
 
 ```mermaid
-stateDiagram-v2
-  [*] --> 已接入: 客户端请求到达
-  已接入 --> 尝试中: 目标和候选已选定
-  已接入 --> 错误处理中: 入口或请求阶段出现来源失败
-  尝试中 --> 响应处理中: 上游尝试成功且结果已完整缓冲
-  尝试中 --> 错误处理中: 上游尝试出现来源失败
-  响应处理中 --> 错误处理中: 响应处理产出来源失败
-  响应处理中 --> 响应已提交: 成功结果完成客户端投影
-  错误处理中 --> 尝试中: 错误决策要求新尝试并分配新尝试 ID
-  错误处理中 --> 传输已中止: 恢复耗尽且无可交付响应
-  已接入 --> 已取消: 客户端断开
-  尝试中 --> 已取消: 客户端断开
-  响应处理中 --> 已取消: 客户端断开
-  错误处理中 --> 已取消: 客户端断开
-  响应已提交 --> 已释放: 关闭流和关联资源
-  传输已中止 --> 已释放: 先释放尝试再释放请求资源
-  已取消 --> 已释放: 停止本请求持有的尝试并释放资源
-  响应已提交 --> 流已中断: 客户端断开或已提交流传输失败
-  流已中断 --> 已释放: 记录关闭原因并释放流及请求资源
-  已释放 --> [*]
+flowchart TD
+  S([一次尝试进入 Runtime]):::boundary --> A[引用请求控制并登记尝试预算]:::action
+  A --> B[选择目标并执行一次上游尝试]:::action
+  B --> C{本次尝试结果}:::decision
+  C -->|完整成功响应| D[处理响应并完成全部已声明改写]:::action
+  C -->|来源失败| E[执行错误恢复判断]:::action
+  C -->|取消或客户端断开| T
+  D --> F{响应处置}:::decision
+  E --> G{恢复决策}:::decision
+  F -->|业务可提交| H[提交真实业务响应]:::success
+  F -->|内部跟随| X[外部动作：清理尝试后重入请求图]:::action
+  F -->|内部 502 / 599| E
+  G -->|可恢复| X
+  G -->|恢复耗尽| T[可检测地中止受影响传输]:::failure
+  H --> Z[释放本次尝试资源并交付唯一处置结果]:::boundary
+  T --> Z
+  X --> Z
+
+  classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+  classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
+  classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
+  classDef success fill:#E8F7EE,stroke:#16A34A,color:#0F172A,stroke-width:1.5px
+  classDef failure fill:#FDECEC,stroke:#DC2626,color:#0F172A,stroke-width:1.5px
 ```
 
-状态机由 Runtime/Server 边界拥有，DAGPipe 静态图不承担循环调度。请求取消是独立终点；必须有可核对的连接/尝试/流释放证据。响应成功、错误、取消和提交后流中断最终均汇入资源释放终点，但业务出口保持各自语义。客户端响应提交后只能记录流关闭及其来源，不能再次投影 HTTP 状态或第二份终端错误。目标契约要求 provider 尝试提交前完整缓冲；若现有 SSE 路径仍观测到上游提交后失败，应作为 G6 的实现/契约差异核对，不能暗中把它当成新业务成功或重选机会。
+生命周期由 Runtime/Server 边界拥有，此图以一次尝试为边界。DAGPipe 静态图不承担循环调度或请求重试。`外部动作：清理尝试后重入请求图` 只表示 Runtime 在当前图外创建新尝试或内部跟随调用，不是指向请求图节点的回边。重试和内部跟随仅释放尝试资源，保留请求资源。取消和客户端断开由 Runtime/Server 在声明边界处理，并与成功、终态失败和外部重入一起到达唯一尝试资源释放与处置出口。请求终结器只在成功提交、终态失败、取消或断开后释放请求资源。必须有可核对的连接、尝试和流释放证据。客户端响应提交后只能记录流关闭及其来源，不能再次投影 HTTP 状态或第二份终端错误。目标契约要求 provider 尝试提交前完整缓冲；若现有 SSE 路径仍观测到上游提交后失败，应作为 G6 的实现/契约差异核对，不能暗中把它当成新业务成功或重选机会。
 
 ## 首轮图审计
 

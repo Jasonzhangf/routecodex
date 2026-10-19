@@ -341,19 +341,19 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                 )
             })?;
             if disposition == V3SseFrameDisposition::LegalCloseout {
+                has_business_content =
+                    rewrite_direct_sse_memory(&mut committed, manifest, request_id)
+                        .map_err(|error| {
+                            direct_attempt_store_error_source(
+                                error,
+                                "V3ExecutionAttemptPayloadStore",
+                                "direct_sse_memory_strip_failed",
+                            )
+                        })?
+                        .unwrap_or(has_business_content);
                 if !has_business_content {
                     return Err(direct_sse_empty_attempt_failure());
                 }
-                rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(
-                    |error| {
-                        crate::shared::direct_plain_error(
-                            V3ErrorSourceKind::RuntimeFailure,
-                            "V3ExecutionAttemptPayloadStore",
-                            "direct_sse_memory_strip_failed",
-                            error.to_string(),
-                        )
-                    },
-                )?;
                 let sealed = committed.seal_after_validated_terminal();
                 let sealed = sealed.map_err(|error| {
                     crate::shared::direct_plain_error(
@@ -368,9 +368,6 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         }
     }
     if terminal_seen {
-        if !has_business_content {
-            return Err(direct_sse_empty_attempt_failure());
-        }
         // OpenAI Chat's client protocol terminal is the `data: [DONE]`
         // sentinel. A chat-wire provider may close after the semantic
         // terminal without ever emitting it; synthesize the protocol closeout
@@ -389,14 +386,18 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                     )
                 })?;
         }
-        rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|error| {
-            crate::shared::direct_plain_error(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3ExecutionAttemptPayloadStore",
-                "direct_sse_memory_strip_failed",
-                error.to_string(),
-            )
-        })?;
+        has_business_content = rewrite_direct_sse_memory(&mut committed, manifest, request_id)
+            .map_err(|error| {
+                direct_attempt_store_error_source(
+                    error,
+                    "V3ExecutionAttemptPayloadStore",
+                    "direct_sse_memory_strip_failed",
+                )
+            })?
+            .unwrap_or(has_business_content);
+        if !has_business_content {
+            return Err(direct_sse_empty_attempt_failure());
+        }
         let sealed = committed.seal_after_validated_terminal();
         let sealed = sealed.map_err(|error| {
             crate::shared::direct_plain_error(
@@ -498,15 +499,15 @@ fn rewrite_direct_sse_memory(
     committed: &mut crate::execution_control::V3CommittedClientSseBuilder,
     manifest: Option<&V3Config05ManifestPublished>,
     request_id: Option<&str>,
-) -> Result<(), crate::execution_control::V3AttemptStoreError> {
+) -> Result<Option<bool>, crate::execution_control::V3AttemptStoreError> {
     let Some(manifest) = manifest else {
-        return Ok(());
+        return Ok(None);
     };
     let Some(request_id) = request_id else {
-        return Ok(());
+        return Ok(None);
     };
     if !manifest.memory_raw_capture.enabled {
-        return Ok(());
+        return Ok(None);
     }
     let host_id = routecodex_v3_agent_memory::stable_host_id(&format!(
         "{}{}",
@@ -522,7 +523,7 @@ fn rewrite_direct_sse_memory(
     let canonical_output_texts = accumulator.canonical_output_texts();
     let report = accumulator.finalize(&host_id, request_id);
     if !report.memory_unit_found {
-        return Ok(());
+        return Ok(None);
     }
     for captured in &report.captured {
         if let Err(error) = routecodex_v3_agent_memory::publish_l3_entry(
@@ -542,6 +543,7 @@ fn rewrite_direct_sse_memory(
         })
         .collect::<std::collections::BTreeMap<_, _>>();
     let mut visible_chars_by_key = std::collections::BTreeMap::<(usize, usize), usize>::new();
+    let mut has_business_content = false;
     committed.rewrite_frames_non_increasing(|frame| {
         rewrite_direct_sse_frame(&frame, |mut value| {
             match value.get("type").and_then(serde_json::Value::as_str) {
@@ -575,6 +577,20 @@ fn rewrite_direct_sse_memory(
                         );
                     }
                 }
+                Some("response.output_item.added" | "response.output_item.done") => {
+                    if let Some(item) = value.get_mut("item") {
+                        routecodex_v3_agent_memory::strip_memory_envelope_from_responses_output_item(
+                            item, &report,
+                        );
+                    }
+                }
+                Some("response.content_part.added" | "response.content_part.done") => {
+                    if let Some(part) = value.get_mut("part") {
+                        routecodex_v3_agent_memory::strip_memory_envelope_from_responses_output_part(
+                            part, &report,
+                        );
+                    }
+                }
                 Some("response.completed" | "response.done") => {
                     if let Some(response) = value.get_mut("response") {
                         routecodex_v3_agent_memory::strip_memory_envelope_from_responses_payload(
@@ -588,9 +604,17 @@ fn rewrite_direct_sse_memory(
                 }
                 _ => {}
             }
+            // Reuse the complete-attempt predicate on the final projected
+            // value. The removed memory text cannot count toward admission.
+            has_business_content |=
+                crate::hub_v1::v3_provider_event_has_deliverable_business_content(
+                    V3HubProviderWireProtocol::Responses,
+                    &value,
+                );
             value
         })
-    })
+    })?;
+    Ok(Some(has_business_content))
 }
 
 fn direct_sse_output_text_key(event: &serde_json::Value) -> (usize, usize) {

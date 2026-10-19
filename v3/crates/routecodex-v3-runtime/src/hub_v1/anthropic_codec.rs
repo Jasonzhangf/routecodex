@@ -1209,7 +1209,25 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
             });
         }
     }
-    let mut response = Map::new();
+    // Expanded admission accepts ordinary business fields that happen to share
+    // control-like names. Preserve every field this converter does not
+    // explicitly interpret, in place, so its inverse association survives
+    // instead of being silently dropped. Only the Anthropic message fields
+    // owned by an explicit semantic mapping below are consumed.
+    let mut response = object.clone();
+    for consumed in [
+        "id",
+        "type",
+        "role",
+        "content",
+        "model",
+        "stop_reason",
+        "stop_sequence",
+        "stop_details",
+        "usage",
+    ] {
+        response.remove(consumed);
+    }
     response.insert(
         "id".to_string(),
         object

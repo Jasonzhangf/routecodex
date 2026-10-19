@@ -1867,6 +1867,9 @@ features:
     typed_writer_test: bug03df769_typed_transport_writer_isolates_control_from_business_body
     typed_writer_command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib bug03df769_ -- --nocapture
     typed_writer_negative_control: A temporary production transport writer mutation copies typed target.base_url into business selected_target; exact body preservation must fail. The mutation is absent from delivered source.
+    response_opaque_test: anthropic_json_business_root_fields_survive_responses_client_projection
+    response_opaque_command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox anthropic_json_business_root_fields_survive_responses_client_projection -- --exact --nocapture --test-threads=1
+    known_locator_control: responses_continuation_locator_does_not_enter_chat_canonical_payload proves previous_response_id is consumed by its existing continuation owner rather than treated as an unmapped business extension; public multi_listener_server previous_response_id cases retain admission and zero-provider-send behavior.
   owner_kind: rust_v3_protocol_codec_field_parity
   owner_scope: Lossless field parity for V3 Relay protocol conversion and Responses Direct; structured latest user/tool images survive across Chat, Responses and Anthropic. Chat projects tool images to adjacent user content, Responses to function_call_output.output and Anthropic to tool_result.content, without server/SSE/MetadataCenter repair owners.
   compatibility_exceptions:
@@ -3431,6 +3434,9 @@ features:
   - Genuine Chat, Anthropic and Responses errors retain their typed source through recovery and transport termination.
   - Configured backoff is a minimum combined with provider-action-gate delay by max rather than addition.
   - A complete provider attempt with no deliverable business content is classified as an internal typed 502 (provider_response_empty) that enters the existing Error chain retry/reselect and never reaches the client as an empty completion; the judgment reads the whole accumulated attempt, not the last terminal frame or usage.
+  - 5338ac6 direct_sse_memory_only_reselects_before_client_commit and direct_sse_memory_only_exhaustion_interrupts_transport cover post-memory-strip adjudication at legal-closeout and terminal/EOF seal exits through public HTTP; execute the no_response_adjudication_blackbox required gate with filter direct_sse_memory_only for focused red/green.
+  - 5338ac6 direct_sse_memory_rewrite_preserves_business_results sends text, opaque model tool arguments, reasoning, refusal and content_filter through memory-enabled public Direct SSE; each remains first-attempt business content after declared memory stripping.
+  - direct_sse_memory_item_part_sequences_never_authorize_completion covers normal output_item/content_part added/done snapshots at both sealing exits, with candidate recovery and request-local exhaustion. Captured memory envelopes are removed by the same memory owner before whole-attempt adjudication; visible business siblings remain deliverable. Run CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox direct_sse_memory_item_part_sequences_never_authorize_completion -- --exact --nocapture --test-threads=1.
   - Successful provider responses reach client commit without content, refusal, incomplete, zero-usage or tool-argument adjudication; the empty-attempt 502 is the single exception and is never projected to the client.
   - Responses incomplete reasons, Chat content_filter and refusal, tool-call-only, reasoning, and Anthropic refusal remain representable provider output on Direct and Relay paths and are not reclassified as empty.
   - Structured Chat reasoning, reasoning_text and Gemini filtering finishReason or promptFeedback remain business results; candidate-less Gemini prompt filtering is a real JSON/SSE terminal and seals typed control without inventing payload fields.
@@ -3981,7 +3987,10 @@ features:
   - RespInbound02/Resp03/RespOutbound05 use only the successful attempt map and current response binding
   - remote continuation is projection-only; no local continuation is introduced
   - semantic matrix partial/declared statuses are preserved, not relabeled as covered
-  - ErrorErr02Classified is mandatory between ErrorErr01 and ErrorErr03
+  - canonical error_err02_classified classifies the typed source before error_err03_target_local_action; retired HostCaptured-era labels are not the executable chain
+  - recoverable Error05 decisions skip Error06 and launch a new attempt outside the static DAG after attempt-only cleanup; Error06 accepts terminal decisions only
+  - after all declared response rewrites, the whole attempt must retain text, tools, reasoning, refusal, or content_filter before client commit; deliberate non-client envelope removal leaving no business content enters typed Error01 as provider_response_empty internal 502
+  - loss or processing failure of representable business content enters typed Error01 as internal 599; servertool_followup remains internal continuation and is not an empty client success or provider failure
   - Direct/Relay, ToolThinking, inverse context, attempt projection, and response binding have one writer and declared readers
   - servertool hop re-enters the same runner before client commit
   - servertool_sidecar_plan is produced only by Resp03 when execution_disposition=servertool_followup, read only by RuntimeInternalFollowup, and released after sidecar execution before request re-entry
