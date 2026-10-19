@@ -174,6 +174,12 @@ async fn upstream(
     }
     let mut wire = String::new();
     let mut emit = |mut value: Value, carrier: bool| {
+        if value["type"] == "response.output_text.delta" {
+            value["logprobs"] = json!([]);
+        }
+        if let Some(part) = value.get_mut("part") {
+            part["logprobs"] = json!([]);
+        }
         if carrier && peer.case == DsmlCase::OpaqueSse {
             value["vendor_data"] = json!({"business":"carrier-kept","raw":"C".repeat(4096)});
         }

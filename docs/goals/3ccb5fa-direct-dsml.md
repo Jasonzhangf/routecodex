@@ -25,6 +25,10 @@ added/delta/done/terminal events and never emits converted DSML text first.
 Opaque fields on replaced item, part and text events must retain their complete
 values and association. When an association cannot be represented faithfully,
 the original envelope remains text instead of losing event data.
+Empty standard `logprobs` arrays on text events and content parts carry no
+token data and permit conversion. Nonempty logprobs retain the original
+association. The SSE round-trip fixtures include these empty arrays, matching
+the observed inferai stream.
 
 Regression IDs and commands:
 

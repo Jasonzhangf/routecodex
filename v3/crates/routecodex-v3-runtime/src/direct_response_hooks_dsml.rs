@@ -413,11 +413,18 @@ fn known_text_part(part: &Value) -> bool {
         && part["text"].is_string()
         && part.as_object().is_some_and(|o| {
             o.keys()
-                .all(|k| matches!(k.as_str(), "type" | "text" | "annotations"))
+                .all(|k| matches!(k.as_str(), "type" | "text" | "annotations" | "logprobs"))
         })
         && part
             .get("annotations")
             .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty))
+        && empty_logprobs(part)
+}
+
+fn empty_logprobs(value: &Value) -> bool {
+    value
+        .get("logprobs")
+        .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty))
 }
 
 fn joined_text(output: &[Value]) -> String {
@@ -469,6 +476,7 @@ const KNOWN_EVENT_FIELDS: &[&str] = &[
     "item",
     "part",
     "sequence_number",
+    "logprobs",
 ];
 
 fn event_has_unrepresentable_extension(event: &Value) -> bool {
@@ -476,7 +484,8 @@ fn event_has_unrepresentable_extension(event: &Value) -> bool {
         object
             .keys()
             .any(|key| !KNOWN_EVENT_FIELDS.contains(&key.as_str()))
-    }) || event
+    }) || !empty_logprobs(event)
+        || event
         .get("item")
         .is_some_and(|item| !known_message_item(item))
         || event.get("part").is_some_and(|part| !known_text_part(part))
@@ -859,6 +868,18 @@ mod tests {
     }
     fn call(value: &str) -> String {
         format!("{OPEN}<｜｜DSML｜｜ invoke name=\"read_image\"><｜｜DSML｜｜ parameter name=\"file_path\" string=\"true\">{value}{END_PARAM}{END_INVOKE}{CLOSE}")
+    }
+
+    #[test]
+    fn direct_dsml_empty_logprobs_convert_but_values_remain_opaque() {
+        let mut part = json!({"type":"output_text","text":call("x"),"logprobs":[]});
+        assert!(known_text_part(&part));
+        part["logprobs"] = json!([{"token":"x","logprob":-1.0}]);
+        assert!(!known_text_part(&part));
+        let mut event = json!({"type":"response.output_text.delta","delta":"x","logprobs":[]});
+        assert!(!event_has_unrepresentable_extension(&event));
+        event["logprobs"] = part["logprobs"].clone();
+        assert!(event_has_unrepresentable_extension(&event));
     }
 
     #[test]
