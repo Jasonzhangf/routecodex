@@ -247,6 +247,9 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     let mut request = root.clone();
     for mapped in [
         "input",
+        // The continuation owner consumes this known protocol locator. It is
+        // not an opaque business extension in canonical Chat.
+        "previous_response_id",
         "instructions",
         "metadata",
         "client_metadata",

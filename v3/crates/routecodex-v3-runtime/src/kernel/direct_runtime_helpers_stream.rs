@@ -622,6 +622,20 @@ fn rewrite_direct_sse_memory(
                         );
                     }
                 }
+                Some("response.output_item.added" | "response.output_item.done") => {
+                    if let Some(item) = value.get_mut("item") {
+                        routecodex_v3_agent_memory::strip_memory_envelope_from_responses_output_item(
+                            item, &report,
+                        );
+                    }
+                }
+                Some("response.content_part.added" | "response.content_part.done") => {
+                    if let Some(part) = value.get_mut("part") {
+                        routecodex_v3_agent_memory::strip_memory_envelope_from_responses_output_part(
+                            part, &report,
+                        );
+                    }
+                }
                 Some("response.completed" | "response.done") => {
                     if let Some(response) = value.get_mut("response") {
                         routecodex_v3_agent_memory::strip_memory_envelope_from_responses_payload(
