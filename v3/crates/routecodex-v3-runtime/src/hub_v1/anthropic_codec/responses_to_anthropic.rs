@@ -74,7 +74,6 @@ pub(super) fn chat_messages_as_anthropic_messages(
             continue;
         }
         if role == "tool" {
-            let is_error = responses_tool_result_is_error(chat_tool_result_status(object)?)?;
             let mut tool_result = Map::new();
             tool_result.insert("type".to_string(), Value::String("tool_result".to_string()));
             tool_result.insert(
@@ -85,7 +84,9 @@ pub(super) fn chat_messages_as_anthropic_messages(
                 "content".to_string(),
                 responses_tool_output_as_anthropic_content(object.get("content"))?,
             );
-            if is_error {
+            if let Some(is_error) = tool_result_explicit_is_error(object)? {
+                tool_result.insert("is_error".to_string(), is_error.clone());
+            } else if responses_tool_result_is_error(chat_tool_result_status(object)?)? {
                 tool_result.insert("is_error".to_string(), Value::Bool(true));
             }
             output.push(json!({
@@ -98,10 +99,19 @@ pub(super) fn chat_messages_as_anthropic_messages(
         if let Some(reasoning_content) = object.get("reasoning_content") {
             if let Some(reasoning_content) = reasoning_content.as_str() {
                 if !reasoning_content.is_empty() {
-                    content.push(json!({
+                    let mut thinking_block = json!({
                         "type":"thinking",
                         "thinking":reasoning_content
-                    }));
+                    });
+                    // Restore the Anthropic thinking `signature` from the opaque
+                    // business association captured while folding the Responses
+                    // reasoning item into the canonical Chat message. Absent
+                    // stays absent; present-empty and non-empty pass through
+                    // unchanged.
+                    if let Some(signature) = chat_reasoning_encrypted_content(object) {
+                        thinking_block["signature"] = Value::String(signature.to_string());
+                    }
+                    content.push(thinking_block);
                 }
             } else if !reasoning_content.is_null() {
                 return Err(V3AnthropicCodecError::MalformedField {
@@ -126,6 +136,14 @@ pub(super) fn chat_messages_as_anthropic_messages(
         }));
     }
     Ok(output)
+}
+
+fn chat_reasoning_encrypted_content(object: &Map<String, Value>) -> Option<&str> {
+    object
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+        .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
+        .and_then(Value::as_str)
 }
 
 pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(
@@ -427,7 +445,6 @@ pub(super) fn responses_tool_call_as_anthropic_tool_use(
 pub(super) fn responses_tool_output_as_anthropic_tool_result(
     object: &Map<String, Value>,
 ) -> Result<Value, V3AnthropicCodecError> {
-    let is_error = responses_tool_result_is_error(object.get("status"))?;
     let mut result = Map::new();
     result.insert("type".to_string(), Value::String("tool_result".to_string()));
     result.insert(
@@ -438,10 +455,24 @@ pub(super) fn responses_tool_output_as_anthropic_tool_result(
         "content".to_string(),
         responses_tool_output_as_anthropic_content(object.get("output"))?,
     );
-    if is_error {
+    if let Some(is_error) = tool_result_explicit_is_error(object)? {
+        result.insert("is_error".to_string(), is_error.clone());
+    } else if responses_tool_result_is_error(object.get("status"))? {
         result.insert("is_error".to_string(), Value::Bool(true));
     }
     Ok(Value::Object(result))
+}
+
+fn tool_result_explicit_is_error<'a>(
+    object: &'a Map<String, Value>,
+) -> Result<Option<&'a Value>, V3AnthropicCodecError> {
+    match object.get("routecodex_chat_extension") {
+        None => Ok(None),
+        Some(Value::Object(extension)) => Ok(extension.get("anthropic_tool_result_is_error")),
+        Some(_) => Err(V3AnthropicCodecError::MalformedField {
+            field: "routecodex_chat_extension",
+        }),
+    }
 }
 
 fn chat_tool_result_status<'a>(

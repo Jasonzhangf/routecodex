@@ -605,15 +605,27 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     ) {
                         return response;
                     }
+                    let client_response_capture =
+                        V3LiveSnapFinalSseResponseCapture::from_direct_frame(
+                            &state,
+                            &entry_protocol,
+                            &path,
+                            &request_id,
+                            &frame,
+                        );
                     let stream_console_finalizer =
                         emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
                     let frame =
                         project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
-                    return responses_direct_output_response_with_console(
+                    let response = responses_direct_output_response_with_console(
                         frame,
                         stream_console_finalizer,
                         client_keepalive_interval,
                     );
+                    return match client_response_capture {
+                        Some(capture) => capture.observe_response(response),
+                        None => response,
+                    };
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(mut relay_output) => {
                     persist_v3_responses_relay_failure_sources(
@@ -778,6 +790,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     &request_headers,
                     &console_payload,
                 );
+                let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_direct_frame(
+                    &state,
+                    &entry_protocol,
+                    &path,
+                    &request_id,
+                    &frame,
+                );
                 let stream_console_finalizer =
                     emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
                 if matches!(&frame.body, V3Server16Body::Sse(_)) {
@@ -807,11 +826,15 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         &request_id,
                     ));
                 }
-                responses_direct_output_response_with_console(
+                let response = responses_direct_output_response_with_console(
                     frame,
                     stream_console_finalizer,
                     client_keepalive_interval,
-                )
+                );
+                match client_response_capture {
+                    Some(capture) => capture.observe_response(response),
+                    None => response,
+                }
             }
             V3ResponsesDirectServerOutcome::RelayOutput(output) => {
                 persist_v3_responses_relay_failure_sources(
@@ -1423,12 +1446,23 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                     output.stream_observation.is_none(),
                 );
             }
-            return openai_chat_relay_output_response(
+            let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_openai_chat_relay(
+                &state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &output,
+            );
+            let response = openai_chat_relay_output_response(
                 output,
                 stream_console_finalizer,
                 Duration::from_millis(state.server.http_sse_keepalive_ms),
                 requested_stream,
             );
+            return match client_response_capture {
+                Some(capture) => capture.observe_response(response),
+                None => response,
+            };
         }
         if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
             let client_headers = match collect_anthropic_relay_client_headers(request_headers) {
@@ -1501,7 +1535,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                 entry_protocol,
                 &path,
                 &request_id,
-                &output,
+                &mut output,
             ) {
                 return response;
             }
@@ -1561,10 +1595,21 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                     );
                 }
             }
-            return anthropic_relay_output_response(output, requested_stream);
+            let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(
+                &state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &output,
+            );
+            let response = anthropic_relay_output_response(output, requested_stream);
+            return match client_response_capture {
+                Some(capture) => capture.observe_response(response),
+                None => response,
+            };
         }
         if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-            let output =
+            let mut output =
                 match execute_v3_gemini_relay_runtime_with_default_transport_provider_health(
                     &state.manifest,
                     V3GeminiRelayRuntimeInput {
@@ -1605,6 +1650,24 @@ fn execute_v3_non_responses_protocol_branch<'a>(
             ) {
                 return response;
             }
+            if let Some(response) = capture_v3_relay_provider_snapshots(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &mut output.provider_snapshots,
+            ) {
+                return response;
+            }
+            if let Some(response) = capture_v3_gemini_relay_response(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &mut output,
+            ) {
+                return response;
+            }
             let console_payload = payload.clone();
             let console_context = build_v3_console_emission_context(
                 state,
@@ -1638,12 +1701,23 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                     output.stream_observation.is_none(),
                 );
             }
-            return gemini_relay_output_response(
+            let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_gemini_relay(
+                &state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &output,
+            );
+            let response = gemini_relay_output_response(
                 output,
                 stream_console_finalizer,
                 Duration::from_millis(state.server.http_sse_keepalive_ms),
                 requested_stream,
             );
+            return match client_response_capture {
+                Some(capture) => capture.observe_response(response),
+                None => response,
+            };
         }
         unreachable!("non-Responses branch requires a supported protocol and execution mode")
     })

@@ -231,7 +231,7 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
                 "type":"reasoning",
                 "summary":[{"type":"summary_text","text":summary_text}]
             });
-            if let Some(signature) = optional_nonempty_reasoning_string(object, "signature")? {
+            if let Some(signature) = optional_reasoning_string(object, "signature")? {
                 item["encrypted_content"] = Value::String(signature.to_string());
             }
             Ok(item)
@@ -264,14 +264,19 @@ fn require_nonempty_reasoning_string(value: Option<&Value>) -> Result<&str, V3An
     Ok(value)
 }
 
-fn optional_nonempty_reasoning_string<'a>(
+fn optional_reasoning_string<'a>(
     object: &'a Map<String, Value>,
     key: &str,
 ) -> Result<Option<&'a str>, V3AnthropicCodecError> {
     let Some(value) = object.get(key) else {
         return Ok(None);
     };
-    Ok(Some(require_nonempty_reasoning_string(Some(value))?))
+    value
+        .as_str()
+        .map(Some)
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "reasoning content",
+        })
 }
 
 fn validate_anthropic_reasoning_object_keys(

@@ -1564,11 +1564,23 @@ features:
   - Anthropic protocol differences remain in the entry and exit codec; Chat Process and Virtual Router contain no provider-specific branch
   - provider HTTP and runtime failures enter Error01 through Error06 and never enter the successful response node chain
   - structured SSE decoding preserves arbitrary chunk boundaries and reasoning tool terminal ordering without a second framing parser
+  - anthropic_empty_signature_tool_followup_reaches_first_provider_attempt preserves native thinking with present empty signature and complete paired Bash history through the public messages entry on its first provider attempt (04c8bc6).
   - side-channel control debug resource and selected-target fields never enter provider or client normal payloads
   - the controlled driver calls the Server-owned wrapper and never reads expected fixture truth
+  black_box_regression:
+    command: node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox c8e707e_anthropic_relay_sse_tool_input_delta_executes_and_follows_up -- --exact --nocapture
+    test_ids:
+    - c8e707e_anthropic_relay_sse_tool_input_delta_executes_and_follows_up
+  native_client_black_box_regression:
+    execution: manual_installed_client
+    command: node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox c8e707e_native_claude_cli_executes_bash_and_follows_up -- --ignored --exact --nocapture
+    test_ids:
+    - c8e707e_native_claude_cli_executes_bash_and_follows_up
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test anthropic_relay_anthropic_provider_wire_integration -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox c8e707e_anthropic_relay_sse_tool_input_delta_executes_and_follows_up -- --exact --nocapture
   - npm run test:v3-anthropic-relay-runtime-integration
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox anthropic_empty_signature_tool_followup_reaches_first_provider_attempt -- --exact --nocapture
   - npm run verify:v3-anthropic-relay-runtime-integration
   - npm run test:v3-anthropic-relay-runtime-integration-red-fixtures
   - node scripts/architecture/verify-v3-anthropic-relay-controlled-replay-harness.mjs
@@ -2019,6 +2031,8 @@ features:
   - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
   - responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak
   - responses_relay_anthropic_json_schema_name_is_consumed_at_provider_wire_boundary
+  - anthropic_relay_preserves_explicit_tool_result_is_error_presence
+  - responses_completed_tool_output_does_not_synthesize_anthropic_is_error
   - anthropic_consumes_responses_json_schema_name_in_outbound_projection
   - openai_chat_wire_projects_responses_web_search_tool_to_options
   - responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history
@@ -2048,6 +2062,7 @@ features:
   - npm run test:v3-protocol-conversion-field-parity
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_relay_json_projects_legacy_output_text_items_without_losing_fields
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_cross_protocol_public -- --nocapture
+  - CARGO_NET_OFFLINE=true cargo test --locked --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox is_error -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_native_discovery_public -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test gemini_sse_attempt_public -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test gemini_terminal_public -- --nocapture --test-threads=1
@@ -3027,6 +3042,10 @@ features:
   required_positive:
   - Debug artifacts are preserved verbatim before filesystem persistence; no proxy-generated redaction marker is allowed.
   - Direct runtime typed provider request/response carriers persist canonical artifacts without rebuilding provider payloads at the server boundary.
+  - Full sampling persists request, provider request, provider response, and client response for Responses, Chat, Anthropic, and Gemini in Direct and Relay JSON/SSE execution.
+  - Final client SSE observation includes transport keepalive and framing bytes; the persisted rawSse equals the bytes received by the client.
+  - Zero raw-request/raw-response memory retention does not suppress explicitly enabled disk sampling.
+  - Direct-to-Relay handoffs retain the paired request across the real failed Direct attempt and successful Relay attempt.
   - Error evidence force-writes request/error samples even when sampling is disabled.
   - Dev builds sample by default; release builds require explicit opt-in.
   - Each port retains at most 100 request directories.
@@ -3040,12 +3059,17 @@ features:
   required_negative:
   - Debug payload copies never enter MetadataCenter, provider payload, client payload, or routing truth.
   - Missing Direct typed carriers do not cause the server to fabricate provider artifacts.
+  - Final SSE observation preserves source errors and dropped prefixes; diagnostic write failures do not change the business stream.
   - No truncation or placeholder machinery may exist anywhere in the sample path.
   - Enqueue acceptance alone is never treated as successful filesystem persistence; worker failures cannot be discarded.
   - Queue or failure-ledger growth cannot retain an unbounded number or total byte size of JSON payloads; each queued job reserves a fixed overhead inside the byte budget so the job count is bounded too.
   required_gates:
   - npm run verify:v3-debug-payload-budget
   - npm run test:v3-debug-payload-budget-red-fixtures
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server matrix_persists_four_stage_exact_wire_for_all_protocols -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server snapall_direct_relay_handoffs_persist_four_stage_exact_wire -- --exact --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server snap_scope -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib codex_sample_final_body_capture -- --nocapture
   - npm run verify:v3-resource-map
   - cargo test -p routecodex-v3-debug persist_async_worker_records_explicit_failure_terminal
   - npm run test:v3-shared-sample-retention-blackbox

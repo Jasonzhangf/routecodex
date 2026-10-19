@@ -360,9 +360,16 @@ fn project_v3_anthropic_message_as_sse_events(
                         field: "tool_use input",
                     });
                 }
+                let mut start_part = part.clone();
+                start_part["input"] = json!({});
                 events.push(json!({
                     "event":"content_block_start",
-                    "data":{"type":"content_block_start","index":index,"content_block":part}
+                    "data":{"type":"content_block_start","index":index,"content_block":start_part}
+                }));
+                events.push(json!({
+                    "event":"content_block_delta",
+                    "data":{"type":"content_block_delta","index":index,
+                        "delta":{"type":"input_json_delta","partial_json":input.to_string()}}
                 }));
                 events.push(json!({
                     "event":"content_block_stop",
@@ -751,6 +758,67 @@ mod tests {
                 .expect("empty Chat strings must leave the tool intact");
             assert_eq!(empty["content"], json!([tool]));
         }
+    }
+
+    #[test]
+    fn anthropic_sse_projection_frames_tool_input_as_delta_and_keeps_unknown_fields() {
+        let input = json!({
+            "command": "printf '%s' CLAUDE_TOOL_PROBE",
+            "nested": {"values": [1, 2, 3]},
+            "note": "  spaced \"quoted\" \\n "
+        });
+        let part = json!({
+            "type": "tool_use",
+            "id": "call_delta",
+            "name": "lookup",
+            "input": input,
+            "cache_control": {"type": "ephemeral"},
+            "vendor_unknown": {"retain": [true, null]}
+        });
+        let events = project_v3_anthropic_message_as_sse_events(&json!({
+            "id":"msg_delta",
+            "type":"message",
+            "role":"assistant",
+            "content":[part]
+        }))
+        .expect("complete tool input must project");
+
+        let start = events
+            .iter()
+            .find(|event| event["data"]["type"] == "content_block_start")
+            .expect("content block start");
+        assert_eq!(start["data"]["index"], 0);
+        assert_eq!(start["data"]["content_block"]["input"], json!({}));
+        assert_eq!(start["data"]["content_block"]["id"], "call_delta");
+        assert_eq!(start["data"]["content_block"]["name"], "lookup");
+        assert_eq!(
+            start["data"]["content_block"]["cache_control"],
+            json!({"type":"ephemeral"}),
+            "unknown metadata must survive the start clone"
+        );
+        assert_eq!(
+            start["data"]["content_block"]["vendor_unknown"],
+            json!({"retain":[true, null]})
+        );
+
+        let delta = events
+            .iter()
+            .find(|event| event["data"]["type"] == "content_block_delta")
+            .expect("argument delta");
+        assert_eq!(delta["data"]["index"], 0);
+        assert_eq!(delta["data"]["delta"]["type"], "input_json_delta");
+        assert_eq!(
+            serde_json::from_str::<Value>(delta["data"]["delta"]["partial_json"].as_str().unwrap())
+                .unwrap(),
+            input
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event["data"]["type"] == "content_block_stop")
+                .count(),
+            1
+        );
     }
 
     #[test]

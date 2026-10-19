@@ -5,7 +5,12 @@
 //! Native error fixtures are representative protocol fixtures, NOT the QSA
 //! sample: its retained body=[] does not identify its original native event.
 use axum::{
-    body::Body, extract::State, http::StatusCode, response::Response, routing::post, Json, Router,
+    body::{to_bytes, Body},
+    extract::State,
+    http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
+    response::Response,
+    routing::post,
+    Router,
 };
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
@@ -34,6 +39,34 @@ struct ProviderState {
     attempt_bodies: Vec<String>,
     attempts: std::sync::atomic::AtomicUsize,
     header_captures: Option<mpsc::UnboundedSender<String>>,
+    live_forward: Option<LiveForward>,
+}
+
+struct LiveForward {
+    client: reqwest::Client,
+    target: String,
+    captures: Arc<std::sync::Mutex<Vec<LiveForwardExchange>>>,
+}
+
+#[derive(Clone)]
+struct LiveForwardExchange {
+    request_body: Vec<u8>,
+    response_status: Option<StatusCode>,
+    response_content_type: Option<String>,
+    response_body: Vec<u8>,
+    transport_error: Option<String>,
+}
+
+impl Default for LiveForwardExchange {
+    fn default() -> Self {
+        Self {
+            request_body: Vec::new(),
+            response_status: None,
+            response_content_type: None,
+            response_body: Vec::new(),
+            transport_error: None,
+        }
+    }
 }
 
 /// Explicit Anthropic SSE failures must stay failures at the public entry.
@@ -461,6 +494,185 @@ async fn anthropic_relay_tool_only_terminal_stays_deliverable() {
     assert!(
         body.contains("guard"),
         "tool-only arguments must survive: {body}"
+    );
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Native Anthropic Relay must preserve an explicit `tool_result.is_error`
+/// boolean exactly. The client's explicit `false`, explicit `true`, and absent
+/// marker must each project to the provider-bound Anthropic wire unchanged, and
+/// an explicit `false` must never be synthesized for an unmarked success.
+#[tokio::test]
+async fn anthropic_relay_preserves_explicit_tool_result_is_error_presence() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let provider_body = json!({
+        "id":"msg_business_ok","type":"message","role":"assistant",
+        "model":"wire-test","content":[{"type":"text","text":"provider finished the turn"}],
+        "stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":4}
+    })
+    .to_string();
+    for (label, marker) in [
+        ("explicit_false", Some(false)),
+        ("explicit_true", Some(true)),
+        ("absent", None),
+    ] {
+        let mut tool_result = json!({
+            "type":"tool_result",
+            "tool_use_id":"toolu_bash_1",
+            "content":"MARKER tool output for is_error preservation"
+        });
+        if let Some(marker) = marker {
+            tool_result["is_error"] = json!(marker);
+        }
+        let request = json!({
+            "model":"test.test","max_tokens":128,"stream":false,
+            "tools":[{"name":"Bash","description":"run a shell command","input_schema":{
+                "type":"object",
+                "properties":{"command":{"type":"string"},"description":{"type":"string"}},
+                "required":["command","description"]}}],
+            "messages":[
+                {"role":"user","content":[{"type":"text","text":"run the check"}]},
+                {"role":"assistant","content":[{"type":"tool_use","id":"toolu_bash_1","name":"Bash",
+                    "input":{"command":"ls -la","description":"list files"}}]},
+                {"role":"user","content":[tool_result]}
+            ]
+        });
+        let (endpoint, handle, mut captures, shutdown) = start_entry(
+            "anthropic",
+            "chat",
+            StatusCode::OK,
+            "application/json",
+            provider_body.clone(),
+        )
+        .await;
+        let (_, client_body) = successful_transfer(
+            client()
+                .post(endpoint.replace("/v1/responses", "/v1/messages"))
+                .json(&request)
+                .send()
+                .await,
+        )
+        .await;
+        stop_entry(handle, shutdown).await;
+        let captured = tokio::time::timeout(Duration::from_secs(2), captures.recv())
+            .await
+            .expect("real upstream attempt")
+            .unwrap();
+        assert_eq!(captured["model"], "wire-test");
+        assert!(
+            matches!(
+                captures.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+            ),
+            "{label}: exactly one upstream attempt"
+        );
+        let parts = |message: &Value| -> Vec<Value> {
+            message["content"].as_array().cloned().unwrap_or_default()
+        };
+        let messages = captured["messages"].as_array().expect("provider messages");
+        let call = messages
+            .iter()
+            .flat_map(parts)
+            .find(|part| part["type"] == "tool_use")
+            .unwrap_or_else(|| panic!("{label}: tool_use missing: {captured}"));
+        assert_eq!(call["id"], "toolu_bash_1", "{label}: {captured}");
+        assert_eq!(call["name"], "Bash", "{label}: {captured}");
+        assert_eq!(call["input"]["command"], "ls -la", "{label}: {captured}");
+        assert_eq!(
+            call["input"]["description"], "list files",
+            "{label}: {captured}"
+        );
+        let result = messages
+            .iter()
+            .flat_map(parts)
+            .find(|part| part["type"] == "tool_result")
+            .unwrap_or_else(|| panic!("{label}: tool_result missing: {captured}"));
+        assert_eq!(result["tool_use_id"], "toolu_bash_1", "{label}: {captured}");
+        assert!(
+            result["content"]
+                .to_string()
+                .contains("MARKER tool output for is_error preservation"),
+            "{label}: tool result content preserved: {captured}"
+        );
+        match marker {
+            Some(expected) => assert_eq!(
+                result.get("is_error"),
+                Some(&json!(expected)),
+                "{label}: explicit is_error must survive the roundtrip: {captured}"
+            ),
+            None => assert!(
+                result.get("is_error").is_none(),
+                "{label}: absent marker must remain absent: {captured}"
+            ),
+        }
+        assert!(
+            client_body.contains("provider finished the turn"),
+            "{label}: client success body must carry provider text: {client_body}"
+        );
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// A generic Responses `completed` status is not a native Anthropic marker.
+/// It must project to Anthropic without synthesizing `is_error: false`.
+#[tokio::test]
+async fn responses_completed_tool_output_does_not_synthesize_anthropic_is_error() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let provider_body = json!({
+        "id":"msg_business_ok","type":"message","role":"assistant",
+        "model":"wire-test","content":[{"type":"text","text":"generic Responses control"}],
+        "stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":4}
+    })
+    .to_string();
+    let request = json!({
+        "model":"test.test","stream":false,
+        "input":[
+            {"type":"message","role":"user","content":"run the check"},
+            {"type":"function_call","call_id":"call_completed","name":"Bash",
+                "arguments":"{\"command\":\"ls -la\",\"description\":\"list files\"}"},
+            {"type":"function_call_output","call_id":"call_completed","status":"completed",
+                "output":"generic completed output"}
+        ]
+    });
+    let (endpoint, handle, mut captures, shutdown) = start_entry(
+        "anthropic",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        provider_body,
+    )
+    .await;
+    let (_, client_body) =
+        successful_transfer(client().post(&endpoint).json(&request).send().await).await;
+    stop_entry(handle, shutdown).await;
+    let captured = tokio::time::timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("real upstream attempt")
+        .unwrap();
+    assert!(
+        matches!(
+            captures.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+        ),
+        "exactly one upstream attempt"
+    );
+    let result = captured["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|part| part["type"] == "tool_result")
+        .unwrap_or_else(|| panic!("tool_result missing: {captured}"));
+    assert_eq!(result["tool_use_id"], "call_completed", "{captured}");
+    assert!(
+        result.get("is_error").is_none(),
+        "generic Responses completed must not synthesize an Anthropic marker: {captured}"
+    );
+    assert!(
+        client_body.contains("generic Responses control"),
+        "client success body must carry provider text: {client_body}"
     );
     std::env::remove_var(KEY_ENV);
 }
@@ -1711,14 +1923,311 @@ async fn tool_parameter_values_and_matching_results_survive_request_projection()
     std::env::remove_var(KEY_ENV);
 }
 
+async fn probe_native_followup_attempt(
+    next_kind: &str,
+    thinking: &str,
+    call_id: &str,
+    input: &Value,
+    signature: Option<&str>,
+) -> Value {
+    let reply = if next_kind == "anthropic" {
+        json!({"id":"msg_followup","type":"message","role":"assistant","model":"wire-test","content":[{"type":"text","text":"CLAUDE_NATIVE_TOOL_PROBE"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}})
+    } else {
+        json!({"id":"chat_followup","object":"chat.completion","model":"wire-test","choices":[{"index":0,"message":{"role":"assistant","content":"CLAUDE_NATIVE_TOOL_PROBE"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}})
+    };
+    let (endpoint, handle, mut captures, shutdown) = start_entry(
+        next_kind,
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        reply.to_string(),
+    )
+    .await;
+    let mut thinking_block = json!({"type":"thinking","thinking":thinking});
+    if let Some(signature) = signature {
+        thinking_block["signature"] = json!(signature);
+    }
+    let request = json!({
+        "model":"test.test","max_tokens":128,"stream":false,
+        "tools":[{"name":"Bash","description":"Execute command","input_schema":{"type":"object","properties":{"command":{"type":"string"},"description":{"type":"string"}}}}],
+        "messages":[
+            {"role":"user","content":"Run the probe once and report its result."},
+            {"role":"assistant","content":[thinking_block,{"type":"tool_use","id":call_id,"name":"Bash","input":input}]},
+            {"role":"user","content":[{"type":"tool_result","tool_use_id":call_id,"content":"CLAUDE_NATIVE_TOOL_PROBE","is_error":false}]}
+        ]
+    });
+    let result = client()
+        .post(endpoint.replace("/v1/responses", "/v1/messages"))
+        .json(&request)
+        .send()
+        .await;
+    let wire = tokio::time::timeout(Duration::from_secs(3), captures.recv()).await;
+    stop_entry(handle, shutdown).await;
+    let wire = wire
+        .unwrap_or_else(|_| {
+            panic!(
+                "signature={signature:?} next_kind={next_kind}: followup must reach its first provider attempt"
+            )
+        })
+        .expect("provider capture");
+    assert!(
+        captures.try_recv().is_err(),
+        "signature={signature:?} next_kind={next_kind}: followup must use exactly one provider attempt"
+    );
+    assert!(
+        result
+            .expect("successful native followup transport")
+            .status()
+            .is_success(),
+        "signature={signature:?} next_kind={next_kind}"
+    );
+    wire
+}
+
+fn assert_native_followup_thinking_and_tool_history(
+    next_kind: &str,
+    wire: &Value,
+    thinking: &str,
+    call_id: &str,
+    input: &Value,
+) {
+    if next_kind == "openai_chat" {
+        let messages = wire["messages"].as_array().expect("Chat history");
+        let assistant = messages
+            .iter()
+            .find(|m| m["tool_calls"].is_array())
+            .expect("paired assistant call");
+        assert_eq!(assistant["reasoning_content"], thinking);
+        assert_eq!(assistant["tool_calls"][0]["id"], call_id);
+        assert_eq!(
+            serde_json::from_str::<Value>(
+                assistant["tool_calls"][0]["function"]["arguments"]
+                    .as_str()
+                    .unwrap()
+            )
+            .unwrap(),
+            *input
+        );
+        assert!(messages.iter().any(|m| {
+            m["role"] == "tool"
+                && m["tool_call_id"] == call_id
+                && m["content"] == "CLAUDE_NATIVE_TOOL_PROBE"
+        }));
+    } else {
+        let messages = wire["messages"].as_array().expect("Anthropic history");
+        let blocks: Vec<&Value> = messages
+            .iter()
+            .filter_map(|m| m["content"].as_array())
+            .flatten()
+            .collect();
+        let thinking_block = blocks
+            .iter()
+            .find(|b| b["type"] == "thinking")
+            .expect("native thinking block");
+        assert_eq!(thinking_block["thinking"], thinking);
+        let tool = blocks
+            .iter()
+            .find(|b| b["type"] == "tool_use")
+            .expect("native tool use");
+        assert_eq!(tool["id"], call_id);
+        assert_eq!(tool["name"], "Bash");
+        assert_eq!(tool["input"], *input, "{wire}");
+        let result = blocks
+            .iter()
+            .find(|b| b["type"] == "tool_result")
+            .expect("native tool result");
+        assert_eq!(result["tool_use_id"], call_id);
+        assert_eq!(result["content"], "CLAUDE_NATIVE_TOOL_PROBE");
+    }
+}
+
+#[tokio::test]
+async fn anthropic_empty_signature_tool_followup_reaches_first_provider_attempt() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let thinking = "We need obey exact once Bash with command. Need commentary tool call. Then report actual output.";
+    let call_id = "call_00_0DgLrsue3mL4JgHTP5rM6075";
+    let input = json!({"command":"/usr/bin/printf CLAUDE_NATIVE_TOOL_PROBE","description":"Print tool probe marker"});
+    for signature in [None, Some(""), Some("sig_nonempty")] {
+        for next_kind in ["openai_chat", "anthropic"] {
+            let wire =
+                probe_native_followup_attempt(next_kind, thinking, call_id, &input, signature)
+                    .await;
+            assert_native_followup_thinking_and_tool_history(
+                next_kind, &wire, thinking, call_id, &input,
+            );
+            if next_kind == "anthropic" {
+                let messages = wire["messages"].as_array().expect("Anthropic history");
+                let thinking_block = messages
+                    .iter()
+                    .filter_map(|m| m["content"].as_array())
+                    .flatten()
+                    .find(|b| b["type"] == "thinking")
+                    .expect("native thinking block");
+                match signature {
+                    None => assert!(thinking_block.get("signature").is_none(), "{wire}"),
+                    Some(signature) => {
+                        assert_eq!(thinking_block["signature"], signature, "{wire}")
+                    }
+                }
+            }
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+// Independent defect bfd9e2c: the native `tool_result.is_error: false` is an
+// explicit business field and must survive the round trip. This case stays RED
+// until that defect's owner fixes it; the signature scope above is separate.
+#[tokio::test]
+async fn anthropic_tool_result_explicit_false_preserved_on_tool_followup() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let thinking = "We need obey exact once Bash with command. Need commentary tool call. Then report actual output.";
+    let call_id = "call_00_0DgLrsue3mL4JgHTP5rM6075";
+    let input = json!({"command":"/usr/bin/printf CLAUDE_NATIVE_TOOL_PROBE","description":"Print tool probe marker"});
+    for signature in [None, Some(""), Some("sig_nonempty")] {
+        let wire =
+            probe_native_followup_attempt("anthropic", thinking, call_id, &input, signature).await;
+        let messages = wire["messages"].as_array().expect("Anthropic history");
+        let blocks: Vec<&Value> = messages
+            .iter()
+            .filter_map(|m| m["content"].as_array())
+            .flatten()
+            .collect();
+        let result = blocks
+            .iter()
+            .find(|b| b["type"] == "tool_result")
+            .expect("native tool result");
+        assert_eq!(result["tool_use_id"], call_id);
+        assert_eq!(result["content"], "CLAUDE_NATIVE_TOOL_PROBE");
+        assert_eq!(result["is_error"], false, "{wire}");
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 async fn controlled_upstream(
     State(state): State<Arc<ProviderState>>,
-    headers: axum::http::HeaderMap,
-    Json(body): Json<Value>,
+    request: axum::extract::Request,
 ) -> Response<Body> {
+    if let Some(live_forward) = &state.live_forward {
+        let (parts, body) = request.into_parts();
+        let request_body = match to_bytes(body, usize::MAX).await {
+            Ok(body) => body.to_vec(),
+            Err(error) => {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from(format!("request body unavailable: {error}")))
+                    .unwrap();
+            }
+        };
+        let request_content_type = parts.headers.get(CONTENT_TYPE).cloned();
+        let completed = live_forward.captures.lock().unwrap().len();
+        let has_tool_result = serde_json::from_slice::<Value>(&request_body)
+            .ok()
+            .and_then(|body| body["messages"].as_array().cloned())
+            .is_some_and(|messages| messages.iter().any(|message| message["role"] == "tool"));
+        if completed >= 2 || (completed == 1 && !has_tool_result) {
+            eprintln!("LIVE_PROBE_STOP: retry or extra generation outside the two-turn case");
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from("live probe stopped; original exchange retained"))
+                .unwrap();
+        }
+        let mut request = live_forward
+            .client
+            .post(&live_forward.target)
+            .body(request_body.clone());
+        if let Some(content_type) = request_content_type {
+            request = request.header(CONTENT_TYPE, content_type);
+        }
+        let mut exchange = LiveForwardExchange {
+            request_body,
+            ..LiveForwardExchange::default()
+        };
+        let response = match request.send().await {
+            Ok(response) => {
+                let status = StatusCode::from_u16(response.status().as_u16()).unwrap();
+                let content_type = response
+                    .headers()
+                    .get(CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_string);
+                match response.bytes().await {
+                    Ok(body) => {
+                        exchange.response_status = Some(status);
+                        exchange.response_content_type = content_type.clone();
+                        exchange.response_body = body.to_vec();
+                        Some((status, content_type, body))
+                    }
+                    Err(error) => {
+                        exchange.response_status = Some(status);
+                        exchange.response_content_type = content_type;
+                        exchange.transport_error = Some(error.to_string());
+                        None
+                    }
+                }
+            }
+            Err(error) => {
+                exchange.transport_error = Some(error.to_string());
+                None
+            }
+        };
+        let mut captured = live_forward.captures.lock().unwrap();
+        let number = captured.len() + 1;
+        let evidence_dir = live_native_evidence_dir();
+        write_live_evidence(
+            &evidence_dir,
+            &format!("claude-live-native-candidate-wire-{number}.json"),
+            &exchange.request_body,
+        );
+        write_live_evidence(
+            &evidence_dir,
+            &format!("claude-live-native-rcc-response-{number}.body"),
+            &exchange.response_body,
+        );
+        write_live_evidence(&evidence_dir, &format!("claude-live-native-exchange-{number}.meta.json"),
+            json!({"rcc_status":exchange.response_status.map(|status|status.as_u16()),
+                "rcc_content_type":exchange.response_content_type,"transport_error":exchange.transport_error}).to_string().as_bytes());
+        captured.push(exchange);
+        drop(captured);
+        return match response {
+            Some((status, content_type, body)) => {
+                let mut builder = Response::builder().status(status);
+                if let Some(content_type) = content_type {
+                    builder =
+                        builder.header(CONTENT_TYPE, HeaderValue::from_str(&content_type).unwrap());
+                }
+                builder.body(Body::from(body)).unwrap()
+            }
+            None => Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .body(Body::from("live upstream transport failed"))
+                .unwrap(),
+        };
+    }
+    let (parts, request_body) = request.into_parts();
+    let body = match to_bytes(request_body, usize::MAX).await {
+        Ok(body) => match serde_json::from_slice::<Value>(&body) {
+            Ok(body) => body,
+            Err(error) => {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from(format!("invalid JSON body: {error}")))
+                    .unwrap();
+            }
+        },
+        Err(error) => {
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from(format!("request body unavailable: {error}")))
+                .unwrap();
+        }
+    };
     state.captures.send(body.clone()).unwrap();
     if let Some(header_captures) = &state.header_captures {
-        let auth = headers
+        let auth = parts
+            .headers
             .iter()
             .filter(|(name, _)| matches!(name.as_str(), "authorization" | "x-api-key"))
             .map(|(name, value)| {
@@ -2021,6 +2530,8 @@ struct EntryOptions {
     auth_entries: Vec<(String, String)>,
     pin_key: Option<String>,
     capture_headers: bool,
+    wire_model: Option<String>,
+    live_forward: Option<LiveForward>,
 }
 
 async fn start_entry(
@@ -2126,6 +2637,8 @@ async fn start_entry_configured(
         pin_key,
         capture_headers,
         mixed,
+        wire_model,
+        live_forward,
     } = options;
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -2150,6 +2663,7 @@ async fn start_entry_configured(
             attempts: std::sync::atomic::AtomicUsize::new(0),
             header_captures: capture_headers.then_some(header_tx),
             mixed,
+            live_forward,
         }));
     tokio::spawn(async move {
         axum::serve(upstream, app)
@@ -2186,6 +2700,7 @@ async fn start_entry_configured(
         .as_ref()
         .map(|key| format!(", key = \"{key}\""))
         .unwrap_or_default();
+    let wire_model = wire_model.as_deref().unwrap_or("wire-test");
     // Anthropic's transport appends /v1/messages; Responses and Chat append
     // their endpoint to an API base that already includes /v1.
     let provider_base_url = if kind == "anthropic" {
@@ -2210,8 +2725,8 @@ default_model = "test"
 auth = {{ type = "api_key", entries = [{auth_entries_toml}] }}
 health = {{ enabled = {health_enabled}, failure_threshold = 2, cooldown_ms = 5000 }}
 responses = {{ process = "{process}", streaming = "always" }}
-[providers.test.models.test]
-wire_name = "wire-test"
+        [providers.test.models.test]
+wire_name = "{wire_model}"
 capabilities = ["text", "tools"]
 supports_streaming = true
 max_tokens = 4096
@@ -2278,6 +2793,50 @@ fn events(body: &str) -> Vec<Value> {
         .filter_map(|line| line.strip_prefix("data:").map(str::trim))
         .filter(|data| !data.is_empty() && *data != "[DONE]")
         .map(|data| serde_json::from_str(data).expect("client SSE must preserve valid JSON"))
+        .collect()
+}
+
+/// Test-local Anthropic SSE consumer that mirrors the real client's incremental
+/// contract: a tool block's `content_block_start.input` is discarded and the
+/// arguments are accumulated only from matching `input_json_delta` frames.
+fn anthropic_sse_content_blocks(body: &str) -> Vec<Value> {
+    let frames = events(body);
+    let mut blocks = Vec::new();
+    let mut indexes = Vec::new();
+    for frame in &frames {
+        if frame["type"] != "content_block_start" {
+            continue;
+        }
+        let mut block = frame["content_block"].clone();
+        if block["type"] == "tool_use" {
+            // Ignore any populated start input, exactly like the observed client.
+            block["input"] = json!({});
+        }
+        indexes.push(frame["index"].as_u64().expect("content block index"));
+        blocks.push(block);
+    }
+    for (position, index) in indexes.iter().enumerate() {
+        if blocks[position]["type"] != "tool_use" {
+            continue;
+        }
+        let partial = anthropic_tool_input_partial_json(&frames, *index);
+        assert!(
+            !partial.is_empty(),
+            "missing input_json_delta for tool block {index}: {body}"
+        );
+        blocks[position]["input"] = serde_json::from_str(&partial).unwrap_or_else(|error| {
+            panic!("tool input delta must reconstruct JSON for block {index}: {error}: {partial:?}")
+        });
+    }
+    blocks
+}
+
+fn anthropic_tool_input_partial_json(frames: &[Value], index: u64) -> String {
+    frames
+        .iter()
+        .filter(|frame| frame["type"] == "content_block_delta" && frame["index"] == index)
+        .filter(|frame| frame["delta"]["type"] == "input_json_delta")
+        .filter_map(|frame| frame["delta"]["partial_json"].as_str())
         .collect()
 }
 
@@ -2961,11 +3520,7 @@ async fn duplicate_tool_ids_preserve_both_calls_across_public_entries() {
                         assert_eq!(value["output"], native["output"], "{body}");
                     } else if entry == "anthropic" {
                         let blocks: Vec<Value> = if projected_sse {
-                            payloads
-                                .iter()
-                                .filter(|event| event["type"] == "content_block_start")
-                                .map(|event| event["content_block"].clone())
-                                .collect()
+                            anthropic_sse_content_blocks(&body)
                         } else {
                             payloads[0]["content"].as_array().unwrap().clone()
                         };
@@ -2979,24 +3534,7 @@ async fn duplicate_tool_ids_preserve_both_calls_across_public_entries() {
                                 serde_json::from_str(calls[index]["arguments"].as_str().unwrap())
                                     .unwrap()
                             };
-                            let actual = if projected_sse {
-                                let arguments: String = payloads
-                                    .iter()
-                                    .filter(|event| {
-                                        event["type"] == "content_block_delta"
-                                            && event["index"] == index
-                                    })
-                                    .filter_map(|event| event["delta"]["partial_json"].as_str())
-                                    .collect();
-                                if arguments.is_empty() {
-                                    blocks[index]["input"].clone()
-                                } else {
-                                    serde_json::from_str::<Value>(&arguments).unwrap()
-                                }
-                            } else {
-                                blocks[index]["input"].clone()
-                            };
-                            assert_eq!(actual, expected, "{body}");
+                            assert_eq!(blocks[index]["input"], expected, "{body}");
                         }
                     } else {
                         let tools: Vec<Value> = if projected_sse {
@@ -4017,11 +4555,7 @@ async fn anthropic_incomplete_tools_preserve_terminal_reason_and_full_calls() {
                     1
                 );
                 (
-                    frames
-                        .iter()
-                        .filter(|frame| frame["type"] == "content_block_start")
-                        .map(|frame| frame["content_block"].clone())
-                        .collect(),
+                    anthropic_sse_content_blocks(&body),
                     terminal["delta"]["stop_reason"].clone(),
                 )
             };
@@ -4475,11 +5009,7 @@ async fn anthropic_chat_tools_preserve_filter_and_length_terminals() {
                     .unwrap();
                 assert_eq!(terminal["usage"]["output_tokens"], 3);
                 (terminal["delta"]["stop_reason"].clone(), {
-                    let mut content: Vec<Value> = frames
-                        .iter()
-                        .filter(|f| f["type"] == "content_block_start")
-                        .map(|f| f["content_block"].clone())
-                        .collect();
+                    let mut content = anthropic_sse_content_blocks(&body);
                     content[0]["text"] = json!(frames
                         .iter()
                         .filter_map(|f| f["delta"]["text"].as_str())
@@ -4745,11 +5275,7 @@ async fn anthropic_chat_complete_argument_objects_execute_and_follow_up_exactly(
                 assert_eq!(value["stop_reason"], "tool_use");
                 value["content"].as_array().unwrap().clone()
             } else {
-                events(&body)
-                    .into_iter()
-                    .filter(|f| f["type"] == "content_block_start")
-                    .map(|f| f["content_block"].clone())
-                    .collect()
+                anthropic_sse_content_blocks(&body)
             };
             let call = content
                 .iter()
@@ -4826,6 +5352,623 @@ async fn anthropic_chat_complete_argument_objects_execute_and_follow_up_exactly(
     std::env::remove_var(KEY_ENV);
 }
 
+/// c8e707e: the real Claude client discards `content_block_start.input` and
+/// accumulates only `input_json_delta.partial_json`. This public-entry
+/// regression proves the Anthropic SSE projection emits the complete arguments
+/// as deltas, executes the received command, and keeps the paired follow-up.
+#[tokio::test]
+async fn c8e707e_anthropic_relay_sse_tool_input_delta_executes_and_follows_up() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let input = json!({
+        "command": "printf '%s' CLAUDE_TOOL_PROBE",
+        "nested": {"values": [1, 2, 3], "keep": true},
+        "note": "  spaced \"quoted\" \\n "
+    });
+    // Cross-protocol provider with split upstream arguments exercises the Relay
+    // projection into Anthropic SSE.
+    let (media, upstream) = chat_tool_fixture(json!(input.to_string()), "tool_calls", 3);
+    let (endpoint, handle, mut captures, shutdown) =
+        start_entry("openai_chat", "chat", StatusCode::OK, media, upstream).await;
+    let endpoint = endpoint.replace("/v1/responses", "/v1/messages");
+    let tools = json!([{"name":"lookup","input_schema":{"type":"object"}}]);
+    let (media, body) = successful_transfer(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model":"test.test","max_tokens":128,"stream":true,"tools":tools,
+                "messages":[{"role":"user","content":"execute the complete tool input"}]
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    assert!(
+        media.starts_with("text/event-stream"),
+        "real client entry must be SSE: {body}"
+    );
+    let frames = events(&body);
+    let start = frames
+        .iter()
+        .find(|frame| {
+            frame["type"] == "content_block_start" && frame["content_block"]["type"] == "tool_use"
+        })
+        .expect("tool start block");
+    let deltas = anthropic_tool_input_partial_json(&frames, start["index"].as_u64().unwrap());
+    assert!(!deltas.is_empty(), "missing input_json_delta: {body}");
+    assert_eq!(
+        start["content_block"]["input"],
+        json!({}),
+        "start block must not carry the arguments: {body}"
+    );
+    let reconstructed: Value =
+        serde_json::from_str(&deltas).expect("argument deltas must reconstruct JSON");
+    assert_eq!(
+        reconstructed, input,
+        "exact tool input must survive the delta framing: {body}"
+    );
+    let blocks = anthropic_sse_content_blocks(&body);
+    let call = blocks
+        .iter()
+        .find(|block| block["type"] == "tool_use")
+        .expect("tool block");
+    assert_eq!(call["id"], "call_original");
+    assert_eq!(call["name"], "lookup");
+    assert_eq!(
+        call["input"], input,
+        "delta consumer must reconstruct the exact input: {body}"
+    );
+    // Execute the received command only after the exact expected input assertion.
+    let command = call["input"]["command"]
+        .as_str()
+        .expect("required command field");
+    let execution = std::process::Command::new("sh")
+        .args(["-c", command])
+        .output()
+        .unwrap();
+    assert!(execution.status.success(), "{execution:?}");
+    let output = String::from_utf8(execution.stdout).unwrap();
+    assert_eq!(output, "CLAUDE_TOOL_PROBE");
+    assert_one_attempt(&mut captures, "wire-test").await;
+    // Paired same-call-ID follow-up carries the complete arguments and result.
+    let (_, completed) = successful_transfer(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model":"test.test","max_tokens":128,"stream":true,"tools":tools,
+                "messages":[
+                    {"role":"user","content":"execute the complete tool input"},
+                    {"role":"assistant","content":[call]},
+                    {"role":"user","content":[{"type":"tool_result","tool_use_id":call["id"],"content":output}]}
+                ]
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    stop_entry(handle, shutdown).await;
+    let wire = captures
+        .recv()
+        .await
+        .expect("matching actual result reaches Chat provider");
+    let messages = wire["messages"].as_array().unwrap();
+    let sent = messages
+        .iter()
+        .find_map(|message| message["tool_calls"].as_array())
+        .unwrap();
+    assert_eq!(sent[0]["id"], "call_original");
+    assert_eq!(sent[0]["function"]["name"], "lookup");
+    assert_eq!(
+        serde_json::from_str::<Value>(sent[0]["function"]["arguments"].as_str().unwrap()).unwrap(),
+        input
+    );
+    let result = messages
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .expect("paired tool result");
+    assert_eq!(result["tool_call_id"], "call_original");
+    assert_eq!(result["content"], output);
+    assert!(matches!(
+        captures.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+    ));
+    assert!(completed.contains("chat roundtrip complete"), "{completed}");
+    std::env::remove_var(KEY_ENV);
+}
+
+/// The installed Claude client must execute the projected Bash call itself.
+#[tokio::test]
+#[ignore = "manual native consumer: requires installed Claude CLI; run explicitly with --ignored"]
+async fn c8e707e_native_claude_cli_executes_bash_and_follows_up() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let command = "/usr/bin/printf CLAUDE_NATIVE_TOOL_PROBE";
+    let arguments = json!({"command": command}).to_string();
+    let upstream = format!(
+        "data: {}\n\ndata: [DONE]\n\n",
+        json!({"id":"chat-native-claude","object":"chat.completion.chunk","model":"wire-test",
+            "choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{
+                "index":0,"id":"call_native_claude","type":"function",
+                "function":{"name":"Bash","arguments":arguments}
+            }]},"finish_reason":"tool_calls"}],
+            "usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}})
+    );
+    let (endpoint, handle, mut captures, shutdown) = start_entry(
+        "openai_chat",
+        "chat",
+        StatusCode::OK,
+        "text/event-stream",
+        upstream,
+    )
+    .await;
+    let base_url = endpoint.strip_suffix("/v1/responses").unwrap();
+    let config_home =
+        std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("native-claude");
+    std::fs::create_dir(&config_home).unwrap();
+    let mut child = tokio::process::Command::new("/Users/fanzhang/.local/bin/claude");
+    child
+        .args([
+            "--model", "test.test", "--permission-mode", "dontAsk",
+            "--allowedTools", "Bash", "--setting-sources", "",
+            "--no-session-persistence", "--output-format", "stream-json", "--verbose",
+            "-p", "Run /usr/bin/printf CLAUDE_NATIVE_TOOL_PROBE using Bash once, then report its actual output.",
+        ])
+        .env("ANTHROPIC_BASE_URL", base_url)
+        .env("ANTHROPIC_API_KEY", "test-local-key")
+        .env_remove("ANTHROPIC_AUTH_TOKEN")
+        .env_remove("CLAUDE_CODE_OAUTH_TOKEN")
+        .env_remove("CLAUDECODE")
+        .env("CLAUDE_CONFIG_DIR", &config_home)
+        .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
+    let result = tokio::time::timeout(Duration::from_secs(90), child.output()).await;
+    stop_entry(handle, shutdown).await;
+    std::env::remove_var(KEY_ENV);
+    let output = result
+        .expect("native Claude timeout")
+        .expect("native Claude launch");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "native Claude failed: {stdout}\n{stderr}"
+    );
+    let first = captures
+        .recv()
+        .await
+        .expect("native Claude first provider request");
+    let tools = first["tools"].as_array().expect("native tool declarations");
+    let bash = tools
+        .iter()
+        .find(|tool| tool["function"]["name"] == "Bash")
+        .expect("native Bash declaration reaches the selected provider");
+    assert!(
+        bash.pointer("/function/parameters/properties/command")
+            .is_some(),
+        "{bash}"
+    );
+    let followup = captures
+        .recv()
+        .await
+        .expect("native Claude paired follow-up");
+    let messages = followup["messages"].as_array().unwrap();
+    let call = messages
+        .iter()
+        .filter_map(|message| message["tool_calls"].as_array())
+        .flatten()
+        .find(|call| call["id"] == "call_native_claude")
+        .expect("original native call remains paired");
+    assert_eq!(call["function"]["name"], "Bash");
+    assert_eq!(
+        serde_json::from_str::<Value>(call["function"]["arguments"].as_str().unwrap()).unwrap(),
+        json!({"command": command})
+    );
+    let tool_result = messages
+        .iter()
+        .find(|message| {
+            message["role"] == "tool" && message["tool_call_id"] == "call_native_claude"
+        })
+        .expect("the native client must return the executed tool result");
+    let actual = tool_result["content"].to_string();
+    assert!(
+        actual.contains("CLAUDE_NATIVE_TOOL_PROBE"),
+        "missing actual execution: {actual}\n{stdout}"
+    );
+    assert!(
+        !actual.contains("InputValidationError") && !actual.contains("command is missing"),
+        "{actual}"
+    );
+    assert!(
+        stdout.contains("chat roundtrip complete"),
+        "native final response: {stdout}"
+    );
+    assert!(
+        matches!(
+            captures.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+        ),
+        "one accepted provider attempt per native turn"
+    );
+    eprintln!("CLAUDE_NATIVE_EXECUTION_AND_FOLLOWUP_OK");
+}
+
+fn collect_json_blocks(value: &Value, block_type: &str, out: &mut Vec<Value>) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_json_blocks(item, block_type, out);
+            }
+        }
+        Value::Object(map) => {
+            if map.get("type").and_then(Value::as_str) == Some(block_type) {
+                out.push(value.clone());
+            }
+            for child in map.values() {
+                collect_json_blocks(child, block_type, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn live_native_evidence_dir() -> std::path::PathBuf {
+    std::env::var_os("CLAUDE_NATIVE_EVIDENCE_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(
+                "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012",
+            )
+        })
+}
+
+fn write_live_evidence(run_dir: &std::path::Path, name: &str, bytes: &[u8]) {
+    let path = run_dir.join(name);
+    std::fs::write(&path, bytes).expect("required live consumer evidence");
+    eprintln!("LIVE_EVIDENCE_WROTE {}", path.display());
+}
+
+/// Manual live native consumer: real Claude CLI -> isolated candidate server ->
+/// this test gateway -> the currently running public RCC at 127.0.0.1:4444.
+/// The gateway forwards the candidate's raw Chat body without rewriting it and
+/// records the raw RCC response. Opt-in only: requires `RCC_NATIVE_LIVE=1` and
+/// `RCC_NATIVE_CHAT_MODEL=<current 4444 chat route label>`.
+#[tokio::test]
+#[ignore = "manual real-generation native consumer"]
+async fn c8e707e_native_claude_cli_live_rcc_bash_and_followup() {
+    let _guard = TEST_LOCK.lock().await;
+    assert_eq!(
+        std::env::var("RCC_NATIVE_LIVE").ok().as_deref(),
+        Some("1"),
+        "manual live test: set RCC_NATIVE_LIVE=1 explicitly; absence is not PASS"
+    );
+    let route_model = std::env::var("RCC_NATIVE_CHAT_MODEL").unwrap_or_else(|_| {
+        panic!("set RCC_NATIVE_CHAT_MODEL to the current 4444 chat route label")
+    });
+    let run_dir = live_native_evidence_dir();
+    std::fs::create_dir_all(&run_dir).expect("live evidence run dir");
+    let command = "/usr/bin/printf CLAUDE_NATIVE_TOOL_PROBE";
+    let allowed_tool = format!("Bash({command})");
+    let prompt = format!(
+        "Call the Bash tool exactly once with the command `{command}`, then report the actual output."
+    );
+
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let live_captures = Arc::new(std::sync::Mutex::new(Vec::<LiveForwardExchange>::new()));
+    let live_client = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(60))
+        .build()
+        .unwrap();
+    let (endpoint, handle, _captures, _headers, shutdown) = start_entry_configured(
+        "openai_chat",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        "live upstream placeholder: the live forwarder replaces this scripted body".to_string(),
+        EntryOptions {
+            live_forward: Some(LiveForward {
+                client: live_client,
+                target: "http://127.0.0.1:4444/v1/chat/completions".to_string(),
+                captures: live_captures.clone(),
+            }),
+            wire_model: Some(route_model.clone()),
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let base_url = endpoint
+        .strip_suffix("/v1/responses")
+        .expect("candidate base url")
+        .to_string();
+
+    let child_home =
+        std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("claude-native-live");
+    let config_home = child_home.join("claude-config");
+    std::fs::create_dir_all(&config_home).expect("fresh claude config home");
+
+    let mut child = tokio::process::Command::new("/Users/fanzhang/.local/bin/claude");
+    child
+        .args([
+            "--model",
+            "test.test",
+            "--permission-mode",
+            "dontAsk",
+            "--allowedTools",
+            &allowed_tool,
+            "--setting-sources",
+            "",
+            "--no-session-persistence",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "-p",
+            &prompt,
+        ])
+        .env("ANTHROPIC_BASE_URL", &base_url)
+        .env("ANTHROPIC_API_KEY", "test-local-key")
+        .env_remove("ANTHROPIC_AUTH_TOKEN")
+        .env_remove("CLAUDE_CODE_OAUTH_TOKEN")
+        .env_remove("CLAUDECODE")
+        .env("HOME", &child_home)
+        .env("CLAUDE_CONFIG_DIR", &config_home)
+        .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::fs::File::create(run_dir.join("claude-live-native-stdout.jsonl")).unwrap())
+        .stderr(std::fs::File::create(run_dir.join("claude-live-native-stderr.log")).unwrap())
+        .kill_on_drop(true);
+    let mut child = child.spawn().expect("native Claude live launch");
+    eprintln!("CLAUDE_LIVE_NATIVE_PID={}", child.id().unwrap());
+    let status = match tokio::time::timeout(Duration::from_secs(120), child.wait()).await {
+        Ok(status) => status.expect("native Claude live wait"),
+        Err(_) => {
+            child
+                .kill()
+                .await
+                .expect("stop timed out owned native child");
+            child
+                .wait()
+                .await
+                .expect("reap timed out owned native child")
+        }
+    };
+    stop_entry(handle, shutdown).await;
+    std::env::remove_var(KEY_ENV);
+    let output = std::process::Output {
+        status,
+        stdout: std::fs::read(run_dir.join("claude-live-native-stdout.jsonl")).unwrap(),
+        stderr: std::fs::read(run_dir.join("claude-live-native-stderr.log")).unwrap(),
+    };
+    let stdout_bytes = output.stdout;
+    let stderr_bytes = output.stderr;
+    let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+
+    let exchanges = std::mem::take(&mut *live_captures.lock().unwrap());
+    eprintln!(
+        "CLAUDE_LIVE_NATIVE exit={:?} route={} candidate_forwards={} stdout_len={} stderr_len={}",
+        output.status.code(),
+        route_model,
+        exchanges.len(),
+        stdout_bytes.len(),
+        stderr_bytes.len()
+    );
+    if !stderr.is_empty() {
+        eprintln!("CLAUDE_LIVE_NATIVE_STDERR {stderr}");
+    }
+
+    assert!(
+        output.status.success(),
+        "native Claude live failed: exit={:?}\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        output.status.code()
+    );
+    assert_eq!(
+        exchanges.len(),
+        2,
+        "expected one accepted candidate forward per turn (2 total), got {}\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        exchanges.len()
+    );
+    let events: Vec<Value> = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
+        .collect();
+    assert!(
+        !events.is_empty(),
+        "native Claude stream-json events missing:\n{stdout}"
+    );
+    let mut tool_uses = Vec::new();
+    collect_json_blocks(&Value::Array(events.clone()), "tool_use", &mut tool_uses);
+    let bash_call = tool_uses
+        .iter()
+        .find(|block| block["name"] == "Bash")
+        .unwrap_or_else(|| {
+            panic!("real model did not emit a native Bash tool call:\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        });
+    assert_eq!(
+        bash_call["input"]["command"], command,
+        "native Bash call must be the exact allowed command: {bash_call}\nstdout:\n{stdout}"
+    );
+    let call_id = bash_call["id"]
+        .as_str()
+        .expect("real generated tool call id");
+    assert!(!call_id.is_empty());
+    let mut tool_results = Vec::new();
+    collect_json_blocks(
+        &Value::Array(events.clone()),
+        "tool_result",
+        &mut tool_results,
+    );
+    let matched_result = tool_results
+        .iter()
+        .find(|block| block["tool_use_id"] == call_id)
+        .unwrap_or_else(|| panic!("native tool_result for {call_id} missing:\nstdout:\n{stdout}"));
+    let result_text = matched_result["content"].to_string();
+    assert!(
+        result_text.contains("CLAUDE_NATIVE_TOOL_PROBE"),
+        "native Bash did not execute the fixed command: {result_text}\nstdout:\n{stdout}"
+    );
+    assert!(
+        matched_result["is_error"] != json!(true),
+        "native tool_result reports an error: {matched_result}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event["type"] == "result"
+                && event["subtype"] == "success"
+                && event["is_error"] != json!(true)
+        }),
+        "native final result turn missing or failed:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let first: Value =
+        serde_json::from_slice(&exchanges[0].request_body).expect("first candidate wire");
+    assert_eq!(
+        first["model"], route_model,
+        "candidate must project the explicit route label"
+    );
+    let tools = first["tools"].as_array().expect("native tool declarations");
+    let bash = tools
+        .iter()
+        .find(|tool| tool["function"]["name"] == "Bash")
+        .expect("native Bash declaration reaches the selected provider");
+    assert!(
+        bash.pointer("/function/parameters/properties/command")
+            .is_some(),
+        "{bash}"
+    );
+    assert_eq!(
+        exchanges[0].response_status.map(|status| status.as_u16()),
+        Some(200),
+        "RCC must accept the first candidate forward: {:?}",
+        exchanges[0].transport_error
+    );
+
+    let followup: Value =
+        serde_json::from_slice(&exchanges[1].request_body).expect("follow-up candidate wire");
+    let messages = followup["messages"].as_array().expect("follow-up messages");
+    let paired_call = messages
+        .iter()
+        .filter_map(|message| message["tool_calls"].as_array())
+        .flatten()
+        .find(|call| call["id"] == call_id)
+        .expect("native follow-up keeps the real generated call id");
+    assert_eq!(paired_call["function"]["name"], "Bash");
+    assert_eq!(
+        serde_json::from_str::<Value>(paired_call["function"]["arguments"].as_str().unwrap())
+            .unwrap(),
+        bash_call["input"]
+    );
+    let paired_result = messages
+        .iter()
+        .find(|message| message["role"] == "tool" && message["tool_call_id"] == call_id)
+        .expect("native follow-up keeps the matching tool result");
+    assert!(
+        paired_result["content"]
+            .to_string()
+            .contains("CLAUDE_NATIVE_TOOL_PROBE"),
+        "paired native result must carry the real command output: {paired_result}"
+    );
+    assert_eq!(
+        exchanges[1].response_status.map(|status| status.as_u16()),
+        Some(200),
+        "RCC must accept the follow-up candidate forward: {:?}",
+        exchanges[1].transport_error
+    );
+    eprintln!("CLAUDE_LIVE_NATIVE_EXECUTION_AND_FOLLOWUP_OK call_id={call_id}");
+}
+
+/// The small test-local consumer must reject the pre-fix start-only shape and
+/// mismatched fragment indexes, and must reconstruct valid split fragments.
+#[test]
+fn c8e707e_anthropic_tool_delta_consumer_controls() {
+    let input = json!({"command":"printf '%s' CLAUDE_TOOL_PROBE","nested":{"values":[1,2,3]}});
+    let full = input.to_string();
+    let split_at = full.len() / 2;
+    let frames = |body: &str| events(body);
+
+    let valid = format!(
+        "{}{}{}{}",
+        sse(
+            "content_block_start",
+            &json!({"type":"content_block_start","index":0,
+                "content_block":{"type":"tool_use","id":"call_original","name":"lookup","input":{}}})
+        ),
+        sse(
+            "content_block_delta",
+            &json!({"type":"content_block_delta","index":0,
+                "delta":{"type":"input_json_delta","partial_json":&full[..split_at]}})
+        ),
+        sse(
+            "content_block_delta",
+            &json!({"type":"content_block_delta","index":0,
+                "delta":{"type":"input_json_delta","partial_json":&full[split_at..]}})
+        ),
+        sse(
+            "content_block_stop",
+            &json!({"type":"content_block_stop","index":0})
+        )
+    );
+    let blocks = anthropic_sse_content_blocks(&valid);
+    assert_eq!(blocks[0]["input"], input, "split deltas must reconstruct");
+
+    let start_only = sse(
+        "content_block_start",
+        &json!({"type":"content_block_start","index":0,
+            "content_block":{"type":"tool_use","id":"call_original","name":"lookup","input":input.clone()}}),
+    );
+    let start_only_frames = frames(&start_only);
+    assert!(
+        anthropic_tool_input_partial_json(&start_only_frames, 0).is_empty(),
+        "start-only input cannot satisfy the delta consumer"
+    );
+
+    let wrong_index = format!(
+        "{}{}",
+        sse(
+            "content_block_start",
+            &json!({"type":"content_block_start","index":0,
+                "content_block":{"type":"tool_use","id":"call_original","name":"lookup","input":{}}})
+        ),
+        sse(
+            "content_block_delta",
+            &json!({"type":"content_block_delta","index":1,
+                "delta":{"type":"input_json_delta","partial_json":&full}})
+        )
+    );
+    let wrong_index_frames = frames(&wrong_index);
+    assert!(
+        anthropic_tool_input_partial_json(&wrong_index_frames, 0).is_empty(),
+        "fragments for another index cannot satisfy block 0"
+    );
+
+    let out_of_order = format!(
+        "{}{}{}",
+        sse(
+            "content_block_start",
+            &json!({"type":"content_block_start","index":0,
+                "content_block":{"type":"tool_use","id":"call_original","name":"lookup","input":{}}})
+        ),
+        sse(
+            "content_block_delta",
+            &json!({"type":"content_block_delta","index":0,
+                "delta":{"type":"input_json_delta","partial_json":&full[split_at..]}})
+        ),
+        sse(
+            "content_block_delta",
+            &json!({"type":"content_block_delta","index":0,
+                "delta":{"type":"input_json_delta","partial_json":&full[..split_at]}})
+        )
+    );
+    let out_of_order_frames = frames(&out_of_order);
+    let reassembled = anthropic_tool_input_partial_json(&out_of_order_frames, 0);
+    assert_ne!(
+        serde_json::from_str::<Value>(&reassembled).ok(),
+        Some(input.clone()),
+        "out-of-order fragments cannot satisfy the successful reconstruction"
+    );
+}
+
 #[tokio::test]
 async fn anthropic_custom_calls_execute_and_return_original_kind_and_input() {
     let _guard = TEST_LOCK.lock().await;
@@ -4886,11 +6029,7 @@ async fn anthropic_custom_calls_execute_and_return_original_kind_and_input() {
                     .unwrap()
                     .clone()
             } else {
-                events(&body)
-                    .into_iter()
-                    .filter(|event| event["type"] == "content_block_start")
-                    .map(|event| event["content_block"].clone())
-                    .collect()
+                anthropic_sse_content_blocks(&body)
             };
             let call = content
                 .iter()
@@ -5083,11 +6222,7 @@ async fn anthropic_responses_custom_inputs_preserve_every_present_json_value() {
                         .unwrap()
                         .clone()
                 } else {
-                    events(&body)
-                        .iter()
-                        .filter(|event| event["type"] == "content_block_start")
-                        .map(|event| event["content_block"].clone())
-                        .collect()
+                    anthropic_sse_content_blocks(&body)
                 };
                 let call = content
                     .iter()

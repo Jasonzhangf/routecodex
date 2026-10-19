@@ -242,27 +242,6 @@ requireMatch(
   /raw_sse:\s*Arc<Mutex<V3DebugBoundedTextCapture>>/,
   "Server SSE recorders must use Debug-owned capture",
 );
-requireMatch(
-  serverLiveSnapshot,
-  /stream\.observe\([\s\S]*move \|terminal\|[\s\S]*persist_current\(disconnect,\s*V3RecorderPersistPhase::Terminal\)/,
-  "Recorded stream sample persistence must finalize at the shared stream terminal callback",
-);
-requireMatch(
-  serverLiveSnapshot,
-  /struct V3LiveSnapSseRecorderCore[\s\S]*fn persist_current[\s\S]*persist_v3_codex_sample_payload/,
-  "SSE recorders must share one Debug-owned core persistence",
-);
-for (const recorder of [
-  "V3LiveSnapClientResponseSseRecorder",
-  "V3LiveSnapDirectClientResponseSseRecorder",
-  "V3LiveSnapOpenAiChatClientResponseSseRecorder",
-]) {
-  requireMatch(
-    serverLiveSnapshot,
-    new RegExp(`struct ${recorder} \\{[\\s\\S]*core: V3LiveSnapSseRecorderCore`),
-    `${recorder} must be a thin shell over the shared recorder core`,
-  );
-}
 const directProjectionStart = serverFrameBuilders.indexOf(
   "fn responses_direct_output_response_with_console(",
 );

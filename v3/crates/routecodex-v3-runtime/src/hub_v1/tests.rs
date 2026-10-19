@@ -538,7 +538,7 @@ fn protocol_data_fields_are_not_misclassified_as_routecodex_control() {
 }
 
 #[test]
-fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encrypted_content() {
+fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_wire_signature() {
     let request = build_v3_openai_chat_provider_payload_from_responses_payload(&json!({
         "model": "client-responses",
         "input": [
@@ -567,7 +567,7 @@ fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encryp
             }
         ]
     }))
-    .expect("Responses reasoning must normalize into Chat without encrypted replay state");
+    .expect("Responses reasoning must normalize into Chat with its signature association");
 
     let messages = request["messages"]
         .as_array()
@@ -587,8 +587,18 @@ fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encryp
     assert_eq!(messages[2]["role"], "tool");
     assert_eq!(messages[2]["tool_call_id"], "call-1");
     assert_eq!(messages[2]["content"], "/tmp");
-    let serialized = serde_json::to_string(&request).expect("OpenAI Chat request JSON");
+    assert_eq!(
+        messages[1]["routecodex_chat_extension"]["responses_reasoning_encrypted_content"],
+        "opaque-reasoning"
+    );
+    let wire =
+        super::request_outbound_format::build_v3_openai_chat_standard_request_from_chat_canonical(
+            &request,
+        )
+        .expect("canonical Chat must project to the provider wire");
+    let serialized = serde_json::to_string(&wire).expect("OpenAI Chat provider wire JSON");
     assert!(!serialized.contains("opaque-reasoning"));
+    assert!(!serialized.contains("routecodex_chat_extension"));
     assert!(!serialized.contains("summary_text"));
 }
 
