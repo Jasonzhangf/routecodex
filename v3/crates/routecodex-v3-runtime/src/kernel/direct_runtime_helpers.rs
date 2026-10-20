@@ -57,15 +57,19 @@ fn v3_direct_selected_available_for_send(
     now_epoch_ms: u64,
 ) -> bool {
     let selected_key = candidate_key(&selected.candidate);
-    let selected_available_in_session = session_availability
-        .availability_for_interface(
-            &selected.candidate.provider_id,
-            &selected.candidate.interface_id,
-            Some(&selected.candidate.auth_alias),
-            Some(&selected.candidate.model_id),
-            now_epoch_ms,
-        )
-        .available;
+    let selected_projection = session_availability.availability_for_interface(
+        &selected.candidate.provider_id,
+        &selected.candidate.interface_id,
+        Some(&selected.candidate.auth_alias),
+        Some(&selected.candidate.model_id),
+        now_epoch_ms,
+    );
+    let selected_available_in_session = selected_projection.available
+        || (!failed_candidates.contains(&selected_key)
+            && routecodex_v3_target::V3TargetInterpreter::ignores_single_candidate_automatic_cooldown(
+                expanded.map_or(1, |target| target.candidates.len()),
+                &selected_projection.blocked_scopes,
+            ));
     let session_alternative_available = expanded.is_some_and(|expanded| {
         expanded.candidates.iter().any(|candidate| {
             let key = candidate_key(candidate);
@@ -581,42 +585,6 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 .and_then(|error| error.code.as_deref()),
         );
     let failed_key = candidate_key(&selected.candidate);
-    let health_record = if is_request_local_compat_failure {
-        V3ProviderFailureRecord {
-            scope_label: failed_key.clone(),
-            provider_key: failed_key.clone(),
-            state: "request_local_provider_compat".to_string(),
-            failure_count: 0,
-            cooldown_until_ms: None,
-            reason: (!source.message.trim().is_empty()).then(|| source.message.clone()),
-        }
-    } else {
-        match record_v3_direct_provider_failure_record(
-            context.provider_health,
-            context.failure_session_scope,
-            selected,
-            &source,
-            context.now_epoch_ms,
-        ) {
-            Ok(record) => record,
-            Err(Ok(policy_failure)) => {
-                return Err(DirectPolicyFailure {
-                    original_source: source.clone(),
-                    policy_failure,
-                })
-            }
-            Err(Err(fault)) => {
-                let original_source = match fault.original_source {
-                    Some(original_source) => original_source,
-                    None => source.clone(),
-                };
-                return Err(DirectPolicyFailure {
-                    original_source,
-                    policy_failure: fault.policy_failure,
-                });
-            }
-        }
-    };
     let expanded_candidates = match (context.expanded, context.provider_pinned) {
         (Some(expanded), _) => Some(&expanded.candidates),
         (None, true) => None,
@@ -687,6 +655,45 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             }
         }
     }
+    // Health changes are allowed only after the captured target proves that
+    // another eligible, untried identity can take this request.
+    let health_record = if is_request_local_compat_failure || remaining == 0 {
+        V3ProviderFailureRecord {
+            scope_label: failed_key.clone(),
+            provider_key: failed_key.clone(),
+            state: if is_request_local_compat_failure {
+                "request_local_provider_compat"
+            } else {
+                "last_candidate_terminal"
+            }
+            .to_string(),
+            failure_count: 0,
+            cooldown_until_ms: None,
+            reason: (!source.message.trim().is_empty()).then(|| source.message.clone()),
+        }
+    } else {
+        match record_v3_direct_provider_failure_record(
+            context.provider_health,
+            context.failure_session_scope,
+            selected,
+            &source,
+            context.now_epoch_ms,
+        ) {
+            Ok(record) => record,
+            Err(Ok(policy_failure)) => {
+                return Err(DirectPolicyFailure {
+                    original_source: source.clone(),
+                    policy_failure,
+                })
+            }
+            Err(Err(fault)) => {
+                return Err(DirectPolicyFailure {
+                    original_source: fault.original_source.unwrap_or_else(|| source.clone()),
+                    policy_failure: fault.policy_failure,
+                })
+            }
+        }
+    };
     let provider_key_model_scope = V3ErrorActionScope::ProviderKeyModel {
         provider_id: selected.candidate.provider_id.clone(),
         auth_alias: selected.candidate.auth_alias.clone(),
@@ -787,40 +794,6 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             ),
         ));
     }
-    if context.provider_pinned && health_record.state == "cooldown" {
-        context
-            .provider_health
-            .record_provider_action_failure_in_scope_for_interface(
-                context.failure_session_scope,
-                &selected.candidate.provider_id,
-                &selected.candidate.interface_id,
-                Some(&selected.candidate.auth_alias),
-                Some(&selected.candidate.model_id),
-                &source.code,
-            )
-            .map_err(|error| {
-                direct_policy_failure(&source, "V3ProviderActionGateAdmission", error)
-            })?;
-    }
-    let admission = if is_request_local_compat_failure {
-        None
-    } else {
-        Some(
-            context
-                .provider_health
-                .record_terminal_provider_projection_in_scope_for_interface(
-                    context.failure_session_scope,
-                    &selected.candidate.provider_id,
-                    &selected.candidate.interface_id,
-                    Some(&selected.candidate.auth_alias),
-                    Some(&selected.candidate.model_id),
-                    &source.code,
-                )
-                .map_err(|error| {
-                    direct_policy_failure(&source, "V3ProviderActionGateAdmission", error)
-                })?,
-        )
-    };
     state.trace.push("V3Error06ClientProjected");
     let event = Some(build_v3_direct_provider_failure_observation(
         selected,
@@ -829,9 +802,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         &health_record,
         "terminal_default_floor_exhausted",
         None,
-        admission
-            .as_ref()
-            .map(|admission| admission.minimum_delay_ms),
+        None,
     ));
     Ok(V3DirectProviderFailurePolicyResult {
         decision,

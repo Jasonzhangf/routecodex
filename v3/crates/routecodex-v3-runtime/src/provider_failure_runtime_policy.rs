@@ -780,32 +780,23 @@ async fn reselect_from_captured_target_plan(
             }
         }
     };
-    match select_v3_expanded_target_with_exhaustion_rescue(
-        context.manifest,
+    // This is an observation before Error03's health effects, not a recovery
+    // event. It must not start probes or wait on an alternative's recovery.
+    match select_v3_target_with_session_then_global(
+        &V3TargetInterpreter::default(),
         expanded,
-        &context.failure_session_scope,
+        &context
+            .provider_health
+            .session_bound_availability(&context.failure_session_scope),
         context.provider_health,
         request_local_excluded_candidates,
         now_ms,
         context.deterministic_sample,
-        true,
-    )
-    .await
-    {
-        V3TargetSelectionAfterRescue::Selected(selected) => {
-            V3RelayProviderTargetResolution::Selected(selected)
-        }
-        V3TargetSelectionAfterRescue::Exhausted(exhausted) => {
-            V3RelayProviderTargetResolution::Exhausted {
-                attempted_candidates: exhausted.attempted_candidates,
-            }
-        }
-        V3TargetSelectionAfterRescue::Failed(source) => {
-            V3RelayProviderTargetResolution::Failed(source)
-        }
-        V3TargetSelectionAfterRescue::OperatorFault(fault) => {
-            V3RelayProviderTargetResolution::OperatorFault(fault)
-        }
+    ) {
+        Ok(selected) => V3RelayProviderTargetResolution::Selected(selected),
+        Err(exhausted) => V3RelayProviderTargetResolution::Exhausted {
+            attempted_candidates: exhausted.attempted_candidates,
+        },
     }
 }
 
@@ -854,15 +845,28 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     let reason = (!message.trim().is_empty()).then_some(message.as_str());
     let is_request_local_compat_failure =
         is_health_neutral_request_compat_failure(source_stage, error_type.as_deref());
-    // SSE/transport failures are provider-health events as well. The
-    // failure action builder classifies them as recoverable, so they enter
-    // the shared rolling score/cooldown path instead of a synthetic local
-    // record.
-    let health_record = if is_request_local_compat_failure {
+    let mut excluded_with_failed = state.failed_candidates.clone();
+    excluded_with_failed.insert(candidate_key.clone());
+    let resolution = reselect_from_captured_target_plan(
+        context,
+        &selected,
+        &excluded_with_failed,
+        v3_relay_provider_policy_now_epoch_ms().map_err(v3_relay_provider_policy_ordinary_error)?,
+    )
+    .await;
+    let has_alternative = matches!(&resolution, V3RelayProviderTargetResolution::Selected(_));
+    // Resolve another eligible identity before any health mutation. A terminal
+    // attempt publishes diagnostics only; it does not update health or actions.
+    let health_record = if is_request_local_compat_failure || !has_alternative {
         V3ProviderFailureRecord {
             scope_label: candidate_key.clone(),
             provider_key: candidate_key.clone(),
-            state: "request_local_provider_compat".to_string(),
+            state: if is_request_local_compat_failure {
+                "request_local_provider_compat"
+            } else {
+                "last_candidate_terminal"
+            }
+            .to_string(),
             failure_count: 0,
             cooldown_until_ms: None,
             reason: reason.map(str::to_string),
@@ -893,15 +897,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         .get(&candidate_key)
         .copied()
         .unwrap_or(0);
-    let mut excluded_with_failed = state.failed_candidates.clone();
-    excluded_with_failed.insert(candidate_key.clone());
-    let resolution = reselect_from_captured_target_plan(
-        context,
-        &selected,
-        &excluded_with_failed,
-        v3_relay_provider_policy_now_epoch_ms().map_err(v3_relay_provider_policy_ordinary_error)?,
-    )
-    .await;
     let route_resolution_proved_no_alternative = match resolution {
         V3RelayProviderTargetResolution::Selected(alternative) => {
             let alternative_key = v3_relay_provider_candidate_key(&alternative.candidate);
@@ -912,7 +907,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                     "provider failure reselection returned an already failed candidate: {alternative_key}"
                 )));
             }
-            if !alternative.default_floor_protected {
+            {
                 let request_local_recovery = || {
                     V3Error05RecoveryAdmissionWitness::new(
                         context.failure_session_scope.clone(),
@@ -1003,7 +998,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                     ),
                 });
             }
-            true
         }
         V3RelayProviderTargetResolution::Exhausted {
             attempted_candidates: _,
@@ -1120,17 +1114,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     .map_err(Err)?;
     let terminal_projection =
         terminal_projection_for(decision_projection, &decision, matched_policy).map_err(Err)?;
-    let admission = context
-        .provider_health
-        .record_terminal_provider_projection_in_scope_for_interface(
-            &context.failure_session_scope,
-            &selected.candidate.provider_id,
-            &selected.candidate.interface_id,
-            Some(&selected.candidate.auth_alias),
-            Some(&selected.candidate.model_id),
-            error_type.as_deref().unwrap_or("provider_failure"),
-        )
-        .map_err(v3_relay_provider_policy_ordinary_error)?;
     let terminal_disposition = terminal_disposition_for(&decision, state);
     Ok(V3RelayProviderFailurePolicyResult {
         terminal_projection,
@@ -1146,7 +1129,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 health_record,
                 action: "terminal_route_and_default_exhausted",
                 next_provider_key: None,
-                wait_ms: Some(admission.minimum_delay_ms),
+                wait_ms: None,
                 diagnostic_source: attempt_source.clone(),
             },
         ),

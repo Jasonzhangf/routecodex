@@ -18,6 +18,14 @@ metadata_center:
   attempt_policy: failed_attempt_slots_are_released_by_typed_attempt_cleanup_before_next_candidate; successful_attempt_slots_are_released_after_final_client_projection_or_after_servertool_sidecar_execution; terminal_client_error_cancel_or_disconnect_release_attempt_slots_before_request_finalizer; request_inverse_context_and_explicit_history_pairing_remain_until_runtime_request_finalizer
   finalizer: runtime_request_finalizer_is_the_sole_request_cleanup_owner_and_runs_only_on_final_client_commit_terminal_client_error_cancel_or_disconnect; terminal_client_error_cancel_and_disconnect_run_attempt_cleanup_before_request_finalizer; retry_and_servertool_followup_do_not_trigger_request_scope_release
   forbidden: [request_body, response_body, provider_wire, protocol_metadata, history_values, debug_snapshot, cross_request_tool_binding]
+last_provider_failure_policy:
+  requirement: routecodex-last-provider-failure-terminal-policy@1
+  owner: Error03_target_local_action
+  precondition: Target provides another request-eligible untried candidate from the captured target before any failed-identity health mutation
+  alternative: apply existing exact-identity health policy and launch one next-candidate attempt through RuntimeRetryLaunch
+  terminal: retain typed cause and end only this request transport without health failure count, score penalty, cooldown, probe, action wait, fallback or automatic retry
+  single_candidate: Target ignores prior automatic cooldown admission while preserving other request constraints; a new request may send again
+  forbidden: [router_reentry, last_candidate_rescue_probe, five_blocking_retries, client_error_payload, normal_empty_completion]
 legacy_conversion_tables:
   path: v3/crates/routecodex-v3-runtime/tables
   status: migration_baseline_only

@@ -63,7 +63,7 @@ async fn serve(mut socket: TcpStream, peer: Arc<Peer>) {
             _ = socket.read(&mut byte) => return,
         }
     }
-    let (status, body) = if marker == "genuine failure" {
+    let (status, body) = if marker == "genuine failure" && !head.starts_with("POST /fallback/") {
         (
             "403 Forbidden",
             json!({"error":{"message":"real focused failure"}}),
@@ -116,6 +116,28 @@ capabilities = ["text"]
     }
     let targets = ids.iter().map(|id| format!(r#"{{ kind = "provider_model", provider = "{id}", model = "recovery", key = "key", priority = 1 }}"#)).collect::<Vec<_>>().join(",");
     source.push_str(&format!("\n[route_groups.fairness.pools.default]\nselection = {{ strategy = \"priority\" }}\ntargets = [{targets}]\n"));
+    source.push_str(&format!(
+        r#"
+[providers.fairness_fallback]
+type = "openai_chat"
+base_url = "{base}/fallback/v1"
+default_model = "recovery"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FA22072_RUNTIME_FAIRNESS_KEY" }}] }}
+[providers.fairness_fallback.models.recovery]
+wire_name = "recovery"
+capabilities = ["text"]
+"#
+    ));
+    // A real failure may establish cooldown only when the captured target has
+    // an eligible alternative. Explicit provider pins are terminal and neutral.
+    for id in &ids {
+        source.push_str(&format!(r#"
+[route_groups.fairness.pools.{id}]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 20, models = ["{id}-failure"] }}
+targets = [{{ kind = "provider_model", provider = "{id}", model = "recovery", key = "key", priority = 10 }}, {{ kind = "provider_model", provider = "fairness_fallback", model = "recovery", key = "key", priority = 1 }}]
+"#));
+    }
     (
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap(),
         ids,
@@ -199,14 +221,30 @@ async fn witness(startup: bool) {
             business(
                 manifest.clone(),
                 health.clone(),
-                format!("{id}.recovery"),
+                format!("{id}-failure"),
                 "genuine failure",
             ),
         )
         .await
         .unwrap();
         eprintln!("focused genuine failure result={result:?}");
-        assert!(result.error_chain.is_some());
+        assert!(
+            result.error_chain.is_none(),
+            "eligible fallback must deliver: {result:?}"
+        );
+        assert!(
+            !health
+                .store
+                .availability_for_interface(
+                    id,
+                    "default",
+                    Some("key"),
+                    Some("recovery"),
+                    v3_relay_provider_policy_now_epoch_ms().unwrap()
+                )
+                .available,
+            "the real nonterminal failure must cool its exact identity"
+        );
     }
     let deadlines: Vec<_> = ids
         .iter()
