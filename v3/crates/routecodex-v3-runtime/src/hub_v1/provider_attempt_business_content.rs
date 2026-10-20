@@ -296,29 +296,114 @@ fn v3_anthropic_content_block_has_deliverable_content(block: &Value) -> bool {
     }
 }
 
+/// Complete-attempt facts. Reasoning is business content, but cannot mask an
+/// explicit blank assistant final. These facts never rewrite provider payloads.
+#[derive(Default)]
+pub(crate) struct V3ProviderAttemptBusinessContent {
+    business: bool,
+    explicit_text: bool,
+    visible_text: bool,
+    independent_result: bool,
+}
+
+impl V3ProviderAttemptBusinessContent {
+    fn text(&mut self, value: Option<&Value>) {
+        if let Some(text) = value.and_then(Value::as_str) {
+            // An empty carrier may be a reasoning-only or stripped-memory
+            // placeholder. Actual whitespace characters establish a blank final.
+            self.explicit_text |= !text.is_empty();
+            self.visible_text |= !text.trim().is_empty();
+        } else if value.is_some_and(|value| !value.is_null()) {
+            // Representable structured model content stays opaque business.
+            self.independent_result = true;
+        }
+    }
+
+    fn part(&mut self, part: &Value) {
+        match part.get("type").and_then(Value::as_str) {
+            Some("text" | "output_text") => self.text(part.get("text")),
+            Some("reasoning_text" | "summary_text") => {}
+            _ if part.is_string() => self.text(Some(part)),
+            _ => self.independent_result |= business_part_has_content(part),
+        }
+    }
+
+    fn item(&mut self, item: &Value) {
+        let business = v3_responses_output_item_has_deliverable_content(item);
+        self.business |= business;
+        match item.get("type").and_then(Value::as_str) {
+            Some("reasoning") => {}
+            Some("message") => {
+                self.text(item.get("text"));
+                if let Some(parts) = item.get("content").and_then(Value::as_array) {
+                    for part in parts {
+                        self.part(part);
+                    }
+                }
+            }
+            Some("output_text") => self.part(item),
+            _ => self.independent_result |= business,
+        }
+    }
+
+    fn response(&mut self, response: &Value) {
+        self.independent_result |= v3_responses_incomplete_reason(response)
+            == Some("content_filter")
+            || response.get("stop_reason").and_then(Value::as_str) == Some("refusal")
+            || response
+                .pointer("/stop_details/type")
+                .and_then(Value::as_str)
+                == Some("refusal");
+        self.business |= has_non_empty_string(response.get("output_text"));
+        self.text(response.get("output_text"));
+        if let Some(output) = response.get("output").and_then(Value::as_array) {
+            for item in output {
+                self.item(item);
+            }
+        }
+    }
+
+    pub(crate) fn observe_event(&mut self, protocol: V3HubProviderWireProtocol, event: &Value) {
+        self.business |= v3_provider_event_has_deliverable_business_content(protocol, event);
+        if protocol != V3HubProviderWireProtocol::Responses {
+            return;
+        }
+        match event.get("type").and_then(Value::as_str) {
+            Some("response.completed" | "response.incomplete" | "response.done") => {
+                if let Some(response) = event.get("response") {
+                    self.response(response);
+                }
+            }
+            Some("response.output_item.added" | "response.output_item.done") => {
+                if let Some(item) = event.get("item") {
+                    self.item(item);
+                }
+            }
+            Some("response.output_text.delta") => self.text(event.get("delta")),
+            Some("response.output_text.done") => self.text(event.get("text")),
+            Some("response.content_part.added" | "response.content_part.done") => {
+                if let Some(part) = event.get("part") {
+                    self.part(part);
+                }
+            }
+            Some("response.refusal.delta" | "response.refusal.done") => {
+                self.independent_result |= has_non_empty_string(event.get("delta"))
+                    || has_non_empty_string(event.get("refusal"));
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn has_deliverable_business_content(&self) -> bool {
+        self.independent_result
+            || ((self.business || self.visible_text) && (!self.explicit_text || self.visible_text))
+    }
+}
+
 fn v3_responses_attempt_has_deliverable_business_content(response: &Value) -> bool {
-    // A provider-declared content_filter terminal is a legal representable
-    // terminal even with empty output; it is not an empty attempt.
-    if v3_responses_incomplete_reason(response) == Some("content_filter")
-        || response.get("stop_reason").and_then(Value::as_str) == Some("refusal")
-        || response
-            .pointer("/stop_details/type")
-            .and_then(Value::as_str)
-            == Some("refusal")
-    {
-        return true;
-    }
-    // The relay Responses reducer accumulates streamed text into a top-level
-    // `output_text` carrier that is projected later; it is real business text.
-    if has_non_empty_string(response.get("output_text")) {
-        return true;
-    }
-    match response.get("output").and_then(Value::as_array) {
-        Some(output) => output
-            .iter()
-            .any(v3_responses_output_item_has_deliverable_content),
-        None => false,
-    }
+    let mut facts = V3ProviderAttemptBusinessContent::default();
+    facts.response(response);
+    facts.has_deliverable_business_content()
 }
 
 pub(super) fn v3_responses_output_item_has_deliverable_content(item: &Value) -> bool {

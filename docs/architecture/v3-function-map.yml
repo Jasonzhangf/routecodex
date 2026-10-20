@@ -5220,6 +5220,9 @@ features:
   - V3ProviderActionGate::record_failure_with_minimum_delay
   - v3_provider_attempt_has_deliverable_business_content
   - v3_provider_json_attempt_has_deliverable_business_content
+  - V3ProviderAttemptBusinessContent
+  - V3ProviderAttemptBusinessContent::observe_event
+  - V3ProviderAttemptBusinessContent::has_deliverable_business_content
   - empty_provider_attempt_failure
   - v3_provider_event_has_deliverable_business_content
   - V3RuntimeStreamObservation::record_provider_business_content

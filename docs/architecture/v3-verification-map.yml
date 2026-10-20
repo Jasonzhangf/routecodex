@@ -3454,6 +3454,7 @@ features:
   required_positive:
   - Provider-local full path compiles into the unified provider error action manifest with injected provider scope while legacy action remains compatible.
   - Genuine Chat, Anthropic and Responses errors retain their typed source through recovery and transport termination.
+  - issue0ff6700 public HTTP cases reject a complete reasoning-plus-explicit-blank-assistant-final attempt before commit, recover through the next candidate, and preserve independent business results and reasoning-only output
   - Configured backoff is a minimum combined with provider-action-gate delay by max rather than addition.
   - A complete provider attempt with no deliverable business content is classified as an internal typed 502 (provider_response_empty) that enters the existing Error chain retry/reselect and never reaches the client as an empty completion; the judgment reads the whole accumulated attempt, not the last terminal frame or usage.
   - 5338ac6 direct_sse_memory_only_reselects_before_client_commit and direct_sse_memory_only_exhaustion_interrupts_transport cover post-memory-strip adjudication at legal-closeout and terminal/EOF seal exits through public HTTP; execute the no_response_adjudication_blackbox required gate with filter direct_sse_memory_only for focused red/green.
@@ -3472,6 +3473,7 @@ features:
   - Genuine provider HTTP or native SSE errors cannot reach the client as HTTP errors, protocol error events or fabricated successful completion.
   - The internal empty-attempt 502 keeps its real upstream HTTP status separate from the internal classification, never enters client payload or MetadataCenter, and never fabricates a client HTTP error or empty completion.
   required_gates:
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issue0ff6700_ -- --nocapture --test-threads=1
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test local599_consumer_blackbox -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib local599_output -- --nocapture
