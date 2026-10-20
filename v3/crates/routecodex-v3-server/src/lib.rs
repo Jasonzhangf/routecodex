@@ -119,15 +119,15 @@ use routecodex_v3_runtime::{
     V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayClientBody,
     V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3HubExecutionMode,
     V3OpenAiChatClientStream, V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3RelayProviderSnapshots,
-    V3RequestExecutionControl, V3Resp15ClientPayload, V3ResponsesDirectRuntimeSharedState,
-    V3ResponsesDirectServerToolScope, V3ResponsesDirectServerToolState,
-    V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
-    V3ResponsesRelayDryRunOutcome, V3ResponsesRelayProviderHealthHandle,
-    V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
-    V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeSeeds,
-    V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState, V3RuntimeObservability,
-    V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3ProviderHealthListenerScope,
+    V3RelayProviderSnapshots, V3RequestExecutionControl, V3Resp15ClientPayload,
+    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
+    V3ResponsesDirectServerToolState, V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody,
+    V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
+    V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
+    V3ResponsesRelayRuntimeSeeds, V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState,
+    V3RuntimeObservability, V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
     V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
 };
@@ -260,7 +260,7 @@ pub struct V3ServerAggregateHandle {
     probe_lifecycle: aggregate_probe_lifecycle::AggregateProbeLifecycle,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
-    provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
+    provider_health: Vec<Arc<V3ResponsesRelayProviderHealthHandle>>,
     observability_writers: Vec<V3WebuiObservability>,
     codex_sample_persist_worker: Option<routecodex_v3_debug::V3CodexSamplePersistHandle>,
 }
@@ -388,8 +388,10 @@ impl V3ServerAggregateHandle {
     }
 
     fn flush_runtime_persistence(&self) {
-        if let Err(error) = self.provider_health.flush_persistence() {
-            eprintln!("V3 provider health persistence flush failed: {error}");
+        for provider_health in &self.provider_health {
+            if let Err(error) = provider_health.flush_persistence() {
+                eprintln!("V3 provider health persistence flush failed: {error}");
+            }
         }
         for observability in &self.observability_writers {
             if let Err(error) = observability.flush_persistence() {
@@ -523,9 +525,6 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     let responses_relay_server_tool_state = Arc::new(
         V3ResponsesRelayServerToolState::default().with_hooks_sidecar_socket(hooks_sidecar_socket),
     );
-    let provider_health = Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
-        &manifest,
-    ));
     let codex_sample_store = Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
         manifest.debug.codex_samples,
         routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
@@ -592,6 +591,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     let mut listeners = Vec::with_capacity(bound.len());
     let mut observability_writers = Vec::with_capacity(bound.len());
     let mut pending_listener_tasks = Vec::with_capacity(bound.len());
+    let mut provider_health_handles = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
         let app = if server_id == "admin_webui" {
@@ -628,6 +628,21 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             let webui_observability =
                 V3WebuiObservability::load_persisted(&observability_store_path);
             observability_writers.push(webui_observability.clone());
+            // Each business listener owns its own provider health store,
+            // availability generation, failure/action state and recovery
+            // scheduler. Requests on this listener share only this handle.
+            let listener_scope = V3ProviderHealthListenerScope {
+                server_id: server.id.clone(),
+                bind: server.bind.clone(),
+                port: server.port,
+            };
+            let listener_provider_health = Arc::new(
+                V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener(
+                    &manifest,
+                    &listener_scope,
+                ),
+            );
+            provider_health_handles.push(Arc::clone(&listener_provider_health));
             build_v3_listener_router(V3ListenerState {
                 server,
                 manifest_version: preflight.manifest_version,
@@ -639,7 +654,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                 codex_sample_store: codex_sample_store.clone(),
                 responses_direct_server_tool_state: responses_direct_server_tool_state.clone(),
                 responses_relay_server_tool_state: responses_relay_server_tool_state.clone(),
-                provider_health: provider_health.clone(),
+                provider_health: listener_provider_health,
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
                 responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
                 request_activity_gate: Arc::clone(&request_activity_gate),
@@ -723,7 +738,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     }
     let probe_lifecycle = aggregate_probe_lifecycle::AggregateProbeLifecycle::start(
         Arc::clone(&manifest),
-        Arc::clone(&provider_health),
+        provider_health_handles.clone(),
     )
     .map_err(std::io::Error::other)?;
     Ok(V3ServerAggregateHandle {
@@ -731,7 +746,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
         probe_lifecycle,
         request_activity_gate,
         front_transport_broker,
-        provider_health,
+        provider_health: provider_health_handles,
         observability_writers,
         codex_sample_persist_worker,
     })

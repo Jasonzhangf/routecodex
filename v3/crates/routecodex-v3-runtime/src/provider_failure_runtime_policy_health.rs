@@ -41,6 +41,28 @@ impl V3ProviderFailureRuntimeHealth {
         }
     }
 
+    /// Build the runtime health owned by one business listener.
+    ///
+    /// The listener owns its own store, availability generation, failure and
+    /// action state, and recovery scheduler owner. A listener-scoped handle
+    /// must not share the process-wide action gate, otherwise one port's
+    /// failure admission would still gate another port.
+    pub fn from_manifest_for_listener(
+        manifest: &V3Config05ManifestPublished,
+        listener: &V3ProviderHealthListenerScope,
+    ) -> Self {
+        let store = V3ProviderHealthStore::from_manifest_for_listener(manifest, listener);
+        Self {
+            store,
+            action_gate: V3ProviderActionGate::default(),
+            probe_owner: Default::default(),
+            default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
+                manifest,
+            )
+            .same_candidate_retries,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         Self::from_manifest_for_tests(manifest)
@@ -466,25 +488,23 @@ impl V3ProviderFailureRuntimeHealth {
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, Result<String, V3RelayErrorOperatorFault>> {
         let code = error_type.unwrap_or("provider_failure").to_string();
-        let (source_projection, source) =
-            raise_v3_source_via_err01(
-                V3ErrorSourceKind::ProviderFailure,
-                source_stage,
-                code.clone(),
-                message,
-                V3Err01SourceInput::External(V3ExternalErrorLink {
-                    kind: V3ExternalErrorKind::Provider,
-                    status: Some(status),
-                    code: Some(code),
-                    provider_id: Some(provider_id.to_string()),
-                    upstream_request_id: None,
-                    message: Some(message.to_string()),
-                }),
-            )
-            .map_err(Err)?;
+        let (source_projection, source) = raise_v3_source_via_err01(
+            V3ErrorSourceKind::ProviderFailure,
+            source_stage,
+            code.clone(),
+            message,
+            V3Err01SourceInput::External(V3ExternalErrorLink {
+                kind: V3ExternalErrorKind::Provider,
+                status: Some(status),
+                code: Some(code),
+                provider_id: Some(provider_id.to_string()),
+                upstream_request_id: None,
+                message: Some(message.to_string()),
+            }),
+        )
+        .map_err(Err)?;
         let classified =
-            classify_v3_provider_health_source_via_err02(source_projection, source)
-                .map_err(Err)?;
+            classify_v3_provider_health_source_via_err02(source_projection, source).map_err(Err)?;
         let failure_action = build_v3_provider_failure_action_from_v3_error_02(&classified);
         if let Some(policy) = matched_policy_directive
             .map(|policy| {
@@ -522,15 +542,16 @@ impl V3ProviderFailureRuntimeHealth {
             status,
             error_type.unwrap_or("provider_failure"),
         );
-        let projection = self.record_provider_key_failure_action_for_interface(
-            provider_id,
-            interface_id,
-            auth_alias,
-            model_id,
-            &action,
-            now_ms,
-        )
-        .map_err(Ok)?;
+        let projection = self
+            .record_provider_key_failure_action_for_interface(
+                provider_id,
+                interface_id,
+                auth_alias,
+                model_id,
+                &action,
+                now_ms,
+            )
+            .map_err(Ok)?;
         let session_record = self
             .record_provider_failure_in_session_without_health_cooldown_for_interface(
                 failure_session_scope,
@@ -619,7 +640,10 @@ impl V3ProviderFailureRuntimeHealth {
         // the saturation window for the same provider/auth identity.
         if let Some(auth_alias) = auth_alias {
             V3AdaptiveConcurrencyController::process_shared()
-                .observe_business_success(&v3_provider_concurrency_key_parts(provider_id, auth_alias))
+                .observe_business_success(&v3_provider_concurrency_key_parts(
+                    provider_id,
+                    auth_alias,
+                ))
                 .map_err(|error| error.to_string())?;
         }
         self.action_gate

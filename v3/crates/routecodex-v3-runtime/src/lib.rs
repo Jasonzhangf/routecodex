@@ -67,4 +67,5 @@ pub use provider_failure_runtime_policy::{
     V3ProviderFailureRuntimeHealth, V3ProviderHealthProbeFailure, V3RelayErrorOperatorFault,
 };
 pub use route_policy::*;
+pub use routecodex_v3_provider_responses::V3ProviderHealthListenerScope;
 pub use runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};

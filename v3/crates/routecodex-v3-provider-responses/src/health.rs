@@ -19,7 +19,9 @@ use crate::provider_cooldown_probe::{
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
 };
 use persistence::{
-    legacy_provider_cooldown_state_path_for_manifest, persist_cooldown_state,
+    legacy_provider_cooldown_state_path_for_listener,
+    legacy_provider_cooldown_state_path_for_manifest, listener_scoped_state_suffix,
+    persist_cooldown_state, provider_cooldown_state_path_for_listener,
     provider_cooldown_state_path_for_manifest, start_provider_health_persistence,
     V3ProviderHealthPersistenceWriter,
 };
@@ -166,6 +168,18 @@ impl V3ProviderAvailabilityReader for V3ProviderAllAvailable {
             blocked_scopes: Vec::new(),
         }
     }
+}
+
+/// Typed identity of one business listener that owns provider health state.
+///
+/// The server passes this scope in; it never decides persistence. Provider
+/// health owns the mapping from listener scope to state file so two listeners
+/// can never share one mutable store or one persistence writer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ProviderHealthListenerScope {
+    pub server_id: String,
+    pub bind: String,
+    pub port: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -430,24 +444,54 @@ impl V3ProviderHealthStore {
             manifest,
             Some(persistence_path),
             Some(legacy_provider_cooldown_state_path_for_manifest(manifest)),
+            None,
+        )
+    }
+
+    /// Build the store owned by one business listener.
+    ///
+    /// The persistence owner selects a listener-scoped state file. A single
+    /// listener keeps the historical path and legacy migration; a multi-listener
+    /// manifest derives one file per listener and never imports the unowned
+    /// aggregate record into every port.
+    pub fn from_manifest_for_listener(
+        manifest: &V3Config05ManifestPublished,
+        listener: &V3ProviderHealthListenerScope,
+    ) -> Self {
+        let persistence_path = provider_cooldown_state_path_for_listener(manifest, listener);
+        let legacy_persistence_path =
+            legacy_provider_cooldown_state_path_for_listener(manifest, listener);
+        let multi_listener = manifest
+            .servers
+            .values()
+            .filter(|server| server.enabled)
+            .count()
+            > 1;
+        let prune_scope_suffix = multi_listener.then(|| listener_scoped_state_suffix(listener));
+        Self::from_manifest_internal(
+            manifest,
+            Some(persistence_path),
+            legacy_persistence_path,
+            prune_scope_suffix,
         )
     }
 
     pub fn from_manifest_without_persistence(manifest: &V3Config05ManifestPublished) -> Self {
-        Self::from_manifest_internal(manifest, None, None)
+        Self::from_manifest_internal(manifest, None, None, None)
     }
 
     pub fn from_manifest_with_persistence_path(
         manifest: &V3Config05ManifestPublished,
         persistence_path: PathBuf,
     ) -> Self {
-        Self::from_manifest_internal(manifest, Some(persistence_path), None)
+        Self::from_manifest_internal(manifest, Some(persistence_path), None, None)
     }
 
     fn from_manifest_internal(
         manifest: &V3Config05ManifestPublished,
         persistence_path: Option<PathBuf>,
         legacy_persistence_path: Option<PathBuf>,
+        prune_scope_suffix: Option<String>,
     ) -> Self {
         let configured_disabled = manifest
             .providers
@@ -490,9 +534,12 @@ impl V3ProviderHealthStore {
             failure_policies,
             ..V3ProviderHealthState::default()
         };
-        if let Some((writer, persisted_entries)) =
-            start_provider_health_persistence(manifest, persistence_path, legacy_persistence_path)
-        {
+        if let Some((writer, persisted_entries)) = start_provider_health_persistence(
+            manifest,
+            persistence_path,
+            legacy_persistence_path,
+            prune_scope_suffix,
+        ) {
             for (key, blocked_until_ms, next_probe_at_ms) in persisted_entries {
                 if !matches!(
                     key.failure_class,
