@@ -4836,7 +4836,6 @@ features:
   - build_v3_runtime_provider_failed_attempt_evidence_no_response
   - relay_handoff_entry_state
   - relay_request_execution_control
-  - resolve_v3_relay_entry_target
   resource_bindings:
   - v3.runtime.responses_observability
   - v3.execution.target_plan
@@ -5068,9 +5067,10 @@ features:
   - complete_v3_provider_health_probe
   - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
   - build_v3_provider_global_probe_target
-  - select_v3_expanded_target_with_exhaustion_rescue
-  - select_v3_expanded_target_with_admission_rescue
-  - resolve_v3_relay_target_outcome_with_admission_rescue
+  - run_v3_plan_execution_operator_with_probes
+  - PlanExecutionOperator::execute_plan
+  - step_v3_target_planning_with_admission_sync
+  - try_admit_v3_selected_target
   - V3RuntimeProviderAdmission::into_lease
   - V3RuntimeProviderAdmission::drop
   - V3PreAcquiredProviderAdmission::release
@@ -5114,6 +5114,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs

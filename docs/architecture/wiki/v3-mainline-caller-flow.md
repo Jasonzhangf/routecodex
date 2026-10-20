@@ -3017,7 +3017,7 @@ flowchart TD
 
 ## v3.provider_admission_rescue_entrypoints
 
-Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry.
+Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry, and pure capacity exhaustion retains its typed cause.
 
 Owner feature: `v3.provider_global_subscription_probe`
 
@@ -3068,7 +3068,7 @@ flowchart TD
     c_73_v3_provider_admission_lease_lifecycle_16["v3-provider-responses<br/>V3AdaptiveConcurrencyController::observe_business_success<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
   end
   subgraph c_73_v3_provider_admission_lease_lifecycle_m_v3_runtime["v3-runtime"]
-    c_73_v3_provider_admission_lease_lifecycle_0["v3-runtime<br/>select_v3_expanded_target_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
+    c_73_v3_provider_admission_lease_lifecycle_0["v3-runtime<br/>try_admit_v3_selected_target<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
     c_73_v3_provider_admission_lease_lifecycle_2["v3-runtime<br/>execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small>"]
     c_73_v3_provider_admission_lease_lifecycle_4["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
     c_73_v3_provider_admission_lease_lifecycle_10["v3-runtime<br/>V3RuntimeProviderAdmission::drop<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
@@ -3094,7 +3094,7 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-provider-admission-lease-acquire` | `V3Target10ConcreteProviderSelected` → `V3RuntimeProviderAdmission` | anchored | select_v3_expanded_target_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | V3AdaptiveConcurrencyController::try_acquire_business<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-provider-admission-lease-acquire` | `V3Target10ConcreteProviderSelected` → `V3RuntimeProviderAdmission` | anchored | try_admit_v3_selected_target<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | V3AdaptiveConcurrencyController::try_acquire_business<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-admission-lease-direct-handoff` | `V3RuntimeProviderAdmission` → `V3PreAcquiredProviderAdmission` | anchored | execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small> | V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-admission-lease-responses-direct-handoff` | `V3RuntimeProviderAdmission` → `V3PreAcquiredProviderAdmission` | anchored | execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-admission-lease-relay-handoff` | `V3RuntimeProviderAdmission` → `V3PreAcquiredProviderAdmission` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.provider_global_subscription_probe` |
