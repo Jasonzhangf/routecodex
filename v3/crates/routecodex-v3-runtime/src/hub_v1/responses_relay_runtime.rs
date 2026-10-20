@@ -6,10 +6,9 @@ use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
-    provider_runtime_failure_stage, resolve_v3_relay_target_outcome_with_admission_rescue,
-    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderAdmittedTargetResolution, V3RelayProviderFailurePolicyContext,
+    provider_runtime_failure_stage, run_v3_relay_provider_failure_policy,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
     V3RelayProviderTargetResolutionInput, V3RuntimeProviderAdmission,
 };
