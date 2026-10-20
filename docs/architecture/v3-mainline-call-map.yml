@@ -8516,6 +8516,7 @@ chains:
       - The Server owner retains old task custody through cancellation and join, then synchronously registers the due-only Runtime owner before releasing reversible maintenance.
       - Preparation error, cancellation, drop and returned exec failure restore the retained runtime; terminal shutdown suppresses late restoration.
       - Terminal supervisor exit cancels and joins every listener probe owner before aggregate shutdown or terminal exec preparation returns; a terminal notification alone is not a completed cleanup.
+      - Fault exit removes the completed handle and joins every surviving owner; registration failure drops only unspawned futures, so every supervisor return has no live detached child and never restores admission after terminal intent.
 
   - step_id: v3-provider-global-probe-02-quiesce
     from_node: V3ServerAggregateLifecycle

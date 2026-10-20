@@ -13,11 +13,17 @@ struct ListenerProbeOwner {
 }
 
 impl ListenerProbeOwner {
-    fn start(
+    fn prepare(
         manifest: &Arc<V3Config05ManifestPublished>,
         health: &Arc<V3ResponsesRelayProviderHealthHandle>,
         resume: bool,
-    ) -> Result<Self, String> {
+    ) -> Result<
+        (
+            std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
+            oneshot::Sender<()>,
+        ),
+        String,
+    > {
         let runtime_health = health.runtime_health();
         let (shutdown, shutdown_rx) = oneshot::channel();
         let future: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> = if resume {
@@ -31,10 +37,7 @@ impl ListenerProbeOwner {
                     .aggregate_provider_probe_lifecycle(Arc::clone(manifest), shutdown_rx)?,
             )
         };
-        Ok(Self {
-            probe: tokio::spawn(future),
-            shutdown: Some(shutdown),
-        })
+        Ok((future, shutdown))
     }
 
     /// Stop and join this port's owner. Returns an unexpected join fault so the
@@ -61,18 +64,19 @@ impl ListenerProbeOwners {
         healths: &[Arc<V3ResponsesRelayProviderHealthHandle>],
         resume: bool,
     ) -> Result<Self, String> {
-        let mut owners = Vec::with_capacity(healths.len());
+        let mut prepared = Vec::with_capacity(healths.len());
         for health in healths {
-            match ListenerProbeOwner::start(manifest, health, resume) {
-                Ok(owner) => owners.push(owner),
-                Err(error) => {
-                    for owner in &owners {
-                        owner.probe.abort();
-                    }
-                    return Err(error);
-                }
-            }
+            prepared.push(ListenerProbeOwner::prepare(manifest, health, resume)?);
         }
+        // A failed registration drops only unspawned futures. No child task
+        // exists until the whole listener batch can be supervised.
+        let owners = prepared
+            .into_iter()
+            .map(|(future, shutdown)| ListenerProbeOwner {
+                probe: tokio::spawn(future),
+                shutdown: Some(shutdown),
+            })
+            .collect();
         Ok(Self { owners })
     }
 
@@ -176,6 +180,12 @@ impl AggregateProbeLifecycle {
                         return;
                     }
                     SupervisorWake::Stopped { index, error } => {
+                        // select_all already consumed this JoinHandle's result.
+                        // Remove it before joining the still-live siblings.
+                        owners.owners.remove(index);
+                        if let Some(join_error) = owners.stop().await {
+                            eprintln!("V3 aggregate fault probe join failed: {join_error}");
+                        }
                         eprintln!(
                             "V3 aggregate probe owner {index} stopped unexpectedly: {error}; scheduled recovery unavailable"
                         );
@@ -318,9 +328,8 @@ impl Drop for AggregateProbeLifecycle {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn id9_terminal_supervisor_joins_held_owners() {
-        let manifest = Arc::new(V3Config05ManifestPublished {
+    fn test_manifest() -> Arc<V3Config05ManifestPublished> {
+        Arc::new(V3Config05ManifestPublished {
             version: 3,
             hub_v1: None,
             servers: Default::default(),
@@ -347,7 +356,12 @@ mod tests {
                 provider_error_action_policy: Vec::new(),
                 client_error_projection_policy: Vec::new(),
             },
-        });
+        })
+    }
+
+    #[tokio::test]
+    async fn id9_terminal_supervisor_joins_held_owners() {
+        let manifest = test_manifest();
         let permits = Arc::new(tokio::sync::Semaphore::new(2));
         let mut owners = Vec::new();
         for _ in 0..2 {
@@ -384,6 +398,77 @@ mod tests {
         assert!(
             finished && released == 2,
             "terminal join returned with detached owners: finished={finished} permits={released}"
+        );
+    }
+
+    #[tokio::test]
+    async fn id9_stopped_owner_joins_remaining_owner_before_exit() {
+        let permits = Arc::new(tokio::sync::Semaphore::new(2));
+        let first = permits.clone().acquire_owned().await.unwrap();
+        let (first_shutdown, first_receiver) = oneshot::channel();
+        let completed = tokio::spawn(async move {
+            drop((first, first_receiver));
+        });
+        while !completed.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        let second = permits.clone().acquire_owned().await.unwrap();
+        let (second_shutdown, second_receiver) = oneshot::channel();
+        let held = tokio::spawn(async move {
+            let _resources = (second, second_receiver);
+            std::future::pending::<()>().await;
+        });
+        let held_task = held.abort_handle();
+        let mut lifecycle = AggregateProbeLifecycle::supervise(
+            test_manifest(),
+            Vec::new(),
+            ListenerProbeOwners {
+                owners: vec![
+                    ListenerProbeOwner {
+                        probe: completed,
+                        shutdown: Some(first_shutdown),
+                    },
+                    ListenerProbeOwner {
+                        probe: held,
+                        shutdown: Some(second_shutdown),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+        tokio::task::yield_now().await;
+        let gate = Arc::new(V3ServerRequestActivityGate::default());
+        let result = lifecycle.quiesce(gate.begin_maintenance().await).await;
+        assert!(
+            result.is_err(),
+            "the completed owner must enter the fault branch"
+        );
+        lifecycle.join().await;
+        let finished = held_task.is_finished();
+        let released = permits.available_permits();
+        held_task.abort();
+        assert!(
+            finished && released == 2,
+            "stopped-owner exit detached its sibling: finished={finished} permits={released}"
+        );
+    }
+
+    #[tokio::test]
+    async fn id9_partial_registration_does_not_spawn_detached_owner() {
+        let manifest = test_manifest();
+        let health = Arc::new(
+            V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest),
+        );
+        let failed =
+            ListenerProbeOwners::start(&manifest, &[health.clone(), health.clone()], false);
+        assert!(failed.is_err(), "duplicate registration must fail");
+        let (_shutdown, receiver) = oneshot::channel();
+        let registration = health
+            .runtime_health()
+            .aggregate_provider_probe_lifecycle_resume(manifest, receiver);
+        assert!(
+            registration.is_ok(),
+            "a failed registration batch must release earlier registrations before returning"
         );
     }
 }
