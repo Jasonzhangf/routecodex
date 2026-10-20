@@ -1161,6 +1161,7 @@ features:
   - docs/goals/v3-direct-thinking-tag-response-compat-test-design.md
   required_contract:
   - Complete declared DSML and demonstrated bounded alternate tool envelopes are harvested only by the registered Responses Direct response hook; quoted, code and opaque-associated examples remain intact. JSON and buffered SSE preserve retained prose, arguments, native calls and paired follow-up results. Recognized unharvestable attempted invocations reject the entire attempt through existing typed Error recovery even beside prose or a complete sibling call; native invalid model arguments remain business content.
+  - The exact observed unprefixed tool_call wrapper with a bounded missing-angle invoke opener and complete inner invoke close becomes a native call without requiring the outer tool_call close; retained surrounding text and paired follow-up identity remain unchanged. The same shared grammar is exercised through Relay.
   - Demonstrated orphan fullwidth/ASCII DSML and analysis lines, including the exact standalone closing residue ' calls>', are removed outside literal contexts. Labels alone trigger provider_response_empty only after complete hook normalization. Both JSON callers and both SSE sealing exits adjudicate the final normalized attempt before success; exhaustion detectably terminates request transport without error payload or normal empty completion.
   - Thinking governance reuses the existing owner; complete wrappers harvest, complete tools with partial thinking/text labels keep the body, and unknown-start reasoning stays text. Isolated closing labels remove only the label and preserve all surrounding text.
   - Thinking SSE preserves opaque carrier associations and raw unrelated values; modified snapshots and appended reasoning events agree with terminal output, and matching output_text aggregates are refreshed after normalization.
@@ -1189,6 +1190,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_dsml_ -- --nocapture
   # f665809: exact prefixed invoke grammar is harvested by the shared parser
   # through registered Direct hooks; executable truncation uses processing Error.
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_dsml_issue03c2a07_plain_invoke_json_and_sse_round_trip -- --nocapture --test-threads=1
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_dsml_f665809_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_dsml_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_thinking_ -- --nocapture
@@ -4196,6 +4198,7 @@ features:
   - v3-hub-relay-resp-03
   required_contract:
   - Quoted, code, literal and unrecognized DSML-looking business text is forwarded unchanged; declared leaked orphan control labels are removed only in Relay response Chat Process while preserving surrounding prose and native calls.
+  - Relay consumes the shared unprefixed invoke grammar for the exact observed missing-angle opener and absent outer close; the complete inner call, exact declared arguments and paired follow-up identity survive.
   - Shared pure marker recognition has one grammar owner; Direct hooks and Relay Chat Process retain distinct payload rewrite ownership. Native invalid model arguments never trigger provider rejection or reselection.
   - After governance, a complete attempt with only removed labels enters existing typed provider_response_empty recovery; exhausted recovery detectably terminates only that request transport without client errors or empty success.
   - genuine HTTP and native protocol errors retain the existing internal Error chain and client transport-break boundary
@@ -4212,6 +4215,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_control_marker_
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server relay_control_marker_
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server relay_serialized_tool_
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server relay_serialized_tool_issue03c2a07_plain_invoke_json_and_sse_round_trip -- --nocapture --test-threads=1
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server relay_serialized_tool_f665809_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_serialized_tool_
   - git diff --check

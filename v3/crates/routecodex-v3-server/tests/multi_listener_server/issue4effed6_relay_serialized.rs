@@ -13,6 +13,8 @@ enum Mode {
     Recovered,
     Minimax,
     MinimaxPartial,
+    PlainInvoke,
+    PlainInvokePartial,
 }
 #[derive(Clone)]
 struct Peer {
@@ -53,7 +55,7 @@ async fn upstream(State(peer): State<Peer>, axum::Json(body): axum::Json<Value>)
             turn, 1,
             "first attempt must be accepted without reselection"
         );
-        if matches!(peer.mode, Mode::Minimax) {
+        if matches!(peer.mode, Mode::Minimax | Mode::PlainInvoke) {
             let calls: Vec<_> = messages
                 .iter()
                 .filter(|message| message["role"] == "assistant")
@@ -103,6 +105,8 @@ async fn upstream(State(peer): State<Peer>, axum::Json(body): axum::Json<Value>)
             .any(|message| message.to_string().contains("SERIALIZED_FIXTURE")));
         let envelope = format!("<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name=\"{wire_name}\" call_id=\"{CALL}\"><｜｜DSML｜｜ parameter name=\"value\" string=\"true\">42</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>");
         text = match peer.mode {
+            Mode::PlainInvoke => format!("<thinking>Preparing.\n<tool_call><invoke name=\"{wire_name}\"><value>42</value></invoke><invoke name=\"{wire_name}\"><value>42</value></invoke>\nDone preparing."),
+            Mode::PlainInvokePartial => format!("FAILED_ATTEMPT_PROSE\n<tool_call>invoke name=\"{wire_name}\"><value>42</value></invoke><invoke name=\"{wire_name}\"><value>broken</tool_call>"),
             Mode::Minimax | Mode::MinimaxPartial => {
                 let call = format!("]<]minimax[>[<invoke name=\"{wire_name}\">]<]minimax[>[<value>42]<]minimax[>[</value>]<]minimax[>[</invoke>");
                 if matches!(peer.mode, Mode::MinimaxPartial) {
@@ -185,7 +189,7 @@ async fn round_trip(stream: bool, mode: Mode) {
     );
     let result = completed(&wire, stream);
     let output = result["output"].as_array().unwrap();
-    if matches!(mode, Mode::Minimax) {
+    if matches!(mode, Mode::Minimax | Mode::PlainInvoke) {
         assert!(!wire.contains("]<]minimax[>[") && !wire.contains("<invoke"));
         let harvested: Vec<_> = output
             .iter()
@@ -730,5 +734,21 @@ async fn relay_serialized_tool_partial_sibling_json_and_sse_exhaustion() {
 async fn relay_serialized_tool_opaque_carriers_json_and_sse_preserved() {
     for stream in [false, true] {
         opaque_counterexample(stream).await;
+    }
+}
+
+#[tokio::test]
+async fn relay_serialized_tool_issue03c2a07_plain_invoke_json_and_sse_round_trip() {
+    for stream in [false, true] {
+        super::issue3ccb5fa_dsml::run_issue03c2a07_plain_invoke(stream, true).await;
+    }
+}
+
+#[tokio::test]
+async fn relay_serialized_tool_issue03c2a07_inner_complete_and_truncated_recovery() {
+    for stream in [false, true] {
+        round_trip(stream, Mode::PlainInvoke).await;
+        partial_mode(stream, true, Mode::PlainInvokePartial).await;
+        partial_mode(stream, false, Mode::PlainInvokePartial).await;
     }
 }

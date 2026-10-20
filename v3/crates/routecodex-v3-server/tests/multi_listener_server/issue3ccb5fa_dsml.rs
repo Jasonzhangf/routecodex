@@ -21,6 +21,7 @@ enum DsmlCase {
     MinimaxLiteral,
     MinimaxUnknown,
     MinimaxNamespace,
+    PlainInvoke,
 }
 
 fn opaque_tool_text(case: DsmlCase) -> Option<&'static str> {
@@ -39,10 +40,13 @@ fn opaque_tool_text(case: DsmlCase) -> Option<&'static str> {
 #[derive(Clone)]
 struct DsmlPeer {
     path: String,
+    owned_path: Option<PathBuf>,
     calls: Arc<std::sync::atomic::AtomicUsize>,
     sse: bool,
     case: DsmlCase,
 }
+
+const PLAIN_INVOKE_TEXT: &str = "\n<tool_call>invoke name=\"view_image\"><detail>high</detail><path>OWNED.png</path></invoke>\n";
 
 const NESTED_NAMESPACE: &str = "mcp__mcpx.workspace";
 const NESTED_LEAF: &str = "read";
@@ -71,6 +75,19 @@ fn client_tools(case: DsmlCase) -> Value {
         DsmlCase::Discovered => {
             json!([{"type":"function","name":"read_image","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}])
         }
+        DsmlCase::PlainInvoke => json!([{
+            "type":"function",
+            "name":"view_image",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "detail":{"type":"string","enum":["high","original"]},
+                    "path":{"type":"string"}
+                },
+                "required":["path"],
+                "additionalProperties":false
+            }
+        }]),
         DsmlCase::Alternate | DsmlCase::ToolCall | DsmlCase::CallsResidueSse => json!([{
             "type":"function",
             "name":"exec_command",
@@ -94,6 +111,7 @@ fn invoke_name(case: DsmlCase) -> &'static str {
     match case {
         DsmlCase::Nested | DsmlCase::MinimaxNamespace => NESTED_WIRE,
         DsmlCase::Discovered => DISCOVERED_WIRE,
+        DsmlCase::PlainInvoke => "view_image",
         DsmlCase::Alternate | DsmlCase::ToolCall | DsmlCase::CallsResidueSse => "exec_command",
         _ => "read_image",
     }
@@ -103,6 +121,7 @@ fn expected_leaf(case: DsmlCase) -> &'static str {
     match case {
         DsmlCase::Nested | DsmlCase::MinimaxNamespace => NESTED_LEAF,
         DsmlCase::Discovered => DISCOVERED_LEAF,
+        DsmlCase::PlainInvoke => "view_image",
         DsmlCase::Alternate | DsmlCase::ToolCall | DsmlCase::CallsResidueSse => "exec_command",
         _ => "read_image",
     }
@@ -117,7 +136,10 @@ fn expected_namespace(case: DsmlCase) -> Option<&'static str> {
 }
 
 fn first_input(case: DsmlCase) -> Value {
-    let mut input = vec![json!({"role":"user","content":"Read the owned image"})];
+    let mut input = vec![json!({
+        "role":"user",
+        "content":if case == DsmlCase::PlainInvoke { "Inspect the owned image" } else { "Read the owned image" }
+    })];
     if case == DsmlCase::Discovered {
         input.push(discovery_item());
     }
@@ -152,7 +174,9 @@ async fn upstream(
     let turn = peer.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     assert_provider_declaration(&body, peer.case);
     let output = if turn == 0 {
-        if let Some(text) = opaque_tool_text(peer.case) {
+        if peer.case == DsmlCase::PlainInvoke {
+            json!([{"id":"plain_invoke_message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":PLAIN_INVOKE_TEXT,"annotations":[]}]}])
+        } else if let Some(text) = opaque_tool_text(peer.case) {
             let mut output = json!([
                 {"id":"opaque_message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text,"annotations":[]}]},
                 {"id":"native_sibling","type":"function_call","call_id":"native_sibling_call","name":"read_image","arguments":json!({"file_path":peer.path}).to_string(),"status":"completed"}
@@ -247,6 +271,56 @@ async fn upstream(
         }
     } else {
         assert_eq!(turn, 1, "no retry or duplicate attempt allowed");
+        if peer.case == DsmlCase::PlainInvoke {
+            let calls: Vec<_> = body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|item| item["type"] == "function_call")
+                .collect();
+            let results: Vec<_> = body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|item| item["type"] == "function_call_output")
+                .collect();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(results.len(), 1);
+            let call = calls[0];
+            assert_eq!(call["name"], "view_image");
+            assert_eq!(
+                serde_json::from_str::<Value>(call["arguments"].as_str().unwrap()).unwrap(),
+                json!({"detail":"high","path":"OWNED.png"})
+            );
+            assert_eq!(call["call_id"], results[0]["call_id"]);
+            assert_eq!(
+                serde_json::from_str::<Value>(results[0]["output"].as_str().unwrap()).unwrap(),
+                json!({"width":3,"height":2})
+            );
+            let bytes = fs::read(peer.owned_path.as_ref().unwrap()).unwrap();
+            assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+            let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+            let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+            assert_eq!((width, height), (3, 2));
+            return Response::builder()
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "id":"resp_plain_invoke_followup",
+                        "object":"response",
+                        "status":"completed",
+                        "output":[{
+                            "id":"final_plain_invoke",
+                            "type":"message",
+                            "role":"assistant",
+                            "status":"completed",
+                            "content":[{"type":"output_text","text":"Owned image is 3 by 2.","annotations":[]}]
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap();
+        }
         let input = body["input"].as_array().unwrap();
         let call = input.iter().find(|i| i["type"] == "function_call").unwrap();
         let leaf = expected_leaf(peer.case);
@@ -591,11 +665,21 @@ async fn run(case: DsmlCase, sse: bool) {
 async fn run_mode(case: DsmlCase, sse: bool, relay: bool) {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_PROTOCOL_DECISION_KEY", "dsml-test-key");
-    let fixture = std::env::temp_dir().join(format!(
-        "rcc-dsml-{}-{}-{sse}.png",
-        std::process::id(),
-        case as u8
-    ));
+    let fixture = if case == DsmlCase::PlainInvoke {
+        std::env::temp_dir()
+            .join(format!(
+                "rcc-dsml-issue03c2a07-{}-{}-{sse}",
+                std::process::id(),
+                relay as u8
+            ))
+            .join("OWNED.png")
+    } else {
+        std::env::temp_dir().join(format!(
+            "rcc-dsml-{}-{}-{sse}.png",
+            std::process::id(),
+            case as u8
+        ))
+    };
     // Valid PNG fixture: the client reads the actual file and decodes IHDR dimensions.
     let png = [
         137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 3, 0, 0, 0, 2, 8, 2,
@@ -603,9 +687,17 @@ async fn run_mode(case: DsmlCase, sse: bool, relay: bool) {
         3, 38, 8, 197, 192, 192, 0, 0, 4, 96, 0, 64, 242, 81, 76, 125, 0, 0, 0, 0, 73, 69, 78, 68,
         174, 66, 96, 130,
     ];
+    if let Some(parent) = fixture.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
     fs::write(&fixture, png).unwrap();
     let peer = DsmlPeer {
-        path: fixture.to_str().unwrap().to_owned(),
+        path: if case == DsmlCase::PlainInvoke {
+            "OWNED.png".to_owned()
+        } else {
+            fixture.to_str().unwrap().to_owned()
+        },
+        owned_path: Some(fixture.clone()),
         calls: Arc::default(),
         sse,
         case,
@@ -852,6 +944,48 @@ async fn run_mode(case: DsmlCase, sse: bool, relay: bool) {
         std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
         return;
     }
+    if case == DsmlCase::PlainInvoke {
+        assert!(
+            !wire.contains("<tool_call>") && !wire.contains("invoke name="),
+            "plain invoke markup leaked: {wire}"
+        );
+        assert_eq!(calls.len(), 1, "plain invoke must become one native call");
+        let call = calls[0];
+        assert_eq!(call["name"], "view_image");
+        assert_eq!(call["namespace"], Value::Null);
+        let args: Value = serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args, json!({"detail":"high","path":"OWNED.png"}));
+        let bytes = fs::read(&fixture).unwrap();
+        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+        let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+        let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+        let mut input = first_input(case).as_array().unwrap().clone();
+        input.extend(output.clone());
+        input.push(json!({
+            "type":"function_call_output",
+            "call_id":call["call_id"],
+            "output":json!({"width":width,"height":height}).to_string()
+        }));
+        let followup = client
+            .post(&endpoint)
+            .json(&json!({"model":"client-test","input":input,"tools":tools,"stream":false}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(followup.status(), 200);
+        assert!(followup
+            .text()
+            .await
+            .unwrap()
+            .contains("Owned image is 3 by 2."));
+        assert_eq!(peer.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        handle.shutdown().await;
+        task.abort();
+        fs::remove_file(&fixture).unwrap();
+        fs::remove_dir(fixture.parent().unwrap()).unwrap();
+        std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+        return;
+    }
     if matches!(case, DsmlCase::Alternate | DsmlCase::ToolCall) {
         let visible: String = output
             .iter()
@@ -1056,6 +1190,7 @@ async fn responses_direct_dsml_f665809_partial_attempt_exhaustion_is_transport_f
     for stream in [false, true] {
         let peer = DsmlPeer {
             path: "owned.png".into(),
+            owned_path: None,
             calls: Arc::default(),
             sse: stream,
             case: DsmlCase::MinimaxPartial,
@@ -1225,4 +1360,15 @@ async fn responses_direct_dsml_tool_call_arg_key_value_sse_tool_round_trip() {
 #[tokio::test]
 async fn responses_direct_dsml_sse_reordered_native_calls_close_round_trip() {
     run(DsmlCase::CallsResidueSse, true).await
+}
+
+pub(super) async fn run_issue03c2a07_plain_invoke(stream: bool, relay: bool) {
+    run_mode(DsmlCase::PlainInvoke, stream, relay).await;
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_issue03c2a07_plain_invoke_json_and_sse_round_trip() {
+    for stream in [false, true] {
+        run_issue03c2a07_plain_invoke(stream, false).await;
+    }
 }

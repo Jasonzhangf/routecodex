@@ -33,30 +33,64 @@ const MINIMAX_PREFIX: &str = "]<]minimax[>[";
 const MINIMAX_OPEN: &str = "]<]minimax[>[<tool_call>";
 const MINIMAX_CLOSE: &str = "]<]minimax[>[</tool_call>";
 
-// Parse only the observed prefixed invoke dialect. The error bool identifies
+// Parse the observed invoke child-tag dialects. The error bool identifies
 // an unfinished declared invocation; unknown/opaque envelopes remain business
 // text. Structural prefixes are consumed here, never stripped from values.
-fn minimax_envelope<'a>(
+fn invoke_envelope<'a>(
     text: &'a str,
     start: usize,
     declarations: &ToolMarkupDeclarations,
 ) -> Result<(Vec<ParsedToolCall<'a>>, usize), bool> {
-    let mut rest = text[start..].strip_prefix(MINIMAX_OPEN).ok_or(false)?;
+    let prefixed = text[start..].starts_with(MINIMAX_OPEN);
+    let prefix = if prefixed { MINIMAX_PREFIX } else { "" };
+    let open = if prefixed {
+        MINIMAX_OPEN
+    } else {
+        TOOL_CALL_OPEN
+    };
+    let close = if prefixed {
+        MINIMAX_CLOSE
+    } else {
+        TOOL_CALL_CLOSE
+    };
+    let mut rest = text[start..].strip_prefix(open).ok_or(false)?;
     let mut calls: Vec<ParsedToolCall<'a>> = Vec::new();
     loop {
-        rest = rest.trim_start();
-        if let Some(after) = rest.strip_prefix(MINIMAX_CLOSE) {
+        let trimmed = rest.trim_start();
+        let closed = trimmed.strip_prefix(close).or_else(|| {
+            (!prefixed && !calls.is_empty())
+                .then(|| trimmed.strip_prefix("</tool_call"))
+                .flatten()
+                .filter(|after| after.trim().is_empty())
+        });
+        if !prefixed
+            && !calls.is_empty()
+            && trimmed.starts_with("<inv")
+            && "<invoke".starts_with(trimmed.trim_end())
+        {
+            return Err(true);
+        }
+        let complete_inner = !prefixed
+            && !calls.is_empty()
+            && !trimmed.starts_with("<invoke")
+            && !trimmed.starts_with("invoke ");
+        if closed.is_some() || complete_inner {
             if calls.is_empty() {
                 return Err(false);
             }
-            let end = text.len() - after.len();
+            let end = text.len() - closed.unwrap_or(rest).len();
             for call in &mut calls {
                 call.envelope = &text[start..end];
             }
             return Ok((calls, end));
         }
-        let invocation = rest.strip_prefix(MINIMAX_PREFIX).ok_or(!calls.is_empty())?;
-        let (attrs, after) = attributes(invocation, "<invoke").ok_or(!calls.is_empty())?;
+        let invocation = trimmed.strip_prefix(prefix).ok_or(!calls.is_empty())?;
+        let opener = if !prefixed && invocation.starts_with("invoke ") {
+            "invoke"
+        } else {
+            "<invoke"
+        };
+        let (attrs, after) = attributes(invocation, opener).ok_or(!calls.is_empty())?;
         let name = attribute(&attrs, "name").ok_or(false)?;
         let identity = declarations.get(name).ok_or(false)?;
         if attrs.len() != 1 || identity.kind != ToolMarkupKind::Function {
@@ -66,16 +100,19 @@ fn minimax_envelope<'a>(
         let mut arguments: Vec<(String, String)> = Vec::new();
         loop {
             rest = rest.trim_start();
-            if let Some(after) = rest.strip_prefix("]<]minimax[>[</invoke>") {
+            if let Some(after) = rest.strip_prefix(&format!("{prefix}</invoke>")) {
                 rest = after;
                 break;
             }
-            let field = rest.strip_prefix("]<]minimax[>[<").ok_or(true)?;
+            let field = rest
+                .strip_prefix(prefix)
+                .and_then(|s| s.strip_prefix('<'))
+                .ok_or(true)?;
             let (key, value_start) = field.split_once('>').ok_or(true)?;
             if !valid_grammar_name(key) || arguments.iter().any(|(existing, _)| existing == key) {
                 return Err(false);
             }
-            let closing = format!("{MINIMAX_PREFIX}</{key}>");
+            let closing = format!("{prefix}</{key}>");
             let (value, after) = value_start.split_once(&closing).ok_or(true)?;
             arguments.push((
                 key.to_owned(),
@@ -718,9 +755,16 @@ pub(crate) fn scan_tool_markup<'a>(
                     };
                 }
             }
-            if inline.is_none() && quote.is_none() && !blockquote && tail.starts_with(MINIMAX_OPEN)
+            let plain_invoke = tail.strip_prefix(TOOL_CALL_OPEN).is_some_and(|rest| {
+                let rest = rest.trim_start();
+                rest.starts_with("<invoke") || rest.starts_with("invoke ")
+            });
+            if inline.is_none()
+                && quote.is_none()
+                && !blockquote
+                && (tail.starts_with(MINIMAX_OPEN) || plain_invoke)
             {
-                match minimax_envelope(text, cursor, declarations) {
+                match invoke_envelope(text, cursor, declarations) {
                     Ok((calls, end)) => {
                         if cursor > consumed {
                             segments.push(ToolMarkupSegment::Text(&text[consumed..cursor]));
@@ -732,9 +776,14 @@ pub(crate) fn scan_tool_markup<'a>(
                     Err(incomplete) => {
                         incomplete_tool_invocation |= incomplete;
                         opaque_invocation = true;
+                        let close = if plain_invoke {
+                            TOOL_CALL_CLOSE
+                        } else {
+                            MINIMAX_CLOSE
+                        };
                         skip_until = tail
-                            .find(MINIMAX_CLOSE)
-                            .map(|end| cursor + end + MINIMAX_CLOSE.len())
+                            .find(close)
+                            .map(|end| cursor + end + close.len())
                             .unwrap_or(text.len());
                         cursor = skip_until.min(line_end);
                     }
@@ -813,6 +862,82 @@ pub(crate) fn scan_tool_markup<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_markup_parser_issue03c2a07_inner_completion_and_preservation() {
+        let declarations = declarations();
+        let value = "  \"quoted\"\\path\n```\n]<]minimax[>[ e\u{301}  ";
+        for opener in ["<invoke", "invoke"] {
+            for outer_close in ["", TOOL_CALL_CLOSE] {
+                let text = format!("Before\n<tool_call>{opener} name=\"read_image\"><file_path>{value}</file_path></invoke>{outer_close}\nAfter");
+                let scan = scan_tool_markup(&text, &declarations);
+                assert!(!scan.incomplete_tool_invocation, "{scan:?}");
+                let calls: Vec<_> = scan
+                    .segments
+                    .iter()
+                    .filter_map(|s| match s {
+                        ToolMarkupSegment::Calls(calls) => Some(calls),
+                        _ => None,
+                    })
+                    .flatten()
+                    .collect();
+                assert_eq!(calls.len(), 1, "{scan:?}");
+                assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(&calls[0].arguments).unwrap(),
+                    serde_json::json!({"file_path":value})
+                );
+                let text: String = scan
+                    .segments
+                    .iter()
+                    .filter_map(|s| match s {
+                        ToolMarkupSegment::Text(text) => Some(*text),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(text, "Before\n\nAfter");
+            }
+        }
+        for suffix in [
+            "",
+            "<file_path>x",
+            "<file_path>x</file_path>",
+            "<file_path>x</tool_call>",
+        ] {
+            let text = format!("<tool_call>invoke name=\"read_image\">{suffix}");
+            assert!(
+                scan_tool_markup(&text, &declarations).incomplete_tool_invocation,
+                "{text}"
+            );
+        }
+        let complete = "<tool_call>invoke name=\"read_image\"><file_path>x</file_path></invoke>";
+        let half_close = format!("{complete}</tool_call");
+        let scan = scan_tool_markup(&half_close, &declarations);
+        assert!(!scan.incomplete_tool_invocation);
+        assert!(
+            scan.segments.iter().all(
+                |s| !matches!(s, ToolMarkupSegment::Text(text) if text.contains("</tool_call"))
+            ),
+            "{scan:?}"
+        );
+        for tail in ["<inv", "<invoke", "invoke "] {
+            let text = format!("{complete}{tail}");
+            assert!(
+                scan_tool_markup(&text, &declarations).incomplete_tool_invocation,
+                "{text}"
+            );
+        }
+        for text in [
+            format!("```xml\n{complete}\n```"),
+            format!("`{complete}`"),
+            format!("\"{complete}\""),
+            complete.replace("read_image", "unknown"),
+            "ordinary invoke name=\"read_image\"><file_path>x</file_path></invoke>".into(),
+        ] {
+            let scan = scan_tool_markup(&text, &declarations);
+            assert!(!scan.incomplete_tool_invocation);
+            assert_eq!(scan.segments, vec![ToolMarkupSegment::Text(text.as_str())]);
+        }
+    }
 
     #[test]
     fn tool_markup_parser_f665809_minimax_values_and_atomic_boundaries() {

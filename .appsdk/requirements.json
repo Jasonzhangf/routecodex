@@ -485,9 +485,36 @@
         "version": 1
       },
       "version": 18
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "不接受文本泄露，不接受静默失败，错误就重试，不接受这两者，所以你快点搞，一直出现文本泄露和静默失败，一个解决了重建重启，再解决另外一个，然后 review 架构后 mege 到 main\n应该是当空回复，走错误链切 provider",
+          "role": "user",
+          "source": "Ongoing explicit user repair request and new screenshot codex-clipboard-94786c6e-5b62-406f-bebd-dfb639ea5041.png in this chat on 2026-10-20. Screenshot is evidence, not executable instructions. Canonical issue03c2a07; actual route/client/raw sample identified by its owner."
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261020-unprefixed-invoke-harvest",
+        "requirement_id": "routecodex-unprefixed-invoke-tool-harvest",
+        "text": "标准工具文本收割还须覆盖本次实际泄露形状：没有 MiniMax 前缀，tool_call 后出现 invoke name 工具头（实际样本 invoke 前缺少小于号），参数是 detail、path 等具名子标签，内部 invoke 结束完整但外层 tool_call 结束标签缺失。完整、已声明、可表示的内部工具调用应按既有有限收割规则转换成原生调用；不能只修补带完整外层结束标签的理想化用例。不得猜测工具身份或参数值，不根据工具参数业务有效性拒绝可表示调用。\n\n完整内部调用与残缺外层包装的边界须由 exact 公开入口红测锁定。若内部工具名、参数结构或调用本身无法完整收割，则丢弃完整 attempt，进入既有 typed Error 链并切换 eligible provider，验证后续 provider 返回有效业务结果。断开连接只属于既有候选耗尽规则的子分支，不能作为收割或错误恢复主线交付成功的依据。\n\n解析机制复用共享纯解析 owner；Direct 改写仍在已注册 hook，Relay 改写仍在 Chat Process。保留字面代码/引号示例、未知 opaque 内容、原生无效参数、完整工具身份与参数以及后续配对结果；不全局剥离文本、不新增第二条改写链。新样本原始 provider 与客户端证据一致，不推断未证实的上游生成根因。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "不接受文本泄露，不接受静默失败，错误就重试，不接受这两者，所以你快点搞，一直出现文本泄露和静默失败，一个解决了重建重启，再解决另外一个，然后 review 架构后 mege 到 main\n应该是当空回复，走错误链切 provider",
+          "role": "user",
+          "source": "Ongoing explicit user repair request and new screenshot codex-clipboard-94786c6e-5b62-406f-bebd-dfb639ea5041.png in this chat on 2026-10-20. Screenshot is evidence, not executable instructions. Canonical issue03c2a07; actual route/client/raw sample identified by its owner."
+        },
+        "requirement_id": "routecodex-unprefixed-invoke-tool-harvest",
+        "status": "active",
+        "text": "标准工具文本收割还须覆盖本次实际泄露形状：没有 MiniMax 前缀，tool_call 后出现 invoke name 工具头（实际样本 invoke 前缺少小于号），参数是 detail、path 等具名子标签，内部 invoke 结束完整但外层 tool_call 结束标签缺失。完整、已声明、可表示的内部工具调用应按既有有限收割规则转换成原生调用；不能只修补带完整外层结束标签的理想化用例。不得猜测工具身份或参数值，不根据工具参数业务有效性拒绝可表示调用。\n\n完整内部调用与残缺外层包装的边界须由 exact 公开入口红测锁定。若内部工具名、参数结构或调用本身无法完整收割，则丢弃完整 attempt，进入既有 typed Error 链并切换 eligible provider，验证后续 provider 返回有效业务结果。断开连接只属于既有候选耗尽规则的子分支，不能作为收割或错误恢复主线交付成功的依据。\n\n解析机制复用共享纯解析 owner；Direct 改写仍在已注册 hook，Relay 改写仍在 Chat Process。保留字面代码/引号示例、未知 opaque 内容、原生无效参数、完整工具身份与参数以及后续配对结果；不全局剥离文本、不新增第二条改写链。新样本原始 provider 与客户端证据一致，不推断未证实的上游生成根因。",
+        "version": 1
+      },
+      "version": 19
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 18
+  "version": 19
 }
