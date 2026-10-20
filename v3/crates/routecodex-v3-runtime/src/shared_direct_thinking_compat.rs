@@ -14,7 +14,7 @@ pub(crate) struct V3ThinkingTagTextProjection {
 pub(crate) struct V3DirectThinkingOutputItemPlan {
     pub(crate) item_id: Option<String>,
     pub(crate) output_index: usize,
-    pub(crate) visible: String,
+    pub(crate) visible_parts: Vec<String>,
     pub(crate) reasoning: Vec<String>,
     pub(crate) pure_reasoning: bool,
 }
@@ -111,7 +111,7 @@ pub(crate) fn analyze_v3_direct_thinking_output(
                         .map(ToOwned::to_owned),
                     output_index,
                     pure_reasoning: !reasoning.is_empty() && visible.is_empty(),
-                    visible,
+                    visible_parts,
                     reasoning,
                 }
             })
