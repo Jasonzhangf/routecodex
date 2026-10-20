@@ -1,12 +1,3 @@
-#[derive(Debug, Clone)]
-struct V3DirectThinkingItemPlan {
-    item_id: String,
-    output_index: usize,
-    visible: String,
-    reasoning: Vec<String>,
-    pure_reasoning: bool,
-}
-
 pub(crate) use crate::shared_direct_thinking_compat::normalize_v3_direct_thinking_json;
 
 pub(crate) fn wrap_v3_direct_responses_thinking_tag_consumer_stream(
@@ -145,10 +136,19 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
     if plans.is_empty() {
         return None;
     }
+    let mut wire_items = BTreeMap::<usize, Option<String>>::new();
+    for event in frames.iter().filter_map(|frame| direct_thinking_event_value(frame)) {
+        let Some(index) = event.get("output_index").and_then(Value::as_u64)
+            .and_then(|index| usize::try_from(index).ok()) else { continue };
+        let Some(id) = direct_thinking_event_item_id(&event) else { continue };
+        wire_items.entry(index).and_modify(|bound| {
+            if bound.as_deref() != Some(id) { *bound = None; }
+        }).or_insert_with(|| Some(id.to_owned()));
+    }
     // Opaque carrier values have no defined association with synthesized
     // reasoning events. Preserve the complete attempt rather than lose them.
     if frames.iter().any(|frame| direct_thinking_event_value(frame).is_some_and(|event| {
-        direct_thinking_plan_for_event(&plans, &event).is_some()
+        direct_thinking_plan_for_event(&plans, &event, &wire_items).is_some()
             && (!thinking_carrier_can_rewrite(&event)
                 || std::str::from_utf8(frame).is_ok_and(|wire| wire.lines().any(|line| {
                     !line.is_empty() && !line.starts_with("data:") && !line.starts_with("event:")
@@ -173,23 +173,29 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
 
     let mut rewritten = Vec::with_capacity(frames.len() + plans.len());
     let mut terminal_index = None;
+    let mut emitted_pure_reasoning = BTreeSet::new();
+    let first_appended_wire_index = match wire_items.keys().next_back() {
+        Some(index) => index.checked_add(1)?,
+        None => original_output.len(),
+    };
     for (frame_index, frame) in frames.iter().enumerate() {
         if frame_index == terminal_position {
             for (index, item) in transformed_output.iter().enumerate().skip(original_output.len()) {
+                let wire_index = first_appended_wire_index.checked_add(index - original_output.len())?;
                 let mut added = item.clone();
                 added["summary"] = json!([]);
                 rewritten.push(direct_thinking_event_frame("response.output_item.added", json!({
-                    "type":"response.output_item.added", "output_index":index, "item":added
+                    "type":"response.output_item.added", "output_index":wire_index, "item":added
                 })));
                 if let Some(original_plan) = plans.iter().find(|plan| !plan.pure_reasoning && !plan.reasoning.is_empty()
                     && item["id"].as_str() == Some(format!("rs_compat_{}", plan.item_id.clone().unwrap_or_else(|| plan.output_index.to_string())).as_str())) {
                     let mut reasoning_plan = original_plan.clone();
-                    reasoning_plan.output_index = index;
+                    reasoning_plan.output_index = wire_index;
                     reasoning_plan.item_id = item["id"].as_str().map(str::to_owned);
                     rewritten.extend(direct_thinking_reasoning_summary_frames(&reasoning_plan, response_id.as_deref()));
                 }
                 rewritten.push(direct_thinking_event_frame("response.output_item.done", json!({
-                    "type":"response.output_item.done", "output_index":index, "item":item
+                    "type":"response.output_item.done", "output_index":wire_index, "item":item
                 })));
             }
             terminal_index = Some(rewritten.len());
@@ -212,7 +218,7 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
             } else { rewritten.push(frame.clone()); }
             continue;
         }
-        let Some(plan) = direct_thinking_plan_for_event(&plans, &value) else {
+        let Some(plan) = direct_thinking_plan_for_event(&plans, &value, &wire_items) else {
             rewritten.push(frame.clone());
             continue;
         };
@@ -230,7 +236,7 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
                     "response.output_item.added",
                     json!({
                         "type": "response.output_item.added",
-                        "output_index": plan.output_index,
+                        "output_index": value.get("output_index").cloned().unwrap_or_else(|| plan.output_index.into()),
                         "item": {
                             "id": item_id,
                             "type": "reasoning",
@@ -241,29 +247,37 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
                 ));
             }
             "response.output_text.done" if plan.pure_reasoning => {
-                rewritten.extend(direct_thinking_reasoning_summary_frames(
-                    &plan,
-                    response_id.as_deref(),
-                ));
+                if emitted_pure_reasoning.insert(plan.output_index) {
+                    let mut wire_plan = plan.clone();
+                    wire_plan.output_index = value.get("output_index").and_then(Value::as_u64)
+                        .and_then(|index| usize::try_from(index).ok()).unwrap_or(plan.output_index);
+                    rewritten.extend(direct_thinking_reasoning_summary_frames(
+                        &wire_plan,
+                        response_id.as_deref(),
+                    ));
+                }
             }
             "response.output_text.done" => {
-                if !plan.visible.is_empty() {
+                let visible = direct_thinking_visible_part(plan, &value)?;
+                if !visible.is_empty() {
                     rewritten.push(direct_thinking_output_text_delta_frame(
                         &value,
                         &plan,
+                        visible,
                         response_id.as_deref(),
                     ));
                 }
                 let mut done = value;
                 if let Some(object) = done.as_object_mut() {
-                    object.insert("text".to_owned(), Value::String(plan.visible.clone()));
+                    object.insert("text".to_owned(), Value::String(visible.to_owned()));
                 }
                 rewritten.push(replace_v3_direct_thinking_event_data(frame, &done));
             }
             "response.content_part.done" => {
+                let visible = direct_thinking_visible_part(plan, &value)?;
                 let mut done = value;
                 if let Some(part) = done.get_mut("part").and_then(Value::as_object_mut) {
-                    part.insert("text".to_owned(), Value::String(plan.visible.clone()));
+                    part.insert("text".to_owned(), Value::String(visible.to_owned()));
                 }
                 rewritten.push(replace_v3_direct_thinking_event_data(frame, &done));
             }
@@ -361,19 +375,33 @@ fn direct_thinking_preserved_event_json(frame: &[u8], value: &Value) -> Option<S
 fn direct_thinking_plan_for_event<'a>(
     plans: &'a [crate::shared_direct_thinking_compat::V3DirectThinkingOutputItemPlan],
     event: &Value,
+    wire_items: &BTreeMap<usize, Option<String>>,
 ) -> Option<&'a crate::shared_direct_thinking_compat::V3DirectThinkingOutputItemPlan> {
-    let item_id = event
-        .get("item_id")
-        .and_then(Value::as_str)
-        .or_else(|| event.get("item").and_then(|item| item.get("id")).and_then(Value::as_str));
+    if let Some(item_id) = direct_thinking_event_item_id(event) {
+        return plans.iter().find(|plan| plan.item_id.as_deref() == Some(item_id));
+    }
     let output_index = event
         .get("output_index")
         .and_then(Value::as_u64)
         .and_then(|index| usize::try_from(index).ok());
-    plans.iter().find(|plan| {
-        item_id.is_some_and(|value| plan.item_id.as_deref() == Some(value))
-            || output_index.is_some_and(|value| value == plan.output_index)
+    let item_id = wire_items.get(&output_index?)?.as_deref()?;
+    plans.iter().find(|plan| plan.item_id.as_deref() == Some(item_id))
+}
+
+fn direct_thinking_event_item_id(event: &Value) -> Option<&str> {
+    event.get("item_id").and_then(Value::as_str).or_else(|| {
+        event.get("item").and_then(|item| item.get("id")).and_then(Value::as_str)
     })
+}
+
+fn direct_thinking_visible_part<'a>(
+    plan: &'a crate::shared_direct_thinking_compat::V3DirectThinkingOutputItemPlan,
+    event: &Value,
+) -> Option<&'a str> {
+    let content_index = event.get("content_index").and_then(Value::as_u64)
+        .and_then(|index| usize::try_from(index).ok())
+        .or_else(|| (plan.visible_parts.len() == 1).then_some(0))?;
+    plan.visible_parts.get(content_index).map(String::as_str)
 }
 
 fn direct_thinking_event_frame(event_type: &str, value: Value) -> Vec<u8> {
@@ -387,14 +415,15 @@ fn direct_thinking_event_frame(event_type: &str, value: Value) -> Vec<u8> {
 fn direct_thinking_output_text_delta_frame(
     original: &Value,
     plan: &crate::shared_direct_thinking_compat::V3DirectThinkingOutputItemPlan,
+    visible: &str,
     response_id: Option<&str>,
 ) -> Vec<u8> {
     let mut value = json!({
         "type": "response.output_text.delta",
-        "output_index": plan.output_index,
+        "output_index": original.get("output_index").cloned().unwrap_or_else(|| plan.output_index.into()),
         "item_id": plan.item_id.clone().unwrap_or_else(|| format!("msg_{}", plan.output_index)),
         "content_index": original.get("content_index").cloned().unwrap_or_else(|| Value::from(0)),
-        "delta": plan.visible
+        "delta": visible
     });
     if let (Some(response_id), Some(object)) = (response_id, value.as_object_mut()) {
         object.insert("response_id".to_owned(), Value::String(response_id.to_owned()));
@@ -467,231 +496,22 @@ fn direct_thinking_reasoning_summary_frames(
 fn rewrite_v3_direct_thinking_tag_sse_frames(
     frames: &[SseTransportIn03ValidatedFrameStream],
 ) -> Result<Vec<u8>, String> {
-    let terminal = frames
+    if !frames
         .iter()
         .filter_map(v3_direct_sse_frame_semantic)
-        .find(|semantic| {
+        .any(|semantic| {
             matches!(
                 semantic.protocol.event_type.as_str(),
                 "response.completed" | "response.incomplete" | "response.failed"
             )
-        })
-        .ok_or_else(|| "thinking-tag compat requires a terminal Responses event".to_string())?;
-    let original_output = terminal
-        .response
-        .as_ref()
-        .and_then(|response| response.output.clone())
-        .unwrap_or_default();
-    let (plans, transformed_output) = v3_direct_thinking_typed_output(&original_output)?;
-    if plans.is_empty() {
-        let mut passthrough = Vec::new();
-        for frame in frames {
-            passthrough.extend_from_slice(
-                build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(frame).as_bytes(),
-            );
-        }
-        return Ok(passthrough);
+        }) {
+        return Err("thinking-tag compat requires a terminal Responses event".to_string());
     }
-
-    let mut terminal_compat = terminal.clone();
-    terminal_compat
-        .replace_response_output(transformed_output.clone())
-        .map_err(|error| error.to_string())?;
-    let appended_reasoning = transformed_output
-        .iter()
-        .skip(original_output.len())
-        .cloned()
-        .collect::<Vec<_>>();
-
-    let mut output = Vec::new();
-    let mut sequence = 0_u64;
-    let mut appended_emitted = false;
-    for frame in frames {
-        let Some(mut semantic) = v3_direct_sse_frame_semantic(frame) else {
-            output.extend_from_slice(
-                build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(frame).as_bytes(),
-            );
-            continue;
-        };
-        let event_type = semantic.protocol.event_type.clone();
-        let plan = v3_direct_thinking_plan_for_event(&plans, &semantic);
-        match event_type.as_str() {
-            "response.output_item.added" if plan.is_some_and(|plan| plan.pure_reasoning) => {
-                let plan = plan.unwrap();
-                let item = crate::hub_v1::V3ResponsesSseOutputItem::new_reasoning_compat_item(
-                    Some(plan.item_id.clone()),
-                    Some(plan.output_index),
-                    Some("in_progress".to_owned()),
-                    Vec::new(),
-                );
-                push_v3_direct_typed_compat_event(
-                    &mut output,
-                    &mut sequence,
-                    crate::hub_v1::V3ResponsesSseSemanticObject::new_compat_output_item_event(
-                        "response.output_item.added",
-                        plan.output_index,
-                        item,
-                    ),
-                )?;
-            }
-            "response.content_part.added" | "response.content_part.done"
-                if plan.is_some_and(|plan| plan.pure_reasoning) => {}
-            "response.output_text.delta" if plan.is_some() => {}
-            "response.output_text.done" if plan.is_some() => {
-                let plan = plan.unwrap();
-                if plan.pure_reasoning {
-                    push_v3_direct_reasoning_summary_events(
-                        &mut output,
-                        &mut sequence,
-                        plan.output_index,
-                        &plan.item_id,
-                        &plan.reasoning,
-                    )?;
-                } else {
-                    if !plan.visible.is_empty() {
-                        semantic.set_event_type("response.output_text.delta");
-                        semantic.set_content_value("delta", plan.visible.clone());
-                        push_v3_direct_compat_event(&mut output, &mut sequence, semantic.clone())?;
-                    }
-                    semantic.set_event_type("response.output_text.done");
-                    semantic.set_content_value("text", plan.visible.clone());
-                    push_v3_direct_compat_event(&mut output, &mut sequence, semantic)?;
-                }
-            }
-            "response.content_part.done" if plan.is_some() => {
-                let plan = plan.unwrap();
-                semantic
-                    .set_extension_object_text("part", "text", plan.visible.clone())
-                    .map_err(|error| error.to_string())?;
-                push_v3_direct_compat_event(&mut output, &mut sequence, semantic)?;
-            }
-            "response.output_item.done" if plan.is_some() => {
-                let plan = plan.unwrap();
-                let item = transformed_output
-                    .get(plan.output_index)
-                    .cloned()
-                    .ok_or_else(|| "thinking-tag output item projection missing".to_owned())?;
-                push_v3_direct_typed_compat_event(
-                    &mut output,
-                    &mut sequence,
-                    crate::hub_v1::V3ResponsesSseSemanticObject::new_compat_output_item_event(
-                        "response.output_item.done",
-                        plan.output_index,
-                        item,
-                    ),
-                )?;
-            }
-            "response.completed" | "response.incomplete" | "response.failed" => {
-                if !appended_emitted {
-                    for (offset, item) in appended_reasoning.iter().enumerate() {
-                        push_v3_direct_reasoning_item_events(
-                            &mut output,
-                            &mut sequence,
-                            original_output.len() + offset,
-                            item,
-                        )?;
-                    }
-                    appended_emitted = true;
-                }
-                push_v3_direct_compat_event(&mut output, &mut sequence, terminal_compat.clone())?;
-            }
-            _ => push_v3_direct_compat_event(&mut output, &mut sequence, semantic)?,
-        }
-    }
-    Ok(output)
-}
-
-fn v3_direct_thinking_typed_output(
-    output: &[crate::hub_v1::V3ResponsesSseOutputItem],
-) -> Result<(
-    Vec<V3DirectThinkingItemPlan>,
-    Vec<crate::hub_v1::V3ResponsesSseOutputItem>,
-), String> {
-    let has_complete_tools = output.iter().any(|item| {
-        !matches!(
-            item.kind(),
-            crate::hub_v1::V3ResponsesSseOutputItemKind::Message
-                | crate::hub_v1::V3ResponsesSseOutputItemKind::OutputText
-                | crate::hub_v1::V3ResponsesSseOutputItemKind::Reasoning
-        )
-    });
-    let mut plans = Vec::new();
-    let mut transformed = Vec::new();
-    let mut appended_reasoning = Vec::new();
-    for (output_index, original_item) in output.iter().enumerate() {
-        let mut typed = original_item.clone();
-        let Some(texts) = typed.message_output_texts() else {
-            transformed.push(typed);
-            continue;
-        };
-        let mut visible_parts = Vec::new();
-        let mut reasoning = Vec::new();
-        let mut tag_observed = false;
-        for text in texts {
-            let projection =
-                crate::shared_direct_thinking_compat::project_v3_thinking_tag_text_with_tools(
-                    &text,
-                    has_complete_tools,
-                );
-            visible_parts.push(projection.visible);
-            reasoning.extend(projection.reasoning);
-            tag_observed |= projection.tag_observed;
-        }
-        if !tag_observed {
-            transformed.push(typed);
-            continue;
-        }
-        let visible = visible_parts.concat();
-        let item_id = typed
-            .identity()
-            .item_id
-            .clone()
-            .unwrap_or_else(|| "message".to_owned());
-        let plan = V3DirectThinkingItemPlan {
-            item_id: item_id.clone(),
-            output_index,
-            pure_reasoning: !reasoning.is_empty() && visible.is_empty(),
-            visible,
-            reasoning: reasoning.clone(),
-        };
-        if plan.pure_reasoning {
-            typed = typed.into_reasoning_compat_item(reasoning.clone());
-        } else {
-            typed
-                .replace_message_output_texts(&visible_parts)
-                .map_err(|error| error.to_string())?;
-        }
-        transformed.push(typed);
-        plans.push(plan);
-        if !plans.last().is_some_and(|plan| plan.pure_reasoning) && !reasoning.is_empty() {
-            appended_reasoning.push(
-                crate::hub_v1::V3ResponsesSseOutputItem::new_reasoning_compat_item(
-                    Some(format!("rs_compat_{item_id}")),
-                    Some(output.len() + appended_reasoning.len()),
-                    Some("completed".to_owned()),
-                    reasoning,
-                ),
-            );
-        }
-    }
-    transformed.extend(appended_reasoning);
-    Ok((plans, transformed))
-}
-
-fn v3_direct_thinking_plan_for_event<'a>(
-    plans: &'a [V3DirectThinkingItemPlan],
-    event: &crate::hub_v1::V3ResponsesSseSemanticObject,
-) -> Option<&'a V3DirectThinkingItemPlan> {
-    let item_id = event.protocol.item_id.as_deref().or_else(|| {
-        event
-            .item()
-            .and_then(|item| item.identity().item_id.as_deref())
-    });
-    let output_index = event.protocol.output_index;
-    plans.iter().find(|plan| {
-        item_id.is_some_and(|value| value == plan.item_id)
-            || output_index.is_some_and(|value| value == plan.output_index)
-    })
+    let wire = frames.iter().map(|frame| {
+        build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(frame).as_bytes().to_vec()
+    }).collect::<Vec<_>>();
+    Ok(rewrite_v3_direct_thinking_attempt(&wire)
+        .map_or_else(|| wire.concat(), |(rewritten, _)| rewritten.concat()))
 }
 
 fn v3_direct_sse_frame_semantic(
@@ -704,122 +524,6 @@ fn v3_direct_sse_frame_semantic(
     let mut value: Value = serde_json::from_str(data).ok()?;
     crate::hub_v1::normalize_v3_responses_function_call_arguments(&mut value).ok()?;
     crate::hub_v1::classify_v3_responses_sse_event(&value).ok()
-}
-
-fn push_v3_direct_compat_event(
-    output: &mut Vec<u8>,
-    sequence: &mut u64,
-    mut semantic: crate::hub_v1::V3ResponsesSseSemanticObject,
-) -> Result<(), String> {
-    semantic.protocol.sequence_number = Some(*sequence);
-    *sequence += 1;
-    crate::hub_v1::project_v3_responses_sse_event_sse(
-        Some(semantic.protocol.event_type.clone()),
-        &semantic,
-    )
-    .map(|bytes| output.extend_from_slice(&bytes))
-    .map_err(|error| error.to_string())
-}
-
-fn push_v3_direct_typed_compat_event(
-    output: &mut Vec<u8>,
-    sequence: &mut u64,
-    semantic: crate::hub_v1::V3ResponsesSseSemanticObject,
-) -> Result<(), String> {
-    push_v3_direct_compat_event(output, sequence, semantic)
-}
-
-fn push_v3_direct_reasoning_summary_events(
-    output: &mut Vec<u8>,
-    sequence: &mut u64,
-    output_index: usize,
-    item_id: &str,
-    summaries: &[String],
-) -> Result<(), String> {
-    for (summary_index, text) in summaries.iter().enumerate() {
-        push_v3_direct_typed_compat_event(
-            output,
-            sequence,
-            crate::hub_v1::V3ResponsesSseSemanticObject::new_compat_reasoning_summary_part_event(
-                "response.reasoning_summary_part.added",
-                output_index,
-                item_id,
-                summary_index,
-                "",
-            ),
-        )?;
-        push_v3_direct_typed_compat_event(
-            output,
-            sequence,
-            crate::hub_v1::V3ResponsesSseSemanticObject::new_compat_reasoning_summary_text_event(
-                "response.reasoning_summary_text.delta",
-                output_index,
-                item_id,
-                summary_index,
-                "delta",
-                text,
-            ),
-        )?;
-        push_v3_direct_typed_compat_event(
-            output,
-            sequence,
-            crate::hub_v1::V3ResponsesSseSemanticObject::new_compat_reasoning_summary_text_event(
-                "response.reasoning_summary_text.done",
-                output_index,
-                item_id,
-                summary_index,
-                "text",
-                text,
-            ),
-        )?;
-        push_v3_direct_typed_compat_event(
-            output,
-            sequence,
-            crate::hub_v1::V3ResponsesSseSemanticObject::new_compat_reasoning_summary_part_event(
-                "response.reasoning_summary_part.done",
-                output_index,
-                item_id,
-                summary_index,
-                text,
-            ),
-        )?;
-    }
-    Ok(())
-}
-
-fn push_v3_direct_reasoning_item_events(
-    output: &mut Vec<u8>,
-    sequence: &mut u64,
-    output_index: usize,
-    item: &crate::hub_v1::V3ResponsesSseOutputItem,
-) -> Result<(), String> {
-    let item_id = item.identity().item_id.as_deref().unwrap_or_default();
-    let summaries = item.reasoning_summary_texts().unwrap_or_default();
-    let added_item = crate::hub_v1::V3ResponsesSseOutputItem::new_reasoning_compat_item(
-        Some(item_id.to_owned()),
-        Some(output_index),
-        Some("in_progress".to_owned()),
-        Vec::new(),
-    );
-    push_v3_direct_typed_compat_event(
-        output,
-        sequence,
-        crate::hub_v1::V3ResponsesSseSemanticObject::new_compat_output_item_event(
-            "response.output_item.added",
-            output_index,
-            added_item,
-        ),
-    )?;
-    push_v3_direct_reasoning_summary_events(output, sequence, output_index, item_id, &summaries)?;
-    push_v3_direct_typed_compat_event(
-        output,
-        sequence,
-        crate::hub_v1::V3ResponsesSseSemanticObject::new_compat_output_item_event(
-            "response.output_item.done",
-            output_index,
-            item.clone(),
-        ),
-    )
 }
 
 #[cfg(test)]
