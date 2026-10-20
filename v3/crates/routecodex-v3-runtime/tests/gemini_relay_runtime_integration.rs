@@ -6,7 +6,8 @@ use routecodex_v3_provider_responses::{
     V3ProviderResp14Raw, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_gemini_relay_runtime, execute_v3_gemini_relay_runtime_with_provider_health,
+    build_v3_provider_global_probe_target, execute_v3_gemini_relay_runtime,
+    execute_v3_gemini_relay_runtime_with_provider_health, probe_v3_provider_global_target,
     V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3ResponsesRelayProviderHealthHandle,
 };
 use serde_json::{json, Value};
@@ -996,14 +997,17 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             .base_url = base_url;
         provider.auth.entries[0].env = Some("V3_GEMINI_GATE_FAILURE_PROBE_KEY".into());
         std::env::set_var("V3_GEMINI_GATE_FAILURE_PROBE_KEY", "routecodex-test-key");
+        let failure_manifest = manifest_with_action_gate_spare(&manifest, server_id);
 
         let provider_health =
-            V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+            V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(
+                &failure_manifest,
+            );
         let failing = StaticSseTransport {
             chunks: Mutex::new(Some(chunks.clone())),
         };
         let first = execute_v3_gemini_relay_runtime_with_provider_health(
-            &manifest,
+            &failure_manifest,
             V3GeminiRelayRuntimeInput {
                 server_id: server_id.into(),
                 failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -1060,7 +1064,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
         // failed business attempt. The public probe blackbox covers wire validation.
         revive_cooled_provider(&provider_health, server_id).await;
         let repeated = execute_v3_gemini_relay_runtime_with_provider_health(
-            &manifest,
+            &failure_manifest,
             V3GeminiRelayRuntimeInput {
                 server_id: server_id.into(),
                 failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -1114,6 +1118,30 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             "200 OK",
             r#"{"candidates":[]}"#,
         ));
+        // Recovery belongs to the independent Provider probe owner. A single
+        // remaining route does not perform request-blocking rescue probes.
+        provider_health
+            .runtime_health()
+            .run_due_provider_health_probes(
+                u64::MAX,
+                false,
+                |provider_id, interface_id, auth_alias, model_id| {
+                    let manifest = manifest.clone();
+                    async move {
+                        let target = build_v3_provider_global_probe_target(
+                            &manifest,
+                            &provider_id,
+                            &interface_id,
+                            auth_alias.as_deref(),
+                            model_id.as_deref(),
+                        )
+                        .map_err(routecodex_v3_runtime::V3ProviderHealthProbeFailure::Internal)?;
+                        probe_v3_provider_global_target(target).await
+                    }
+                },
+            )
+            .await
+            .expect("the actual provider probe restores the primary identity");
         let held = tokio::spawn(async move {
             execute_v3_gemini_relay_runtime_with_provider_health(
                 &held_manifest,
@@ -1138,7 +1166,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             .await
         });
         // Even an empty Gemini response is a successful HTTP 2xx probe.
-        // The actual rescue probe must restore eligibility without manual release.
+        // The actual independent probe restores eligibility without manual release.
         let revived = tokio::time::timeout(Duration::from_secs(2), held)
             .await
             .expect("held request must wake after HTTP 2xx probe recovery")
@@ -1161,8 +1189,9 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
     use futures_util::StreamExt;
     let server_id = "gemini_gate_success";
     let manifest = manifest_for_action_gate_scope(server_id);
+    let failure_manifest = manifest_with_action_gate_spare(&manifest, server_id);
     let provider_health =
-        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&failure_manifest);
     // Seed one recoverable malformed attempt so the next success can prove
     // action-lane release while this provider remains eligible.
     {
@@ -1170,7 +1199,7 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
             chunks: Mutex::new(Some(vec![b"data: {malformed-json}\n\n".to_vec()])),
         };
         let failed = execute_v3_gemini_relay_runtime_with_provider_health(
-            &manifest,
+            &failure_manifest,
             V3GeminiRelayRuntimeInput {
                 server_id: server_id.into(),
                 failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -1874,6 +1903,38 @@ targets = [{{ kind = "provider_model", provider = "{scope}", model = "gemini-wir
         server_execution = hub_v1_server_execution(scope),
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+// Health/action-lane fixtures need a real alternative when the primary fails.
+// The spare receives the same malformed SSE and is the last candidate, so its
+// failure stays request-local. Recovery requests use the original single route
+// to prove the primary's actual probe, rather than succeeding through the spare.
+fn manifest_with_action_gate_spare(
+    manifest: &routecodex_v3_config::V3Config05ManifestPublished,
+    scope: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let mut manifest = manifest.clone();
+    let spare_id = format!("{scope}_spare");
+    let mut spare = manifest.providers[scope].clone();
+    spare.id = spare_id.clone();
+    spare.auth.entries[0].alias = spare_id.clone();
+    manifest.providers.insert(spare_id.clone(), spare);
+    for pool in manifest
+        .route_groups
+        .get_mut(scope)
+        .unwrap()
+        .pools
+        .values_mut()
+    {
+        let primary = &mut pool.targets[0];
+        primary.priority = Some(2);
+        let mut spare = primary.clone();
+        spare.provider = Some(spare_id.clone());
+        spare.key = Some(spare_id.clone());
+        spare.priority = Some(1);
+        pool.targets.push(spare);
+    }
+    manifest
 }
 
 fn manifest_with_two_providers_for_scope(
