@@ -288,6 +288,120 @@ fn responses_assistant_message_reasoning_function_call_coalesces_single_turn() {
 }
 
 #[test]
+fn responses_reasoning_extension_survives_assistant_message_coalescing() {
+    // A reasoning item that follows an assistant text message, or follows a
+    // pending function call, is merged into that assistant message to keep
+    // tool adjacency. The merge must also carry the provider reasoning
+    // extension; otherwise the second provider request loses `cache_control`.
+    let reasoning_item = json!({
+        "type": "reasoning",
+        "id": "reasoning-ext-1",
+        "summary": [{"type": "summary_text", "text": "Why the lookup matters."}],
+        "routecodex_chat_extension": {
+            "anthropic_reasoning": {"cache_control": {"type": "ephemeral"}}
+        }
+    });
+
+    let message_first = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "claude",
+        "input": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "I will look that up."}]
+            },
+            reasoning_item.clone(),
+            {
+                "type": "function_call",
+                "call_id": "call_ext_1",
+                "name": "lookup",
+                "arguments": "{\"query\":\"p0\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_ext_1",
+                "output": "42"
+            }
+        ]
+    }))
+    .expect("message+reasoning extension must project to Chat");
+    let message_first_messages = message_first["messages"].as_array().expect("messages");
+    assert_eq!(
+        message_first_messages[0]["routecodex_chat_extension"]["anthropic_reasoning"]
+            ["cache_control"],
+        json!({"type": "ephemeral"}),
+        "extension must survive merging into a preceding assistant message: {message_first}"
+    );
+
+    let tool_call_first = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "claude",
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_ext_2",
+                "name": "lookup",
+                "arguments": "{\"query\":\"p0\"}"
+            },
+            reasoning_item,
+            {
+                "type": "function_call_output",
+                "call_id": "call_ext_2",
+                "output": "42"
+            }
+        ]
+    }))
+    .expect("function_call+reasoning extension must project to Chat");
+    let tool_call_first_messages = tool_call_first["messages"].as_array().expect("messages");
+    assert_eq!(
+        tool_call_first_messages[0]["routecodex_chat_extension"]["anthropic_reasoning"]
+            ["cache_control"],
+        json!({"type": "ephemeral"}),
+        "extension must survive merging into a pending tool-call message: {tool_call_first}"
+    );
+
+    let multiple_reasoning = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "claude",
+        "input": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "answer"}]
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "first block"}],
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {
+                        "cache_control": {"type": "ephemeral"},
+                        "first_only": true
+                    }
+                }
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "second block"}],
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {"second_only": true}
+                }
+            }
+        ]
+    }))
+    .expect("multiple reasoning extensions must project to Chat");
+    let merged_extension =
+        &multiple_reasoning["messages"][0]["routecodex_chat_extension"]["anthropic_reasoning"];
+    assert_eq!(
+        merged_extension["cache_control"],
+        json!({"type": "ephemeral"})
+    );
+    assert_eq!(merged_extension["first_only"], json!(true));
+    assert_eq!(
+        merged_extension["second_only"],
+        json!(true),
+        "a second carrier-bearing reasoning item must not lose its extension: {multiple_reasoning}"
+    );
+}
+
+#[test]
 fn responses_encrypted_only_reasoning_item_keeps_empty_reasoning_content() {
     // Codex 只回传 encrypted_content 密文（无 text/summary 明文）时，入口归一化
     // 必须保留 reasoning 条目并以空 reasoning_content 呈现——opencode/DeepSeek 语义

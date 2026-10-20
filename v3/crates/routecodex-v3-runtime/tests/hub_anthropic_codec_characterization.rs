@@ -977,6 +977,44 @@ fn anthropic_malformed_thinking_history_fails_instead_of_disappearing() {
 
     assert!(matches!(
         error,
+        V3AnthropicCodecError::MalformedField { field: "thinking" }
+    ));
+}
+
+#[test]
+fn anthropic_thinking_history_rejects_missing_native_reasoning_fields() {
+    // Extra alias fields are preserved as opaque extensions, so a block is only
+    // rejected when its own native reasoning payload is absent.
+    for (content, field) in [
+        (
+            json!({"type":"thinking","text":"alias text","data":"alias signature"}),
+            "thinking",
+        ),
+        (
+            json!({"type":"redacted_thinking","signature":"alias redacted payload"}),
+            "data",
+        ),
+    ] {
+        let error = encode_v3_anthropic_request_as_responses_semantic(json!({
+            "model":"claude-sonnet",
+            "messages":[{"role":"assistant","content":[content]}]
+        }))
+        .expect_err("Anthropic history must reject a reasoning block without its native payload");
+
+        assert!(matches!(
+            error,
+            V3AnthropicCodecError::MalformedField { field: actual } if actual == field
+        ));
+    }
+
+    // `reasoning` is not an Anthropic content block type.
+    let error = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{"role":"assistant","content":[{"type":"reasoning","reasoning":"non-Anthropic alias"}]}]
+    }))
+    .expect_err("Anthropic history must reject non-Anthropic reasoning block types");
+    assert!(matches!(
+        error,
         V3AnthropicCodecError::MalformedField {
             field: "reasoning content"
         }
@@ -984,54 +1022,179 @@ fn anthropic_malformed_thinking_history_fails_instead_of_disappearing() {
 }
 
 #[test]
-fn anthropic_thinking_history_rejects_cross_type_alias_fields() {
-    for content in [
-        json!({"type":"thinking","text":"alias text","data":"alias signature"}),
-        json!({"type":"redacted_thinking","signature":"alias redacted payload"}),
-        json!({"type":"reasoning","reasoning":"non-Anthropic alias"}),
-    ] {
-        let error = encode_v3_anthropic_request_as_responses_semantic(json!({
-            "model":"claude-sonnet",
-            "messages":[{"role":"assistant","content":[content]}]
-        }))
-        .expect_err("Anthropic history must reject cross-type reasoning aliases");
+fn anthropic_thinking_history_preserves_native_reasoning_with_extra_fields() {
+    // A representable reasoning block that also carries extra provider fields
+    // keeps its native payload and preserves the extra fields as opaque data.
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{"role":"assistant","content":[
+            {"type":"thinking","thinking":"native thinking","text":"alias thinking"},
+            {"type":"redacted_thinking","data":"native encrypted content","signature":"alias encrypted content"}
+        ]}]
+    }))
+    .expect("representable reasoning with extra fields must not be rejected");
 
-        assert!(matches!(
-            error,
-            V3AnthropicCodecError::MalformedField {
-                field: "reasoning content"
+    assert_eq!(
+        semantic["input"],
+        json!([
+            {
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"native thinking"}],
+                "routecodex_chat_extension":{
+                    "anthropic_reasoning":{
+                        "type":"thinking",
+                        "text":"alias thinking"
+                    }
+                }
+            },
+            {
+                "type":"reasoning",
+                "encrypted_content":"native encrypted content",
+                "routecodex_chat_extension":{
+                    "anthropic_reasoning":{
+                        "type":"redacted_thinking",
+                        "signature":"alias encrypted content"
+                    }
+                }
             }
-        ));
-    }
+        ])
+    );
 }
 
 #[test]
-fn anthropic_thinking_history_rejects_native_and_alias_dual_truth() {
-    for content in [
+fn anthropic_reasoning_extensions_round_trip_without_overwriting_responses_native_fields() {
+    let response = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_reasoning_extensions",
+        "type":"message",
+        "role":"assistant",
+        "content":[
+            {
+                "type":"thinking",
+                "thinking":"signed thinking",
+                "signature":"native-signature",
+                "summary":{"source":"provider-extension-summary"},
+                "encrypted_content":"provider-extension-encrypted-content",
+                "cache_control":{"type":"ephemeral"}
+            },
+            {
+                "type":"thinking",
+                "thinking":"unsigned thinking",
+                "encrypted_content":"unsigned-provider-extension"
+            }
+        ],
+        "stop_reason":"end_turn"
+    }))
+    .expect("representable Anthropic reasoning extensions must survive projection");
+
+    let signed = &response["output"][0];
+    assert_eq!(
+        signed["summary"],
+        json!([{"type":"summary_text","text":"signed thinking"}])
+    );
+    assert_eq!(signed["encrypted_content"], "native-signature");
+    let signed_extension = &signed["routecodex_chat_extension"]["anthropic_reasoning"];
+    assert_eq!(signed_extension["type"], "thinking");
+    assert_eq!(
+        signed_extension["summary"],
+        json!({"source":"provider-extension-summary"})
+    );
+    assert_eq!(
+        signed_extension["encrypted_content"],
+        "provider-extension-encrypted-content"
+    );
+    assert_eq!(
+        signed_extension["cache_control"],
+        json!({"type":"ephemeral"})
+    );
+
+    let unsigned = &response["output"][1];
+    assert_eq!(
+        unsigned["summary"],
+        json!([{"type":"summary_text","text":"unsigned thinking"}])
+    );
+    assert!(
+        unsigned.get("encrypted_content").is_none(),
+        "an extension named encrypted_content is not an Anthropic thinking signature"
+    );
+    assert_eq!(
+        unsigned["routecodex_chat_extension"]["anthropic_reasoning"]["encrypted_content"],
+        "unsigned-provider-extension"
+    );
+
+    let replay = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream":false,
+        "input":[signed.clone(), unsigned.clone()]
+    }))
+    .expect("namespaced reasoning extensions must restore on Anthropic replay");
+    assert_eq!(
+        replay["messages"][0]["content"][0],
         json!({
             "type":"thinking",
-            "thinking":"native thinking",
-            "text":"alias thinking"
-        }),
+            "thinking":"signed thinking",
+            "signature":"native-signature",
+            "summary":{"source":"provider-extension-summary"},
+            "encrypted_content":"provider-extension-encrypted-content",
+            "cache_control":{"type":"ephemeral"}
+        })
+    );
+    assert_eq!(
+        replay["messages"][1]["content"][0],
+        json!({
+            "type":"thinking",
+            "thinking":"unsigned thinking",
+            "encrypted_content":"unsigned-provider-extension"
+        })
+    );
+    assert!(
+        replay["messages"][1]["content"][0]
+            .get("signature")
+            .is_none(),
+        "opaque encrypted_content must not become an Anthropic thinking signature"
+    );
+}
+
+#[test]
+fn anthropic_redacted_reasoning_extensions_round_trip_without_reclassification() {
+    let response = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_redacted_extensions",
+        "type":"message",
+        "role":"assistant",
+        "content":[{
+            "type":"redacted_thinking",
+            "data":"native-redacted-data",
+            "summary":{"source":"redacted-extension-summary"},
+            "cache_control":{"type":"ephemeral"}
+        }],
+        "stop_reason":"end_turn"
+    }))
+    .expect("representable redacted reasoning extensions must survive projection");
+
+    let reasoning = &response["output"][0];
+    assert_eq!(reasoning["encrypted_content"], "native-redacted-data");
+    let extension = &reasoning["routecodex_chat_extension"]["anthropic_reasoning"];
+    assert_eq!(extension["type"], "redacted_thinking");
+    assert_eq!(
+        extension["summary"],
+        json!({"source":"redacted-extension-summary"})
+    );
+    assert_eq!(extension["cache_control"], json!({"type":"ephemeral"}));
+
+    let replay = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream":false,
+        "input":[reasoning.clone()]
+    }))
+    .expect("redacted reasoning extensions must restore on Anthropic replay");
+    assert_eq!(
+        replay["messages"][0]["content"][0],
         json!({
             "type":"redacted_thinking",
-            "data":"native encrypted content",
-            "signature":"alias encrypted content"
-        }),
-    ] {
-        let error = encode_v3_anthropic_request_as_responses_semantic(json!({
-            "model":"claude-sonnet",
-            "messages":[{"role":"assistant","content":[content]}]
-        }))
-        .expect_err("Anthropic history must reject native and alias dual truth");
-
-        assert!(matches!(
-            error,
-            V3AnthropicCodecError::MalformedField {
-                field: "reasoning content"
-            }
-        ));
-    }
+            "data":"native-redacted-data",
+            "summary":{"source":"redacted-extension-summary"},
+            "cache_control":{"type":"ephemeral"}
+        })
+    );
 }
 
 #[test]

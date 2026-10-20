@@ -1,6 +1,7 @@
 use crate::protocol_tables::{map_field as table_map_field, V3TableDirection};
 use provider_compat_core::namespace_tools::resolve_responses_tool_declarations;
 use serde_json::{json, Map, Value};
+mod chat_extension_merge;
 mod tool_output;
 pub(super) use tool_output::{
     canonical_content as responses_tool_output_content, image_url as responses_image_url,
@@ -542,22 +543,26 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
         };
         target.insert("reasoning_content".to_string(), Value::String(merged));
     }
-    // A reasoning item folded into an existing assistant message must keep its
-    // Responses `encrypted_content` association (the Anthropic thinking
-    // signature). Absent stays absent; present-empty stays distinct from
-    // non-empty.
-    if let Some(source_signature) = source
-        .get("routecodex_chat_extension")
-        .and_then(Value::as_object)
-        .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
-    {
-        let target_extension = target
-            .entry("routecodex_chat_extension".to_string())
-            .or_insert_with(|| Value::Object(Map::new()));
-        if let Some(target_extension) = target_extension.as_object_mut() {
-            target_extension
-                .entry("responses_reasoning_encrypted_content".to_string())
-                .or_insert_with(|| source_signature.clone());
+    if let Some(source_extension) = source.get("routecodex_chat_extension") {
+        // Keep the first Responses reasoning signature: a canonical assistant
+        // message carries one reasoning_content, so a later folded item must
+        // not overwrite the association captured for the first one.
+        let existing_signature = target
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object)
+            .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
+            .cloned();
+        chat_extension_merge::merge_chat_extension(target, source_extension)?;
+        if let Some(signature) = existing_signature {
+            if let Some(extension) = target
+                .get_mut("routecodex_chat_extension")
+                .and_then(Value::as_object_mut)
+            {
+                extension.insert(
+                    "responses_reasoning_encrypted_content".to_string(),
+                    signature,
+                );
+            }
         }
     }
     Ok(())
@@ -726,14 +731,27 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
         "content":"",
         "reasoning_content":reasoning_content
     });
+    if let Some(extension) = item.get("routecodex_chat_extension") {
+        message["routecodex_chat_extension"] = extension.clone();
+    }
     // Preserve the Responses reasoning `encrypted_content` as an opaque business
     // association so the Anthropic outbound projection can restore the exact
     // thinking signature. Present-empty and non-empty both pass through; an
     // absent field leaves the key absent.
     if let Some(Value::String(signature)) = item.get("encrypted_content") {
-        message["routecodex_chat_extension"] = json!({
-            "responses_reasoning_encrypted_content": signature
-        });
+        if let Some(extension) = message
+            .get_mut("routecodex_chat_extension")
+            .and_then(Value::as_object_mut)
+        {
+            extension.insert(
+                "responses_reasoning_encrypted_content".to_string(),
+                Value::String(signature.clone()),
+            );
+        } else {
+            message["routecodex_chat_extension"] = json!({
+                "responses_reasoning_encrypted_content": signature
+            });
+        }
     }
     Some(message)
 }

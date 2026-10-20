@@ -612,27 +612,29 @@ fn parse_block(
     {
         "text" => V3AnthropicSseBlockKind::Text,
         "tool_use" => V3AnthropicSseBlockKind::ToolUse,
-        "thinking" => {
-            if object
-                .keys()
-                .any(|key| !["type", "thinking", "signature"].contains(&key.as_str()))
-            {
-                return Err(V3AnthropicSseTreeError::MalformedReasoningContent);
-            }
-            V3AnthropicSseBlockKind::Thinking
-        }
-        "redacted_thinking" => {
-            if object
-                .keys()
-                .any(|key| !["type", "data"].contains(&key.as_str()))
-            {
-                return Err(V3AnthropicSseTreeError::MalformedReasoningContent);
-            }
-            V3AnthropicSseBlockKind::RedactedThinking
-        }
+        "thinking" => V3AnthropicSseBlockKind::Thinking,
+        "redacted_thinking" => V3AnthropicSseBlockKind::RedactedThinking,
         "server_tool_use" => V3AnthropicSseBlockKind::ServerToolUse,
         "web_search_tool_result" => V3AnthropicSseBlockKind::WebSearchToolResult,
         other => V3AnthropicSseBlockKind::Extension(other.to_owned()),
+    };
+    // Reasoning blocks carry provider-defined extension fields (for example
+    // `cache_control`). They are business data a compatible target can carry,
+    // so fields outside the block's native shape are preserved as opaque
+    // extensions instead of rejecting the whole stream. Required reasoning
+    // content stays a typed error in the canonical projection.
+    let native_fields: &[&str] = match kind {
+        V3AnthropicSseBlockKind::Thinking => &["type", "thinking", "signature"],
+        V3AnthropicSseBlockKind::RedactedThinking => &["type", "data"],
+        _ => &[
+            "type",
+            "id",
+            "name",
+            "input",
+            "text",
+            "thinking",
+            "signature",
+        ],
     };
     Ok(V3AnthropicSseBlock {
         index,
@@ -646,18 +648,7 @@ fn parse_block(
         signature: string(object, "signature"),
         redacted_data: string(object, "data"),
         stopped: false,
-        extensions: object_extensions(
-            value,
-            &[
-                "type",
-                "id",
-                "name",
-                "input",
-                "text",
-                "thinking",
-                "signature",
-            ],
-        ),
+        extensions: object_extensions(value, native_fields),
     })
 }
 
@@ -695,7 +686,7 @@ fn apply_delta(
             let signature = object
                 .get("signature")
                 .and_then(Value::as_str)
-                .ok_or(V3AnthropicSseTreeError::MalformedReasoningContent)?;
+                .ok_or(V3AnthropicSseTreeError::SignatureDeltaRequired)?;
             block.signature = Some(signature.to_owned());
         }
         delta_type => block.extensions.extend(object_extensions(delta, &["type"])),
@@ -756,8 +747,6 @@ pub(crate) enum V3AnthropicSseTreeError {
         "Anthropic provider event stream emitted duplicate message_start after content_block_start"
     )]
     DuplicateMessageAfterBlock,
-    #[error("Anthropic codec malformed reasoning content")]
-    MalformedReasoningContent,
     #[error("Anthropic tool input JSON is malformed")]
     MalformedToolInput,
     #[error("Anthropic stream emitted an event after message_stop")]
@@ -772,6 +761,8 @@ pub(crate) enum V3AnthropicSseTreeError {
     InputJsonFragmentRequired,
     #[error("Anthropic thinking_delta requires thinking")]
     ThinkingDeltaRequired,
+    #[error("Anthropic signature_delta requires signature")]
+    SignatureDeltaRequired,
     #[error("Anthropic provider error: {0}")]
     ProviderError(String),
 }
