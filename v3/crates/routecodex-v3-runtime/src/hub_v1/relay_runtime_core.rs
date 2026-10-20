@@ -449,9 +449,12 @@ where
     let mut trace = Vec::with_capacity(17);
     // 统一 relay timing：internal = RouteCodex 处理，external = provider 等待；
     // 只写入 typed observability，不进入 payload。
-    let (runtime_timing, mut failed_candidates, mut retry_selected) =
-        relay_handoff_entry_state(initial_handoff.as_ref());
-    let mut request_local_busy_candidates = BTreeSet::new();
+    let (
+        runtime_timing,
+        mut failed_candidates,
+        mut request_local_busy_candidates,
+        mut retry_selected,
+    ) = relay_handoff_entry_state(initial_handoff.as_ref());
     let transport_intent = if payload.get("stream").and_then(Value::as_bool) == Some(true)
         || (C::ENTRY_PROTOCOL == V3HubEntryProtocol::Gemini
             && endpoint_path.ends_with(":streamGenerateContent"))

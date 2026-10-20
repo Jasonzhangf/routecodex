@@ -121,6 +121,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         initial_selected_target,
         initial_expanded,
         initial_request_local_excluded_candidates,
+        initial_request_local_busy_candidates,
         initial_route_policy_scope,
         initial_route_policy_pending,
         initial_protocol_decision,
@@ -307,7 +308,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         }
     };
     let mut failed_candidates = initial_request_local_excluded_candidates;
-    let mut request_local_busy_candidates = BTreeSet::new();
+    let mut request_local_busy_candidates = initial_request_local_busy_candidates;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut initial_selected_target = initial_selected_target;
@@ -728,6 +729,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 decision.target,
                 captured_target_09,
                 failed_candidates.clone(),
+                request_local_busy_candidates.clone(),
                 route_policy_pending.clone(),
                 Some(route_policy_scope.clone()),
                 trace,

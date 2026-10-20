@@ -365,6 +365,7 @@ where
                 decision.target,
                 expanded.clone(),
                 failed_candidates.clone(),
+                request_local_busy_candidates.clone(),
                 route_policy_pending.clone(),
                 route_policy_scope.clone(),
                 trace,
