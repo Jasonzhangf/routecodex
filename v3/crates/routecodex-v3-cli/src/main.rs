@@ -178,12 +178,30 @@ enum ServerCommand {
     },
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(error) = run_cli().await {
-        eprintln!("[RouteCodexV3] command failed: {error}");
-        std::process::exit(1);
+fn main() {
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.enable_all();
+    if managed_child_worker_stack_size(std::env::args_os()).is_some() {
+        // The managed child owns the complete nested Direct/Relay completion
+        // state machine. Keep its Error/Retry handoff off the default worker
+        // stack while leaving the parent CLI runtime unchanged.
+        builder.thread_stack_size(8 * 1024 * 1024);
     }
+    let runtime = builder.build().expect("tokio runtime");
+    runtime.block_on(async {
+        if let Err(error) = run_cli().await {
+            eprintln!("[RouteCodexV3] command failed: {error}");
+            std::process::exit(1);
+        }
+    });
+}
+
+fn managed_child_worker_stack_size(
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Option<usize> {
+    args.into_iter()
+        .any(|arg| arg == "run-managed-child")
+        .then_some(8 * 1024 * 1024)
 }
 
 async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
@@ -717,4 +735,32 @@ fn emit_v3_cli_server_started_console_line(
 
 fn flush_stdout_best_effort() {
     let _ = io::stdout().flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::managed_child_worker_stack_size;
+    use std::ffi::OsString;
+
+    #[test]
+    fn managed_child_uses_bounded_worker_stack() {
+        let args = [
+            "rccv3",
+            "server",
+            "run-managed-child",
+            "--config",
+            "config.toml",
+        ]
+        .into_iter()
+        .map(OsString::from);
+        assert_eq!(managed_child_worker_stack_size(args), Some(8 * 1024 * 1024));
+    }
+
+    #[test]
+    fn parent_cli_keeps_default_worker_stack() {
+        let args = ["rccv3", "server", "restart", "--config", "config.toml"]
+            .into_iter()
+            .map(OsString::from);
+        assert_eq!(managed_child_worker_stack_size(args), None);
+    }
 }

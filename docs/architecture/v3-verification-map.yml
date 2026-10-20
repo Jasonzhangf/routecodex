@@ -301,6 +301,8 @@ features:
   - responses_direct_historical_sample_failure_does_not_reject_exec_preparation covers real HTTP persistence failure history retained as diagnostic evidence without blocking completed exec drain.
   - managed_child_applies_configured_fd_limit_before_hooks_sidecar proves the real `rccv3 start` entry
     applies `[runtime] fd_limit` to the managed child before an inherited child (hooks sidecar) is launched
+  - managed_child_uses_bounded_worker_stack proves only server run-managed-child requests the 8 MiB
+    Tokio worker stack; parent restart/status command runtimes keep the default stack
   - managed_child_lowers_inherited_fd_limit_to_configured_value proves the configured cap lowers a higher inherited soft limit without changing the hard limit
   - foreground startup emits the standard minimal human status line instead of raw debug JSON, while Relay/Direct requests emit colorized old-production request monitor output; human server logs persist
     the same ANSI-colored monitor lines; scoped prefix is `[port:entry:sessionID:<data>][project][provider.model][route]`; started/route/terminal/error lines after target selection use Runtime observability
@@ -315,6 +317,7 @@ features:
   - live managed 5555 restart with concurrent V2 health and real JSON/SSE Responses
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test managed_restart_control_budget_blackbox -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --bin rccv3 managed_child_uses_bounded_worker_stack -- --exact --nocapture
   - npm run verify:v3-dagpipe-feature-graphs
   - npm run test:v3-managed-server-lifecycle
   - npm run verify:v3-architecture-docs

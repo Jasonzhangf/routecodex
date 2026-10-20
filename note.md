@@ -1,3 +1,11 @@
+## 2026-10-20 issue6bb0153 managed child worker stack
+
+- Master scope correction: latest `origin/main` has no `run-business-child` or managed-continuity skeleton. The pre-refactor candidate `1243a7e82` remains preserved on its original branch as evidence only and must not be merged. This delivery is based directly on `origin/main` `ca78af84c`.
+- Change: only `server run-managed-child` requests an 8 MiB Tokio worker stack. Parent restart/status runtimes keep the default stack. No old business-child module, route, identity, or continuity skeleton is reintroduced.
+- Source evidence: `cargo fmt --check` PASS; both CLI stack-boundary tests PASS; `npm run verify:v3-architecture-ci` PASS 35/35; build PASS; install PASS to `/Users/fanzhang/.local/bin/rccv3` version `0.90.4924`.
+- `npm run test:v3-managed-server-lifecycle` result: 47 PASS / 5 FAIL; all five failures panic at `previous_release_restart.rs:19` because `ROUTECODEX_V3_PREVIOUS_RELEASE_BINARY` is unavailable. This is an existing fixture prerequisite, not a stack-boundary failure.
+- Formal restart attempt: `rccv3 restart -c ~/.rcc/config.toml` exited 1 with `managed lifecycle control timed out: control challenge v3-287d9097ba1fad3b217b`. PID 19583 and start time `2026-10-20 04:19:36` are unchanged, so the installed candidate is not proven loaded. 4444/7777 health remains 200 and build version `0.90.4924`; health is not candidate-load evidence. Exactly one restart was attempted; do not repeat blindly.
+
 ## 2026-10-18 Magpie matrix and Source01 integration
 
 - Update09:48Z: M3 PR418 is merged to remote main918bba4fe after all applicable CI39112284069 passed, including installed58. M4a now normally combines main, with no product change after author tests. M4a affected public54PASS, installed58/58PASS, formal install/restart running,4444 real200/completed/MATRIX_OK. Current7777no_response has no persisted provider attempt, exact selected parkzhao identity is waiting probe and official same-bindingL2 returns401Invalidtoken; generation remains unavailable. Closed sample window and evidence boundaries: `.worker-runs/magpie-node-flow-20261012/m4a-runtime-author-acceptance.md` under external playground. Fresh independent overall M4a review is running. Global accepted count stays13/20; DirectD2b, ServerHTTP, remainingError and REQ02 businessCompat/Frame remain separate.
