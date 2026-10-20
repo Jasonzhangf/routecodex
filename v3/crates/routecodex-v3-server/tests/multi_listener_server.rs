@@ -4746,6 +4746,22 @@ fn anthropic_sse_reasoning_tool_call_fixture() -> Vec<u8> {
     ])
 }
 
+fn anthropic_sse_redacted_reasoning_tool_call_fixture() -> Vec<u8> {
+    anthropic_sse_bytes(vec![
+        json!({"type":"message_start","message":{"id":"msg_p0_redacted_turn1","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":11}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","cache_control":{"type":"ephemeral"},"x-p0-marker":"plaintext","x-p0-opaque":{"a":1}}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"plan the lookup"}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"native-redacted-data","cache_control":{"type":"ephemeral"},"x-p0-marker":"redacted","x-p0-opaque":{"b":2}}}),
+        json!({"type":"content_block_stop","index":1}),
+        json!({"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_p0_redacted","name":"mcp__codex_apps__codex_security_cloud__lookup","input":{}}}),
+        json!({"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"p0 reasoning\",\"limit\":3}"}}),
+        json!({"type":"content_block_stop","index":2}),
+        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":6}}),
+        json!({"type":"message_stop"}),
+    ])
+}
+
 fn anthropic_sse_final_fixture() -> Vec<u8> {
     anthropic_sse_bytes(vec![
         json!({"type":"message_start","message":{"id":"msg_p0_turn2","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":13}}}),
@@ -4805,10 +4821,13 @@ async fn controlled_anthropic_reasoning_upstream(
                 .is_some_and(|content| content.iter().any(|block| block["type"] == "tool_result"))
         })
     });
+    let redacted_reasoning_association = control("redacted-reasoning-association");
     let bytes = if control("malformed-reasoning-control") {
         anthropic_sse_malformed_reasoning_fixture()
     } else if followup {
         anthropic_sse_final_fixture()
+    } else if redacted_reasoning_association {
+        anthropic_sse_redacted_reasoning_tool_call_fixture()
     } else {
         anthropic_sse_reasoning_tool_call_fixture()
     };
@@ -5026,6 +5045,193 @@ async fn responses_client_anthropic_reasoning_cache_control_survives_two_turn_to
         "reasoning extensions must survive the client replay round trip: {}",
         second_capture.body
     );
+    let tool_result = second_capture.body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|message| {
+            message["content"]
+                .as_array()
+                .and_then(|content| content.iter().find(|block| block["type"] == "tool_result"))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "missing tool_result on provider wire: {}",
+                second_capture.body
+            )
+        });
+    assert_eq!(tool_result["tool_use_id"], call_id);
+    assert!(
+        tool_result["content"].to_string().contains("42"),
+        "client tool output must reach the paired provider tool_result: {}",
+        second_capture.body
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_client_anthropic_redacted_reasoning_association_survives_two_turn_tool_roundtrip(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream().await;
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
+    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
+
+    let first = client
+        .post(format!("{base}/v1/responses"))
+        .json(&json!({"model":"client-test","input":"redacted-reasoning-association","stream":true,"tools":tools}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_body = reasoning_client_completed_response(&first.text().await.unwrap());
+    let output = first_body["output"].as_array().expect("output array");
+    let plaintext_reasoning = output
+        .iter()
+        .find(|item| {
+            item["type"] == "reasoning"
+                && item["routecodex_chat_extension"]["anthropic_reasoning"]["x-p0-marker"]
+                    == "plaintext"
+        })
+        .unwrap_or_else(|| panic!("missing plaintext reasoning item: {first_body}"))
+        .clone();
+    let redacted_reasoning = output
+        .iter()
+        .find(|item| {
+            item["type"] == "reasoning"
+                && item["routecodex_chat_extension"]["anthropic_reasoning"]["type"]
+                    == "redacted_thinking"
+        })
+        .unwrap_or_else(|| panic!("missing redacted reasoning item: {first_body}"))
+        .clone();
+    assert_eq!(
+        redacted_reasoning["encrypted_content"],
+        "native-redacted-data"
+    );
+    assert_eq!(
+        redacted_reasoning["routecodex_chat_extension"]["anthropic_reasoning"]["cache_control"],
+        json!({"type":"ephemeral"}),
+        "{first_body}"
+    );
+    assert_eq!(
+        redacted_reasoning["routecodex_chat_extension"]["anthropic_reasoning"]["x-p0-opaque"],
+        json!({"b":2}),
+        "{first_body}"
+    );
+    let call = output
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .unwrap_or_else(|| panic!("missing function_call item: {first_body}"))
+        .clone();
+    let call_id = call["call_id"].as_str().expect("call_id").to_string();
+    assert_eq!(call_id, "toolu_p0_redacted");
+
+    let first_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        first_capture.body["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == declared_tool)),
+        "declared tool name must reach the provider wire: {}",
+        first_capture.body
+    );
+
+    let execution = std::process::Command::new("node")
+        .args([
+            "-e",
+            "const c=JSON.parse(process.argv[1]);const p=JSON.parse(c.arguments);if(p.query!=='p0 reasoning'||p.limit!==3)throw Error('unexpected params');process.stdout.write(String(7*6));",
+            &call.to_string(),
+        ])
+        .output()
+        .unwrap();
+    assert!(execution.status.success());
+    let tool_output = String::from_utf8(execution.stdout).unwrap();
+    assert_eq!(tool_output, "42");
+
+    let second = client
+        .post(format!("{base}/v1/responses"))
+        .json(
+            &json!({"model":"client-test","stream":true,"tools":tools,"input":[
+                {"role":"user","content":"redacted-reasoning-association"},
+                plaintext_reasoning,
+                redacted_reasoning,
+                call,
+                {"type":"function_call_output","call_id":call_id,"output":tool_output}
+            ]}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let second_body = reasoning_client_completed_response(&second.text().await.unwrap());
+    assert_eq!(second_body["status"], "completed", "{second_body}");
+
+    let second_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let assistant_content = second_capture.body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|message| {
+            message["content"].as_array().filter(|content| {
+                content
+                    .iter()
+                    .any(|block| block["type"] == "tool_use" && block["id"] == call_id)
+            })
+        })
+        .expect("the provider must receive the paired tool call history");
+    let replayed_plaintext = assistant_content
+        .iter()
+        .find(|block| block["type"] == "thinking" && block["x-p0-marker"] == "plaintext")
+        .unwrap_or_else(|| {
+            panic!(
+                "plaintext reasoning block lost its association: {}",
+                second_capture.body
+            )
+        });
+    assert_eq!(replayed_plaintext["thinking"], "plan the lookup");
+    assert_eq!(
+        replayed_plaintext["cache_control"],
+        json!({"type":"ephemeral"})
+    );
+    assert_eq!(replayed_plaintext["x-p0-opaque"], json!({"a":1}));
+    let replayed_redacted = assistant_content
+        .iter()
+        .find(|block| block["type"] == "redacted_thinking" && block["x-p0-marker"] == "redacted")
+        .unwrap_or_else(|| {
+            panic!(
+                "redacted reasoning block lost its association: {}",
+                second_capture.body
+            )
+        });
+    assert_eq!(replayed_redacted["data"], "native-redacted-data");
+    assert_eq!(
+        replayed_redacted["cache_control"],
+        json!({"type":"ephemeral"})
+    );
+    assert_eq!(replayed_redacted["x-p0-opaque"], json!({"b":2}));
     let tool_result = second_capture.body["messages"]
         .as_array()
         .unwrap()

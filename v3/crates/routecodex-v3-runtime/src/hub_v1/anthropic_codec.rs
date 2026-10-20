@@ -41,6 +41,7 @@ use responses_to_anthropic::{
 const CLAUDE_CODE_SYSTEM_PROMPT_MD: &str = include_str!("claude_code_system_prompt.md");
 const ANTHROPIC_REQUEST_EXTENSION: &str = "anthropic_request";
 const ANTHROPIC_REASONING_EXTENSION: &str = "anthropic_reasoning";
+const ANTHROPIC_REASONING_BLOCKS_EXTENSION: &str = "anthropic_reasoning_blocks";
 const ANTHROPIC_ENTRY_PASSTHROUGH_EXTENSION_KEYS: &[&str] = &["context_management"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

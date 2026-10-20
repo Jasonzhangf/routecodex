@@ -394,11 +394,92 @@ fn responses_reasoning_extension_survives_assistant_message_coalescing() {
         json!({"type": "ephemeral"})
     );
     assert_eq!(merged_extension["first_only"], json!(true));
+    assert!(
+        merged_extension.get("second_only").is_none(),
+        "the first block compatibility view must not gain values from a later block: {multiple_reasoning}"
+    );
+    let block_extensions = multiple_reasoning["messages"][0]["routecodex_chat_extension"]
+        ["anthropic_reasoning_blocks"]
+        .as_array()
+        .expect("each coalesced reasoning block must retain its own association");
+    assert_eq!(block_extensions.len(), 2, "{multiple_reasoning}");
     assert_eq!(
-        merged_extension["second_only"],
+        block_extensions[1]["anthropic_reasoning"]["second_only"],
         json!(true),
         "a second carrier-bearing reasoning item must not lose its extension: {multiple_reasoning}"
     );
+}
+
+#[test]
+fn responses_reasoning_extensions_keep_distinct_block_associations() {
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "claude",
+        "input": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "answer"}]
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "first block"}],
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {
+                        "type": "thinking",
+                        "marker": "first",
+                        "opaque": {"a": 1}
+                    }
+                }
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "second block"}],
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {
+                        "type": "thinking",
+                        "marker": "second",
+                        "opaque": {"b": 2}
+                    }
+                }
+            }
+        ]
+    }))
+    .expect("multiple provider reasoning extensions must reach canonical Chat");
+
+    let blocks = canonical["messages"][0]["routecodex_chat_extension"]
+        ["anthropic_reasoning_blocks"]
+        .as_array()
+        .expect("canonical Chat must retain one extension record per reasoning block");
+    assert_eq!(blocks.len(), 2, "{canonical}");
+    assert_eq!(blocks[0]["reasoning_content"], "first block");
+    assert_eq!(blocks[0]["anthropic_reasoning"]["marker"], "first");
+    assert_eq!(blocks[0]["anthropic_reasoning"]["opaque"], json!({"a": 1}));
+    assert_eq!(blocks[1]["reasoning_content"], "second block");
+    assert_eq!(blocks[1]["anthropic_reasoning"]["marker"], "second");
+    assert_eq!(blocks[1]["anthropic_reasoning"]["opaque"], json!({"b": 2}));
+
+    let provider =
+        crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+            canonical,
+        )
+        .expect("distinct canonical reasoning blocks must restore on the Anthropic wire");
+    let reasoning = provider["messages"][0]["content"]
+        .as_array()
+        .expect("assistant content")
+        .iter()
+        .filter(|block| block["type"] == "thinking")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reasoning.len(),
+        2,
+        "each source reasoning block must remain separate: {provider}"
+    );
+    assert_eq!(reasoning[0]["thinking"], "first block");
+    assert_eq!(reasoning[0]["marker"], "first");
+    assert_eq!(reasoning[0]["opaque"], json!({"a": 1}));
+    assert_eq!(reasoning[1]["thinking"], "second block");
+    assert_eq!(reasoning[1]["marker"], "second");
+    assert_eq!(reasoning[1]["opaque"], json!({"b": 2}));
 }
 
 #[test]

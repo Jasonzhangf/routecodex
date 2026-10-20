@@ -3,6 +3,8 @@ use provider_compat_core::namespace_tools::resolve_responses_tool_declarations;
 use serde_json::{json, Map, Value};
 mod chat_extension_merge;
 mod tool_output;
+const ANTHROPIC_REASONING_EXTENSION: &str = "anthropic_reasoning";
+const ANTHROPIC_REASONING_BLOCKS_EXTENSION: &str = "anthropic_reasoning_blocks";
 pub(super) use tool_output::{
     canonical_content as responses_tool_output_content, image_url as responses_image_url,
 };
@@ -743,7 +745,11 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
         "reasoning_content":reasoning_content
     });
     if let Some(extension) = item.get("routecodex_chat_extension") {
-        message["routecodex_chat_extension"] = extension.clone();
+        let mut extension = extension.clone();
+        if let Some(extension) = extension.as_object_mut() {
+            retain_anthropic_reasoning_block_association(item, &reasoning_content, extension);
+        }
+        message["routecodex_chat_extension"] = extension;
     }
     // Preserve the Responses reasoning `encrypted_content` as an opaque business
     // association so the Anthropic outbound projection can restore the exact
@@ -765,6 +771,42 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
         }
     }
     Some(message)
+}
+
+fn retain_anthropic_reasoning_block_association(
+    item: &Map<String, Value>,
+    reasoning_content: &str,
+    extension: &mut Map<String, Value>,
+) {
+    let Some(anthropic_reasoning) = extension
+        .get(ANTHROPIC_REASONING_EXTENSION)
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+    if extension
+        .get(ANTHROPIC_REASONING_BLOCKS_EXTENSION)
+        .and_then(Value::as_array)
+        .is_some_and(|blocks| !blocks.is_empty())
+    {
+        return;
+    }
+    let mut block = Map::new();
+    block.insert(
+        "reasoning_content".to_string(),
+        Value::String(reasoning_content.to_string()),
+    );
+    if let Some(encrypted_content) = item.get("encrypted_content") {
+        block.insert("encrypted_content".to_string(), encrypted_content.clone());
+    }
+    block.insert(
+        ANTHROPIC_REASONING_EXTENSION.to_string(),
+        Value::Object(anthropic_reasoning.clone()),
+    );
+    extension.insert(
+        ANTHROPIC_REASONING_BLOCKS_EXTENSION.to_string(),
+        Value::Array(vec![Value::Object(block)]),
+    );
 }
 
 fn build_v3_openai_chat_assistant_tool_call_message(

@@ -1,5 +1,125 @@
 use super::*;
 
+pub(super) fn chat_message_reasoning_as_anthropic_content(
+    object: &Map<String, Value>,
+) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    let reasoning_content = match object.get("reasoning_content") {
+        Some(Value::String(value)) => value.as_str(),
+        Some(Value::Null) | None => "",
+        Some(_) => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "reasoning_content",
+            })
+        }
+    };
+    let extension = object
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object);
+    if let Some(blocks) =
+        extension.and_then(|extension| extension.get(ANTHROPIC_REASONING_BLOCKS_EXTENSION))
+    {
+        let blocks = blocks
+            .as_array()
+            .ok_or(V3AnthropicCodecError::MalformedField {
+                field: "anthropic_reasoning_blocks",
+            })?;
+        let mut output = Vec::new();
+        for block in blocks {
+            output.extend(project_chat_reasoning_block_record(block)?);
+        }
+        return Ok(output);
+    }
+    let anthropic_reasoning = extension
+        .and_then(|extension| extension.get(ANTHROPIC_REASONING_EXTENSION))
+        .and_then(Value::as_object);
+    let encrypted_content = extension
+        .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
+        .and_then(Value::as_str);
+    project_chat_reasoning_block(reasoning_content, encrypted_content, anthropic_reasoning)
+}
+
+fn project_chat_reasoning_block_record(value: &Value) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    let record = value
+        .as_object()
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "anthropic_reasoning_blocks",
+        })?;
+    let reasoning_content = record
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "anthropic_reasoning_blocks.reasoning_content",
+        })?;
+    let encrypted_content = match record.get("encrypted_content") {
+        Some(Value::String(value)) => Some(value.as_str()),
+        Some(Value::Null) | None => None,
+        Some(_) => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "anthropic_reasoning_blocks.encrypted_content",
+            })
+        }
+    };
+    let anthropic_reasoning = record
+        .get(ANTHROPIC_REASONING_EXTENSION)
+        .and_then(Value::as_object)
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "anthropic_reasoning_blocks.anthropic_reasoning",
+        })?;
+    project_chat_reasoning_block(
+        reasoning_content,
+        encrypted_content,
+        Some(anthropic_reasoning),
+    )
+}
+
+fn project_chat_reasoning_block(
+    reasoning_content: &str,
+    encrypted_content: Option<&str>,
+    anthropic_reasoning: Option<&Map<String, Value>>,
+) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    let block_type = anthropic_reasoning
+        .and_then(|extension| extension.get("type"))
+        .and_then(Value::as_str);
+    if block_type == Some("redacted_thinking") {
+        let data = encrypted_content.filter(|value| !value.is_empty()).ok_or(
+            V3AnthropicCodecError::MalformedField {
+                field: "anthropic_reasoning_blocks.encrypted_content",
+            },
+        )?;
+        let mut block = Map::from_iter([
+            (
+                "type".to_string(),
+                Value::String("redacted_thinking".to_string()),
+            ),
+            ("data".to_string(), Value::String(data.to_string())),
+        ]);
+        if let Some(anthropic_reasoning) = anthropic_reasoning {
+            restore_anthropic_reasoning_extension(anthropic_reasoning, &mut block);
+        }
+        return Ok(vec![Value::Object(block)]);
+    }
+    if reasoning_content.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut block = Map::from_iter([
+        ("type".to_string(), Value::String("thinking".to_string())),
+        (
+            "thinking".to_string(),
+            Value::String(reasoning_content.to_string()),
+        ),
+    ]);
+    if let Some(signature) = encrypted_content {
+        block.insert(
+            "signature".to_string(),
+            Value::String(signature.to_string()),
+        );
+    }
+    if let Some(anthropic_reasoning) = anthropic_reasoning {
+        restore_anthropic_reasoning_extension(anthropic_reasoning, &mut block);
+    }
+    Ok(vec![Value::Object(block)])
+}
+
 pub(crate) fn project_v3_responses_reasoning_item_as_anthropic_content(
     item: &Value,
 ) -> Result<Value, V3AnthropicCodecError> {
@@ -77,6 +197,13 @@ pub(super) fn restore_anthropic_reasoning_extensions(
     else {
         return;
     };
+    restore_anthropic_reasoning_extension(extension, block);
+}
+
+fn restore_anthropic_reasoning_extension(
+    extension: &Map<String, Value>,
+    block: &mut Map<String, Value>,
+) {
     for (key, value) in extension {
         if key != "type" {
             block.entry(key.clone()).or_insert_with(|| value.clone());
