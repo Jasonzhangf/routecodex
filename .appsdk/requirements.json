@@ -350,9 +350,63 @@
         "version": 6
       },
       "version": 13
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "最后一个provider错误就错误，不冷却也不回退，和单provider时无调度一样，这个才是合理的解决方案",
+          "role": "user",
+          "source": "Explicit user instruction relayed by authorized peer chat 01a1345f-00c7-7f72-89b3-538b61fb4e66 on 2026-10-19; supersedes that chat's prior five-attempt policy for issue 86b45e0"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261019-last-provider-no-cooldown",
+        "requirement_id": "routecodex-last-provider-failure-terminal-policy",
+        "text": "在本次请求命中的 target 内，若只有一个可用 provider candidate，或当前已是最后一个可尝试的 eligible candidate，该 candidate 的失败必须保留真实 typed Error 原因并结束当前请求。对这个最后或单独 candidate 不触发冷却、不回退、不自动重试；单 provider 路径不因调度器沿用旧冷却状态而拒绝本次业务发送。本条明确取代此前最后候选五次重试方案。\n\n多 candidate 时，只有仍存在其他可尝试 candidate，才对当前失败应用既有健康策略并切换。此前因各自失败而已冷却的其他 candidate 仍沿其既有独立后台 probe 和恢复政策运行；不能仅因最后 candidate 失败或请求终止而新建冷却、probe 或替代尝试。\n\n错误仍遵守客户端与 provider 解耦契约：内部记录实际上游状态、原始原因和 typed source；客户端仅可检测地终止该请求传输，不返回 provider 错误、代理错误状态或 SSE error payload，也不伪造正常空成功。模型生成的无效工具参数等可传递业务内容不属于本条 provider 失败。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "最后一个provider错误就错误，不冷却也不回退，和单provider时无调度一样，这个才是合理的解决方案",
+          "role": "user",
+          "source": "Explicit user instruction relayed by authorized peer chat 01a1345f-00c7-7f72-89b3-538b61fb4e66 on 2026-10-19; supersedes that chat's prior five-attempt policy for issue 86b45e0"
+        },
+        "requirement_id": "routecodex-last-provider-failure-terminal-policy",
+        "status": "active",
+        "text": "在本次请求命中的 target 内，若只有一个可用 provider candidate，或当前已是最后一个可尝试的 eligible candidate，该 candidate 的失败必须保留真实 typed Error 原因并结束当前请求。对这个最后或单独 candidate 不触发冷却、不回退、不自动重试；单 provider 路径不因调度器沿用旧冷却状态而拒绝本次业务发送。本条明确取代此前最后候选五次重试方案。\n\n多 candidate 时，只有仍存在其他可尝试 candidate，才对当前失败应用既有健康策略并切换。此前因各自失败而已冷却的其他 candidate 仍沿其既有独立后台 probe 和恢复政策运行；不能仅因最后 candidate 失败或请求终止而新建冷却、probe 或替代尝试。\n\n错误仍遵守客户端与 provider 解耦契约：内部记录实际上游状态、原始原因和 typed source；客户端仅可检测地终止该请求传输，不返回 provider 错误、代理错误状态或 SSE error payload，也不伪造正常空成功。模型生成的无效工具参数等可传递业务内容不属于本条 provider 失败。",
+        "version": 1
+      },
+      "version": 14
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "1. 最后一个 provider 不能进冷却池，除非五次阻塞等待都失败，你确定是否是如此\n2. 不同端口冷却池独立",
+          "role": "user",
+          "source": "Verbatim human user text supplied by authorized peer chat 01a1345f-00c7-7f72-89b3-538b61fb4e66 on 2026-10-19; only item 2 remains effective here; later last-provider instruction supersedes item 1"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261019-port-local-provider-health",
+        "requirement_id": "routecodex-port-local-provider-health",
+        "text": "不同监听端口的 provider 冷却池必须独立。同一个 provider/interface/model/auth-key 在一个端口的失败、连续失败计数、健康排除、冷却、恢复 probe 及恢复结果，不得改变另一个端口的对应状态或调度可用性。保留完整 provider.model.key 身份边界，并在端口内独立持有 typed 健康控制状态、恢复调度及适用持久化状态。\n\n本条不保留原文第1项的五次阻塞等待政策；该项已被后续用户的 routecodex-last-provider-failure-terminal-policy 明确取代。单/最后可尝试 candidate 失败不冷却、不回退、不自动重试。端口间不得共享可变健康状态来实现调度或恢复，也不得从业务 payload、日志或隐式上下文重建健康决策。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "1. 最后一个 provider 不能进冷却池，除非五次阻塞等待都失败，你确定是否是如此\n2. 不同端口冷却池独立",
+          "role": "user",
+          "source": "Verbatim human user text supplied by authorized peer chat 01a1345f-00c7-7f72-89b3-538b61fb4e66 on 2026-10-19; only item 2 remains effective here; later last-provider instruction supersedes item 1"
+        },
+        "requirement_id": "routecodex-port-local-provider-health",
+        "status": "active",
+        "text": "不同监听端口的 provider 冷却池必须独立。同一个 provider/interface/model/auth-key 在一个端口的失败、连续失败计数、健康排除、冷却、恢复 probe 及恢复结果，不得改变另一个端口的对应状态或调度可用性。保留完整 provider.model.key 身份边界，并在端口内独立持有 typed 健康控制状态、恢复调度及适用持久化状态。\n\n本条不保留原文第1项的五次阻塞等待政策；该项已被后续用户的 routecodex-last-provider-failure-terminal-policy 明确取代。单/最后可尝试 candidate 失败不冷却、不回退、不自动重试。端口间不得共享可变健康状态来实现调度或恢复，也不得从业务 payload、日志或隐式上下文重建健康决策。",
+        "version": 1
+      },
+      "version": 15
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 13
+  "version": 15
 }
