@@ -404,9 +404,36 @@
         "version": 1
       },
       "version": 15
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "空白响应直接 drop，作为 502 错误重试，切换 provider",
+          "role": "user",
+          "source": "Explicit human user instruction relayed by authorized peer chat 01a1345f-00c7-7f72-89b3-538b61fb4e66 on 2026-10-19, immediately after exact RouteCodex TUI sample1428766/42954 with nonempty reasoning and assistant final consisting of four newlines; canonical issue0ff6700"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261019-explicit-blank-final-recovery",
+        "requirement_id": "routecodex-explicit-blank-assistant-final-recovery",
+        "text": "对于完整 provider attempt，若存在显式 assistant final 文本，但该 final 只有空白字符，则丢弃本次完整响应，作为内部 502 进入既有 typed Error 恢复链，重传并切换到同一 target 内的其他 eligible、未尝试 provider candidate。此前有非空 reasoning 也不能让该显式空白 assistant final 正常完成到客户端。本条明确覆盖 2026-10-19 的非空 reasoning 加四个换行 final 样本。\n\n本条是对既有 reasoning 可作为业务内容契约的窄例外；不据此拒绝没有显式 assistant final 的纯 reasoning 结果，也不拒绝完整原生工具调用、refusal 或 content_filter 等合法业务结果。只在完整 attempt 边界判断，不以单个空白 SSE delta/片段触发拒绝。Direct payload 改写仍由注册 Direct hook 负责，Relay 由 Chat Process 负责，错误及恢复仍沿统一 typed Error 链。\n\n内部 502 不投影为客户端 HTTP 错误、错误正文或 SSE error event，不伪造正常空成功或替代答案。若已经没有其他 eligible candidate，沿当前最后/单 provider 终止政策结束本请求，不引入同候选循环重试、回退或新的冷却/健康副作用。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "空白响应直接 drop，作为 502 错误重试，切换 provider",
+          "role": "user",
+          "source": "Explicit human user instruction relayed by authorized peer chat 01a1345f-00c7-7f72-89b3-538b61fb4e66 on 2026-10-19, immediately after exact RouteCodex TUI sample1428766/42954 with nonempty reasoning and assistant final consisting of four newlines; canonical issue0ff6700"
+        },
+        "requirement_id": "routecodex-explicit-blank-assistant-final-recovery",
+        "status": "active",
+        "text": "对于完整 provider attempt，若存在显式 assistant final 文本，但该 final 只有空白字符，则丢弃本次完整响应，作为内部 502 进入既有 typed Error 恢复链，重传并切换到同一 target 内的其他 eligible、未尝试 provider candidate。此前有非空 reasoning 也不能让该显式空白 assistant final 正常完成到客户端。本条明确覆盖 2026-10-19 的非空 reasoning 加四个换行 final 样本。\n\n本条是对既有 reasoning 可作为业务内容契约的窄例外；不据此拒绝没有显式 assistant final 的纯 reasoning 结果，也不拒绝完整原生工具调用、refusal 或 content_filter 等合法业务结果。只在完整 attempt 边界判断，不以单个空白 SSE delta/片段触发拒绝。Direct payload 改写仍由注册 Direct hook 负责，Relay 由 Chat Process 负责，错误及恢复仍沿统一 typed Error 链。\n\n内部 502 不投影为客户端 HTTP 错误、错误正文或 SSE error event，不伪造正常空成功或替代答案。若已经没有其他 eligible candidate，沿当前最后/单 provider 终止政策结束本请求，不引入同候选循环重试、回退或新的冷却/健康副作用。",
+        "version": 1
+      },
+      "version": 16
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 15
+  "version": 16
 }

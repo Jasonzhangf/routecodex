@@ -287,6 +287,10 @@ async fn zero_score_cooldown_excludes_exact_key_and_valid_probe_restores_it() {
     let (shutdown, stopped) = oneshot::channel::<()>();
     let app = Router::new()
         .route("/v1/responses", post(zero_provider))
+        .route(
+            "/fallback/v1/responses",
+            post(|| async { zero_rejection() }),
+        )
         .with_state(upstream.clone());
     let upstream_task = tokio::spawn(async move {
         axum::serve(listener, app)
@@ -425,7 +429,9 @@ async fn zero_score_cooldown_excludes_exact_key_and_valid_probe_restores_it() {
 }
 
 /// Controlled loopback upstream: probe traffic and business traffic are recorded
-/// separately, and only business markers that ask for it return 429.
+/// separately, and only business markers that ask for it return 429. The
+/// separate fallback remains eligible so failed primary attempts may change
+/// health under the last-candidate policy.
 #[derive(Default)]
 struct ZeroUpstream {
     business: Mutex<BTreeMap<String, usize>>,
@@ -452,16 +458,20 @@ async fn zero_provider(
         .entry(marker.clone())
         .or_default() += 1;
     if marker.starts_with("zero:fail-") {
-        return Response::builder()
+        return zero_rejection();
+    }
+    zero_ok(&marker)
+}
+
+fn zero_rejection() -> Response<Body> {
+    Response::builder()
             .status(StatusCode::TOO_MANY_REQUESTS)
             .header("content-type", "application/json")
             .body(Body::from(
                 json!({"error":{"type":"rate_limit_error","code":"rate_limit_error","message":"controlled 429"}})
                     .to_string(),
             ))
-            .unwrap();
-    }
-    zero_ok(&marker)
+            .unwrap()
 }
 
 fn zero_ok(text: &str) -> Response<Body> {
@@ -570,9 +580,19 @@ default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}] }}
 [providers.independent.models.test]
 
+[providers.fallback]
+type = "responses"
+base_url = "http://127.0.0.1:{upstream_port}/fallback/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}] }}
+[providers.fallback.models.test]
+
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 100 }}]
+targets = [
+  {{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 100 }},
+  {{ kind = "provider_model", provider = "fallback", model = "test", key = "key", priority = 99 }}
+]
 [route_groups.default.pools.sibling]
 match = {{ models = ["sibling"], precedence = 10 }}
 targets = [{{ kind = "provider_model", provider = "test", model = "sibling", key = "key", priority = 100 }}]
