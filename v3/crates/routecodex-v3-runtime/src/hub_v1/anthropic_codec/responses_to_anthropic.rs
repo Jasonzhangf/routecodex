@@ -568,7 +568,6 @@ pub(super) fn responses_web_search_call_history_id(
 pub(super) fn validate_responses_web_search_action(
     action: &Map<String, Value>,
 ) -> Result<Map<String, Value>, V3AnthropicCodecError> {
-    reject_side_channel_object_keys(action)?;
     let action_type = action
         .get("type")
         .and_then(Value::as_str)

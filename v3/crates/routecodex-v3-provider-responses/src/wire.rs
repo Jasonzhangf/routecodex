@@ -294,9 +294,6 @@ fn build_responses_wire_payload_with_registry(
     {
         return Err(V3ProviderError::InvalidStreamIntent { request_id });
     }
-    if let Some(field) = find_v3_routecodex_control_payload_key(&current_request_body) {
-        return Err(V3ProviderError::ControlFieldInWireBody { request_id, field });
-    }
     validate_current_responses_data_images(&request_id, &current_request_body)?;
     let actual_model = current_request_body
         .get("model")
@@ -1089,84 +1086,6 @@ fn invalid_data_image(
         request_id: request_id.to_string(),
         media_type: media_type.into(),
         reason: reason.into(),
-    }
-}
-
-pub const V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS: &[&str] = &[
-    "routecodex_internal",
-    "routecodexInternal",
-    "route_hint",
-    "routeHint",
-    "metadata_center",
-    "metadataCenter",
-    "__metadataCenter",
-    // `_debug` 是 runtime 出站控制键集合（`is_provider_outbound_control_key`）
-    // 里唯一的单下划线键，必须在进入 provider tool-call arguments/result 字符串
-    // 之前就被拦下；这里是精确匹配，不会影响客户端任意 schema 键（如 `_ReplaceBlock`）。
-    "_debug",
-    "debug_snapshot",
-    "debugSnapshot",
-    "provider_protocol",
-    "providerProtocol",
-    "provider_runtime",
-    "providerRuntime",
-    "resource_handle",
-    "resourceHandle",
-    "continuation_owner",
-    "continuationOwner",
-    "runtime_control",
-    "runtimeControl",
-    "request_truth",
-    "requestTruth",
-    "route_selection",
-    "routeSelection",
-    "retry_exclusion_set",
-    "retryExclusionSet",
-    "selected_target",
-    "selectedTarget",
-    "opaque_target",
-    "opaqueTarget",
-    "resume_meta",
-    "resumeMeta",
-    "servertool_state",
-    "servertoolState",
-    "error_chain",
-    "errorChain",
-    "node_trace",
-    "nodeTrace",
-    "capturedChatRequest",
-    "entryOriginRequest",
-    "requestSemantics",
-    "responsesRequestContext",
-    "__raw_request_body",
-    "__rt",
-    "__rccDryRunSerialized",
-    "request_capabilities",
-    "requestCapabilities",
-    "required_capabilities",
-    "requiredCapabilities",
-    "model_capabilities",
-    "modelCapabilities",
-    "selection_plan",
-    "selectionPlan",
-];
-
-pub fn find_v3_routecodex_control_payload_key(value: &Value) -> Option<&'static str> {
-    match value {
-        Value::Array(items) => items
-            .iter()
-            .find_map(find_v3_routecodex_control_payload_key),
-        Value::Object(object) => {
-            for &key in V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS {
-                if object.contains_key(key) {
-                    return Some(key);
-                }
-            }
-            object
-                .values()
-                .find_map(find_v3_routecodex_control_payload_key)
-        }
-        _ => None,
     }
 }
 

@@ -56,11 +56,6 @@ impl V3DirectProtocolCodec for V3AnthropicDirectCodec {
     const POLICY_STAGE: &'static str = "V3AnthropicDirect11Policy";
 
     fn build_standardized(raw: V3Server03HttpRequestRaw) -> Result<Self::Standardized, String> {
-        if let Some(key) = crate::hub_v1::find_v3_hub_side_channel_key(&raw.body) {
-            return Err(format!(
-                "RouteCodex side-channel field {key} cannot enter request payload"
-            ));
-        }
         let body = raw.body;
         if body.get("messages").and_then(Value::as_array).is_none() {
             return Err("Anthropic request payload must contain a messages array".to_string());

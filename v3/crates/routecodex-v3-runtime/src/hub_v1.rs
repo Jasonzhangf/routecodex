@@ -21,8 +21,6 @@ pub use provider_compat_error::{
     V3ProviderCompatError, V3ProviderCompatErrorClassification,
 };
 
-mod side_channel;
-pub(crate) use side_channel::find_v3_hub_side_channel_key;
 mod provider_request_dry_run;
 pub(crate) use provider_request_dry_run::{
     captured_provider_response_for_dry_run, is_captured_provider_response_for_dry_run,

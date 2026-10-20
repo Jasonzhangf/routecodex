@@ -13,6 +13,7 @@ mod foundation_output;
 mod frame_sdk_fault;
 mod local599_output;
 mod post_commit_sse_sdk_fault;
+mod terminal_probe_join;
 mod websocket_sdk_fault;
 
 #[tokio::test]

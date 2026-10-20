@@ -1,4 +1,4 @@
-use super::{V3ProviderHealthState, V3ProviderHealthStore};
+use super::{V3ProviderHealthListenerScope, V3ProviderHealthState, V3ProviderHealthStore};
 use crate::global_cooldown::{
     V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass, V3ProviderCooldownKey,
 };
@@ -190,12 +190,23 @@ pub(super) fn start_provider_health_persistence(
     manifest: &V3Config05ManifestPublished,
     persistence_path: Option<PathBuf>,
     legacy_persistence_path: Option<PathBuf>,
+    prune_scope_suffix: Option<String>,
 ) -> Option<(
     V3ProviderHealthPersistenceWriter,
     V3ProviderCooldownPersistenceEntries,
 )> {
     let path = persistence_path?;
-    prune_stale_provider_cooldown_scope_files(&path, legacy_persistence_path.as_deref());
+    let aggregate_legacy = legacy_provider_cooldown_state_path_for_manifest(manifest);
+    let mut preserved = vec![aggregate_legacy];
+    if let Some(legacy) = legacy_persistence_path.as_ref() {
+        preserved.push(legacy.clone());
+    }
+    prune_stale_provider_cooldown_scope_files(
+        &path,
+        legacy_persistence_path.as_deref(),
+        &preserved,
+        prune_scope_suffix.as_deref(),
+    );
     let mut coordinator =
         match load_provider_cooldown_coordinator(manifest, path, legacy_persistence_path) {
             Ok(coordinator) => coordinator,
@@ -236,7 +247,12 @@ fn disabled_persistence_writer(error: String) -> V3ProviderHealthPersistenceWrit
 /// `provider-cooldowns-<scope>.json` and the superseded ones are never read
 /// again. Recent generations are kept so a rollback still finds its state;
 /// older ones are removed so the state directory cannot grow per revision.
-fn prune_stale_provider_cooldown_scope_files(current: &Path, legacy: Option<&Path>) {
+fn prune_stale_provider_cooldown_scope_files(
+    current: &Path,
+    legacy: Option<&Path>,
+    preserved: &[PathBuf],
+    scope_suffix: Option<&str>,
+) {
     const RETAINED_SCOPE_GENERATIONS: usize = 4;
     /// The state directory is shared by every instance, so age gates deletion:
     /// on the generation count alone the newest-four rule would remove the
@@ -258,13 +274,31 @@ fn prune_stale_provider_cooldown_scope_files(current: &Path, legacy: Option<&Pat
     let mut superseded = Vec::new();
     for entry in entries.flatten() {
         let candidate = entry.path();
-        if candidate == current || legacy == Some(candidate.as_path()) {
+        if candidate == current
+            || legacy == Some(candidate.as_path())
+            || preserved.iter().any(|path| path == &candidate)
+        {
             continue;
         }
         let Some(name) = candidate.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
         if !name.starts_with("provider-cooldowns-") || !name.ends_with(".json") {
+            continue;
+        }
+        // A listener-scoped manifest owns only the files for this listener.
+        // Never prune another port's live state while cleaning superseded
+        // provider revisions.
+        if scope_suffix.is_some_and(|suffix| !name.ends_with(suffix)) {
+            continue;
+        }
+        // Legacy aggregate callers have no ownership of listener-scoped files.
+        if scope_suffix.is_none()
+            && name
+                .strip_prefix("provider-cooldowns-")
+                .and_then(|name| name.strip_suffix(".json"))
+                .is_some_and(|scope| scope.contains('-'))
+        {
             continue;
         }
         let Ok(metadata) = entry.metadata() else {
@@ -364,6 +398,32 @@ pub(super) fn provider_cooldown_state_path_for_manifest(
         .with_file_name(format!("provider-cooldowns-{scope}.json"))
 }
 
+/// Persistence path for one listener scope.
+///
+/// A single-listener manifest keeps the historical aggregate path so existing
+/// state and the explicit override contract are unchanged. A multi-listener
+/// manifest derives one file per listener; an explicit override is split into
+/// the override directory because one file cannot be handed to several writers.
+pub(super) fn provider_cooldown_state_path_for_listener(
+    manifest: &V3Config05ManifestPublished,
+    listener: &V3ProviderHealthListenerScope,
+) -> PathBuf {
+    if enabled_business_listener_count(manifest) <= 1 {
+        return provider_cooldown_state_path_for_manifest(manifest);
+    }
+    let file_name = listener_scoped_state_file_name(manifest, listener);
+    if let Ok(path) = std::env::var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE") {
+        let base = PathBuf::from(path);
+        let directory = base
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        return directory.join(file_name);
+    }
+    default_provider_cooldown_state_path().with_file_name(file_name)
+}
+
 pub(super) fn legacy_provider_cooldown_state_path_for_manifest(
     manifest: &V3Config05ManifestPublished,
 ) -> PathBuf {
@@ -372,15 +432,77 @@ pub(super) fn legacy_provider_cooldown_state_path_for_manifest(
         .with_file_name(format!("provider-cooldowns-{scope}.json"))
 }
 
+/// Legacy migration source for one listener.
+///
+/// The historical file is keyed by the whole listener set, so it carries no
+/// port provenance once the manifest has more than one listener. Preserve the
+/// file, but never copy an unowned aggregate record into every port.
+pub(super) fn legacy_provider_cooldown_state_path_for_listener(
+    manifest: &V3Config05ManifestPublished,
+    _listener: &V3ProviderHealthListenerScope,
+) -> Option<PathBuf> {
+    (enabled_business_listener_count(manifest) <= 1)
+        .then(|| legacy_provider_cooldown_state_path_for_manifest(manifest))
+}
+
+pub(super) fn listener_scoped_state_suffix(listener: &V3ProviderHealthListenerScope) -> String {
+    format!("-{}.json", listener_identity_digest(listener))
+}
+
+fn enabled_business_listener_count(manifest: &V3Config05ManifestPublished) -> usize {
+    manifest
+        .servers
+        .values()
+        .filter(|server| server.enabled)
+        .count()
+}
+
+fn listener_scoped_state_file_name(
+    manifest: &V3Config05ManifestPublished,
+    listener: &V3ProviderHealthListenerScope,
+) -> String {
+    format!(
+        "provider-cooldowns-{}-{}.json",
+        provider_scope_digest(manifest),
+        listener_identity_digest(listener)
+    )
+}
+
 fn enabled_listener_scope_digest(manifest: &V3Config05ManifestPublished) -> String {
     let mut hasher = Sha256::new();
     for (server_id, server) in manifest.servers.iter().filter(|(_, server)| server.enabled) {
-        hasher.update((server_id.len() as u64).to_le_bytes());
-        hasher.update(server_id.as_bytes());
-        hasher.update((server.bind.len() as u64).to_le_bytes());
-        hasher.update(server.bind.as_bytes());
-        hasher.update(server.port.to_le_bytes());
+        update_listener_identity_digest(&mut hasher, server_id, &server.bind, server.port);
     }
+    update_provider_scope_digest(&mut hasher, manifest);
+    digest_hex(hasher.finalize())
+}
+
+fn provider_scope_digest(manifest: &V3Config05ManifestPublished) -> String {
+    let mut hasher = Sha256::new();
+    update_provider_scope_digest(&mut hasher, manifest);
+    digest_hex(hasher.finalize())
+}
+
+fn listener_identity_digest(listener: &V3ProviderHealthListenerScope) -> String {
+    let mut hasher = Sha256::new();
+    update_listener_identity_digest(
+        &mut hasher,
+        &listener.server_id,
+        &listener.bind,
+        listener.port,
+    );
+    digest_hex(hasher.finalize())
+}
+
+fn update_listener_identity_digest(hasher: &mut Sha256, server_id: &str, bind: &str, port: u16) {
+    hasher.update((server_id.len() as u64).to_le_bytes());
+    hasher.update(server_id.as_bytes());
+    hasher.update((bind.len() as u64).to_le_bytes());
+    hasher.update(bind.as_bytes());
+    hasher.update(port.to_le_bytes());
+}
+
+fn update_provider_scope_digest(hasher: &mut Sha256, manifest: &V3Config05ManifestPublished) {
     // Provider/model/auth identity is part of the persistence scope. A config
     // revision must not inherit cooldown entries for removed or renamed
     // targets and then probe them on startup.
@@ -405,8 +527,11 @@ fn enabled_listener_scope_digest(manifest: &V3Config05ManifestPublished) -> Stri
             hasher.update(model_id.as_bytes());
         }
     }
-    let digest = hasher.finalize();
+}
+
+fn digest_hex(digest: impl AsRef<[u8]>) -> String {
     digest
+        .as_ref()
         .iter()
         .take(16)
         .map(|byte| format!("{byte:02x}"))
@@ -416,18 +541,9 @@ fn enabled_listener_scope_digest(manifest: &V3Config05ManifestPublished) -> Stri
 fn legacy_listener_scope_digest(manifest: &V3Config05ManifestPublished) -> String {
     let mut hasher = Sha256::new();
     for (server_id, server) in manifest.servers.iter().filter(|(_, server)| server.enabled) {
-        hasher.update((server_id.len() as u64).to_le_bytes());
-        hasher.update(server_id.as_bytes());
-        hasher.update((server.bind.len() as u64).to_le_bytes());
-        hasher.update(server.bind.as_bytes());
-        hasher.update(server.port.to_le_bytes());
+        update_listener_identity_digest(&mut hasher, server_id, &server.bind, server.port);
     }
-    let digest = hasher.finalize();
-    digest
-        .iter()
-        .take(16)
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    digest_hex(hasher.finalize())
 }
 
 fn default_provider_cooldown_state_path() -> PathBuf {
@@ -848,7 +964,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         let manifest = manifest("s", "127.0.0.1", 1);
 
         let (writer, entries) =
-            start_provider_health_persistence(&manifest, Some(path.clone()), None)
+            start_provider_health_persistence(&manifest, Some(path.clone()), None, None)
                 .expect("an unreadable cooldown state must not stop provider health persistence");
 
         assert!(
@@ -886,7 +1002,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         let manifest = manifest("s", "127.0.0.1", 1);
 
         let (writer, entries) =
-            start_provider_health_persistence(&manifest, Some(path.clone()), None)
+            start_provider_health_persistence(&manifest, Some(path.clone()), None, None)
                 .expect("a corrupt cooldown state must not stop provider health persistence");
 
         assert!(entries.is_empty());
@@ -914,8 +1030,9 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         TEST_SPAWN_FAILURE
             .with(|failure| failure.set(Some("injected writer start failure".to_string())));
 
-        let (writer, entries) = start_provider_health_persistence(&manifest, Some(path), None)
-            .expect("spawn failure must keep provider health persistence available");
+        let (writer, entries) =
+            start_provider_health_persistence(&manifest, Some(path), None, None)
+                .expect("spawn failure must keep provider health persistence available");
 
         assert_eq!(
             entries.len(),
@@ -954,6 +1071,11 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         fs::write(&legacy, b"{}").expect("write legacy scope state");
         let unrelated = root.path().join("provider-cooldowns.json");
         fs::write(&unrelated, b"{}").expect("write undigested legacy state");
+        let other_listener = root
+            .path()
+            .join("provider-cooldowns-revision-listener.json");
+        fs::write(&other_listener, b"{}").expect("write another listener state");
+        backdate(&other_listener);
         let mut generations = Vec::new();
         for index in 0..6 {
             let path = root
@@ -972,7 +1094,12 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         let concurrent = root.path().join("provider-cooldowns-concurrent.json");
         fs::write(&concurrent, b"{}").expect("write concurrent scope state");
 
-        prune_stale_provider_cooldown_scope_files(&current, Some(&legacy));
+        prune_stale_provider_cooldown_scope_files(&current, Some(&legacy), &[], None);
+
+        assert!(
+            other_listener.exists(),
+            "an unscoped owner must not prune listener state"
+        );
 
         assert!(
             current.exists(),

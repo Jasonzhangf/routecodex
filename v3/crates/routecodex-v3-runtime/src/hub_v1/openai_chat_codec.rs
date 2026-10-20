@@ -51,8 +51,6 @@ pub enum V3OpenAiChatCodecError {
     ProviderProtocolNotOpenAiChat,
     #[error("OpenAI Chat codec payload must be an object")]
     PayloadNotObject,
-    #[error("OpenAI Chat codec payload leaked RouteCodex side-channel field: {field}")]
-    SideChannelLeaked { field: String },
     #[error("OpenAI Chat request messages must be an array")]
     MessagesNotArray,
     #[error("OpenAI Chat response choices must be an array")]
@@ -681,7 +679,6 @@ fn trace(
 }
 
 fn validate_request(payload: &Value) -> Result<(), V3OpenAiChatCodecError> {
-    reject_side_channel_fields(payload)?;
     payload
         .get("messages")
         .and_then(Value::as_array)
@@ -693,7 +690,6 @@ fn validate_response(
     payload: &Value,
     transport: V3HubTransportIntent,
 ) -> Result<(), V3OpenAiChatCodecError> {
-    reject_side_channel_fields(payload)?;
     match transport {
         V3HubTransportIntent::Json => validate_json_response(payload),
         V3HubTransportIntent::Sse => validate_sse_event(payload),
@@ -736,17 +732,6 @@ fn validate_provider_error(payload: &Value) -> Result<(), V3OpenAiChatCodecError
     } else {
         Err(V3OpenAiChatCodecError::MalformedProviderError)
     }
-}
-
-fn reject_side_channel_fields(payload: &Value) -> Result<(), V3OpenAiChatCodecError> {
-    for key in require_object(payload)?.keys() {
-        if routecodex_v3_provider_responses::V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS
-            .contains(&key.as_str())
-        {
-            return Err(V3OpenAiChatCodecError::SideChannelLeaked { field: key.clone() });
-        }
-    }
-    Ok(())
 }
 
 fn require_object(payload: &Value) -> Result<&Map<String, Value>, V3OpenAiChatCodecError> {

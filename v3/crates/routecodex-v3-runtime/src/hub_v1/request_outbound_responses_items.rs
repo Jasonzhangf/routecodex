@@ -5,7 +5,8 @@ use serde_json::{json, Map, Value};
 
 use super::super::request_outbound_mcp_names::provider_function_name;
 use super::super::request_outbound_tool_id::compact_tool_id;
-use super::{project_outbound_nested_payload_for_target_protocol, V3OutboundTargetProtocol};
+#[cfg(test)]
+use super::V3OutboundTargetProtocol;
 
 #[cfg(test)]
 #[path = "signature_target_projection_tests.rs"]
@@ -15,10 +16,7 @@ pub(super) fn normalize_responses_content_part_for_role(
     part: &Value,
     role: &str,
 ) -> Result<Value, String> {
-    let mut normalized = project_outbound_nested_payload_for_target_protocol(
-        part,
-        V3OutboundTargetProtocol::OpenAiResponses,
-    )?;
+    let mut normalized = part.clone();
     let is_assistant = role.eq_ignore_ascii_case("assistant");
     if let Some(row) = normalized.as_object_mut() {
         let part_type = row.get("type").and_then(Value::as_str).unwrap_or("").trim();

@@ -372,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_rejects_routecodex_control_keys_before_provider_transport() {
+    fn wire_preserves_business_names_before_provider_transport() {
         let body = json!({
             "model":"upstream-model", "input":[{
                 "role":"user", "content":"hello",
@@ -381,15 +381,10 @@ mod tests {
             "metadata":{"client":"kept"},
             "client_metadata":{"session_id":"client-owned"}
         });
-        let error = build_v3_provider_12_responses_wire_payload("req-control", target(), body)
-            .expect_err("provider wire body must reject internal control fields");
-        assert!(matches!(
-            error,
-            V3ProviderError::ControlFieldInWireBody {
-                request_id,
-                field: "metadataCenter"
-            } if request_id == "req-control"
-        ));
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-control", target(), body.clone())
+                .expect("business names do not establish control provenance");
+        assert_eq!(wire.body(), &body);
     }
 
     #[test]
@@ -1196,44 +1191,41 @@ mod tests {
     }
 
     #[test]
-    fn wire_rejects_routing_capability_control_keys_before_provider_transport() {
+    fn wire_preserves_business_capability_names_before_provider_transport() {
         let body = json!({
             "model":"upstream-model", "input":"hello", "request_capabilities":["vision"]
         });
-        let error = build_v3_provider_12_responses_wire_payload("req-cap", target(), body)
-            .expect_err("request capability facts are control-plane, not provider payload");
-        assert!(matches!(
-            error,
-            V3ProviderError::ControlFieldInWireBody {
-                request_id,
-                field: "request_capabilities"
-            } if request_id == "req-cap"
-        ));
+        let wire = build_v3_provider_12_responses_wire_payload("req-cap", target(), body.clone())
+            .expect("business fields named like capabilities remain data");
+        assert_eq!(wire.body(), &body);
     }
 
     #[test]
-    fn canonical_control_key_guard_rejects_route_facts_and_keeps_client_metadata_data_plane() {
-        assert!(!V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS.contains(&"metadata"));
-        assert!(!V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS.contains(&"client_metadata"));
+    fn bug03df769_typed_transport_writer_isolates_control_from_business_body() {
+        let mut selected = target();
+        selected.base_url = "https://typed-control.invalid/v1".into();
+        selected
+            .headers
+            .insert("x-route-owner".into(), "typed-writer-only".into());
+        let body = json!({
+            "model": "upstream-model", "input": "hello",
+            "selected_target": {"base_url": "https://business.invalid", "headers": {"x-route-owner": "business"}},
+            "requiredCapabilities": ["business-value"]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-writer", selected, body.clone())
+                .expect("typed target and business data have separate writers");
+        assert_eq!(wire.body(), &body);
+        assert_eq!(wire.target().base_url, "https://typed-control.invalid/v1");
+        assert_eq!(wire.target().headers["x-route-owner"], "typed-writer-only");
+        assert!(!wire.body().to_string().contains("typed-writer-only"));
+        let transport = crate::build_v3_transport_13_responses_request_from_v3_provider_12(wire)
+            .expect("production transport writer uses typed target without sending");
         assert_eq!(
-            find_v3_routecodex_control_payload_key(&json!({
-                "metadata": {"client": "kept"},
-                "client_metadata": {"session_id": "client-owned"}
-            })),
-            None
+            transport.url(),
+            "https://typed-control.invalid/v1/responses"
         );
-        assert_eq!(
-            find_v3_routecodex_control_payload_key(&json!({
-                "input": "hello", "routeHint": {"route": "must-not-enter-wire"}
-            })),
-            Some("routeHint")
-        );
-        assert_eq!(
-            find_v3_routecodex_control_payload_key(&json!({
-                "input": "hello", "opaque_target": {"target": "must-not-enter-wire"}
-            })),
-            Some("opaque_target")
-        );
+        assert_eq!(transport.body(), &body);
     }
 
     #[test]

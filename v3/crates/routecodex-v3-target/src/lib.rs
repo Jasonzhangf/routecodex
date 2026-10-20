@@ -375,6 +375,20 @@ impl V3TargetInterpreter {
         })
     }
 
+    pub fn ignores_single_candidate_automatic_cooldown(
+        candidate_count: usize,
+        blocked_scopes: &[String],
+    ) -> bool {
+        candidate_count == 1
+            && !blocked_scopes.is_empty()
+            && blocked_scopes.iter().all(|scope| {
+                matches!(
+                    scope.as_str(),
+                    "provider_key_health_cooldown" | "provider_cooldown_probe_pending"
+                )
+            })
+    }
+
     pub fn select_available_with_health<R: V3ProviderSchedulingReader>(
         &self,
         expanded: V3Target09CandidateSetExpanded,
@@ -424,6 +438,17 @@ impl V3TargetInterpreter {
                 candidate.weight,
                 now_ms,
             );
+            // A configured singleton does not participate in automatic health
+            // scheduling. Keep manual auth, capacity and request-local blocks.
+            if !projection.available
+                && Self::ignores_single_candidate_automatic_cooldown(
+                    expanded.candidates.len(),
+                    &projection.blocked_scopes,
+                )
+            {
+                projection.available = true;
+                projection.blocked_scopes.clear();
+            }
             let scheduled_priority =
                 self.provider_priority_schedule_priority(&expanded, candidate, now_ms);
             projection.effective_priority = projection

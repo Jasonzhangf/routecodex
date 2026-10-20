@@ -353,6 +353,7 @@ fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
             observability: None,
             failed_attempt_evidence: None,
             matched_policy: None,
+            response_processing_code: None,
         },
         vec!["V3ProviderReqOutbound09TransportRequest"],
         0,

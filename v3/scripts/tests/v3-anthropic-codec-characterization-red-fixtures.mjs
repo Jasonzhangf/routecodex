@@ -10,7 +10,7 @@ const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-anthropic-
 const fixtures = [
   ['hook registration', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'use super::{', 'use super::{ compile_v3_hub_v1_static_registry,', /forbidden.*compile_v3_hub_v1_static_registry/],
   ['Gemini branch', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'V3HubEntryProtocol::Anthropic', 'V3HubEntryProtocol::Gemini', /missing V3HubEntryProtocol::Anthropic|forbidden.*Gemini/],
-  ['side-channel guard removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', '"metadata_center"', '"mc_removed"', /missing metadata_center/],
+  ['business-name guard revival', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'use super::{', 'fn reject_side_channel_fields() {}\nuse super::{', /forbidden.*reject_side_channel_fields/],
   ['provider error guard removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'MalformedProviderError', 'MalformedProviderFailure', /missing MalformedProviderError/],
   ['SSE coverage removed', 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs', 'V3HubTransportIntent::Sse', 'V3HubTransportIntent::Json', /missing V3HubTransportIntent::Sse/],
   ['shape branch helper removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'collect_v3_anthropic_request_shape_branch_semantics', 'collect_v3_anthropic_request_branch_semantics_removed', /missing collect_v3_anthropic_request_shape_branch_semantics/],

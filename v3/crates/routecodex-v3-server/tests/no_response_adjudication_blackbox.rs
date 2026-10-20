@@ -27,6 +27,450 @@ mod test_ports;
 mod fa22072_test_home;
 static TEST_LOCK: fa22072_test_home::ServerTestLock = fa22072_test_home::ServerTestLock::new();
 const KEY_ENV: &str = "V3_NO_RESPONSE_TEST_KEY";
+const RECOVERY_KEY_ENV: &str = "V3_NO_RESPONSE_RECOVERY_KEY";
+
+fn issue0ff6700_blank_final() -> Value {
+    let mut response = text_response("\n\n\n\n");
+    response["output"].as_array_mut().unwrap().insert(
+        0,
+        json!({
+            "id":"reasoning_blank_final", "type":"reasoning",
+            "summary":[{"type":"summary_text","text":"PRIVATE_THOUGHT_0FF"}]
+        }),
+    );
+    response
+}
+
+async fn issue0ff6700_run(process: &str, stream: bool, recover: bool) {
+    issue0ff6700_run_body(process, stream, recover, None).await;
+}
+
+async fn issue0ff6700_run_body(
+    process: &str,
+    stream: bool,
+    recover: bool,
+    blank_body: Option<String>,
+) {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let encode = |body: &Value| {
+        if stream {
+            response_sse(body)
+        } else {
+            body.to_string()
+        }
+    };
+    let blank = issue0ff6700_blank_final();
+    let blank_body = blank_body.unwrap_or_else(|| encode(&blank));
+    let options = EntryOptions {
+        attempt_bodies: if recover {
+            vec![blank_body.clone(), encode(&text_response("RECOVERED_0FF"))]
+        } else {
+            Vec::new()
+        },
+        auth_entries: if recover {
+            vec![
+                ("first".into(), KEY_ENV.into()),
+                ("second".into(), KEY_ENV.into()),
+            ]
+        } else {
+            Vec::new()
+        },
+        ..EntryOptions::default()
+    };
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        process,
+        StatusCode::OK,
+        if stream {
+            "text/event-stream"
+        } else {
+            "application/json"
+        },
+        blank_body,
+        options,
+    )
+    .await;
+    let response = client()
+        .post(&endpoint)
+        .json(&json!({"model":"test.test","input":"controlled blank final","stream":stream}))
+        .send()
+        .await;
+    let consumed = consume_response(response).await;
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    if !recover {
+        let base = endpoint.trim_end_matches("/v1/responses");
+        let health: Value = client()
+            .get(format!("{base}/_routecodex/health/cooldown-pool"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(
+            health["entries"].as_array().unwrap().is_empty(),
+            "last candidate must not cool: {health}"
+        );
+        let next = consume_response(
+            client()
+                .post(&endpoint)
+                .json(&json!({"model":"test.test","input":"new blank request","stream":stream}))
+                .send()
+                .await,
+        )
+        .await;
+        assert!(
+            next.transport_error.is_some(),
+            "next request must still fail detectably: {next:?}"
+        );
+        assert_eq!(
+            std::iter::from_fn(|| captures.try_recv().ok()).count(),
+            1,
+            "new request must try the same uncooled candidate once"
+        );
+    }
+    stop_entry(handle, shutdown).await;
+    std::env::remove_var(KEY_ENV);
+    assert_eq!(
+        attempts,
+        if recover { 2 } else { 1 },
+        "whole-attempt candidate count: {consumed:?}"
+    );
+    assert!(
+        !consumed.body.contains("PRIVATE_THOUGHT_0FF"),
+        "discard the complete blank attempt: {consumed:?}"
+    );
+    if recover {
+        assert!(
+            consumed.transport_error.is_none() && consumed.body.contains("RECOVERED_0FF"),
+            "next candidate must supply visible business: {consumed:?}"
+        );
+    } else {
+        assert!(
+            consumed.transport_error.is_some(),
+            "blank exhaustion cannot complete normally: {consumed:?}"
+        );
+        assert!(!consumed.body.contains("response.completed") && !consumed.body.contains("[DONE]"));
+    }
+    assert!(
+        !consumed.body.contains("provider_response_empty") && !consumed.body.contains("\"error\"")
+    );
+}
+
+#[tokio::test]
+async fn issue0ff6700_direct_json_recovers() {
+    issue0ff6700_run("direct", false, true).await;
+}
+#[tokio::test]
+async fn issue0ff6700_direct_sse_recovers() {
+    issue0ff6700_run("direct", true, true).await;
+}
+#[tokio::test]
+async fn issue0ff6700_relay_json_recovers() {
+    issue0ff6700_run("relay", false, true).await;
+}
+#[tokio::test]
+async fn issue0ff6700_relay_sse_recovers() {
+    issue0ff6700_run("relay", true, true).await;
+}
+#[tokio::test]
+async fn issue0ff6700_direct_json_exhausts() {
+    issue0ff6700_run("direct", false, false).await;
+}
+#[tokio::test]
+async fn issue0ff6700_direct_sse_exhausts() {
+    issue0ff6700_run("direct", true, false).await;
+}
+#[tokio::test]
+async fn issue0ff6700_relay_json_exhausts() {
+    issue0ff6700_run("relay", false, false).await;
+}
+#[tokio::test]
+async fn issue0ff6700_relay_sse_exhausts() {
+    issue0ff6700_run("relay", true, false).await;
+}
+
+async fn issuec1090f9_invisible_final_recovers(process: &str, stream: bool, final_text: &str) {
+    issue0ff6700_run_body(
+        process,
+        stream,
+        true,
+        Some(issuec1090f9_body(stream, final_text)),
+    )
+    .await;
+}
+
+fn issuec1090f9_body(stream: bool, final_text: &str) -> String {
+    let mut response = issue0ff6700_blank_final();
+    response["output"][1]["content"][0]["text"] = final_text.into();
+    if stream {
+        response_sse(&response)
+    } else {
+        response.to_string()
+    }
+}
+
+#[tokio::test]
+async fn issuec1090f9_direct_json_zero_width_final_recovers() {
+    issuec1090f9_invisible_final_recovers("direct", false, "\u{200b}").await;
+}
+
+#[tokio::test]
+async fn issuec1090f9_relay_sse_byte_order_mark_final_recovers() {
+    issuec1090f9_invisible_final_recovers("relay", true, "\u{feff}").await;
+}
+
+#[tokio::test]
+async fn issuec1090f9_empty_final_switches_provider_and_returns_business() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["direct", "relay"] {
+        for stream in [false, true] {
+            let first = issuec1090f9_body(stream, "\u{200b}");
+            let recovered = text_response("RECOVERED_DIFFERENT_PROVIDER_C1090F9");
+            let second = if stream {
+                response_sse(&recovered)
+            } else {
+                recovered.to_string()
+            };
+            let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+                "responses",
+                process,
+                StatusCode::OK,
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+                first.clone(),
+                EntryOptions {
+                    attempt_bodies: vec![first, second],
+                    two_provider_route: true,
+                    ..EntryOptions::default()
+                },
+            )
+            .await;
+            let consumed = consume_response(
+                client()
+                    .post(&endpoint)
+                    .json(&json!({"model":"router-test","input":"recover invisible output using another provider","stream":stream}))
+                    .send()
+                    .await,
+            )
+            .await;
+            let attempts: Vec<_> = std::iter::from_fn(|| captures.try_recv().ok()).collect();
+            stop_entry(handle, shutdown).await;
+            assert_eq!(
+                attempts.len(),
+                2,
+                "must dispatch exactly two providers: {consumed:?}"
+            );
+            assert_eq!(attempts[0]["model"], "wire-test");
+            assert_eq!(attempts[1]["model"], "wire-independent");
+            assert!(
+                consumed.transport_error.is_none(),
+                "provider recovery must complete: {process} stream={stream}: {consumed:?}"
+            );
+            assert!(consumed
+                .body
+                .contains("RECOVERED_DIFFERENT_PROVIDER_C1090F9"));
+            assert!(!consumed.body.contains("PRIVATE_THOUGHT_0FF"));
+            assert!(!consumed.body.contains("provider_response_empty"));
+            assert!(!consumed.body.contains('\u{200b}'));
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn issuec1090f9_remaining_paths_and_last_candidate() {
+    for (process, stream) in [("direct", true), ("relay", false)] {
+        issuec1090f9_invisible_final_recovers(process, stream, "\u{200e}\u{202e}\u{2060}\u{fe0f}")
+            .await;
+    }
+    for process in ["direct", "relay"] {
+        for stream in [false, true] {
+            issue0ff6700_run_body(
+                process,
+                stream,
+                false,
+                Some(issuec1090f9_body(stream, " \u{200b}\u{feff}\u{0000}\n")),
+            )
+            .await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn issuec1090f9_visible_unicode_preserves_exact_text() {
+    issuec1090f9_visible_text_preserved(
+        "中文 العربية देवनागरी e\u{0301} 👩\u{200d}💻 ☀\u{fe0f} A\u{200b}B\u{feff}C\u{202e}D",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn issuec1090f9_visible_cf_ayah_mark_preserved() {
+    issuec1090f9_visible_text_preserved("\u{06dd}").await;
+}
+
+#[tokio::test]
+async fn issuec1090f9_visible_cf_number_sign_preserved() {
+    issuec1090f9_visible_text_preserved("\u{0600}").await;
+}
+
+async fn issuec1090f9_visible_text_preserved(text: &str) {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let body = text_response(text);
+    for process in ["direct", "relay"] {
+        for stream in [false, true] {
+            let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+                "responses",
+                process,
+                StatusCode::OK,
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+                if stream {
+                    response_sse(&body)
+                } else {
+                    body.to_string()
+                },
+                EntryOptions::default(),
+            )
+            .await;
+            let consumed = consume_response(client().post(&endpoint).json(&json!({"model":"test.test","input":"controlled visible unicode","stream":stream})).send().await).await;
+            assert!(consumed.transport_error.is_none(), "visible business must survive: {process} stream={stream} text={text:?}: {consumed:?}");
+            let received: Value = if stream {
+                consumed
+                    .body
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("data: "))
+                    .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+                    .find(|event| event["type"] == "response.completed")
+                    .expect("legal terminal")["response"]
+                    .clone()
+            } else {
+                serde_json::from_str(&consumed.body).unwrap()
+            };
+            assert_eq!(
+                received["output"][0]["content"][0]["text"], text,
+                "{process} stream={stream} must preserve every scalar"
+            );
+            assert_eq!(std::iter::from_fn(|| captures.try_recv().ok()).count(), 1);
+            stop_entry(handle, shutdown).await;
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+fn issue0ff6700_fragmented_blank() -> String {
+    let response = issue0ff6700_blank_final();
+    format!(
+        "{}{}{}{}{}",
+        sse(
+            "response.output_item.done",
+            &json!({"type":"response.output_item.done","output_index":0,"item":response["output"][0]})
+        ),
+        sse(
+            "response.output_item.added",
+            &json!({"type":"response.output_item.added","output_index":1,"item":{"id":"blank_message","type":"message","role":"assistant","content":[]}})
+        ),
+        sse(
+            "response.output_text.delta",
+            &json!({"type":"response.output_text.delta","item_id":"blank_message","output_index":1,"content_index":0,"delta":"\n\n\n\n"})
+        ),
+        sse(
+            "response.output_text.done",
+            &json!({"type":"response.output_text.done","item_id":"blank_message","output_index":1,"content_index":0,"text":"\n\n\n\n"})
+        ),
+        response_sse(
+            &json!({"id":"fragmented_blank","object":"response","status":"completed","output":[]})
+        )
+    )
+}
+
+#[tokio::test]
+async fn issue0ff6700_direct_fragmented_blank_recovers() {
+    issue0ff6700_run_body("direct", true, true, Some(issue0ff6700_fragmented_blank())).await;
+}
+#[tokio::test]
+async fn issue0ff6700_relay_fragmented_blank_recovers() {
+    issue0ff6700_run_body("relay", true, true, Some(issue0ff6700_fragmented_blank())).await;
+}
+
+#[tokio::test]
+async fn issue0ff6700_independent_business_controls_survive() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let blank = issue0ff6700_blank_final();
+    let mut reasoning = blank.clone();
+    reasoning["output"].as_array_mut().unwrap().pop();
+    let mut tool = blank.clone();
+    tool["output"].as_array_mut().unwrap().push(json!({"type":"function_call","id":"tool_0ff","call_id":"call_0ff","name":"lookup","arguments":"{invalid model arguments"}));
+    let mut refusal = blank.clone();
+    refusal["output"][1]["content"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"type":"refusal","refusal":"declined"}));
+    let mut filtered = blank.clone();
+    filtered["status"] = json!("incomplete");
+    filtered["incomplete_details"] = json!({"reason":"content_filter"});
+    let mut opaque = blank.clone();
+    opaque["output"].as_array_mut().unwrap().push(json!({"type":"mcp_call","id":"opaque_0ff","server_label":"opaque","name":"lookup","arguments":"{}","output":"done","status":"completed","vendor_payload":{"ok":true}}));
+    for process in ["direct", "relay"] {
+        for stream in [false, true] {
+            for response in [
+                &reasoning,
+                &tool,
+                &refusal,
+                &filtered,
+                &opaque,
+                &text_response("visible answer"),
+            ] {
+                let body = if stream {
+                    response_sse(response)
+                } else {
+                    response.to_string()
+                };
+                let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+                    "responses",
+                    process,
+                    StatusCode::OK,
+                    if stream {
+                        "text/event-stream"
+                    } else {
+                        "application/json"
+                    },
+                    body,
+                    EntryOptions::default(),
+                )
+                .await;
+                let consumed = consume_response(client().post(&endpoint).json(&json!({"model":"test.test","input":"controlled business","stream":stream})).send().await).await;
+                let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+                stop_entry(handle, shutdown).await;
+                assert_eq!(attempts, 1);
+                assert!(
+                    consumed.transport_error.is_none(),
+                    "{process} stream={stream} control={response}: {consumed:?}"
+                );
+                assert!(!consumed.body.contains("provider_response_empty"));
+                if response == &opaque {
+                    assert!(
+                        consumed.body.contains("opaque_0ff")
+                            && consumed.body.contains("vendor_payload"),
+                        "independent opaque business must survive: {consumed:?}"
+                    );
+                }
+            }
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
 
 struct ProviderState {
     kind: String,
@@ -455,6 +899,349 @@ async fn anthropic_relay_empty_attempt_reselects_healthy_within_target_candidate
     std::env::remove_var(KEY_ENV);
 }
 
+/// 5338ac6: the first complete attempt becomes empty only after memory stripping.
+/// A legal closeout must not commit that attempt instead of trying the next key.
+#[tokio::test]
+async fn direct_sse_memory_only_reselects_before_client_commit() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let options = EntryOptions {
+        memory_project_root: Some(
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("capture"),
+        ),
+        attempt_bodies: vec![
+            format!(
+                "{}data: [DONE]\n\n",
+                response_sse(&text_response(r#"{"memory":{"entries":[]}}"#))
+            ),
+            response_sse(&text_response("Recovered visible answer.")),
+        ],
+        auth_entries: vec![
+            ("first".into(), KEY_ENV.into()),
+            ("second".into(), KEY_ENV.into()),
+        ],
+        ..EntryOptions::default()
+    };
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "text/event-stream",
+        String::new(),
+        options,
+    )
+    .await;
+    let consumed = consume_response(post_request(&client(), &endpoint, "test.test").await).await;
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).collect::<Vec<_>>();
+    stop_entry(handle, shutdown).await;
+    assert!(
+        consumed.body.contains("Recovered visible answer."),
+        "post-rewrite empty attempt must recover: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "recovered transport must complete: {consumed:?}"
+    );
+    assert_eq!(attempts.len(), 2, "must try the second eligible candidate");
+    assert!(attempts
+        .iter()
+        .all(|request| request["model"] == "wire-test"));
+    assert!(
+        !consumed.body.contains("\"memory\"") && !consumed.body.contains("provider_response_empty"),
+        "internal content must not reach client: {consumed:?}"
+    );
+    std::env::remove_var(KEY_ENV);
+}
+
+/// 5338ac6: terminal/EOF without legal closeout must also recheck after stripping.
+#[tokio::test]
+async fn direct_sse_memory_only_exhaustion_interrupts_transport() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let options = EntryOptions {
+        memory_project_root: Some(
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("capture"),
+        ),
+        ..EntryOptions::default()
+    };
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "text/event-stream",
+        response_sse(&text_response(r#"{"memory":{"entries":[]}}"#)),
+        options,
+    )
+    .await;
+    let consumed = consume_response(post_request(&client(), &endpoint, "test.test").await).await;
+    assert_one_attempt(&mut captures, "wire-test").await;
+    stop_entry(handle, shutdown).await;
+    assert!(
+        consumed.transport_error.is_some(),
+        "memory-only exhaustion must interrupt transport: {consumed:?}"
+    );
+    assert!(
+        !consumed.body.contains("response.completed") && !consumed.body.contains("[DONE]"),
+        "must not deliver normal empty completion: {consumed:?}"
+    );
+    assert!(
+        !consumed.body.contains("\"error\"")
+            && !consumed.body.contains("provider_response_empty")
+            && !consumed.body.contains("502"),
+        "internal errors must not reach client: {consumed:?}"
+    );
+    std::env::remove_var(KEY_ENV);
+}
+
+/// 5338ac6: stripping non-client text must preserve every other business carrier.
+#[tokio::test]
+async fn direct_sse_memory_rewrite_preserves_business_results() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let envelope = r#"{"memory":{"entries":[]}}"#;
+    let cases = [
+        ("text", None, "Visible answer."),
+        (
+            "tool",
+            Some(
+                json!({"type":"function_call","id":"fc_memory","call_id":"call_memory","name":"lookup","arguments":"{invalid"}),
+            ),
+            "call_memory",
+        ),
+        (
+            "reasoning",
+            Some(
+                json!({"type":"reasoning","id":"rs_memory","summary":[{"type":"summary_text","text":"Preserved reasoning."}]}),
+            ),
+            "Preserved reasoning.",
+        ),
+        (
+            "refusal",
+            Some(
+                json!({"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"Preserved refusal."}]}),
+            ),
+            "Preserved refusal.",
+        ),
+        ("filter", None, "content_filter"),
+    ];
+    for (kind, extra, expected) in cases {
+        let text = if kind == "text" {
+            format!("Visible answer. {envelope}")
+        } else {
+            envelope.into()
+        };
+        let mut response = text_response(&text);
+        let mut prior_business = String::new();
+        if let Some(extra) = extra {
+            if kind == "tool" {
+                // Whole-attempt admission must preserve earlier tool output
+                // even when the terminal snapshot contains only memory text.
+                prior_business = sse(
+                    "response.output_item.done",
+                    &json!({"type":"response.output_item.done","output_index":1,"item":extra}),
+                );
+            } else {
+                response["output"].as_array_mut().unwrap().push(extra);
+            }
+        }
+        let wire = if kind == "filter" {
+            response["status"] = json!("incomplete");
+            response["incomplete_details"] = json!({"reason":"content_filter"});
+            response["output"] = json!([]);
+            // Incomplete terminals do not request memory capture; the filter
+            // outcome itself remains a deliverable result with no text.
+            response_sse(&response)
+        } else {
+            format!("{prior_business}{}", response_sse(&response))
+        };
+        let options = EntryOptions {
+            memory_project_root: Some(
+                std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("capture"),
+            ),
+            ..EntryOptions::default()
+        };
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            "direct",
+            StatusCode::OK,
+            "text/event-stream",
+            wire,
+            options,
+        )
+        .await;
+        let consumed =
+            consume_response(post_request(&client(), &endpoint, "test.test").await).await;
+        assert_one_attempt(&mut captures, "wire-test").await;
+        stop_entry(handle, shutdown).await;
+        assert!(
+            consumed.transport_error.is_none(),
+            "{kind} must remain deliverable: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains(expected),
+            "{kind} business result lost: {consumed:?}"
+        );
+        assert!(
+            !consumed.body.contains("\\\"memory\\\""),
+            "internal memory leaked in {kind}: {consumed:?}"
+        );
+        if kind == "tool" {
+            assert!(
+                consumed.body.contains("{invalid"),
+                "opaque model arguments must pass"
+            );
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Normal Responses SSE snapshots that carry only the declared memory
+/// envelope. The whole-attempt judgment must strip these carriers exactly like
+/// the terminal snapshot so an internal memory unit cannot authorize client
+/// completion.
+fn responses_memory_item_part_sequence(envelope: &str) -> String {
+    let item = json!({
+        "id":"msg_memory_item_guard",
+        "type":"message",
+        "role":"assistant",
+        "status":"completed",
+        "content":[{"type":"output_text","text":envelope,"annotations":[]}]
+    });
+    let part = json!({"type":"output_text","text":envelope,"annotations":[]});
+    format!(
+        "{}{}{}{}{}{}{}",
+        sse(
+            "response.output_item.added",
+            &json!({"type":"response.output_item.added","output_index":0,"item":item.clone()})
+        ),
+        sse(
+            "response.content_part.added",
+            &json!({"type":"response.content_part.added","output_index":0,"content_index":0,
+                "part":part.clone()})
+        ),
+        sse(
+            "response.output_text.delta",
+            &json!({"type":"response.output_text.delta","output_index":0,"content_index":0,
+                "delta":envelope})
+        ),
+        sse(
+            "response.output_text.done",
+            &json!({"type":"response.output_text.done","output_index":0,"content_index":0,
+                "text":envelope})
+        ),
+        sse(
+            "response.content_part.done",
+            &json!({"type":"response.content_part.done","output_index":0,"content_index":0,
+                "part":part})
+        ),
+        sse(
+            "response.output_item.done",
+            &json!({"type":"response.output_item.done","output_index":0,"item":item})
+        ),
+        response_sse(&text_response(envelope)),
+    )
+}
+
+/// P1A: memory carried only in normal output_item/content_part snapshots must
+/// be stripped before whole-attempt adjudication, at both the legal-closeout
+/// and terminal/EOF seal exits. A memory-only attempt must reselect or
+/// detectably exhaust, and it must never leak the envelope or deliver a normal
+/// empty completion.
+#[tokio::test]
+async fn direct_sse_memory_item_part_sequences_never_authorize_completion() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let envelope = r#"{"memory":{"entries":[]}}"#;
+    let memory_sequence = responses_memory_item_part_sequence(envelope);
+    for (exit, closeout, recover) in [
+        ("legal_closeout", true, true),
+        ("legal_closeout", true, false),
+        ("terminal_eof", false, true),
+        ("terminal_eof", false, false),
+    ] {
+        let memory_wire = if closeout {
+            format!("{memory_sequence}data: [DONE]\n\n")
+        } else {
+            memory_sequence.clone()
+        };
+        let memory_root =
+            std::env::temp_dir().join(format!("rcc-memory-item-part-{exit}-{recover}"));
+        let options = EntryOptions {
+            memory_project_root: Some(memory_root.clone()),
+            attempt_bodies: if recover {
+                vec![
+                    memory_wire.clone(),
+                    response_sse(&text_response("Recovered visible answer.")),
+                ]
+            } else {
+                Vec::new()
+            },
+            auth_entries: if recover {
+                vec![
+                    ("first".into(), KEY_ENV.into()),
+                    ("second".into(), KEY_ENV.into()),
+                ]
+            } else {
+                Vec::new()
+            },
+            ..EntryOptions::default()
+        };
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            "direct",
+            StatusCode::OK,
+            "text/event-stream",
+            if recover { String::new() } else { memory_wire },
+            options,
+        )
+        .await;
+        let consumed =
+            consume_response(post_request(&client(), &endpoint, "test.test").await).await;
+        if recover {
+            let attempts = std::iter::from_fn(|| captures.try_recv().ok()).collect::<Vec<_>>();
+            stop_entry(handle, shutdown).await;
+            assert!(
+                consumed.body.contains("Recovered visible answer."),
+                "{exit}: memory-only attempt must reselect: {consumed:?}"
+            );
+            assert!(
+                consumed.transport_error.is_none(),
+                "{exit}: recovered transport must complete: {consumed:?}"
+            );
+            assert_eq!(
+                attempts.len(),
+                2,
+                "{exit}: second eligible candidate must be tried"
+            );
+            assert!(
+                !consumed.body.contains("msg_memory_item_guard"),
+                "{exit}: memory-only attempt must not commit: {consumed:?}"
+            );
+        } else {
+            assert_one_attempt(&mut captures, "wire-test").await;
+            stop_entry(handle, shutdown).await;
+            assert!(
+                consumed.transport_error.is_some(),
+                "{exit}: memory-only exhaustion must interrupt transport: {consumed:?}"
+            );
+            assert!(
+                !consumed.body.contains("response.completed") && !consumed.body.contains("[DONE]"),
+                "{exit}: must not deliver a normal empty completion: {consumed:?}"
+            );
+        }
+        assert!(
+            !consumed.body.contains("\"memory\"") && !consumed.body.contains("\"entries\""),
+            "{exit}: internal memory must not reach client: {consumed:?}"
+        );
+        assert!(
+            !consumed.body.contains("provider_response_empty") && !consumed.body.contains("502"),
+            "{exit}: internal error must not reach client: {consumed:?}"
+        );
+        let _ = std::fs::remove_dir_all(&memory_root);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 /// A tool-only Anthropic terminal has no text but still carries business
 /// content. It must remain a normal completion and must not be classified as
 /// the empty attempt above.
@@ -494,6 +1281,134 @@ async fn anthropic_relay_tool_only_terminal_stays_deliverable() {
     assert!(
         body.contains("guard"),
         "tool-only arguments must survive: {body}"
+    );
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Read the projected Responses payload at the public client boundary, whether
+/// the fixture returned compact JSON or an SSE stream.
+fn client_responses_payload(body: &str) -> Value {
+    if let Some(response) = events(body).iter().find_map(|event| {
+        matches!(
+            event["type"].as_str(),
+            Some("response.completed" | "response.done" | "response.incomplete")
+        )
+        .then(|| event["response"].clone())
+    }) {
+        return response;
+    }
+    serde_json::from_str(body)
+        .unwrap_or_else(|error| panic!("client body must be Responses payload: {error}: {body}"))
+}
+
+/// P1B: the Anthropic→Responses normalization owner must preserve ordinary
+/// opaque root business fields that expanded admission now allows, while
+/// consuming only the explicitly mapped Anthropic message fields. The tool
+/// identity and the matched prior history stay intact at the same public
+/// cross-protocol boundary.
+#[tokio::test]
+async fn anthropic_json_business_root_fields_survive_responses_client_projection() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let provider_body = json!({
+        "id":"msg_business_opaque","type":"message","role":"assistant","model":"wire-test",
+        "content":[
+            {"type":"text","text":"opaque business result"},
+            {"type":"tool_use","id":"toolu_opaque","name":"lookup","input":{"q":"opaque"}}
+        ],
+        "stop_reason":"tool_use","stop_sequence":null,
+        "usage":{"input_tokens":5,"output_tokens":4},
+        "metadata_center":{"business":"kept"},
+        "requiredCapabilities":["alpha","beta"],
+        "routecodex_internal":{"nested":{"list":[1,2,3]}}
+    })
+    .to_string();
+    let request = json!({
+        "model":"test.test","stream":false,
+        "input":[
+            {"type":"message","role":"user","content":"run the opaque check"},
+            {"type":"function_call","call_id":"call_history","name":"lookup",
+                "arguments":"{\"q\":\"history\"}"},
+            {"type":"function_call_output","call_id":"call_history","output":"history result"}
+        ]
+    });
+    let (endpoint, handle, mut captures, shutdown) = start_entry(
+        "anthropic",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        provider_body,
+    )
+    .await;
+    let (_, client_body) =
+        successful_transfer(client().post(&endpoint).json(&request).send().await).await;
+    let captured = tokio::time::timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("real upstream attempt")
+        .unwrap();
+    assert!(
+        matches!(
+            captures.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+        ),
+        "exactly one upstream attempt"
+    );
+    stop_entry(handle, shutdown).await;
+
+    // History protection: the matched tool result survives request projection.
+    let history = captured["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|part| part["type"] == "tool_result")
+        .unwrap_or_else(|| panic!("history tool_result missing: {captured}"));
+    assert_eq!(history["tool_use_id"], "call_history", "{captured}");
+
+    // Client boundary: complete opaque values survive; Anthropic source fields
+    // are consumed instead of leaking into the Responses payload.
+    let response = client_responses_payload(&client_body);
+    assert_eq!(
+        response["metadata_center"],
+        json!({"business":"kept"}),
+        "{response}"
+    );
+    assert_eq!(
+        response["requiredCapabilities"],
+        json!(["alpha", "beta"]),
+        "{response}"
+    );
+    assert_eq!(
+        response["routecodex_internal"],
+        json!({"nested":{"list":[1,2,3]}}),
+        "{response}"
+    );
+    assert_eq!(response["object"], "response", "{response}");
+    assert!(
+        response.get("content").is_none(),
+        "Anthropic content must not leak: {response}"
+    );
+    assert!(
+        response.get("stop_reason").is_none(),
+        "Anthropic stop_reason must not leak: {response}"
+    );
+    assert!(
+        response.get("type").is_none(),
+        "Anthropic message type must not leak: {response}"
+    );
+    let output = response["output"]
+        .as_array()
+        .unwrap_or_else(|| panic!("output array missing: {response}"));
+    let call = output
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .unwrap_or_else(|| panic!("function_call missing: {response}"));
+    assert_eq!(call["call_id"], "toolu_opaque", "{response}");
+    assert_eq!(call["name"], "lookup", "{response}");
+    assert_eq!(call["arguments"], "{\"q\":\"opaque\"}", "{response}");
+    assert!(
+        response.to_string().contains("opaque business result"),
+        "visible provider text must survive: {response}"
     );
     std::env::remove_var(KEY_ENV);
 }
@@ -2524,6 +3439,7 @@ async fn consume_response(result: Result<reqwest::Response, reqwest::Error>) -> 
 
 #[derive(Default)]
 struct EntryOptions {
+    memory_project_root: Option<std::path::PathBuf>,
     health_enabled: bool,
     mixed: Option<MixedRoundtrip>,
     attempt_bodies: Vec<String>,
@@ -2532,6 +3448,7 @@ struct EntryOptions {
     capture_headers: bool,
     wire_model: Option<String>,
     live_forward: Option<LiveForward>,
+    two_provider_route: bool,
 }
 
 async fn start_entry(
@@ -2631,6 +3548,7 @@ async fn start_entry_configured(
     oneshot::Sender<()>,
 ) {
     let EntryOptions {
+        memory_project_root,
         health_enabled,
         attempt_bodies,
         auth_entries,
@@ -2639,6 +3557,7 @@ async fn start_entry_configured(
         mixed,
         wire_model,
         live_forward,
+        two_provider_route,
     } = options;
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -2749,6 +3668,25 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test"{target_
     );
     let mut manifest =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    if two_provider_route {
+        let pool = manifest
+            .route_groups
+            .get_mut("default")
+            .unwrap()
+            .pools
+            .get_mut("default")
+            .unwrap();
+        pool.targets[0].priority = Some(10);
+        let mut second = pool.targets[0].clone();
+        second.provider = Some("independent".into());
+        second.key = Some("key".into());
+        second.priority = Some(1);
+        pool.targets.push(second);
+    }
+    if let Some(root) = memory_project_root {
+        manifest.memory_raw_capture.enabled = true;
+        manifest.memory_raw_capture.project_root = root;
+    }
     if let Ok(path) = std::env::var("V3_NO_RESPONSE_TEST_LOG_FILE") {
         manifest.debug.log_file = Some(path);
         manifest.debug.log_console = true;
@@ -6560,5 +7498,337 @@ async fn genuine_http_and_native_sse_errors_break_transport_without_client_error
             );
         }
     }
+    std::env::remove_var(KEY_ENV);
+}
+
+// --- Recovery / exhaustion public entry for unharvestable tool markup ---
+
+/// The public client request declares `exec_command` as a function tool with a
+/// string `cmd` parameter. The Response Direct composition resolves an
+/// attempted invocation only from declarations the request actually carried.
+fn exec_command_tools() -> Value {
+    json!([{
+        "type": "function",
+        "name": "exec_command",
+        "description": "Run one bounded command.",
+        "parameters": {
+            "type": "object",
+            "properties": {"cmd": {"type": "string"}},
+            "required": ["cmd"]
+        }
+    }])
+}
+
+async fn post_exec_command_request(
+    client: &reqwest::Client,
+    endpoint: &str,
+    model: &str,
+) -> Result<reqwest::Response, reqwest::Error> {
+    client
+        .post(endpoint)
+        .json(&json!({
+            "model": model,
+            "input": "controlled unharvestable tool markup regression",
+            "stream": true,
+            "tools": exec_command_tools()
+        }))
+        .send()
+        .await
+}
+
+/// Build one controlled provider attempt. JSON is a complete response object.
+/// SSE with `closeout` uses the legal-closeout seal; without it the attempts
+/// end at the terminal/EOF seal.
+fn attempt_wire(content_type: &str, text: &str, closeout: bool) -> String {
+    if content_type == "application/json" {
+        text_response(text).to_string()
+    } else if closeout {
+        format!("{}data: [DONE]\n\n", response_sse(&text_response(text)))
+    } else {
+        response_sse(&text_response(text))
+    }
+}
+
+fn assert_provider_declares_exec_command(request: &Value) {
+    assert_eq!(request["model"], "wire-test", "{request}");
+    let tools = request["tools"]
+        .as_array()
+        .expect("provider-bound Responses request must carry tools");
+    let tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "exec_command")
+        .unwrap_or_else(|| panic!("exec_command declaration must reach the provider: {request}"));
+    assert_eq!(tool["type"], "function", "{request}");
+    assert_eq!(
+        tool["parameters"]["properties"]["cmd"]["type"], "string",
+        "{request}"
+    );
+}
+
+async fn recv_attempt(captures: &mut mpsc::UnboundedReceiver<Value>) -> Value {
+    tokio::time::timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("provider attempt within timeout")
+        .expect("provider attempt captured")
+}
+
+fn assert_no_error_payload(body: &str) {
+    for forbidden in [
+        "\"error\"",
+        "event: error",
+        "response.failed",
+        "response.error",
+        "network_error",
+        "provider_response_empty",
+        "500-211",
+        "internal_599",
+        "\"502\"",
+    ] {
+        assert!(
+            !body.contains(forbidden),
+            "client must not receive {forbidden:?}: {body}"
+        );
+    }
+}
+
+/// A recovered attempt must deliver no native tool item and no attempted tool
+/// text. Request declarations echoed in a response envelope are not business
+/// output, so only delivered items, deltas, and text parts are inspected.
+fn assert_no_native_or_attempted_tool(body: &str) {
+    for event in events(body) {
+        let null = Value::Null;
+        let first_output = event["response"]["output"]
+            .as_array()
+            .and_then(|items| items.first())
+            .unwrap_or(&null);
+        for item in [&event["item"], first_output] {
+            assert_ne!(
+                item["type"], "function_call",
+                "native call delivered: {event}"
+            );
+            assert_ne!(
+                item["type"], "custom_tool_call",
+                "native call delivered: {event}"
+            );
+            assert_ne!(
+                item["name"], "exec_command",
+                "attempted tool delivered: {event}"
+            );
+        }
+        let text = event["delta"]["text"]
+            .as_str()
+            .or_else(|| event["delta"].as_str())
+            .or_else(|| event["text"].as_str())
+            .or_else(|| event["item"]["content"][0]["text"].as_str())
+            .unwrap_or_default();
+        assert!(
+            !text.contains("exec_command") && !text.contains("<|DSML|"),
+            "attempted tool markup leaked into business text: {event}"
+        );
+    }
+}
+
+/// Two eligible candidates: the first returns `first_text`, the second returns
+/// `recovered_text`. The client must see only the second business text, in JSON
+/// and SSE upstream form, after exactly two attempts on distinct keys.
+async fn assert_direct_recovery(
+    first_text: &str,
+    recovered_text: &str,
+    forbidden: &[&str],
+    red_id: &str,
+) {
+    std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret-b");
+    for (content_type, closeout) in [("application/json", false), ("text/event-stream", true)] {
+        let options = EntryOptions {
+            attempt_bodies: vec![
+                attempt_wire(content_type, first_text, closeout),
+                attempt_wire(content_type, recovered_text, closeout),
+            ],
+            auth_entries: vec![
+                ("first-key".to_string(), KEY_ENV.to_string()),
+                ("second-key".to_string(), RECOVERY_KEY_ENV.to_string()),
+            ],
+            capture_headers: true,
+            ..EntryOptions::default()
+        };
+        let (endpoint, handle, mut captures, headers, shutdown) = start_entry_configured(
+            "responses",
+            "direct",
+            StatusCode::OK,
+            content_type,
+            String::new(),
+            options,
+        )
+        .await;
+        let mut headers = headers.expect("recovery fixture must capture provider auth headers");
+        let consumed =
+            consume_response(post_exec_command_request(&client(), &endpoint, "test.test").await)
+                .await;
+        let first = recv_attempt(&mut captures).await;
+        let second = recv_attempt(&mut captures).await;
+        let third = captures.try_recv().ok();
+        let first_auth = headers.try_recv().expect("first candidate auth captured");
+        let second_auth = headers.try_recv().expect("second candidate auth captured");
+        stop_entry(handle, shutdown).await;
+
+        assert_provider_declares_exec_command(&first);
+        assert_provider_declares_exec_command(&second);
+        assert!(
+            third.is_none(),
+            "{red_id} {content_type}: exactly two eligible attempts: {third:?}"
+        );
+        assert_ne!(
+            first_auth, second_auth,
+            "{red_id} {content_type}: the second attempt must use the next eligible key"
+        );
+        assert!(
+            consumed.transport_error.is_none(),
+            "{red_id} {content_type}: recovered transport must complete: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains(recovered_text),
+            "{red_id} {content_type}: second candidate business text must reach the client: {consumed:?}"
+        );
+        for marker in forbidden {
+            assert!(
+                !consumed.body.contains(*marker),
+                "{red_id} {content_type}: first attempt content {marker:?} must not reach the client: {consumed:?}"
+            );
+        }
+        assert_no_native_or_attempted_tool(&consumed.body);
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(RECOVERY_KEY_ENV);
+}
+
+/// Stable RED public ID (JSON + SSE upstream): recognized unharvestable tool
+/// markup beside surviving prose rejects the whole first attempt. The next
+/// eligible candidate supplies business text. The first attempt's prose,
+/// marker, or native call must never reach the client.
+#[tokio::test]
+async fn responses_direct_unharvestable_tool_markup_recovers_json_and_sse() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    const MARKUP: &str = "must-never-be-delivered\n<|DSML|tool_calls>\n<|exec_command\">";
+    assert_direct_recovery(
+        MARKUP,
+        "faithful recovery answer",
+        &[
+            "must-never-be-delivered",
+            "<|DSML|tool_calls>",
+            "<|exec_command",
+        ],
+        "responses_direct_unharvestable_tool_markup_recovers_json_and_sse",
+    )
+    .await;
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable RED public ID (JSON + SSE upstream): a sole recognized tool label
+/// leaves no business content after normalization, so the existing internal
+/// `provider_response_empty` recovery must select the next candidate. The
+/// label and every internal error marker stay out of the client response.
+#[tokio::test]
+async fn responses_direct_sole_dsml_label_recovers_empty_attempt_json_and_sse() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    assert_direct_recovery(
+        "<|DSML|tool_calls>",
+        "label recovery answer",
+        &["<|DSML|tool_calls>"],
+        "responses_direct_sole_dsml_label_recovers_empty_attempt_json_and_sse",
+    )
+    .await;
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable RED public ID (JSON + SSE upstream): when every eligible candidate
+/// returns the same unharvestable tool markup, the request ends in a finite
+/// detectable transport termination. No marker, error payload, client error
+/// number, or normal empty completion may reach the client, and independent
+/// traffic on the same listener still succeeds.
+#[tokio::test]
+async fn responses_direct_unharvestable_tool_markup_exhaustion_json_and_sse() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret-b");
+    const MARKUP: &str = "must-never-be-delivered\n<|DSML|tool_calls>\n<|exec_command\">";
+    for (content_type, closeout) in [("application/json", false), ("text/event-stream", false)] {
+        let options = EntryOptions {
+            auth_entries: vec![
+                ("first-key".to_string(), KEY_ENV.to_string()),
+                ("second-key".to_string(), RECOVERY_KEY_ENV.to_string()),
+            ],
+            capture_headers: true,
+            ..EntryOptions::default()
+        };
+        let (endpoint, handle, mut captures, headers, shutdown) = start_entry_configured(
+            "responses",
+            "direct",
+            StatusCode::OK,
+            content_type,
+            attempt_wire(content_type, MARKUP, closeout),
+            options,
+        )
+        .await;
+        let mut headers = headers.expect("exhaustion fixture must capture provider auth headers");
+        let consumed =
+            consume_response(post_exec_command_request(&client(), &endpoint, "test.test").await)
+                .await;
+        let first = recv_attempt(&mut captures).await;
+        let second = recv_attempt(&mut captures).await;
+        let extra = captures.try_recv().ok();
+        let first_auth = headers.try_recv().expect("first candidate auth captured");
+        let second_auth = headers.try_recv().expect("second candidate auth captured");
+        assert_provider_declares_exec_command(&first);
+        assert_provider_declares_exec_command(&second);
+        assert!(
+            extra.is_none(),
+            "{content_type}: finite attempts, no repeated failed candidate: {extra:?}"
+        );
+        assert_ne!(
+            first_auth, second_auth,
+            "{content_type}: each candidate identity is attempted once"
+        );
+        assert!(
+            consumed.transport_error.is_some(),
+            "{content_type}: exhaustion must terminate the client transport: {consumed:?}"
+        );
+        assert!(
+            consumed.status.is_none() || consumed.status == Some(StatusCode::OK),
+            "{content_type}: no client HTTP error number: {consumed:?}"
+        );
+        assert!(
+            !consumed.body.contains("must-never-be-delivered")
+                && !consumed.body.contains("<|DSML|tool_calls>")
+                && !consumed.body.contains("<|exec_command")
+                && !consumed.body.contains("exec_command")
+                && !consumed.body.contains("function_call")
+                && !consumed.body.contains("custom_tool_call"),
+            "{content_type}: failed attempt content must not reach the client: {consumed:?}"
+        );
+        assert!(
+            !consumed.body.contains("response.completed") && !consumed.body.contains("[DONE]"),
+            "{content_type}: no normal empty completion may be delivered: {consumed:?}"
+        );
+        assert_no_error_payload(&consumed.body);
+
+        // The listener and an unrelated pinned identity remain healthy after
+        // the exhausted request.
+        let independent =
+            successful_body(post_request(&client(), &endpoint, "independent.test").await).await;
+        assert_one_attempt(&mut captures, "wire-independent").await;
+        let payloads = events(&independent);
+        let terminal = payloads
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .expect("independent request completes after exhaustion");
+        assert_eq!(
+            terminal["response"]["output"],
+            text_response("independent ok")["output"]
+        );
+        stop_entry(handle, shutdown).await;
+    }
+    std::env::remove_var(RECOVERY_KEY_ENV);
     std::env::remove_var(KEY_ENV);
 }
