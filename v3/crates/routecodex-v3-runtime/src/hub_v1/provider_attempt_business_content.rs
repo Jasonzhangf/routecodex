@@ -1,8 +1,14 @@
 use serde_json::Value;
+use std::sync::LazyLock;
 
 use super::provider_sse_json_codec::has_non_empty_string;
 use super::V3HubProviderWireProtocol;
 use futures_util::StreamExt;
+
+static VISIBLE_TEXT_PATTERN: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"[^\p{White_Space}\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]")
+        .expect("visible-text Unicode property expression must compile")
+});
 
 pub(super) fn observe_v3_provider_sse(
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
@@ -312,7 +318,7 @@ impl V3ProviderAttemptBusinessContent {
             // An empty carrier may be a reasoning-only or stripped-memory
             // placeholder. Actual whitespace characters establish a blank final.
             self.explicit_text |= !text.is_empty();
-            self.visible_text |= !text.trim().is_empty();
+            self.visible_text |= VISIBLE_TEXT_PATTERN.is_match(text);
         } else if value.is_some_and(|value| !value.is_null()) {
             // Representable structured model content stays opaque business.
             self.independent_result = true;

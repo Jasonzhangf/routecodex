@@ -458,9 +458,36 @@
         "version": 1
       },
       "version": 17
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "不接受文本泄露，不接受静默失败，错误就重试，不接受这两者，所以你快点搞，一直出现文本泄露和静默失败，一个解决了重建重启，再解决另外一个，然后 review 架构后 mege 到 main\n就是最近routecodex，你排查下空响应，或者是无法显示的字符响应",
+          "role": "user",
+          "source": "Explicit user instructions in current RouteCodex chat on 2026-10-20. Canonical issue c1090f9. Historical invisible-only provider output has not been confirmed; controlled public-entry reproduction must establish the defect independently."
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261020-invisible-response-recovery",
+        "requirement_id": "routecodex-invisible-assistant-final-recovery",
+        "text": "扩展既有显式空白 assistant final 恢复契约：完整 provider attempt 的显式 final 如果只有空白及本身不可显示的格式/控制字符、没有可显示正文或独立可交付业务结果，应按空白 final 丢弃整次响应，进入既有 typed Error 重试/切换 eligible provider 的路径。不能把这些字符当作正常可见完成，也不能向客户端投影内部错误或伪造空成功。\n\n判断必须在完整 attempt 聚合后进行。正常多语言文本、具有可显示基字符的 emoji/组合文字及其中的连接符、变体选择符、有效工具调用、refusal、content_filter 等保留现有语义；不根据自然语言的计划性措辞或任务是否看似完成而拒绝模型业务内容。没有显式 final 的纯 reasoning 规则不因本条自动改变。耗尽候选沿已声明终止政策处理，不引入无限重试或新的健康副作用。\n\n本条不把没有命中的历史不可见字符样本写成已确认根因；必须用真实公开入口红测与相同入口绿测证明具体漏口，再构建安装重启验收。MiniMax 收割与本项分别运行验收后，按用户顺序进行整体架构 review 与 main 集成。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "不接受文本泄露，不接受静默失败，错误就重试，不接受这两者，所以你快点搞，一直出现文本泄露和静默失败，一个解决了重建重启，再解决另外一个，然后 review 架构后 mege 到 main\n就是最近routecodex，你排查下空响应，或者是无法显示的字符响应",
+          "role": "user",
+          "source": "Explicit user instructions in current RouteCodex chat on 2026-10-20. Canonical issue c1090f9. Historical invisible-only provider output has not been confirmed; controlled public-entry reproduction must establish the defect independently."
+        },
+        "requirement_id": "routecodex-invisible-assistant-final-recovery",
+        "status": "active",
+        "text": "扩展既有显式空白 assistant final 恢复契约：完整 provider attempt 的显式 final 如果只有空白及本身不可显示的格式/控制字符、没有可显示正文或独立可交付业务结果，应按空白 final 丢弃整次响应，进入既有 typed Error 重试/切换 eligible provider 的路径。不能把这些字符当作正常可见完成，也不能向客户端投影内部错误或伪造空成功。\n\n判断必须在完整 attempt 聚合后进行。正常多语言文本、具有可显示基字符的 emoji/组合文字及其中的连接符、变体选择符、有效工具调用、refusal、content_filter 等保留现有语义；不根据自然语言的计划性措辞或任务是否看似完成而拒绝模型业务内容。没有显式 final 的纯 reasoning 规则不因本条自动改变。耗尽候选沿已声明终止政策处理，不引入无限重试或新的健康副作用。\n\n本条不把没有命中的历史不可见字符样本写成已确认根因；必须用真实公开入口红测与相同入口绿测证明具体漏口，再构建安装重启验收。MiniMax 收割与本项分别运行验收后，按用户顺序进行整体架构 review 与 main 集成。",
+        "version": 1
+      },
+      "version": 18
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 17
+  "version": 18
 }
