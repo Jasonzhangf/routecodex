@@ -25,6 +25,8 @@ pub enum V3InternalErrorCode {
     V3Transport13ResponsesHttpRequest,
     V3ProviderResp14Raw,
     V3DirectResp14ProviderProjectionPrepared,
+    V3DirectResp14UnharvestableToolMarkup,
+    V3HubRelayResp03UnharvestableToolMarkup,
     V3DirectResp15ClientPayloadReady,
     V3Server16HttpFrame,
     V3DebugArtifact,
@@ -171,6 +173,26 @@ impl V3InternalErrorCode {
                     owner_feature_id: "v3.responses_direct_mvp_architecture",
                     module_block: "500-21x",
                     title: "direct provider projection internal failure",
+                }
+            }
+            V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup => {
+                V3InternalErrorRegistryEntry {
+                    code: "500-211",
+                    lane: V3InternalErrorLane::Response,
+                    node_id: "V3DirectResp14ProviderProjectionPrepared",
+                    owner_feature_id: "v3.debug_error_foundation",
+                    module_block: "500-21x",
+                    title: "direct unharvestable tool markup internal failure",
+                }
+            }
+            V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup => {
+                V3InternalErrorRegistryEntry {
+                    code: "500-231",
+                    lane: V3InternalErrorLane::Response,
+                    node_id: "V3HubRespChatProcess03Governed",
+                    owner_feature_id: "v3.anthropic_control_text_resp03",
+                    module_block: "500-23x",
+                    title: "relay unharvestable tool markup internal failure",
                 }
             }
             V3InternalErrorCode::V3DirectResp15ClientPayloadReady => V3InternalErrorRegistryEntry {
@@ -535,8 +557,18 @@ impl V3Error05ExecutionDecision {
     #[allow(clippy::result_large_err)]
     pub fn try_into_terminal(self) -> Result<V3Error05TerminalDecision, Self> {
         let source_kind = &self.exhaustion.local_action.classified.source.source_kind;
+        let recoverable_response_processing = is_v3_recoverable_response_processing_source(
+            &self.exhaustion.local_action.classified.source,
+        );
         let valid_terminal = match source_kind {
             V3ErrorSourceKind::ProviderFailure => {
+                self.action == V3Error05ExecutionAction::ProjectTerminal
+                    && self.exhaustion.route_pool_remaining_after_exclusion == 0
+                    && !self.exhaustion.default_pool_available
+                    && !self.exhaustion.same_provider_retry_available
+                    && self.exhaustion.target_exhausted
+            }
+            V3ErrorSourceKind::RuntimeFailure if recoverable_response_processing => {
                 self.action == V3Error05ExecutionAction::ProjectTerminal
                     && self.exhaustion.route_pool_remaining_after_exclusion == 0
                     && !self.exhaustion.default_pool_available
@@ -779,6 +811,7 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
     if source.external_error.is_some() {
         validate_external_error_source_kind(&source.source_kind);
     }
+    let recoverable_response_processing = is_v3_recoverable_response_processing_source(&source);
     let (class, terminal_state) = match source.source_kind {
         V3ErrorSourceKind::InvalidRequest
         | V3ErrorSourceKind::RequestConflict
@@ -795,6 +828,9 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
             "already_terminal",
         ),
         V3ErrorSourceKind::TargetPoolExhausted => ("target_pool_exhausted", "already_terminal"),
+        V3ErrorSourceKind::RuntimeFailure if recoverable_response_processing => {
+            ("runtime_failure", "non_terminal_if_candidates_remain")
+        }
         V3ErrorSourceKind::RuntimeFailure => ("runtime_failure", "already_terminal"),
         V3ErrorSourceKind::ClientDisconnect => ("client_disconnect", "already_terminal"),
         V3ErrorSourceKind::SuccessControl => ("success_control_violation", "already_terminal"),
@@ -830,6 +866,29 @@ pub fn build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy
 pub fn is_v3_retryable_transient_source(source: &V3Error01SourceRaised) -> bool {
     let _ = source;
     false
+}
+
+/// Returns whether a response-processing RuntimeFailure carries an exact
+/// registered internal code that may recover by excluding the failed attempt
+/// and reselecting a later eligible candidate. The diagnostic reason string is
+/// never sufficient.
+pub fn is_v3_recoverable_response_processing_source(source: &V3Error01SourceRaised) -> bool {
+    source.source_kind == V3ErrorSourceKind::RuntimeFailure
+        && [
+            V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup,
+            V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup,
+        ]
+        .iter()
+        .any(|code| {
+            let expected = code.registry_entry();
+            matches!(
+            source.internal_error.as_ref(),
+            Some(error)
+                if error.internal_code == expected.code
+                    && error.lane == expected.lane
+                    && error.node_id == expected.node_id
+            )
+        })
 }
 
 /// Returns whether a provider failure is health-neutral and eligible for the
@@ -874,11 +933,14 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
         classified.source.source_kind,
         V3ErrorSourceKind::ProviderFailure
     );
+    let recoverable_response_processing =
+        is_v3_recoverable_response_processing_source(&classified.source);
     let client_disconnect = matches!(
         classified.source.source_kind,
         V3ErrorSourceKind::ClientDisconnect
     );
-    let retry_eligible = provider_failure && candidates_remaining > 0;
+    let retry_eligible =
+        (provider_failure || recoverable_response_processing) && candidates_remaining > 0;
     // Provider failures, including SSE/transport failures, affect provider health.
     let health_affecting = provider_failure && !matches!(scope, V3ErrorActionScope::None);
     let exhaustion_effect = if retry_eligible {
@@ -916,22 +978,26 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
         local_action.classified.source.source_kind,
         V3ErrorSourceKind::ProviderFailure
     );
-    let target_exhausted =
-        (provider_failure && route_pool_remaining_after_exclusion == 0 && !default_pool_available)
-            || matches!(
-                local_action.classified.source.source_kind,
-                V3ErrorSourceKind::PendingEndpoint
-                    | V3ErrorSourceKind::InvalidRequest
-                    | V3ErrorSourceKind::RequestConflict
-                    | V3ErrorSourceKind::UnsupportedMediaType
-                    | V3ErrorSourceKind::PayloadTooLarge
-                    | V3ErrorSourceKind::MethodNotAllowed
-                    | V3ErrorSourceKind::PathNotFound
-                    | V3ErrorSourceKind::TargetPoolExhausted
-                    | V3ErrorSourceKind::RuntimeFailure
-                    | V3ErrorSourceKind::ClientDisconnect
-                    | V3ErrorSourceKind::SuccessControl
-            );
+    let recoverable_response_processing =
+        is_v3_recoverable_response_processing_source(&local_action.classified.source);
+    let target_exhausted = if provider_failure || recoverable_response_processing {
+        route_pool_remaining_after_exclusion == 0 && !default_pool_available
+    } else {
+        matches!(
+            local_action.classified.source.source_kind,
+            V3ErrorSourceKind::PendingEndpoint
+                | V3ErrorSourceKind::InvalidRequest
+                | V3ErrorSourceKind::RequestConflict
+                | V3ErrorSourceKind::UnsupportedMediaType
+                | V3ErrorSourceKind::PayloadTooLarge
+                | V3ErrorSourceKind::MethodNotAllowed
+                | V3ErrorSourceKind::PathNotFound
+                | V3ErrorSourceKind::TargetPoolExhausted
+                | V3ErrorSourceKind::RuntimeFailure
+                | V3ErrorSourceKind::ClientDisconnect
+                | V3ErrorSourceKind::SuccessControl
+        )
+    };
     V3Error04TargetExhaustionDecision {
         local_action,
         route_pool_remaining_after_exclusion,
@@ -945,18 +1011,30 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
     exhaustion: V3Error04TargetExhaustionDecision,
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
 ) -> V3Error05ExecutionDecision {
+    let recoverable_response_processing =
+        is_v3_recoverable_response_processing_source(&exhaustion.local_action.classified.source);
+    let alternatives_available =
+        exhaustion.route_pool_remaining_after_exclusion > 0 || exhaustion.default_pool_available;
     let action = match exhaustion.local_action.classified.source.source_kind {
         V3ErrorSourceKind::ClientDisconnect => V3Error05ExecutionAction::ClientDisconnected,
-        V3ErrorSourceKind::ProviderFailure
-            if exhaustion.route_pool_remaining_after_exclusion > 0
-                || exhaustion.default_pool_available =>
-        {
+        V3ErrorSourceKind::ProviderFailure if alternatives_available => {
             V3Error05ExecutionAction::WaitThenReselect {
                 recovery: recovery
                     .expect("reselect Error05 requires an exact recovery admission witness"),
             }
         }
         V3ErrorSourceKind::ProviderFailure => V3Error05ExecutionAction::ProjectTerminal,
+        V3ErrorSourceKind::RuntimeFailure
+            if recoverable_response_processing && alternatives_available =>
+        {
+            V3Error05ExecutionAction::WaitThenReselect {
+                recovery: recovery
+                    .expect("reselect Error05 requires an exact recovery admission witness"),
+            }
+        }
+        V3ErrorSourceKind::RuntimeFailure if recoverable_response_processing => {
+            V3Error05ExecutionAction::ProjectTerminal
+        }
         _ => V3Error05ExecutionAction::RejectNonProviderError,
     };
     V3Error05ExecutionDecision { exhaustion, action }

@@ -21,6 +21,7 @@ rules:
     response_outbound: V3HubRespOutbound05ClientSemantic
   control_fields:
     carrier: typed_side_channel_only
+    business_names: opaque_data_never_control_truth
     forbidden_in_payload:
       - metadata_center
       - routeHint

@@ -1,11 +1,7 @@
-use super::{project_outbound_nested_payload_for_target_protocol, V3OutboundTargetProtocol};
 use serde_json::{Map, Value};
 
 pub(super) fn normalize_openai_chat_message_content_part(part: &Value) -> Result<Value, String> {
-    let mut normalized = project_outbound_nested_payload_for_target_protocol(
-        part,
-        V3OutboundTargetProtocol::OpenAiChat,
-    )?;
+    let mut normalized = part.clone();
     let Some(row) = normalized.as_object_mut() else {
         return Ok(normalized);
     };

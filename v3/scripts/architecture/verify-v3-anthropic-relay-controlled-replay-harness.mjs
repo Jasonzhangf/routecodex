@@ -21,7 +21,6 @@ const requiredNodes = [
   'V3HubRespOutbound05ClientSemantic',
   'V3ServerRespOutbound06ClientFrame',
 ];
-const forbiddenFields = ['routecodex_internal', 'metadata_center', 'debug_snapshot', 'provider_protocol', 'resource_handle', 'runtime_control', 'selected_target'];
 
 if (manifest.harness_id !== 'v3.anthropic_relay_controlled_replay' || manifest.schema_version !== 1) fail('manifest identity mismatch');
 if (JSON.stringify(manifest.cases) !== JSON.stringify(requiredCases)) fail('manifest cases must be complete, unique, and sorted');
@@ -31,7 +30,6 @@ for (const caseId of requiredCases) {
   for (const field of ['transport', 'expected_node_trace', 'client_request', 'expected_upstream_request', 'upstream_response', 'expected_client_response']) {
     if (!(field in fixture)) fail(`${caseId}: missing ${field}`);
   }
-  if (hasForbiddenField(fixture.expected_upstream_request) || hasForbiddenField(fixture.expected_client_response)) fail(`${caseId}: side-channel field in expected normal payload`);
 }
 for (const caseId of ['json_thinking_tool_use', 'side_channel_isolation', 'sse_thinking_tool_use']) {
   const trace = json(`v3/fixtures/anthropic-relay-controlled-upstream/${caseId}.json`).expected_node_trace;
@@ -59,8 +57,3 @@ console.log('[verify:v3-anthropic-relay-controlled-replay-harness] ok');
 function text(relative) { return readFileSync(resolve(sourceRoot, relative), 'utf8'); }
 function json(relative) { return JSON.parse(text(relative)); }
 function fail(message) { failures.push(message); }
-function hasForbiddenField(value) {
-  if (Array.isArray(value)) return value.some(hasForbiddenField);
-  if (!value || typeof value !== 'object') return false;
-  return Object.entries(value).some(([key, nested]) => forbiddenFields.includes(key) || hasForbiddenField(nested));
-}

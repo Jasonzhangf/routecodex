@@ -47,9 +47,8 @@ requireAll(source, sourcePath, [
   'V3AnthropicCodecStage', 'ClientInputToHubSemantic', 'HubSemanticToProviderWire',
   'ProviderRawToHubResponseSemantic', 'HubResponseSemanticToClientProjection',
   'V3HubEntryProtocol::Anthropic', 'V3HubProviderWireProtocol::Anthropic',
-  'validate_json_response', 'validate_sse_event', 'reject_side_channel_fields', 'into_object',
-  'routecodex_internal', 'metadata_center', 'debug_snapshot', 'provider_protocol',
-  'resource_handle', 'MalformedProviderError',
+  'validate_json_response', 'validate_sse_event', 'into_object',
+  'MalformedProviderError',
   'MalformedSseEvent',
   'collect_v3_anthropic_request_shape_branch_semantics',
   'V3AnthropicChatShapeBranchSemantic',
@@ -73,6 +72,7 @@ forbidNear(source, sourcePath, '"request.messages[].content[].image.source.url"'
 forbidNear(source, sourcePath, '"request.messages[].content[].image.source.data"', 'ChatMediaMimeType');
 
 forbidAll(source, sourcePath, [
+  /reject_side_channel_fields/,
   /compile_v3_hub_v1_static_registry/, /compile_v3_hub_relay_(?:request|response)_hooks/,
   /V3HubStaticHookRegistry/, /V3HubRelay(?:Request|Response)Hook/, /routecodex-v3-server/,
   /Gemini/, /OpenAiChat/, /fallback/i, /provider[_-]?family/i,
@@ -81,7 +81,7 @@ forbidAll(source, sourcePath, [
 ]);
 requireAll(tests, 'focused Anthropic codec tests', [
   'tool_result', 'tool_use', 'thinking', 'V3HubTransportIntent::Sse',
-  'MalformedProviderError', 'MalformedSseEvent', 'SideChannelLeaked', 'ProviderProtocolNotAnthropic',
+  'MalformedProviderError', 'MalformedSseEvent', 'business_names_are_preserved', 'ProviderProtocolNotAnthropic',
   'anthropic_image_source_url_maps_only_to_chat_image_url_url',
   'anthropic_image_base64_data_maps_to_chat_inline_media_data',
   'anthropic_image_base64_media_type_maps_to_chat_media_mime_type',

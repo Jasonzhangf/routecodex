@@ -627,6 +627,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/provider_error_policy_matching.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs
@@ -688,6 +689,9 @@ features:
   - v3-de-24
   entry_symbols:
   - execute_v3_foundation_pending_runtime
+  - is_v3_recoverable_response_processing_source
+  - V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup
+  - V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup
   - execute_v3_responses_direct_dry_run_runtime
   - execute_v3_anthropic_relay_response_dry_run_runtime
   - V3DryRunNoNetworkTransport::send
@@ -796,7 +800,11 @@ features:
   - routecodex-v3-provider-responses
   - routecodex-v3-server
   owner_files:
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks_dsml.rs
+  - v3/crates/routecodex-v3-runtime/src/tool_markup_parser.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
   - v3/crates/routecodex-v3-runtime/src/shared_direct_thinking_compat.rs
@@ -820,16 +828,27 @@ features:
   - v3.response.provider_raw
   - v3.response.client_payload
   - v3.error.source
+  - v3.runtime.responses_observability
   mainline_bindings:
   - v3-rd-09
   - v3-rd-09-direct-policy
   - v3-rd-13
+  - v3-tool-markup-direct-parser
   - v3-rd-14
   - v3-rd-15
   - v3-rd-16
   entry_symbols:
+  - normalize_v3_direct_dsml_response
+  - scan_tool_markup
+  - rewrite_v3_direct_dsml_attempt
+  - normalize_v3_direct_complete_json_response
+  - rewrite_v3_direct_complete_response_attempt
+  - normalize_v3_direct_thinking_json
+  - rewrite_v3_direct_thinking_attempt
+  - enforce_v3_provider_json_attempt_admission
   - execute_v3_responses_direct_runtime_kernel
   - execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug
+  - execute_v3_responses_direct_runtime_kernel_core
   - V3Execution11ProtocolDecision
   - V3Execution11ProtocolDecisionMode
   - build_v3_execution_11_protocol_decision_from_v3_target_10
@@ -849,6 +868,7 @@ features:
   - kernel::tests::responses_provider_process_chat_forces_hub_relay
   - build_v3_server_16_http_frame_from_v3_resp_15
   - execute_responses_direct_server_outcome
+  - build_v3_runtime_provider_failed_attempt_evidence_from_error
   - pending_endpoint
   - multi_listener_server::responses_direct_shared_provider_health_reselects_after_unrecoverable_failure
   - multi_listener_server::responses_direct_provider_request_dry_run_does_not_send_to_any_provider
@@ -1454,9 +1474,6 @@ features:
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
     owner_boundary: shared enums/value types used by multiple nodes; no node-local
       builders/parsers
-  - file: v3/crates/routecodex-v3-runtime/src/hub_v1/side_channel.rs
-    owner_boundary: side-channel lookup helpers only; no normal request/response payload
-      construction
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
     owner_boundary: provider-compat shared protocol helpers; no Hub node builder ownership
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs
@@ -1543,7 +1560,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/side_channel.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_error.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
@@ -2897,6 +2913,9 @@ features:
     preserves metadata but must not forward non-standard client_metadata.
   - RouteCodex-created internal control fields fail-fast before provider/client payload
     projection.
+  - Only the typed producing owner proves control provenance. Business key spelling,
+    including nested schema and tool argument names, never authorizes rejection,
+    deletion or promotion into runtime control truth (bug03df769).
   - OpenAI Chat function.arguments is a string-valued payload field and preserves
     the exact source string at the adjacent codec even when its contents are not parseable
     JSON; protocol targets that require structured argument values keep their own
@@ -4586,6 +4605,8 @@ features:
   - finalize_v3_responses_relay_server_output
   - persist_v3_chat_failure_evidence
   - persist_v3_chat_failure_evidence_sources
+  - take_responses_direct_terminal_outcome
+  - issue885bb74_responses_direct_http502_recovers_with_wire_evidence_json_and_sse
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
@@ -4604,6 +4625,7 @@ features:
   - response.client_payload
   required_gates:
   - npm run verify:v3-resource-map
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test issue885bb74_responses_failed_attempt_evidence -- --nocapture --test-threads=1
   mainline_bindings:
   - v3-responses-relay-error-evidence-01
   - v3-responses-relay-error-evidence-02
@@ -5147,7 +5169,7 @@ features:
   status: implementation_in_progress
   change_risk: critical
   owner_kind: rust_v3_provider_terminal_response_error_policy
-  owner_scope: Genuine provider errors enter the typed Error chain before provider success or client commit; representable successful response content and terminals pass without semantic adjudication. A complete provider attempt with no deliverable business content is the single adjudicated case and becomes an internal typed 502 for the Error chain, never a client error or empty completion.
+  owner_scope: Genuine provider errors enter the typed Error chain before provider success or client commit; representable successful response content and terminals pass without semantic adjudication. A complete provider attempt with no deliverable business content after every declared response rewrite, including non-client memory stripping, becomes internal typed 502. Direct SSE collector owns post-rewrite whole-attempt adjudication at both sealing exits; protocol-independent frame storage and Server/SSE do not judge business content. Processing loss or failure of representable content retains internal 599. Typed servertool_followup remains an internal continuation. No client error or empty completion is fabricated.
   owner_crates:
   - routecodex-v3-config
   - routecodex-v3-runtime
@@ -6525,27 +6547,49 @@ features:
   status: source_gate_verified
   change_risk: high
   owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: Resp03 preserves representable Anthropic business text, including complete DSML-looking text, without semantic stripping or rejection.
+  owner_scope: Resp03 preserves literal and unrecognized protocol-looking business text, governs declared leaked control markers under the user policy, and reports normalized empty attempts through typed Runtime recovery.
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   resource_bindings:
   - v3.hub.response_semantic
+  - v3.relay_response.tool_markup_context
   mainline_bindings:
   - v3-hub-relay-resp-03
+  - v3-tool-markup-relay-parser
+  - v3-tool-markup-relay-harvest-parser
+  - v3-tool-markup-relay-thinking-grammar
+  - v3-tool-markup-relay-attempt-context
   entry_symbols:
   - govern_v3_hub_relay_response
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/tool_markup_parser.rs
+  - v3/crates/routecodex-v3-runtime/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks_dsml.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/tests.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server/issue4effed6_relay_markers.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server/issue4effed6_relay_serialized.rs
+  - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-error/src/tests.rs
   - docs/goals/v3-anthropic-dsml-text-leak-20261001.md
+  - docs/goals/4effed6-relay-control-markers.md
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml

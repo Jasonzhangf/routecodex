@@ -3,14 +3,21 @@ use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 use crate::operation_runner::{
     run_v3_single_node_operator, OperationRunnerError, V3OperationGraph,
 };
+use crate::tool_markup_parser::{
+    scan_tool_markup, ParsedToolCall, ToolMarkupDeclarations, ToolMarkupIdentity, ToolMarkupKind,
+    ToolMarkupParamKind, ToolMarkupSegment,
+};
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde::Deserializer;
 use serde_json::{json, Map, Value};
-use std::collections::{BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, OnceLock};
+
+#[path = "resp_chat_process_tool_markup.rs"]
+mod tool_markup;
 
 include!("resp_chat_process_03_governed_provider_identity.rs");
 
@@ -824,6 +831,106 @@ impl Deref for V3HubRespChatProcess03Outcome {
     }
 }
 
+/// Exact-attempt tool declaration view consumed by the Relay serialized-tool
+/// harvest. It is built only from the request-local namespace registry and its
+/// bound wire inverse; it never reads response text, metadata or logs.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct V3RelaySerializedToolIdentity {
+    namespace: Option<String>,
+    leaf: String,
+    kind: ToolMarkupKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct V3HubRelaySerializedToolContext {
+    declarations: ToolMarkupDeclarations,
+    identities: HashMap<String, V3RelaySerializedToolIdentity>,
+}
+
+fn relay_declared_parameter_kinds(source: &Value) -> HashMap<String, ToolMarkupParamKind> {
+    source
+        .get("parameters")
+        .or_else(|| source.pointer("/function/parameters"))
+        .and_then(|parameters| parameters.get("properties"))
+        .and_then(Value::as_object)
+        .map(|properties| {
+            properties
+                .iter()
+                .filter_map(|(name, schema)| {
+                    schema
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .map(|kind| (name.clone(), ToolMarkupParamKind::declared(kind)))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+impl V3HubRelaySerializedToolContext {
+    /// Build the parser declaration view and exact wire-name identity from the
+    /// request-local registry. Duplicate keys are dropped rather than guessed.
+    pub(crate) fn from_registry(
+        registry: &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
+    ) -> Self {
+        let inverse = registry.restore_identities();
+        let mut context = Self::default();
+        let mut ambiguous: HashSet<String> = HashSet::new();
+        for identity in registry.identities() {
+            let namespace = identity
+                .is_namespaced()
+                .then(|| identity.client_namespace());
+            let resolved = V3RelaySerializedToolIdentity {
+                namespace: namespace.clone(),
+                leaf: identity.leaf_name.clone(),
+                kind: match identity.kind {
+                    provider_compat_core::namespace_tools::ToolKind::Function => {
+                        ToolMarkupKind::Function
+                    }
+                    provider_compat_core::namespace_tools::ToolKind::Custom => {
+                        ToolMarkupKind::Custom
+                    }
+                },
+            };
+            let declaration = ToolMarkupIdentity {
+                kind: resolved.kind,
+                parameter_kinds: relay_declared_parameter_kinds(&identity.source),
+            };
+            let keys = std::iter::once(identity.actual_wire_name.clone())
+                .chain(std::iter::once(identity.leaf_name.clone()))
+                .chain(
+                    inverse
+                        .iter()
+                        .filter(|(_, (ns, leaf))| {
+                            leaf == &identity.leaf_name
+                                && Some(ns.as_str()) == namespace.as_deref().or(Some(""))
+                        })
+                        .map(|(wire, _)| wire.clone()),
+                );
+            for key in keys {
+                if context
+                    .identities
+                    .get(&key)
+                    .is_some_and(|old| old != &resolved)
+                {
+                    ambiguous.insert(key.clone());
+                }
+                context.identities.insert(key.clone(), resolved.clone());
+                context.declarations.insert(key, declaration.clone());
+            }
+        }
+        for name in ambiguous {
+            context.identities.remove(&name);
+            context.declarations.remove(&name);
+        }
+        context
+    }
+
+    fn identity(&self, wire_name: &str) -> Option<&V3RelaySerializedToolIdentity> {
+        self.identities.get(wire_name)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRelayResponseHookProfile {
     servertool_names: BTreeSet<String>,
@@ -841,6 +948,8 @@ pub struct V3HubRelayResponseHookProfile {
     toolreason_observation_session_id: Option<String>,
     toolreason_observation_request_id: Option<String>,
     tool_thinking_original_custom_tool_names: BTreeSet<String>,
+    serialized_tool_context: V3HubRelaySerializedToolContext,
+    complete_provider_attempt: bool,
 }
 
 impl V3HubRelayResponseHookProfile {
@@ -864,6 +973,8 @@ impl V3HubRelayResponseHookProfile {
             toolreason_observation_session_id: None,
             toolreason_observation_request_id: None,
             tool_thinking_original_custom_tool_names: BTreeSet::new(),
+            serialized_tool_context: V3HubRelaySerializedToolContext::default(),
+            complete_provider_attempt: false,
         }
     }
 
@@ -878,6 +989,23 @@ impl V3HubRelayResponseHookProfile {
 
     pub(crate) fn is_servertool_name(&self, name: &str) -> bool {
         self.servertool_names.contains(name)
+    }
+
+    pub(crate) fn with_serialized_tool_context(
+        mut self,
+        context: V3HubRelaySerializedToolContext,
+    ) -> Self {
+        self.serialized_tool_context = context;
+        self
+    }
+
+    fn serialized_tool_context(&self) -> &V3HubRelaySerializedToolContext {
+        &self.serialized_tool_context
+    }
+
+    pub(crate) fn with_complete_provider_attempt(mut self, complete: bool) -> Self {
+        self.complete_provider_attempt = complete;
+        self
     }
 
     pub fn with_web_search_execution_mode(
@@ -1000,8 +1128,6 @@ pub enum V3HubRelayResponseError {
     ExecutionModeNotRelay,
     #[error("provider response must be an object")]
     ProviderResponseNotObject,
-    #[error("provider response leaked RouteCodex side-channel field: {key}")]
-    SideChannelLeaked { key: &'static str },
     #[error("provider response output must be an array")]
     ProviderResponseOutputNotArray,
     #[error("malformed tool call at output index {index}: {reason}")]
@@ -1023,6 +1149,10 @@ pub enum V3HubRelayResponseError {
     },
     #[error("provider response compat failed: {reason}")]
     ProviderCompatFailed { reason: String },
+    #[error("provider response contained no deliverable business content after Relay governance")]
+    GovernedAttemptEmpty,
+    #[error("provider response contains a recognized incomplete tool invocation")]
+    UnharvestableToolMarkup,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1088,9 +1218,6 @@ fn normalize_v3_hub_relay_response(
     if !input.payload.0.is_object() {
         return Err(V3HubRelayResponseError::ProviderResponseNotObject);
     }
-    if let Some(key) = find_v3_hub_side_channel_key(&input.payload.0) {
-        return Err(V3HubRelayResponseError::SideChannelLeaked { key });
-    }
     let compat =
         build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(input).map_err(|error| {
             V3HubRelayResponseError::ProviderCompatFailed {
@@ -1149,6 +1276,20 @@ fn govern_v3_hub_relay_response(
             profile.toolreason_client_projection_enabled(),
         );
     }
+    let before_marker_governance = profile
+        .complete_provider_attempt
+        .then(|| input.provider_payload().clone());
+    if profile.serialized_tool_context().identities.is_empty() {
+        govern_v3_relay_control_markers_at_resp03(&mut input);
+    } else {
+        tool_markup::govern(&mut input, profile.serialized_tool_context())?;
+    }
+    if profile.complete_provider_attempt {
+        tool_markup::govern_thinking(&mut input);
+    }
+    let marker_governance_changed = before_marker_governance
+        .as_ref()
+        .is_some_and(|before| input.provider_payload().as_ref() != before.as_ref());
     let _identified_servertool_tool = super::servertool_hooks::inspect_v3_servertool_response_tool(
         input.provider_payload().as_ref(),
     );
@@ -1188,6 +1329,22 @@ fn govern_v3_hub_relay_response(
     } else {
         V3HubServertoolResponseAction::None
     };
+    let typed_servertool_continuation = servertool_tool_call_followup
+        || !matches!(
+            web_search_hook_outcome,
+            V3WebSearchHookOutcome::NotApplicable
+        );
+    // Raw-attempt admission already handles the provider protocol's business
+    // outcomes. Recheck only content changed by this marker governance.
+    if marker_governance_changed
+        && !typed_servertool_continuation
+        && !super::v3_provider_attempt_has_deliverable_business_content(
+            input.semantic_protocol(),
+            input.provider_payload().as_ref(),
+        )
+    {
+        return Err(V3HubRelayResponseError::GovernedAttemptEmpty);
+    }
     let terminality = if governance.tool_calls.is_empty() {
         governance.status_terminality
     } else {
@@ -1738,6 +1895,168 @@ fn harvest_v3_think_blocks_at_resp03(
         *input.provider_payload_mut() = Arc::new(next);
     }
     input
+}
+
+/// Remove only declared standalone control labels from the semantic response
+/// carriers. This increment does not harvest serialized invocations: a parsed
+/// call segment is restored from its original envelope text so its payload
+/// bytes, order and association remain unchanged.
+fn govern_v3_relay_control_markers_at_resp03(input: &mut V3HubRespInbound02Normalized) {
+    let declarations = ToolMarkupDeclarations::default();
+    let mut next = input.provider_payload().as_ref().clone();
+    let changed = match input.semantic_protocol() {
+        V3HubProviderWireProtocol::Responses => {
+            strip_v3_responses_control_markers(&mut next, &declarations)
+        }
+        V3HubProviderWireProtocol::OpenAiChat => {
+            strip_v3_openai_chat_control_markers(&mut next, &declarations)
+        }
+        V3HubProviderWireProtocol::Gemini | V3HubProviderWireProtocol::Anthropic => false,
+    };
+    if changed {
+        *input.provider_payload_mut() = Arc::new(next);
+    }
+}
+
+fn strip_v3_relay_control_marker_text(
+    text: &str,
+    declarations: &ToolMarkupDeclarations,
+) -> Option<String> {
+    let scan = scan_tool_markup(text, declarations);
+    if !scan.removed_label {
+        return None;
+    }
+    let mut visible = String::with_capacity(text.len());
+    for segment in scan.segments {
+        match segment {
+            ToolMarkupSegment::Text(text) => visible.push_str(text),
+            // This increment keeps every serialized invocation opaque. Calls
+            // in one envelope share the envelope span; restore it once.
+            ToolMarkupSegment::Calls(calls) => {
+                if let Some(call) = calls.first() {
+                    visible.push_str(call.envelope);
+                }
+            }
+        }
+    }
+    Some(visible)
+}
+
+fn strip_v3_relay_control_marker_string(
+    value: &mut Value,
+    declarations: &ToolMarkupDeclarations,
+) -> bool {
+    let Some(text) = value.as_str() else {
+        return false;
+    };
+    let Some(stripped) = strip_v3_relay_control_marker_text(text, declarations) else {
+        return false;
+    };
+    *value = Value::String(stripped);
+    true
+}
+
+fn strip_v3_relay_control_marker_content(
+    value: &mut Value,
+    declarations: &ToolMarkupDeclarations,
+) -> bool {
+    match value {
+        Value::String(_) => strip_v3_relay_control_marker_string(value, declarations),
+        Value::Array(parts) => {
+            let mut changed = false;
+            for part in parts {
+                match part {
+                    Value::String(_) => {
+                        changed |= strip_v3_relay_control_marker_string(part, declarations);
+                    }
+                    Value::Object(object) => {
+                        let text_part =
+                            object
+                                .get("type")
+                                .and_then(Value::as_str)
+                                .is_none_or(|kind| {
+                                    matches!(
+                                        kind,
+                                        "text" | "output_text" | "input_text" | "refusal"
+                                    )
+                                });
+                        if !text_part {
+                            continue;
+                        }
+                        if let Some(text) = object.get_mut("text") {
+                            changed |= strip_v3_relay_control_marker_string(text, declarations);
+                        }
+                        if let Some(refusal) = object.get_mut("refusal") {
+                            changed |= strip_v3_relay_control_marker_string(refusal, declarations);
+                        }
+                    }
+                    Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) => {}
+                }
+            }
+            changed
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::Object(_) => false,
+    }
+}
+
+fn strip_v3_openai_chat_control_markers(
+    payload: &mut Value,
+    declarations: &ToolMarkupDeclarations,
+) -> bool {
+    let mut changed = false;
+    let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    for choice in choices {
+        let Some(message) = choice.get_mut("message").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        if let Some(content) = message.get_mut("content") {
+            changed |= strip_v3_relay_control_marker_content(content, declarations);
+        }
+    }
+    changed
+}
+
+fn strip_v3_responses_control_markers(
+    payload: &mut Value,
+    declarations: &ToolMarkupDeclarations,
+) -> bool {
+    let mut changed = false;
+    if let Some(output_text) = payload.get_mut("output_text") {
+        changed |= strip_v3_relay_control_marker_string(output_text, declarations);
+    }
+    let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
+        return changed;
+    };
+    for item in output {
+        match item {
+            Value::String(_) => {
+                changed |= strip_v3_relay_control_marker_string(item, declarations);
+            }
+            Value::Object(object) => match object.get("type").and_then(Value::as_str) {
+                Some("message") => {
+                    if let Some(text) = object.get_mut("text") {
+                        changed |= strip_v3_relay_control_marker_string(text, declarations);
+                    }
+                    if let Some(content) = object.get_mut("content") {
+                        changed |= strip_v3_relay_control_marker_content(content, declarations);
+                    }
+                }
+                Some("output_text" | "refusal") => {
+                    if let Some(text) = object.get_mut("text") {
+                        changed |= strip_v3_relay_control_marker_string(text, declarations);
+                    }
+                    if let Some(refusal) = object.get_mut("refusal") {
+                        changed |= strip_v3_relay_control_marker_string(refusal, declarations);
+                    }
+                }
+                _ => {}
+            },
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) => {}
+        }
+    }
+    changed
 }
 
 #[derive(Default)]

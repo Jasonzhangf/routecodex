@@ -92,11 +92,26 @@ pub(crate) fn run_json_response_hooks(
         input.expected_model_id,
         input.tool_thinking_turn_context,
     );
+    let response_hook_profile = response_hook_profile
+        .with_complete_provider_attempt(true)
+        .with_serialized_tool_context(
+            super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext::from_registry(
+                input.namespace_registry,
+            ),
+        );
     let response_hook_profile = match input.web_search_center_state {
         Some(state) => response_hook_profile.with_web_search_center_state(state),
         None => response_hook_profile,
     };
-    let resp03 = hooks.govern(resp02, &response_hook_profile)?;
+    let resp03 = match hooks.govern(resp02, &response_hook_profile) {
+        Ok(resp03) => resp03,
+        Err(V3HubRelayResponseError::GovernedAttemptEmpty) => {
+            return Err(super::empty_provider_attempt_failure(
+                input.provider_protocol,
+            ));
+        }
+        Err(error) => return Err(error.into()),
+    };
     trace.push("V3HubRespChatProcess03Governed");
     let (resp03, response_web_search_state, _response_web_search_hook_outcome) =
         resp03.into_parts();

@@ -1,3 +1,6 @@
+use super::request_outbound_format::{
+    project_outbound_payload_for_target_protocol, V3OutboundTargetProtocol,
+};
 use super::*;
 use serde_json::json;
 
@@ -467,7 +470,7 @@ fn provider_req_compat_loads_selected_target_profile() {
 }
 
 #[test]
-fn routecodex_control_and_payload_mirror_aliases_are_rejected_recursively() {
+fn bug03df769_business_aliases_are_preserved_recursively() {
     for key in [
         "routecodexInternal",
         "routeHint",
@@ -508,11 +511,12 @@ fn routecodex_control_and_payload_mirror_aliases_are_rejected_recursively() {
                 key: {"internal": true}
             }]
         });
-        assert_eq!(
-            find_v3_hub_side_channel_key(&payload),
-            Some(key),
-            "{key} must fail instead of being stripped or forwarded"
-        );
+        let projected = project_outbound_payload_for_target_protocol(
+            &payload,
+            V3OutboundTargetProtocol::OpenAiResponses,
+        )
+        .expect("field spelling is not control provenance");
+        assert_eq!(projected["input"], payload["input"], "{key}");
     }
 }
 
@@ -534,7 +538,12 @@ fn protocol_data_fields_are_not_misclassified_as_routecodex_control() {
             "namespace": "multi_agent_v1"
         }]
     });
-    assert_eq!(find_v3_hub_side_channel_key(&payload), None);
+    let projected = project_outbound_payload_for_target_protocol(
+        &payload,
+        V3OutboundTargetProtocol::OpenAiResponses,
+    )
+    .expect("client metadata remains business data");
+    assert_eq!(projected["metadata"], payload["metadata"]);
 }
 
 #[test]

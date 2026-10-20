@@ -46,6 +46,9 @@ export function verifyV3StageProtocolShapes(root = defaultRoot) {
   const load = (relative) => YAML.parse(fs.readFileSync(path.join(root, relative), 'utf8'));
   const manifest = load(MANIFEST);
   const mainline = load(MAINLINE);
+  if (manifest?.rules?.control_fields?.business_names !== 'opaque_data_never_control_truth') {
+    failures.push(`${MANIFEST}: business field names must remain opaque data, never control truth`);
+  }
   if (manifest?.status !== 'active') failures.push(`${MANIFEST}: status must be active`);
   if (manifest?.rules?.direct_same_protocol?.protocol_identity !== 'same_as_entry') {
     failures.push(`${MANIFEST}: Direct protocol identity must remain same_as_entry`);

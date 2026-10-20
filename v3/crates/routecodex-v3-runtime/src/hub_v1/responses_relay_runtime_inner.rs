@@ -268,6 +268,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                         error_operator_fault: None,
                         failed_attempt_evidence: None,
                         matched_policy: None,
+                        response_processing_code: None,
                     };
                     return Ok(provider_failure_output(
                         terminalize_v3_responses_relay_provider_failure(failure, None),
@@ -408,6 +409,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             error_operator_fault: None,
                             failed_attempt_evidence: None,
                             matched_policy: None,
+                            response_processing_code: None,
                         };
                         return Ok(provider_failure_output(
                             terminalize_v3_responses_relay_provider_failure(

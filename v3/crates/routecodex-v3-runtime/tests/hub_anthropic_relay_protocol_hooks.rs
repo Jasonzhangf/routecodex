@@ -202,7 +202,7 @@ fn wrong_entry_execution_and_provider_wire_combinations_fail_explicitly() {
 }
 
 #[test]
-fn side_channel_fields_fail_at_both_protocol_hook_boundaries() {
+fn business_names_are_preserved_at_both_protocol_hook_boundaries() {
     for leaked in [
         "routecodex_internal",
         "metadata_center",
@@ -216,30 +216,28 @@ fn side_channel_fields_fail_at_both_protocol_hook_boundaries() {
             .unwrap()
             .insert(leaked.to_string(), json!({"leak":true}));
         let raw = build_v3_hub_req_inbound_01_client_raw(
-            request,
+            request.clone(),
             V3HubEntryProtocol::Anthropic,
             V3HubInvocationSource::Client,
             V3HubTransportIntent::Json,
         );
-        assert!(matches!(
-            run_v3_anthropic_relay_runtime_req_inbound(raw),
-            Err(V3AnthropicRelayProtocolHookError::Codec(_))
-        ));
+        let normalized = run_v3_anthropic_relay_runtime_req_inbound(raw)
+            .expect("request business names are preserved");
+        assert_eq!(normalized.payload()[leaked], request[leaked]);
 
         let mut response = json!({"type":"message","content":[]});
         response
             .as_object_mut()
             .unwrap()
             .insert(leaked.to_string(), json!({"leak":true}));
-        assert!(matches!(
-            run_v3_anthropic_relay_client_projection_hook(response04(
-                response,
-                V3HubEntryProtocol::Anthropic,
-                V3HubExecutionMode::Relay,
-                V3HubProviderWireProtocol::Responses,
-                V3HubTransportIntent::Json,
-            )),
-            Err(V3AnthropicRelayProtocolHookError::Codec(_))
-        ));
+        let projected = run_v3_anthropic_relay_client_projection_hook(response04(
+            response.clone(),
+            V3HubEntryProtocol::Anthropic,
+            V3HubExecutionMode::Relay,
+            V3HubProviderWireProtocol::Responses,
+            V3HubTransportIntent::Json,
+        ))
+        .expect("response business names are preserved");
+        assert_eq!(projected.payload(), &response);
     }
 }

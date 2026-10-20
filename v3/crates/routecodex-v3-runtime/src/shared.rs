@@ -27,8 +27,6 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-pub(crate) use crate::shared_direct_thinking_compat::project_v3_thinking_tag_text;
-
 pub(crate) type V3DirectSourceError = Result<
     V3Error01SourceRaised,
     crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
@@ -326,8 +324,58 @@ pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_project
         tool_thinking_enabled,
         toolreason_client_projection,
         observation_session_id,
+        false,
     )
     .await
+}
+
+pub(crate) async fn project_provider_raw_to_client_payload_for_complete_response_hooks(
+    raw: V3ProviderResp14Raw,
+    plan: &V3DirectResponseCompatPlan,
+    tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
+    observation_session_id: Option<&str>,
+) -> V3DirectSourceResult<V3ProviderResponseProjection> {
+    project_provider_raw_to_client_payload_inner(
+        raw,
+        plan,
+        tool_thinking_enabled,
+        toolreason_client_projection,
+        observation_session_id,
+        true,
+    )
+    .await
+}
+
+pub(crate) fn enforce_v3_provider_json_attempt_admission(
+    provider_protocol: V3HubProviderWireProtocol,
+    payload: &serde_json::Value,
+    provider_id: &str,
+    status: u16,
+) -> V3DirectSourceResult<()> {
+    if crate::hub_v1::v3_provider_json_attempt_has_deliverable_business_content(
+        provider_protocol,
+        payload,
+    ) {
+        return Ok(());
+    }
+    Err(direct_external_error(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_response_empty",
+        "provider returned a complete response with no deliverable business content",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(status),
+            code: Some("PROVIDER_RESPONSE_EMPTY".to_string()),
+            provider_id: Some(provider_id.to_string()),
+            upstream_request_id: None,
+            message: Some(
+                "provider returned a complete response with no deliverable business content"
+                    .to_string(),
+            ),
+        },
+    ))
 }
 
 async fn project_provider_raw_to_client_payload_inner(
@@ -336,6 +384,7 @@ async fn project_provider_raw_to_client_payload_inner(
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
     observation_session_id: Option<&str>,
+    complete_response_hook_pending: bool,
 ) -> V3DirectSourceResult<V3ProviderResponseProjection> {
     let provider_id = raw.provider_id().to_string();
     let request_id = raw.request_id().to_string();
@@ -375,7 +424,11 @@ async fn project_provider_raw_to_client_payload_inner(
     // Responses terminal event. Chat and Anthropic streams have different
     // terminal contracts; applying the wrapper there aborts the stream before
     // the protocol-specific Resp03 toolreason hook can close out observation.
-    let thinking_tags = compat_plan.has_block(V3DirectResponseCompatBlock::ThinkingTags)
+    // The registered complete hook normalizes thinking once, after serialized
+    // tools have been harvested. Legacy raw-projection consumers keep their
+    // configured profile behavior.
+    let thinking_tags = !complete_response_hook_pending
+        && compat_plan.has_block(V3DirectResponseCompatBlock::ThinkingTags)
         && compat_plan.provider_protocol == V3HubProviderWireProtocol::Responses;
     let sse_first_frame_timeout_ms = raw.sse_first_frame_timeout_ms();
     let content_type = raw
@@ -481,27 +534,13 @@ async fn project_provider_raw_to_client_payload_inner(
         // provider response with no deliverable business content is an internal
         // 502 for the Error chain, never a normal empty completion. The
         // judgment is shared with the Relay/SSE boundaries.
-        if !crate::hub_v1::v3_provider_json_attempt_has_deliverable_business_content(
-            compat_plan.provider_protocol,
-            &parsed,
-        ) {
-            return Err(direct_external_error(
-                V3ErrorSourceKind::ProviderFailure,
-                "V3ProviderResp14Raw",
-                "provider_response_empty",
-                "provider returned a complete response with no deliverable business content",
-                V3ExternalErrorLink {
-                    kind: V3ExternalErrorKind::Provider,
-                    status: Some(status),
-                    code: Some("PROVIDER_RESPONSE_EMPTY".to_string()),
-                    provider_id: Some(provider_id.clone()),
-                    upstream_request_id: None,
-                    message: Some(
-                        "provider returned a complete response with no deliverable business content"
-                            .to_string(),
-                    ),
-                },
-            ));
+        if !complete_response_hook_pending {
+            enforce_v3_provider_json_attempt_admission(
+                compat_plan.provider_protocol,
+                &parsed,
+                &provider_id,
+                status,
+            )?;
         }
         (V3ProviderAttemptBody::Json(parsed), None)
     } else {

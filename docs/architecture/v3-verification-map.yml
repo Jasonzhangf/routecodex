@@ -1146,9 +1146,17 @@ features:
   - docs/goals/v3-responses-direct-mvp-implementation-plan.md
   - docs/goals/v3-vr-target-protocol-execution-decision-sop.md
   test_design:
+  - docs/goals/3ccb5fa-direct-dsml.md
   - docs/goals/v3-responses-direct-mvp-test-design.md
   - docs/goals/v3-direct-thinking-tag-response-compat-test-design.md
   required_contract:
+  - Complete declared DSML and demonstrated bounded alternate tool envelopes are harvested only by the registered Responses Direct response hook; quoted, code and opaque-associated examples remain intact. JSON and buffered SSE preserve retained prose, arguments, native calls and paired follow-up results. Recognized unharvestable attempted invocations reject the entire attempt through existing typed Error recovery even beside prose or a complete sibling call; native invalid model arguments remain business content.
+  - Demonstrated orphan fullwidth/ASCII DSML and analysis lines, including the exact standalone closing residue ' calls>', are removed outside literal contexts. Labels alone trigger provider_response_empty only after complete hook normalization. Both JSON callers and both SSE sealing exits adjudicate the final normalized attempt before success; exhaustion detectably terminates request transport without error payload or normal empty completion.
+  - Thinking governance reuses the existing owner; complete wrappers harvest, complete tools with partial thinking/text labels keep the body, and unknown-start reasoning stays text. Isolated closing labels remove only the label and preserve all surrounding text.
+  - Thinking SSE preserves opaque carrier associations and raw unrelated values; modified snapshots and appended reasoning events agree with terminal output, and matching output_text aggregates are refreshed after normalization.
+  - Direct DSML SSE protection, replacement, survivor indexing, snapshots and raw rendering share exact item-ID or unique call-ID association across reordered wire and terminal outputs; raw output_index is never assumed to identify a terminal array slot. Native IDs, call IDs, argument bytes and opaque associations remain faithful. Exact demonstrated closing fragments and bounded tool_call/arg_key/arg_value invocation grammar have owner and public-entry regressions.
+  - DSML dispatch uses the shared declaration registry and exact attempt inverse, including nested namespaces and supported additional_tools/tool_search_output discovery channels; tool kind, full namespace and every bound wire alias are preserved.
+  - Replaced SSE item/part/text carriers retain opaque fields and snapshot associations; an unrepresentable association leaves the affected message as original provider text, without dropping fields or blocking otherwise convertible messages.
   - P6 owns only adjacent transitions V3Target10ConcreteProviderSelected through V3Server16HttpFrame, with V3Execution11ProtocolDecision between Target10 and Direct policy
   - Runtime remains the only complete lifecycle executor
   - routecodex-v3-provider-responses is generic and contains no deployment provider ID or provider-family branch
@@ -1168,6 +1176,12 @@ features:
     JSON as client SSE without treating provider inbound transport as client protocol truth
   - Client stream requests keep text/event-stream for Error06 and success frames; non-stream requests keep JSON while valid provider JSON may omit top-level finish_reason
   required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_dsml_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_dsml_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_thinking_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_tool_markup_recovery_is_exact_and_health_neutral -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_d94731e_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox responses_direct_ -- --nocapture
   - npm run render:v3-mainline-caller-flow
   - npm run verify:v3-mainline-caller-flow
   - npm run test:v3-mainline-caller-flow-red-fixtures
@@ -1325,6 +1339,9 @@ features:
   change_risk: high
   owner_kind: rust_project_v3
   owner_scope: P3 global Debug plus P4 global Error and Provider-owned session-isolated health/availability foundation
+  recovery_delta_contract:
+  - Only exact typed Direct V3DirectResp14UnharvestableToolMarkup (500-211) or Relay V3HubRelayResp03UnharvestableToolMarkup (500-231), RuntimeFailure/internal599, gain health-neutral request-local Error02-05 reselection; the actual upstream status remains a separate witness.
+  - Other RuntimeFailure codes remain terminal. Native model-generated invalid arguments remain business content. Direct never excludes candidates outside the existing Error05-authorized recovery path.
   owner_modules:
   - v3/crates/routecodex-v3-debug
   - v3/crates/routecodex-v3-error
@@ -1449,7 +1466,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target -- --nocapture
   - 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests:': -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_generic_provider_http_400_exhausts_provider_family -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_wait -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime transport_error_switches_provider_family -- --nocapture
   - npm run test:v3-p5-server-blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --test user_config_contract --locked
@@ -1859,6 +1876,17 @@ features:
 - feature_id: v3.protocol_conversion_field_parity
   status: runtime_active_live_verified_5520
   change_risk: high
+  business_name_regression:
+    issue: 03df769
+    test: responses_direct_followup_preserves_function_strict_presence
+    contract: complete nested assignmentFields.properties.requiredCapabilities reaches the first provider attempt and the actual client tool execution plus paired follow-up; no business field name is control provenance
+    command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_followup_preserves_function_strict_presence -- --exact --nocapture --test-threads=1
+    typed_writer_test: bug03df769_typed_transport_writer_isolates_control_from_business_body
+    typed_writer_command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib bug03df769_ -- --nocapture
+    typed_writer_negative_control: A temporary production transport writer mutation copies typed target.base_url into business selected_target; exact body preservation must fail. The mutation is absent from delivered source.
+    response_opaque_test: anthropic_json_business_root_fields_survive_responses_client_projection
+    response_opaque_command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox anthropic_json_business_root_fields_survive_responses_client_projection -- --exact --nocapture --test-threads=1
+    known_locator_control: responses_continuation_locator_does_not_enter_chat_canonical_payload proves previous_response_id is consumed by its existing continuation owner rather than treated as an unmapped business extension; public multi_listener_server previous_response_id cases retain admission and zero-provider-send behavior.
   owner_kind: rust_v3_protocol_codec_field_parity
   owner_scope: Lossless field parity for V3 Relay protocol conversion and Responses Direct; structured latest user/tool images survive across Chat, Responses and Anthropic. Chat projects tool images to adjacent user content, Responses to function_call_output.output and Anthropic to tool_result.content, without server/SSE/MetadataCenter repair owners.
   compatibility_exceptions:
@@ -3105,12 +3133,14 @@ features:
   - Worker filesystem failures for error evidence are logged immediately and retained as request/file-qualified barrier errors.
   - Pinned Chat Direct JSON and SSE GOOD/DROP/GOOD controls attempt the exact one-candidate pin once per request, never admit the unrelated default pool, and retain the original typed failed-attempt source plus the separate terminal source in the request-qualified private artifact.
   - Direct recovered success retains the original ordered failed-attempt sources; clean Direct success without failures or a terminal source creates no provider-failed-attempt artifact.
+  - Public Responses Direct JSON and SSE requests recover from a Provider A HTTP 502 to a distinct Provider B business response while retaining A's admitted ordinal, provider request projection, actual response head, body bytes, and original typed source in the final private artifact; Provider B does not overwrite or duplicate A's failed attempt.
   - Direct attempt-zero failure persists the exact original Error06 source as terminal_source with an empty attempts array and no provider transport attempt.
   - 'Seeded Chat Relay success and terminal failure record the receiving output authoritative sequence once: original Direct failure A followed by later Relay failure B, preserving their exact typed sources and order.'
   - The existing compaction early-return branch records any preceding typed failures before returning, without moving or reusing a consumed handoff and without changing its existing client behavior.
   required_negative:
   - Clean successes without a failed attempt or terminal source do not force failure evidence persistence.
   - Private source fields never enter client payload, SSE frames, or ordinary diagnostic projections; no generic reason code substitutes for the original source.
+  - Responses Direct HTTP 502 recovery never exposes Provider A's error body, credential material, failed-attempt evidence, or proxy error semantics in the JSON or SSE client response.
   - Failure evidence never enters MetadataCenter, provider payload, or client payload.
   - Direct recording cannot alter pin selection, captured candidate plans, exclusions, cumulative attempt budgets, configured hard ceilings, deadlines, retries, health, payloads or client framing.
   - Recording the seeded Relay output must not concatenate a preceding handoff sequence or duplicate A; removing only the seeded Server recording call loses the artifact while the same business continuation remains unchanged.
@@ -3124,6 +3154,7 @@ features:
   - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_provider_continuation -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_failure_evidence -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_relay_handoff -- --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test issue885bb74_responses_failed_attempt_evidence -- --nocapture --test-threads=1
   completion_rule:
     source: Resource, function, mainline, module, and Server unit gates pass.
     runtime: Live failed request evidence capture remains required before production closeout.
@@ -3423,6 +3454,9 @@ features:
   - Genuine Chat, Anthropic and Responses errors retain their typed source through recovery and transport termination.
   - Configured backoff is a minimum combined with provider-action-gate delay by max rather than addition.
   - A complete provider attempt with no deliverable business content is classified as an internal typed 502 (provider_response_empty) that enters the existing Error chain retry/reselect and never reaches the client as an empty completion; the judgment reads the whole accumulated attempt, not the last terminal frame or usage.
+  - 5338ac6 direct_sse_memory_only_reselects_before_client_commit and direct_sse_memory_only_exhaustion_interrupts_transport cover post-memory-strip adjudication at legal-closeout and terminal/EOF seal exits through public HTTP; execute the no_response_adjudication_blackbox required gate with filter direct_sse_memory_only for focused red/green.
+  - 5338ac6 direct_sse_memory_rewrite_preserves_business_results sends text, opaque model tool arguments, reasoning, refusal and content_filter through memory-enabled public Direct SSE; each remains first-attempt business content after declared memory stripping.
+  - direct_sse_memory_item_part_sequences_never_authorize_completion covers normal output_item/content_part added/done snapshots at both sealing exits, with candidate recovery and request-local exhaustion. Captured memory envelopes are removed by the same memory owner before whole-attempt adjudication; visible business siblings remain deliverable. Run CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox direct_sse_memory_item_part_sequences_never_authorize_completion -- --exact --nocapture --test-threads=1.
   - Successful provider responses reach client commit without content, refusal, incomplete, zero-usage or tool-argument adjudication; the empty-attempt 502 is the single exception and is never projected to the client.
   - Responses incomplete reasons, Chat content_filter and refusal, tool-call-only, reasoning, and Anthropic refusal remain representable provider output on Direct and Relay paths and are not reclassified as empty.
   - Structured Chat reasoning, reasoning_text and Gemini filtering finishReason or promptFeedback remain business results; candidate-less Gemini prompt filtering is a real JSON/SSE terminal and seals typed control without inventing payload fields.
@@ -3952,6 +3986,7 @@ features:
   - docs/architecture/manifests/error.mainline.yml
   required_contract:
   - request and response and error graphs are separate SESE DAGpipe graphs
+  - i86_single_stale_cooldown_bypass and i86_last_eligible_failure_is_terminal prove real HTTP sends for singleton stale cooldown and no last-candidate health mutation; i86_multi_next_candidate_success preserves bounded switching when an eligible alternative exists
   - every graph node binds exact operator@operator_version
   - the response provenance edge is RespInbound02 -> Resp03 -> RespOutbound05; RespInbound02 produces v3.operation_runner.response_provenance, Resp03 consumes it and produces response_tool_binding/execution_disposition, and RespOutbound05 consumes response_tool_binding/execution_disposition only for the successful attempt
   - RespInbound02 is the unique producer of v3.operation_runner.response_provenance; Resp03 and RespOutbound05 are its only readers
@@ -3973,7 +4008,10 @@ features:
   - RespInbound02/Resp03/RespOutbound05 use only the successful attempt map and current response binding
   - remote continuation is projection-only; no local continuation is introduced
   - semantic matrix partial/declared statuses are preserved, not relabeled as covered
-  - ErrorErr02Classified is mandatory between ErrorErr01 and ErrorErr03
+  - canonical error_err02_classified classifies the typed source before error_err03_target_local_action; retired HostCaptured-era labels are not the executable chain
+  - recoverable Error05 decisions skip Error06 and launch a new attempt outside the static DAG after attempt-only cleanup; Error06 accepts terminal decisions only
+  - after all declared response rewrites, the whole attempt must retain text, tools, reasoning, refusal, or content_filter before client commit; deliberate non-client envelope removal leaving no business content enters typed Error01 as provider_response_empty internal 502
+  - loss or processing failure of representable business content enters typed Error01 as internal 599; servertool_followup remains internal continuation and is not an empty client success or provider failure
   - Direct/Relay, ToolThinking, inverse context, attempt projection, and response binding have one writer and declared readers
   - servertool hop re-enters the same runner before client commit
   - servertool_sidecar_plan is produced only by Resp03 when execution_disposition=servertool_followup, read only by RuntimeInternalFollowup, and released after sidecar execution before request re-entry
@@ -4097,6 +4135,7 @@ features:
     - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_govern_operator_uses_sdk_output_as_business_payload
   required_gates:
   - npm run verify:v3-operation-runner-dagpipe
+  - npm run test:v3-last-provider-policy
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib typed_planning_failure_is_sdk_error_and_keeps_original_source -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib protocol_candidate_keys_raise_only_actual_failures -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server error01_protocol_decision_normal_http_failure_no_client_error -- --nocapture
@@ -4130,7 +4169,7 @@ features:
   status: source_gate_verified
   change_risk: high
   owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: Public HTTP and unit verification preserves complete and literal Anthropic text without stripping, rejection or provider reselection.
+  owner_scope: Public HTTP and unit verification preserves literal and unrecognized protocol-looking business text while governing declared control-marker leakage in Relay Chat Process.
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
@@ -4139,8 +4178,9 @@ features:
   mainline_bindings:
   - v3-hub-relay-resp-03
   required_contract:
-  - complete, incomplete, suspect, quoted and literal DSML-looking business text is forwarded unchanged
-  - representable business text never causes provider rejection, reselection or a fabricated terminal error
+  - Quoted, code, literal and unrecognized DSML-looking business text is forwarded unchanged; declared leaked orphan control labels are removed only in Relay response Chat Process while preserving surrounding prose and native calls.
+  - Shared pure marker recognition has one grammar owner; Direct hooks and Relay Chat Process retain distinct payload rewrite ownership. Native invalid model arguments never trigger provider rejection or reselection.
+  - After governance, a complete attempt with only removed labels enters existing typed provider_response_empty recovery; exhausted recovery detectably terminates only that request transport without client errors or empty success.
   - genuine HTTP and native protocol errors retain the existing internal Error chain and client transport-break boundary
   required_gates:
   - npm run verify:v3-architecture-ci
@@ -4152,6 +4192,10 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay_suspect_anthropic_text_is_preserved_without_reselection
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay_anthropic_dsml_complete_text
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_control_marker_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server relay_control_marker_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server relay_serialized_tool_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_serialized_tool_
   - git diff --check
   completion_rule:
     source: Complete when the faithful-text public HTTP cases, runtime and error tests, and affected map/resource/mainline gates pass on the exact candidate.

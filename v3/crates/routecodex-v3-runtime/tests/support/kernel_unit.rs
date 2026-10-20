@@ -967,15 +967,23 @@ async fn direct_json_response_strips_encrypted_content_for_multi_provider_route(
 }
 
 #[tokio::test]
-async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send() {
-    struct NoSendTransport;
+async fn direct_runtime_preserves_business_control_names_before_provider_send() {
+    struct BusinessTransport;
     #[async_trait]
-    impl ResponsesTransport for NoSendTransport {
+    impl ResponsesTransport for BusinessTransport {
         async fn send(
             &self,
-            _request: V3Transport13ResponsesHttpRequest,
+            request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            panic!("side-channel control payload must fail before provider transport")
+            assert_eq!(
+                request.body()["metadataCenter"],
+                json!({"providerKey":"must-not-enter-body"})
+            );
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id().to_string(), request.provider_id().to_string(), 200,
+                vec![V3ProviderResponseHeader { name: "content-type".into(), value: b"application/json".to_vec() }],
+                serde_json::to_vec(&json!({"id":"business-response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"preserved"}]}]})).unwrap(),
+            ))
         }
     }
 
@@ -983,8 +991,8 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
         &test_manifest(),
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::Conversation,
-            port: None,
-            pipeline_id: None,
+            port: Some(7777),
+            pipeline_id: Some("business-name-test".into()),
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("test"),
             request_id: "req-control-leak".to_string(),
@@ -999,24 +1007,21 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
             }),
         },
         crate::register_responses_direct_hooks(),
-        &NoSendTransport,
+        &BusinessTransport,
     )
     .await;
 
-    assert_eq!(output.client_payload.status, 599);
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
     assert!(output.node_trace.contains(&"V3Req04StandardizedResponses"));
-    assert!(!output
+    assert!(output
         .node_trace
         .contains(&"V3Provider12ResponsesWirePayload"));
     match output.client_payload.body {
         V3ClientBody::Json(body) => {
-            assert!(body["error"]["message"]
-                .as_str()
-                .expect("error message")
-                .contains("metadataCenter"));
+            assert_eq!(body["output"][0]["content"][0]["text"], "preserved");
         }
         V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
-            panic!("error response must be JSON")
+            panic!("business response must be JSON")
         }
     }
 }

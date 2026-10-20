@@ -6,6 +6,7 @@
 //!   -- --nocapture
 
 use super::*;
+use axum::Json;
 
 async fn issue_d94731e_thinking_upstream(Json(request): Json<Value>) -> Response<Body> {
     assert_eq!(request["model"], "wire-thinking");
@@ -107,9 +108,20 @@ fn issue_d94731e_thinking_manifest(
     port_a: u16,
     port_b: u16,
     provider_base_url: &str,
+    with_profile: bool,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
     let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
     let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let profile = if with_profile {
+        "compatibility_profile = \"responses:thinking-tags\""
+    } else {
+        ""
+    };
+    let thinking = if with_profile {
+        "capabilities = [\"text\", \"reasoning\"]\nsupports_thinking = true\nthinking = \"optional\""
+    } else {
+        "capabilities = [\"text\", \"tools\"]"
+    };
     let source = format!(
         r#"
 version = 3
@@ -129,17 +141,15 @@ endpoints = ["responses"]
 type = "responses"
 base_url = "{provider_base_url}"
 default_model = "thinking"
-compatibility_profile = "responses:thinking-tags"
+{profile}
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_D94731E_THINKING_KEY" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
 responses = {{ process = "direct", streaming = "client" }}
 [providers.test.models.thinking]
 wire_name = "wire-thinking"
 aliases = ["client-thinking"]
-capabilities = ["text", "reasoning"]
+{thinking}
 supports_streaming = true
-supports_thinking = true
-thinking = "optional"
 max_tokens = 4096
 max_context_tokens = 128000
 [debug]
@@ -157,6 +167,15 @@ targets = [{{ kind = "provider_model", provider = "test", model = "thinking", ke
 
 #[tokio::test]
 async fn responses_direct_d94731e_thinking_tags_public_blackbox() {
+    run_thinking_public(true).await;
+}
+
+#[tokio::test]
+async fn responses_direct_d94731e_without_profile_or_reasoning_capability() {
+    run_thinking_public(false).await;
+}
+
+async fn run_thinking_public(with_profile: bool) {
     let _test_guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_D94731E_THINKING_KEY", "controlled-d94731e-key");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -175,6 +194,7 @@ async fn responses_direct_d94731e_thinking_tags_public_blackbox() {
         free_port(),
         free_port(),
         &format!("http://{address}/v1"),
+        with_profile,
     ))
     .await
     .unwrap();

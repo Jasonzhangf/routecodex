@@ -1,5 +1,48 @@
 use super::*;
 
+#[test]
+fn direct_thinking_json_preserves_opaque_parts_and_refreshes_aggregate() {
+    let mut item = message_output_item("m", "<thinking>private</thinking>");
+    item["content"][0]["annotations"] = json!([{"vendor":"keep"}]);
+    let mut payload = json!({"output":[item]});
+    let original = payload.clone();
+    assert!(!normalize_v3_direct_thinking_json(&mut payload));
+    assert_eq!(payload, original);
+    let mut payload = json!({"output":[message_output_item("m", "<thinking>private</thinking>")],"output_text":"<thinking>private</thinking>"});
+    assert!(normalize_v3_direct_thinking_json(&mut payload));
+    assert_eq!(payload["output_text"], "");
+}
+
+#[test]
+fn direct_thinking_sse_preserves_raw_extensions_and_snapshot() {
+    let item = message_output_item("m", "<thinking>private</thinking>");
+    let number = "123456789012345678901234567890";
+    let created = format!("data: {}\n\n", json!({"type":"response.created","response":{"output":[item.clone()]}}));
+    let terminal = format!("data: {{\"type\":\"response.completed\",\"vendor\":{number},\"response\":{{\"vendor\":{number},\"status\":\"completed\",\"output\":[{item}]}}}}\n\n");
+    let (frames, _) = rewrite_v3_direct_thinking_attempt(&[created.into_bytes(), terminal.into_bytes()]).unwrap();
+    let wire = String::from_utf8(frames.concat()).unwrap();
+    assert!(!wire.contains("<thinking>"), "snapshot leaked: {wire}");
+    assert_eq!(wire.matches(number).count(), 2, "opaque number changed: {wire}");
+}
+
+#[test]
+fn direct_thinking_sse_opaque_carrier_remains_associated() {
+    let source = tagged_sse(&["<thinking>private</thinking>"], "<thinking>private</thinking>");
+    let mut frames = sse_frames(&source);
+    let event = json!({"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","content_index":0,"delta":"<thinking>private</thinking>","vendor":{"keep":true}});
+    frames[2] = format!("data: {event}\n\n").into_bytes();
+    assert!(rewrite_v3_direct_thinking_attempt(&frames).is_none());
+}
+
+#[test]
+fn direct_thinking_sse_mixed_body_emits_appended_reasoning() {
+    let source = tagged_sse(&["<thinking>private</thinking>answer"], "<thinking>private</thinking>answer");
+    let (frames, _) = rewrite_v3_direct_thinking_attempt(&sse_frames(&source)).unwrap();
+    let wire = String::from_utf8(frames.concat()).unwrap();
+    assert!(wire.contains("response.reasoning_summary_text.delta"), "{wire}");
+    assert!(wire.contains("answer"));
+}
+
 fn message_output_item(id: &str, text: &str) -> Value {
     json!({
         "id": id,

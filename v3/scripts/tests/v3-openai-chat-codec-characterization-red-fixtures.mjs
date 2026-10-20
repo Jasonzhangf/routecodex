@@ -9,7 +9,7 @@ const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-openai-cha
 const fixtures = [
   ['hook registration', 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs', 'use super::{', 'use super::{ compile_v3_hub_v1_static_registry,', /forbidden.*compile_v3_hub_v1_static_registry/],
   ['protocol branch', 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs', 'V3HubEntryProtocol::OpenAiChat', 'V3HubEntryProtocol::Responses', /missing V3HubEntryProtocol::OpenAiChat|forbidden.*Responses/],
-  ['side channel', 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs', 'V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS', 'V3_REMOVED_CONTROL_PAYLOAD_KEYS', /missing V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS/],
+  ['business-name guard revival', 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs', 'use super::{', 'fn reject_side_channel_fields() {}\nuse super::{', /forbidden.*reject_side_channel_fields/],
   ['tool identity governance revival', 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs', 'fn validate_request(payload: &Value) -> Result<(), V3OpenAiChatCodecError> {', 'fn validate_message_tool_identity() {}\nfn validate_request(payload: &Value) -> Result<(), V3OpenAiChatCodecError> {', /forbidden.*validate_message_tool_identity/],
   ['SSE coverage', 'v3/crates/routecodex-v3-runtime/tests/hub_openai_chat_codec_characterization.rs', 'V3HubTransportIntent::Sse', 'V3HubTransportIntent::Json', /missing V3HubTransportIntent::Sse/],
 ];
