@@ -1,6 +1,6 @@
 {
   "id": "v3.operation_runner.error",
-  "version": "1",
+  "version": "2",
   "inputs": [
     { "id": "source-failure", "schema": "Object", "schema_ref": "v3.operation_runner.arc.source_failure" }
   ],
@@ -43,7 +43,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.error.chain"],
+        "reads": ["v3.error.chain", "v3.target.candidate_set", "v3.provider.availability_projection"],
         "writes": ["v3.error.chain", "v3.error.action_plan"]
       }
     },

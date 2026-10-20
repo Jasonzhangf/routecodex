@@ -15,6 +15,8 @@ nodes:
     owner: routecodex-v3-error
   - node_id: V3Error05ExecutionDecision
     owner: routecodex-v3-error
+  - node_id: V3Error06ClientProjected
+    owner: routecodex-v3-error
   - node_id: V3Error05RecoveryWitness
     owner: routecodex-v3-error
   - node_id: V3ProviderActionGateAdmission
@@ -86,12 +88,12 @@ edges:
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
   - step_id: v3-provider-action-gate-05
     from: V3Error05ExecutionDecision
-    to: V3ProviderActionGateTerminalAdmission
+    to: V3Error06ClientProjected
     status: anchored
     owner_feature_id: v3.provider_action_gate
     caller_symbol: run_v3_relay_provider_failure_policy
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_terminal_provider_projection_in_scope
+    callee_symbol: terminal_projection_for
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-06
     from: V3ProviderActionGateTerminalAdmission

@@ -9,6 +9,7 @@ flowchart TD
   Wire[V3ProviderReqOutbound08WirePayload]
   E01[V3Error01SourceRaised]
   E05[V3Error05ExecutionDecision]
+  E06[V3Error06ClientProjected]
   Witness[V3Error05RecoveryWitness]
   Gate[V3ProviderActionGateAdmission]
   Retry[V3ExecutionRetryOrReselect]
@@ -33,7 +34,7 @@ flowchart TD
   Wire -->|v3-provider-action-gate-02| E05
   E05 -->|v3-provider-action-gate-03| Witness
   Witness -->|v3-provider-action-gate-04| Gate
-  E05 -->|v3-provider-action-gate-05| TerminalAdmission
+  E05 -->|v3-provider-action-gate-05| E06
   TerminalAdmission -->|v3-provider-action-gate-06| TerminalCommit
   Gate -->|v3-provider-action-gate-07| Retry
   Witness -->|v3-provider-action-gate-08| Gate

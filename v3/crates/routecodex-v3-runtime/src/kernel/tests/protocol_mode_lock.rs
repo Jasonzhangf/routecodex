@@ -139,7 +139,7 @@ async fn direct_generic_provider_http_400_reselects_untried_sibling_model() {
 }
 
 #[tokio::test]
-async fn direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait() {
+async fn direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_wait() {
     let routing_group = "direct_provider_compat_terminal";
     let manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
     let raw = V3Server03HttpRequestRaw {
@@ -187,7 +187,7 @@ async fn direct_generic_provider_http_400_terminal_exhaustion_enters_provider_ac
     );
     assert!(
         output.error_chain.is_some(),
-        "generic provider HTTP 400 exhaustion must produce a client error: {output:?}"
+        "generic provider HTTP 400 exhaustion must retain its internal error: {output:?}"
     );
     let observation = output
         .observability
@@ -197,14 +197,14 @@ async fn direct_generic_provider_http_400_terminal_exhaustion_enters_provider_ac
         .first()
         .expect("generic provider failure event");
     assert_eq!(failure.error_type.as_deref(), Some("provider_http_400"));
-    assert_eq!(failure.health_state, "healthy");
-    assert_eq!(failure.failure_count, 1);
-    assert_eq!(failure.wait_ms, Some(1000));
+    assert_eq!(failure.health_state, "last_candidate_terminal");
+    assert_eq!(failure.failure_count, 0);
+    assert_eq!(failure.wait_ms, None);
     assert!(
         !observation
             .unavailable_candidates
             .contains(&"first:default:key:test".to_string()),
-        "generic provider HTTP 400 must retain normal health semantics"
+        "last candidate HTTP 400 must not exclude the candidate"
     );
 }
 
@@ -238,7 +238,9 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
         plan.decision.mode,
         V3Execution11ProtocolDecisionMode::SameProtocolDirect
     );
-    assert!(plan.protocol_candidate_keys.contains("first:default:key:test"));
+    assert!(plan
+        .protocol_candidate_keys
+        .contains("first:default:key:test"));
     assert!(!plan.protocol_candidate_keys.contains("chat:key:test"));
 
     let output = execute_v3_responses_direct_runtime_kernel_core(

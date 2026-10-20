@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 96 functional paths, 588 caller edges.
+Generated view: 96 functional paths, 590 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -74,7 +74,7 @@ flowchart TD
   module_v3_runtime -->|8 edges / 5 paths| module_v3_error
   module_v3_runtime -->|24 edges / 8 paths| module_v3_provider_responses
   module_v3_runtime -->|65 edges / 20 paths| module_v3_runtime
-  module_v3_runtime -->|48 edges / 13 paths| module_v3_runtime__hub_v1
+  module_v3_runtime -->|49 edges / 14 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|3 edges / 1 paths| module_v3_target
   module_v3_runtime -->|5 edges / 2 paths| module_v3_virtual_router
   module_v3_server -->|1 edges / 1 paths| module_routecodex_v3_sse
@@ -83,7 +83,7 @@ flowchart TD
   module_v3_server -->|2 edges / 2 paths| module_v3_error
   module_v3_server -->|7 edges / 5 paths| module_v3_runtime
   module_v3_server -->|7 edges / 5 paths| module_v3_runtime__hub_v1
-  module_v3_server -->|47 edges / 20 paths| module_v3_server
+  module_v3_server -->|48 edges / 20 paths| module_v3_server
   module_v3_server -->|1 edges / 1 paths| module_v3_vendor
   module_v3_target -->|1 edges / 1 paths| module_v3_provider_responses
   module_v3_target -->|1 edges / 1 paths| module_v3_target
@@ -132,7 +132,7 @@ flowchart TD
 | v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime | v3-provider-responses | 24 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime | v3-runtime | 65 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.direct_parser_binding`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
-| v3-runtime | v3-runtime::hub_v1 | 48 | `v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-runtime::hub_v1 | 49 | `v3.error.raw_wire_evidence`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 3 | `v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 5 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
 | v3-server | routecodex-v3-sse | 1 | `v3.sse.http_keepalive_boundary` |
@@ -141,7 +141,7 @@ flowchart TD
 | v3-server | v3-error | 2 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 7 | `v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime::hub_v1 | 7 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
-| v3-server | v3-server | 47 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3-server | v3-server | 48 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-server | v3/vendor | 1 | `v3.server.startup` |
 | v3-target | v3-provider-responses | 1 | `v3.provider_key_health_model_granularity` |
 | v3-target | v3-target | 1 | `v3.provider_oauth_credentials.mainline` |
@@ -2188,32 +2188,43 @@ Owner feature: `v3.error.raw_wire_evidence`
 ```mermaid
 flowchart TD
   subgraph c_52_v3_error_raw_wire_evidence_m_v3_debug["v3-debug"]
-    c_52_v3_error_raw_wire_evidence_2["v3-debug<br/>run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
-    c_52_v3_error_raw_wire_evidence_3["v3-debug<br/>persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
-    c_52_v3_error_raw_wire_evidence_4["v3-debug<br/>record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_52_v3_error_raw_wire_evidence_6["v3-debug<br/>run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_52_v3_error_raw_wire_evidence_7["v3-debug<br/>persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_52_v3_error_raw_wire_evidence_8["v3-debug<br/>record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+  end
+  subgraph c_52_v3_error_raw_wire_evidence_m_v3_runtime["v3-runtime"]
+    c_52_v3_error_raw_wire_evidence_2["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
+  end
+  subgraph c_52_v3_error_raw_wire_evidence_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
+    c_52_v3_error_raw_wire_evidence_3["v3-runtime::hub_v1<br/>build_v3_runtime_provider_failed_attempt_evidence_from_error<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small>"]
   end
   subgraph c_52_v3_error_raw_wire_evidence_m_v3_server["v3-server"]
     c_52_v3_error_raw_wire_evidence_0["v3-server<br/>finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
     c_52_v3_error_raw_wire_evidence_1["v3-server<br/>persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
-    c_52_v3_error_raw_wire_evidence_5["v3-server<br/>execute_v3_non_responses_protocol_branch<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
-    c_52_v3_error_raw_wire_evidence_6["v3-server<br/>persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_52_v3_error_raw_wire_evidence_7["v3-server<br/>persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small>"]
-    c_52_v3_error_raw_wire_evidence_8["v3-server<br/>execute_v3_openai_chat_direct_server_outcome<br/><small>routecodex-v3-server/src/executors.rs</small>"]
+    c_52_v3_error_raw_wire_evidence_4["v3-server<br/>take_responses_direct_terminal_outcome<br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small>"]
+    c_52_v3_error_raw_wire_evidence_5["v3-server<br/>persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small>"]
+    c_52_v3_error_raw_wire_evidence_9["v3-server<br/>execute_v3_non_responses_protocol_branch<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
+    c_52_v3_error_raw_wire_evidence_10["v3-server<br/>persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_52_v3_error_raw_wire_evidence_11["v3-server<br/>execute_v3_openai_chat_direct_server_outcome<br/><small>routecodex-v3-server/src/executors.rs</small>"]
   end
   c_52_v3_error_raw_wire_evidence_0 -->|v3-responses-relay-error-evidence-01<br/>V3Error06ClientProjected → V3ErrorEvidencePersistQueued| c_52_v3_error_raw_wire_evidence_1
-  c_52_v3_error_raw_wire_evidence_2 -->|v3-responses-relay-error-evidence-02<br/>V3ErrorEvidencePersistQueued → V3ErrorEvidenceFlushOnTerminalFailure| c_52_v3_error_raw_wire_evidence_3
-  c_52_v3_error_raw_wire_evidence_3 -->|v3-responses-relay-error-evidence-03<br/>V3ErrorEvidencePersistFailed → V3ErrorEvidencePersistFailureReported| c_52_v3_error_raw_wire_evidence_4
-  c_52_v3_error_raw_wire_evidence_5 -->|v3-chat-relay-error-evidence-01<br/>V3OpenAiChatRelayRuntimeOutput → V3ChatFailedAttemptEvidence| c_52_v3_error_raw_wire_evidence_6
-  c_52_v3_error_raw_wire_evidence_6 -->|v3-chat-relay-error-evidence-02<br/>V3ChatFailedAttemptEvidence → V3ChatFailedAttemptEvidenceSerialized| c_52_v3_error_raw_wire_evidence_7
-  c_52_v3_error_raw_wire_evidence_7 -->|v3-chat-relay-error-evidence-03<br/>V3ChatFailedAttemptEvidenceSerialized → V3ErrorEvidencePersistQueued| c_52_v3_error_raw_wire_evidence_1
-  c_52_v3_error_raw_wire_evidence_8 -->|v3-chat-direct-error-evidence-01<br/>V3ResponsesDirectRuntimeOutput → V3ChatFailedAttemptEvidenceSerialized| c_52_v3_error_raw_wire_evidence_7
-  c_52_v3_error_raw_wire_evidence_8 -->|v3-chat-direct-relay-error-evidence-01<br/>V3OpenAiChatRelayRuntimeOutput → V3ChatFailedAttemptEvidence| c_52_v3_error_raw_wire_evidence_6
-  c_52_v3_error_raw_wire_evidence_8 -->|v3-chat-direct-compaction-error-evidence-01<br/>V3ResponsesProtocolRelayHandoff → V3ChatFailedAttemptEvidenceSerialized| c_52_v3_error_raw_wire_evidence_7
+  c_52_v3_error_raw_wire_evidence_2 -->|v3-responses-direct-error-evidence-01<br/>V3ProviderError → V3RuntimeProviderFailureObservation| c_52_v3_error_raw_wire_evidence_3
+  c_52_v3_error_raw_wire_evidence_4 -->|v3-responses-direct-error-evidence-02<br/>V3RuntimeProviderFailureObservation → V3ChatFailedAttemptEvidenceSerialized| c_52_v3_error_raw_wire_evidence_5
+  c_52_v3_error_raw_wire_evidence_6 -->|v3-responses-relay-error-evidence-02<br/>V3ErrorEvidencePersistQueued → V3ErrorEvidenceFlushOnTerminalFailure| c_52_v3_error_raw_wire_evidence_7
+  c_52_v3_error_raw_wire_evidence_7 -->|v3-responses-relay-error-evidence-03<br/>V3ErrorEvidencePersistFailed → V3ErrorEvidencePersistFailureReported| c_52_v3_error_raw_wire_evidence_8
+  c_52_v3_error_raw_wire_evidence_9 -->|v3-chat-relay-error-evidence-01<br/>V3OpenAiChatRelayRuntimeOutput → V3ChatFailedAttemptEvidence| c_52_v3_error_raw_wire_evidence_10
+  c_52_v3_error_raw_wire_evidence_10 -->|v3-chat-relay-error-evidence-02<br/>V3ChatFailedAttemptEvidence → V3ChatFailedAttemptEvidenceSerialized| c_52_v3_error_raw_wire_evidence_5
+  c_52_v3_error_raw_wire_evidence_5 -->|v3-chat-relay-error-evidence-03<br/>V3ChatFailedAttemptEvidenceSerialized → V3ErrorEvidencePersistQueued| c_52_v3_error_raw_wire_evidence_1
+  c_52_v3_error_raw_wire_evidence_11 -->|v3-chat-direct-error-evidence-01<br/>V3ResponsesDirectRuntimeOutput → V3ChatFailedAttemptEvidenceSerialized| c_52_v3_error_raw_wire_evidence_5
+  c_52_v3_error_raw_wire_evidence_11 -->|v3-chat-direct-relay-error-evidence-01<br/>V3OpenAiChatRelayRuntimeOutput → V3ChatFailedAttemptEvidence| c_52_v3_error_raw_wire_evidence_10
+  c_52_v3_error_raw_wire_evidence_11 -->|v3-chat-direct-compaction-error-evidence-01<br/>V3ResponsesProtocolRelayHandoff → V3ChatFailedAttemptEvidenceSerialized| c_52_v3_error_raw_wire_evidence_5
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-responses-relay-error-evidence-01` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-responses-direct-error-evidence-01` | `V3ProviderError` → `V3RuntimeProviderFailureObservation` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | build_v3_runtime_provider_failed_attempt_evidence_from_error<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small> | `v3.responses_direct_mvp_architecture` |
+| `v3-responses-direct-error-evidence-02` | `V3RuntimeProviderFailureObservation` → `V3ChatFailedAttemptEvidenceSerialized` | anchored | take_responses_direct_terminal_outcome<br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small> | persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-02` | `V3ErrorEvidencePersistQueued` → `V3ErrorEvidenceFlushOnTerminalFailure` | anchored | run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-03` | `V3ErrorEvidencePersistFailed` → `V3ErrorEvidencePersistFailureReported` | anchored | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-chat-relay-error-evidence-01` | `V3OpenAiChatRelayRuntimeOutput` → `V3ChatFailedAttemptEvidence` | anchored | execute_v3_non_responses_protocol_branch<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.error.raw_wire_evidence` |
@@ -2765,7 +2776,7 @@ flowchart TD
     c_67_v3_provider_action_gate_mainline_3["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_action_failure_in_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_67_v3_provider_action_gate_mainline_4["v3-runtime<br/>V3ProviderFailureRuntimeHealth::wait_for_error05_recovery<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_67_v3_provider_action_gate_mainline_5["v3-runtime<br/>V3ProviderActionGate::wait_for_recovery_witness<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small>"]
-    c_67_v3_provider_action_gate_mainline_6["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_terminal_provider_projection_in_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_67_v3_provider_action_gate_mainline_6["v3-runtime<br/>terminal_projection_for<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_67_v3_provider_action_gate_mainline_7["v3-runtime<br/>V3ProviderActionGate::record_failure_and_commit_terminal_projection<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small>"]
     c_67_v3_provider_action_gate_mainline_8["v3-runtime<br/>V3ProviderActionGate::commit_terminal_generation_locked<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small>"]
     c_67_v3_provider_action_gate_mainline_9["v3-runtime<br/>V3ProviderFailureRuntimeHealth::wait_for_exact_selected_provider_action<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
@@ -2805,7 +2816,7 @@ flowchart TD
   c_67_v3_provider_action_gate_mainline_0 -->|v3-provider-action-gate-02<br/>V3ProviderReqOutbound08WirePayload → V3Error05ExecutionDecision| c_67_v3_provider_action_gate_mainline_1
   c_67_v3_provider_action_gate_mainline_2 -->|v3-provider-action-gate-03<br/>V3Error05ExecutionDecision → V3Error05RecoveryWitness| c_67_v3_provider_action_gate_mainline_3
   c_67_v3_provider_action_gate_mainline_4 -->|v3-provider-action-gate-04<br/>V3Error05RecoveryWitness → V3ProviderActionGateAdmission| c_67_v3_provider_action_gate_mainline_5
-  c_67_v3_provider_action_gate_mainline_2 -->|v3-provider-action-gate-05<br/>V3Error05ExecutionDecision → V3ProviderActionGateTerminalAdmission| c_67_v3_provider_action_gate_mainline_6
+  c_67_v3_provider_action_gate_mainline_2 -->|v3-provider-action-gate-05<br/>V3Error05ExecutionDecision → V3Error06ClientProjected| c_67_v3_provider_action_gate_mainline_6
   c_67_v3_provider_action_gate_mainline_7 -->|v3-provider-action-gate-06<br/>V3ProviderActionGateTerminalAdmission → V3ProviderActionGateTerminalCommitted| c_67_v3_provider_action_gate_mainline_8
   c_67_v3_provider_action_gate_mainline_9 -->|v3-provider-action-gate-07<br/>V3ProviderActionGateAdmission → V3ExecutionRetryOrReselect| c_67_v3_provider_action_gate_mainline_10
   c_67_v3_provider_action_gate_mainline_11 -->|v3-provider-action-gate-08<br/>V3Error05RecoveryWitness → V3ProviderActionGateAdmission| c_67_v3_provider_action_gate_mainline_4
@@ -2857,7 +2868,7 @@ flowchart TD
 | `v3-provider-action-gate-02` | `V3ProviderReqOutbound08WirePayload` → `V3Error05ExecutionDecision` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | handle_v3_responses_relay_provider_failure<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-03` | `V3Error05ExecutionDecision` → `V3Error05RecoveryWitness` | anchored | run_v3_relay_provider_failure_policy<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_action_failure_in_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-04` | `V3Error05RecoveryWitness` → `V3ProviderActionGateAdmission` | anchored | V3ProviderFailureRuntimeHealth::wait_for_error05_recovery<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderActionGate::wait_for_recovery_witness<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small> | `v3.provider_action_gate` |
-| `v3-provider-action-gate-05` | `V3Error05ExecutionDecision` → `V3ProviderActionGateTerminalAdmission` | anchored | run_v3_relay_provider_failure_policy<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderFailureRuntimeHealth::record_terminal_provider_projection_in_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
+| `v3-provider-action-gate-05` | `V3Error05ExecutionDecision` → `V3Error06ClientProjected` | anchored | run_v3_relay_provider_failure_policy<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | terminal_projection_for<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-06` | `V3ProviderActionGateTerminalAdmission` → `V3ProviderActionGateTerminalCommitted` | anchored | V3ProviderActionGate::record_failure_and_commit_terminal_projection<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small> | V3ProviderActionGate::commit_terminal_generation_locked<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-07` | `V3ProviderActionGateAdmission` → `V3ExecutionRetryOrReselect` | anchored | V3ProviderFailureRuntimeHealth::wait_for_exact_selected_provider_action<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderActionGate::wait_for_exact_provider_action<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-08` | `V3Error05RecoveryWitness` → `V3ProviderActionGateAdmission` | anchored | execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3ProviderFailureRuntimeHealth::wait_for_error05_recovery<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |

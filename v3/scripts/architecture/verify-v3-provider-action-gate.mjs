@@ -526,7 +526,7 @@ requireText(
 for (const token of [
   'project_v3_client_disconnect',
   'record_provider_action_failure',
-  'record_terminal_provider_projection_in_scope',
+  'last_candidate_terminal',
   'build_v3_relay_provider_error_05_decision',
   'terminal_projection_for',
   'provider_runtime_failure_stage',
@@ -629,7 +629,7 @@ assertRustTest(
 assertRustTest(
   text.protocolModeLockTests,
   files.protocolModeLockTests,
-  'direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait',
+  'direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_wait',
 );
 requireText(
   text.directHelpers,
@@ -851,7 +851,7 @@ for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-02', 'Wire', 'E05'],
   ['v3-provider-action-gate-03', 'E05', 'Witness'],
   ['v3-provider-action-gate-04', 'Witness', 'Gate'],
-  ['v3-provider-action-gate-05', 'E05', 'TerminalAdmission'],
+  ['v3-provider-action-gate-05', 'E05', 'E06'],
   ['v3-provider-action-gate-06', 'TerminalAdmission', 'TerminalCommit'],
   ['v3-provider-action-gate-07', 'Gate', 'Retry'],
   ['v3-provider-action-gate-08', 'Witness', 'Gate'],
