@@ -1404,6 +1404,7 @@ dependencies = [
  "futures-util",
  "pipeline_runtime",
  "provider-compat-core",
+ "regex",
  "reqwest",
  "routecodex-v3-agent-memory",
  "routecodex-v3-config",

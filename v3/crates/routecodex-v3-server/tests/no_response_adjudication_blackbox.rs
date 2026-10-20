@@ -191,6 +191,105 @@ async fn issue0ff6700_relay_sse_exhausts() {
     issue0ff6700_run("relay", true, false).await;
 }
 
+async fn issuec1090f9_invisible_final_recovers(process: &str, stream: bool, final_text: &str) {
+    issue0ff6700_run_body(
+        process,
+        stream,
+        true,
+        Some(issuec1090f9_body(stream, final_text)),
+    )
+    .await;
+}
+
+fn issuec1090f9_body(stream: bool, final_text: &str) -> String {
+    let mut response = issue0ff6700_blank_final();
+    response["output"][1]["content"][0]["text"] = final_text.into();
+    if stream {
+        response_sse(&response)
+    } else {
+        response.to_string()
+    }
+}
+
+#[tokio::test]
+async fn issuec1090f9_direct_json_zero_width_final_recovers() {
+    issuec1090f9_invisible_final_recovers("direct", false, "\u{200b}").await;
+}
+
+#[tokio::test]
+async fn issuec1090f9_relay_sse_byte_order_mark_final_recovers() {
+    issuec1090f9_invisible_final_recovers("relay", true, "\u{feff}").await;
+}
+
+#[tokio::test]
+async fn issuec1090f9_remaining_paths_and_last_candidate() {
+    for (process, stream) in [("direct", true), ("relay", false)] {
+        issuec1090f9_invisible_final_recovers(process, stream, "\u{200e}\u{202e}\u{2060}\u{fe0f}")
+            .await;
+    }
+    for process in ["direct", "relay"] {
+        for stream in [false, true] {
+            issue0ff6700_run_body(
+                process,
+                stream,
+                false,
+                Some(issuec1090f9_body(stream, " \u{200b}\u{feff}\u{0000}\n")),
+            )
+            .await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn issuec1090f9_visible_unicode_preserves_exact_text() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let text = "中文 العربية देवनागरी e\u{0301} 👩\u{200d}💻 ☀\u{fe0f} A\u{200b}B\u{feff}C\u{202e}D";
+    let body = text_response(text);
+    for process in ["direct", "relay"] {
+        for stream in [false, true] {
+            let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+                "responses",
+                process,
+                StatusCode::OK,
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+                if stream {
+                    response_sse(&body)
+                } else {
+                    body.to_string()
+                },
+                EntryOptions::default(),
+            )
+            .await;
+            let consumed = consume_response(client().post(&endpoint).json(&json!({"model":"test.test","input":"controlled visible unicode","stream":stream})).send().await).await;
+            let received: Value = if stream {
+                consumed
+                    .body
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("data: "))
+                    .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+                    .find(|event| event["type"] == "response.completed")
+                    .expect("legal terminal")["response"]
+                    .clone()
+            } else {
+                serde_json::from_str(&consumed.body).unwrap()
+            };
+            assert_eq!(
+                received["output"][0]["content"][0]["text"], text,
+                "{process} stream={stream} must preserve every scalar"
+            );
+            assert!(consumed.transport_error.is_none());
+            assert_eq!(std::iter::from_fn(|| captures.try_recv().ok()).count(), 1);
+            stop_entry(handle, shutdown).await;
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 fn issue0ff6700_fragmented_blank() -> String {
     let response = issue0ff6700_blank_final();
     format!(

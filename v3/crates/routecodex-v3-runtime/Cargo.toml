@@ -20,6 +20,7 @@ routecodex-v3-virtual-router = { path = "../routecodex-v3-virtual-router" }
 provider-compat-core.workspace = true
 servertool-core.workspace = true
 reqwest.workspace = true
+regex.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 serde_yaml.workspace = true
