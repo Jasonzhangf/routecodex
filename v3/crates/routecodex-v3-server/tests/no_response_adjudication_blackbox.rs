@@ -242,9 +242,25 @@ async fn issuec1090f9_remaining_paths_and_last_candidate() {
 
 #[tokio::test]
 async fn issuec1090f9_visible_unicode_preserves_exact_text() {
+    issuec1090f9_visible_text_preserved(
+        "中文 العربية देवनागरी e\u{0301} 👩\u{200d}💻 ☀\u{fe0f} A\u{200b}B\u{feff}C\u{202e}D",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn issuec1090f9_visible_cf_ayah_mark_preserved() {
+    issuec1090f9_visible_text_preserved("\u{06dd}").await;
+}
+
+#[tokio::test]
+async fn issuec1090f9_visible_cf_number_sign_preserved() {
+    issuec1090f9_visible_text_preserved("\u{0600}").await;
+}
+
+async fn issuec1090f9_visible_text_preserved(text: &str) {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
-    let text = "中文 العربية देवनागरी e\u{0301} 👩\u{200d}💻 ☀\u{fe0f} A\u{200b}B\u{feff}C\u{202e}D";
     let body = text_response(text);
     for process in ["direct", "relay"] {
         for stream in [false, true] {
@@ -266,6 +282,7 @@ async fn issuec1090f9_visible_unicode_preserves_exact_text() {
             )
             .await;
             let consumed = consume_response(client().post(&endpoint).json(&json!({"model":"test.test","input":"controlled visible unicode","stream":stream})).send().await).await;
+            assert!(consumed.transport_error.is_none(), "visible business must survive: {process} stream={stream} text={text:?}: {consumed:?}");
             let received: Value = if stream {
                 consumed
                     .body
@@ -282,7 +299,6 @@ async fn issuec1090f9_visible_unicode_preserves_exact_text() {
                 received["output"][0]["content"][0]["text"], text,
                 "{process} stream={stream} must preserve every scalar"
             );
-            assert!(consumed.transport_error.is_none());
             assert_eq!(std::iter::from_fn(|| captures.try_recv().ok()).count(), 1);
             stop_entry(handle, shutdown).await;
         }

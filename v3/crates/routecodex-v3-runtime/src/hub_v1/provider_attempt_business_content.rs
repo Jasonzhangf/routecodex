@@ -6,7 +6,7 @@ use super::V3HubProviderWireProtocol;
 use futures_util::StreamExt;
 
 static VISIBLE_TEXT_PATTERN: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"[^\p{White_Space}\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]")
+    regex::Regex::new(r"[^\p{White_Space}\p{Cc}\p{Default_Ignorable_Code_Point}]")
         .expect("visible-text Unicode property expression must compile")
 });
 
