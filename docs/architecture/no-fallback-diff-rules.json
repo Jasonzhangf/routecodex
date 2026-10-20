@@ -37,6 +37,7 @@
     "tests/",
     "scripts/tests/",
     "v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar/tests.rs",
+    "v3/crates/routecodex-v3-runtime/src/provider_probe_fairness_tests.rs",
     "v3/build-contracts/",
     "v4/protected/history/"
   ],
