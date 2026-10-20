@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 mod init;
+mod runtime;
 
 #[derive(Parser)]
 #[command(name = "rccv3")]
@@ -179,43 +180,36 @@ enum ServerCommand {
 }
 
 fn main() {
-    let mut builder = tokio::runtime::Builder::new_multi_thread();
-    builder.enable_all();
-    if managed_child_worker_stack_size(std::env::args_os()).is_some() {
-        // The managed child owns the complete nested Direct/Relay completion
-        // state machine. Keep its Error/Retry handoff off the default worker
-        // stack while leaving the parent CLI runtime unchanged.
-        builder.thread_stack_size(8 * 1024 * 1024);
+    if should_print_version() {
+        if let Err(error) = print_version() {
+            eprintln!("[RouteCodexV3] command failed: {error}");
+            std::process::exit(1);
+        }
+        return;
     }
-    let runtime = builder.build().expect("tokio runtime");
+    let args = Args::parse();
+    let runtime = runtime::build(&args).expect("tokio runtime");
     runtime.block_on(async {
-        if let Err(error) = run_cli().await {
+        if let Err(error) = run_cli(args).await {
             eprintln!("[RouteCodexV3] command failed: {error}");
             std::process::exit(1);
         }
     });
 }
 
-fn managed_child_worker_stack_size(
-    args: impl IntoIterator<Item = std::ffi::OsString>,
-) -> Option<usize> {
-    args.into_iter()
-        .any(|arg| arg == "run-managed-child")
-        .then_some(8 * 1024 * 1024)
+fn print_version() -> Result<(), Box<dyn std::error::Error>> {
+    let executable = std::env::current_exe()?;
+    println!(
+        "rccv3 {} (crate {})",
+        resolve_routecodex_package_version_from_executable(&executable)
+            .unwrap_or_else(|| "unknown".to_string()),
+        env!("CARGO_PKG_VERSION")
+    );
+    Ok(())
 }
 
-async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
-    if should_print_version() {
-        let executable = std::env::current_exe()?;
-        println!(
-            "rccv3 {} (crate {})",
-            resolve_routecodex_package_version_from_executable(&executable)
-                .unwrap_or_else(|| "unknown".to_string()),
-            env!("CARGO_PKG_VERSION")
-        );
-        return Ok(());
-    }
-    match Args::parse().command {
+async fn run_cli(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    match args.command {
         Command::Config {
             command: ConfigCommand::Check { config },
         } => {
@@ -735,32 +729,4 @@ fn emit_v3_cli_server_started_console_line(
 
 fn flush_stdout_best_effort() {
     let _ = io::stdout().flush();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::managed_child_worker_stack_size;
-    use std::ffi::OsString;
-
-    #[test]
-    fn managed_child_uses_bounded_worker_stack() {
-        let args = [
-            "rccv3",
-            "server",
-            "run-managed-child",
-            "--config",
-            "config.toml",
-        ]
-        .into_iter()
-        .map(OsString::from);
-        assert_eq!(managed_child_worker_stack_size(args), Some(8 * 1024 * 1024));
-    }
-
-    #[test]
-    fn parent_cli_keeps_default_worker_stack() {
-        let args = ["rccv3", "server", "restart", "--config", "config.toml"]
-            .into_iter()
-            .map(OsString::from);
-        assert_eq!(managed_child_worker_stack_size(args), None);
-    }
 }
