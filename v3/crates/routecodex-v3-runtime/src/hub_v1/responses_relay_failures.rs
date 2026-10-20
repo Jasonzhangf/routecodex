@@ -68,6 +68,7 @@ pub(crate) fn provider_http_failure(
         error_operator_fault: None,
         failed_attempt_evidence: None,
         matched_policy: None,
+        response_processing_code: None,
     }
 }
 
@@ -120,6 +121,7 @@ pub(crate) fn provider_runtime_failure(
             error_operator_fault,
             failed_attempt_evidence: None,
             matched_policy: None,
+            response_processing_code: None,
         };
     }
     let (terminal_projection, error_operator_fault) =
@@ -181,6 +183,7 @@ pub(crate) fn provider_runtime_failure(
         error_operator_fault,
         failed_attempt_evidence: None,
         matched_policy: None,
+        response_processing_code: None,
     }
 }
 
@@ -209,6 +212,7 @@ pub(crate) fn provider_response_stream_relay_failure(
             error_operator_fault: None,
             failed_attempt_evidence: None,
             matched_policy: None,
+            response_processing_code: None,
         },
         V3ResponsesRelayRuntimeError::ProviderJson(reason) => {
             provider_response_codec_relay_failure(reason.to_string(), provider_id, observability)
@@ -244,6 +248,7 @@ fn provider_response_codec_relay_failure(
         error_operator_fault: None,
         failed_attempt_evidence: None,
         matched_policy: None,
+        response_processing_code: None,
     }
 }
 
@@ -327,6 +332,7 @@ pub(crate) fn provider_request_relay_failure(
         error_operator_fault,
         failed_attempt_evidence: None,
         matched_policy: None,
+        response_processing_code: None,
     })
 }
 
@@ -451,6 +457,7 @@ pub(crate) fn is_v3_responses_provider_response_failure(
                     | V3HubRelayResponseError::UnsupportedStatus { .. }
                     | V3HubRelayResponseError::ProviderProtocolResponseMalformed { .. }
                     | V3HubRelayResponseError::ProviderCompatFailed { .. }
+                    | V3HubRelayResponseError::UnharvestableToolMarkup
             )
     )
 }
@@ -461,9 +468,52 @@ pub(crate) fn provider_response_hook_failure(
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayProviderFailure {
     match error {
+        V3ResponsesRelayRuntimeError::Response(
+            V3HubRelayResponseError::UnharvestableToolMarkup,
+        ) => {
+            let provider_status = observability
+                .as_ref()
+                .and_then(|value| value.provider_status);
+            V3ResponsesRelayProviderFailure {
+                status: 599,
+                provider_status,
+                policy_error_type: "relay_unharvestable_tool_markup".into(),
+                policy_error_message: "recognized incomplete tool invocation cannot be delivered".into(),
+                provider_id: provider_id.into(),
+                source_stage: "V3HubRespChatProcess03Governed",
+                observability,
+                terminal_projection: None,
+                terminal_disposition: None,
+                error_operator_fault: None,
+                failed_attempt_evidence: None,
+                matched_policy: None,
+                response_processing_code: Some(routecodex_v3_error::V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup),
+            }
+        }
         V3ResponsesRelayRuntimeError::Provider(error) => {
             provider_runtime_failure(error, provider_id, observability)
         }
+        V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+            status,
+            code,
+            message,
+        } => V3ResponsesRelayProviderFailure {
+            status,
+            // The status is the internal response-processing result, not an
+            // upstream HTTP status.
+            provider_status: None,
+            policy_error_type: code,
+            policy_error_message: message,
+            provider_id: provider_id.to_string(),
+            source_stage: "V3HubRespChatProcess03Governed",
+            observability,
+            terminal_projection: None,
+            terminal_disposition: None,
+            error_operator_fault: None,
+            failed_attempt_evidence: None,
+            matched_policy: None,
+            response_processing_code: None,
+        },
         other => {
             let message = format!("provider response event codec failed: {other}");
             V3ResponsesRelayProviderFailure {
@@ -480,8 +530,36 @@ pub(crate) fn provider_response_hook_failure(
                 error_operator_fault: None,
                 failed_attempt_evidence: None,
                 matched_policy: None,
+                response_processing_code: None,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod relay_markup_source_tests {
+    use super::*;
+
+    #[test]
+    fn relay_serialized_tool_failure_retains_upstream_status_and_typed_code() {
+        let failure = provider_response_hook_failure(
+            V3ResponsesRelayRuntimeError::Response(
+                V3HubRelayResponseError::UnharvestableToolMarkup,
+            ),
+            "fixture",
+            Some(V3RuntimeObservability {
+                provider_status: Some(201),
+                ..Default::default()
+            }),
+        );
+        assert_eq!(failure.status, 599);
+        assert_eq!(failure.provider_status, Some(201));
+        assert_eq!(failure.source_stage, "V3HubRespChatProcess03Governed");
+        assert_eq!(
+            failure.response_processing_code,
+            Some(routecodex_v3_error::V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup)
+        );
+        assert!(failure.terminal_projection.is_none());
     }
 }
 
@@ -767,6 +845,7 @@ mod tests {
                 error_operator_fault: Some(fault),
                 failed_attempt_evidence: None,
                 matched_policy: None,
+                response_processing_code: None,
             },
             vec!["V3ProviderRespInbound01Raw"],
             0,
@@ -839,6 +918,7 @@ mod tests {
                 error_operator_fault: Some(fault),
                 failed_attempt_evidence: None,
                 matched_policy: None,
+                response_processing_code: None,
             },
             Some(routecodex_v3_error::V3ExternalHttpWitness::new(
                 429,
@@ -1159,6 +1239,7 @@ mod tests {
                 error_operator_fault: Some(fault),
                 failed_attempt_evidence: None,
                 matched_policy: None,
+                response_processing_code: None,
             },
             vec!["ProviderReqCompat06ProviderCompat"],
             0,

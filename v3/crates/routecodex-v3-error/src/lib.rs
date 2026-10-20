@@ -26,6 +26,7 @@ pub enum V3InternalErrorCode {
     V3ProviderResp14Raw,
     V3DirectResp14ProviderProjectionPrepared,
     V3DirectResp14UnharvestableToolMarkup,
+    V3HubRelayResp03UnharvestableToolMarkup,
     V3DirectResp15ClientPayloadReady,
     V3Server16HttpFrame,
     V3DebugArtifact,
@@ -182,6 +183,16 @@ impl V3InternalErrorCode {
                     owner_feature_id: "v3.debug_error_foundation",
                     module_block: "500-21x",
                     title: "direct unharvestable tool markup internal failure",
+                }
+            }
+            V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup => {
+                V3InternalErrorRegistryEntry {
+                    code: "500-231",
+                    lane: V3InternalErrorLane::Response,
+                    node_id: "V3HubRespChatProcess03Governed",
+                    owner_feature_id: "v3.anthropic_control_text_resp03",
+                    module_block: "500-23x",
+                    title: "relay unharvestable tool markup internal failure",
                 }
             }
             V3InternalErrorCode::V3DirectResp15ClientPayloadReady => V3InternalErrorRegistryEntry {
@@ -857,20 +868,27 @@ pub fn is_v3_retryable_transient_source(source: &V3Error01SourceRaised) -> bool 
     false
 }
 
-/// Returns whether a response-processing RuntimeFailure carries the single
-/// typed internal code that may recover by excluding the failed exact attempt
+/// Returns whether a response-processing RuntimeFailure carries an exact
+/// registered internal code that may recover by excluding the failed attempt
 /// and reselecting a later eligible candidate. The diagnostic reason string is
 /// never sufficient.
 pub fn is_v3_recoverable_response_processing_source(source: &V3Error01SourceRaised) -> bool {
-    let expected = V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup.registry_entry();
     source.source_kind == V3ErrorSourceKind::RuntimeFailure
-        && matches!(
+        && [
+            V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup,
+            V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup,
+        ]
+        .iter()
+        .any(|code| {
+            let expected = code.registry_entry();
+            matches!(
             source.internal_error.as_ref(),
             Some(error)
                 if error.internal_code == expected.code
                     && error.lane == expected.lane
                     && error.node_id == expected.node_id
-        )
+            )
+        })
 }
 
 /// Returns whether a provider failure is health-neutral and eligible for the

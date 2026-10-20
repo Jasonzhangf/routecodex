@@ -55,6 +55,11 @@ mod issue3ccb5fa_dsml;
 #[path = "multi_listener_server/issue_d94731e_thinking.rs"]
 mod issue_d94731e_thinking;
 
+#[path = "multi_listener_server/issue4effed6_relay_markers.rs"]
+mod issue4effed6_relay_markers;
+#[path = "multi_listener_server/issue4effed6_relay_serialized.rs"]
+mod issue4effed6_relay_serialized;
+
 async fn read_raw_content_length_response(socket: &mut TcpStream) -> Vec<u8> {
     let mut wire = Vec::new();
     while !wire.ends_with(b"\r\n\r\n") {
@@ -4855,8 +4860,8 @@ async fn responses_relay_anthropic_dsml_complete_text_is_faithfully_returned() {
         .await
         .expect("Anthropic mock must receive provider request")
         .unwrap();
-    // This is complete native Anthropic business text, even though it resembles
-    // control syntax. Preserve it rather than adjudicating its meaning.
+    // The recognized thinking opener is governed under the current user policy;
+    // retain the complete body, including unrecognized DSML-like trailing text.
     let response = send_result.expect("complete Anthropic text must reach the client");
     let status = response.status();
     assert_eq!(
@@ -4891,15 +4896,15 @@ async fn responses_relay_anthropic_dsml_complete_text_is_faithfully_returned() {
     );
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        text,
-        "<thinking>internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
-        "provider business text must be returned unchanged: {body}"
+        text, "",
+        "known leading thinking content must leave visible prose: {body}"
     );
     let terminal = events
         .iter()
         .find(|event| event["type"] == "response.completed")
         .expect("complete Anthropic text must project a completed business response");
     assert_eq!(terminal["response"]["status"], "completed", "{body}");
+    assert!(terminal["response"]["output"].as_array().unwrap().iter().any(|item| item["type"] == "reasoning" && item["summary"][0]["text"] == "internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>"), "{body}");
 }
 
 #[tokio::test]
@@ -4970,15 +4975,15 @@ async fn responses_relay_anthropic_dsml_complete_text_does_not_attempt_fallback(
     );
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        text,
-        "<thinking>internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
-        "provider business text must be returned unchanged: {body}"
+        text, "",
+        "known leading thinking content must leave visible prose: {body}"
     );
     let terminal = events
         .iter()
         .find(|event| event["type"] == "response.completed")
         .expect("complete Anthropic text must project a completed business response");
     assert_eq!(terminal["response"]["status"], "completed", "{body}");
+    assert!(terminal["response"]["output"].as_array().unwrap().iter().any(|item| item["type"] == "reasoning" && item["summary"][0]["text"] == "internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>"), "{body}");
 }
 
 #[tokio::test]
@@ -4989,20 +4994,22 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
         (
             "<thinking>internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
             true,
-            "call_native_dsml",
+            "internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
+            "",
         ),
-        ("<thinking>private</thinking>Visible answer", false, "<thinking>private</thinking>Visible answer"),
+        ("<thinking>private</thinking>Visible answer", false, "Visible answer", "private"),
         (
             "<thinking>private<\u{2f}thinking>Visible answer\n<\u{2f}｜DSML｜parameter>\n<\u{2f}｜DSML｜invoke>\n<\u{2f}｜DSML｜tool_calls>",
             false,
+            "Visible answer\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
             "private",
         ),
-        ("Quoted <thinking>literal</thinking> text", false, "Quoted"),
-        ("```\n<thinking>literal</thinking>\n```", false, "literal"),
-        ("Prefix <thinking>literal</thinking>", false, "Prefix"),
-        ("<thinking>literal unfinished example", false, "literal unfinished example"),
+        ("Quoted \"<thinking>literal</thinking>\" text", false, "Quoted \"<thinking>literal</thinking>\" text", ""),
+        ("```\n<thinking>literal</thinking>\n```", false, "```\n<thinking>literal</thinking>\n```", ""),
+        ("Prefix <thinking>literal</thinking>", false, "Prefix ", "literal"),
+        ("<thinking>literal unfinished example", false, "", "literal unfinished example"),
     ];
-    for (text, native_tool, expected) in cases {
+    for (text, native_tool, expected_text, expected_reasoning) in cases {
         let (provider_base_url, mut captures, shutdown) =
             start_controlled_terminal_upstream_with_body(
                 StatusCode::OK,
@@ -5031,7 +5038,6 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
         handle.shutdown().await;
         shutdown.send(()).unwrap();
         assert_eq!(status, StatusCode::OK, "{body}");
-        assert!(body.contains(expected), "missing {expected}: {body}");
         let payloads: Vec<Value> = body
             .lines()
             .filter_map(|line| line.strip_prefix("data: "))
@@ -5050,13 +5056,33 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
             .filter_map(|part| part["text"].as_str())
             .collect();
         assert_eq!(
-            actual_text, text,
-            "provider text must be preserved exactly: {body}"
+            actual_text, expected_text,
+            "visible prose must obey the declared marker policy: {body}"
+        );
+        let reasoning: String = items
+            .iter()
+            .filter(|item| item["type"] == "reasoning")
+            .filter_map(|item| item["summary"].as_array())
+            .flatten()
+            .filter_map(|part| part["text"].as_str())
+            .collect();
+        assert_eq!(
+            reasoning, expected_reasoning,
+            "thinking body must be retained: {body}"
         );
         assert!(captures.try_recv().is_err(), "no provider reselection");
         if native_tool {
-            assert!(body.contains("exec_command"), "{body}");
-            assert!(body.contains("pwd"), "{body}");
+            let call = items
+                .iter()
+                .find(|item| {
+                    item["type"] == "function_call" && item["call_id"] == "call_native_dsml"
+                })
+                .unwrap();
+            assert_eq!(call["name"], "exec_command");
+            assert_eq!(
+                serde_json::from_str::<Value>(call["arguments"].as_str().unwrap()).unwrap(),
+                json!({"cmd":"pwd"})
+            );
         }
     }
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -5104,7 +5130,7 @@ async fn responses_relay_suspect_anthropic_text_is_preserved_without_reselection
 #[tokio::test]
 async fn responses_relay_genuine_responses_source_preserves_literal_control_text() {
     let _test_guard = TEST_LOCK.lock().await;
-    let literal = "<thinking>quoted literal ｜DSML｜invoke";
+    let literal = "\"<thinking>quoted literal ｜DSML｜invoke\"";
     let upstream_body = json!({
         "id":"resp_literal",
         "status":"completed",
@@ -5147,8 +5173,16 @@ async fn responses_relay_genuine_responses_source_preserves_literal_control_text
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
     assert_eq!(status, StatusCode::OK, "{body}");
+    let response = issue4effed6_relay_markers::completed(&body, true);
     assert!(
-        body.contains(literal),
+        response["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["type"] == "message"
+                && item["content"]
+                    .as_array()
+                    .is_some_and(|parts| parts.iter().any(|part| part["text"] == literal))),
         "Responses literal was rewritten: {body}"
     );
 }

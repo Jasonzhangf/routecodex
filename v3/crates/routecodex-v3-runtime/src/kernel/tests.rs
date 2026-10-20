@@ -1,6 +1,117 @@
 include!("../../tests/support/kernel_unit.rs");
 
 #[tokio::test]
+async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
+    use crate::provider_failure_runtime_policy::{
+        run_v3_relay_provider_failure_policy_with_response_source,
+        V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
+        V3RelayProviderFailureRetryPolicy,
+    };
+    let manifest =
+        provider_concurrency_two_provider_manifest("relay_markup_a", "relay_markup_b", 50);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let scope = test_failure_session_scope("default");
+    let raw = crate::nodes::build_v3_server_03_http_request_raw(
+        "test".into(),
+        scope.clone(),
+        "relay-markup".into(),
+        "relay-markup-exec".into(),
+        "POST".into(),
+        "/v1/responses".into(),
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw, health.clone(), 0);
+    let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
+        route: plan.expanded.route.clone(),
+        candidate: plan.expanded.candidates[0].clone(),
+        candidate_count: 2,
+        unavailable_candidates: vec![],
+        attempts: 1,
+        default_floor_protected: false,
+    };
+    let key = candidate_key(&selected.candidate);
+    let before: Vec<_> = plan
+        .expanded
+        .candidates
+        .iter()
+        .map(|candidate| {
+            health.availability_for_interface(
+                &candidate.provider_id,
+                &candidate.interface_id,
+                Some(&candidate.auth_alias),
+                Some(&candidate.model_id),
+                0,
+            )
+        })
+        .collect();
+    let mut failed = BTreeSet::new();
+    let mut retries = std::collections::BTreeMap::new();
+    let mut trace = Vec::new();
+    let mut last = None;
+    let result = run_v3_relay_provider_failure_policy_with_response_source(
+        &V3RelayProviderFailurePolicyContext {
+            manifest: &manifest,
+            captured_target_09: Some(&plan.expanded),
+            failure_session_scope: scope.clone(),
+            provider_health: &health,
+            retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+            deterministic_sample: 0,
+        },
+        selected,
+        "V3HubRespChatProcess03Governed",
+        599,
+        Some("relay_unharvestable_tool_markup".into()),
+        "recognized partial invocation".into(),
+        None,
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed,
+            same_candidate_retries: &mut retries,
+            trace: &mut trace,
+            last_external_http: &mut last,
+        },
+        Some(routecodex_v3_error::V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup),
+    )
+    .await
+    .expect("typed Relay recovery");
+    let V3Error05ExecutionAction::WaitThenReselect { recovery } = result.decision.action else {
+        panic!("expected reselection")
+    };
+    assert_eq!(recovery.provider_runtime_identity(), key);
+    assert_eq!(recovery.failure_session_scope(), &scope);
+    assert_eq!(failed, BTreeSet::from([key]));
+    assert!(retries.is_empty());
+    assert_eq!(
+        result.event.diagnostic_source.source_kind,
+        V3ErrorSourceKind::RuntimeFailure
+    );
+    assert_eq!(
+        result
+            .event
+            .diagnostic_source
+            .internal_error
+            .as_ref()
+            .unwrap()
+            .internal_code,
+        "500-231"
+    );
+    assert_eq!(result.event.status, 599);
+    assert_eq!(result.event.health_record.failure_count, 0);
+    assert_eq!(result.event.health_record.cooldown_until_ms, None);
+    for (candidate, before) in plan.expanded.candidates.iter().zip(before) {
+        assert_eq!(
+            health.availability_for_interface(
+                &candidate.provider_id,
+                &candidate.interface_id,
+                Some(&candidate.auth_alias),
+                Some(&candidate.model_id),
+                0
+            ),
+            before
+        );
+    }
+}
+
+#[tokio::test]
 async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
     let manifest = provider_concurrency_two_provider_manifest("markup_a", "markup_b", 50);
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);

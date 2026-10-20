@@ -691,6 +691,7 @@ features:
   - execute_v3_foundation_pending_runtime
   - is_v3_recoverable_response_processing_source
   - V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup
+  - V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup
   - execute_v3_responses_direct_dry_run_runtime
   - execute_v3_anthropic_relay_response_dry_run_runtime
   - V3DryRunNoNetworkTransport::send
@@ -801,6 +802,7 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/direct_response_hooks_dsml.rs
+  - v3/crates/routecodex-v3-runtime/src/tool_markup_parser.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
@@ -831,11 +833,13 @@ features:
   - v3-rd-09
   - v3-rd-09-direct-policy
   - v3-rd-13
+  - v3-tool-markup-direct-parser
   - v3-rd-14
   - v3-rd-15
   - v3-rd-16
   entry_symbols:
   - normalize_v3_direct_dsml_response
+  - scan_tool_markup
   - rewrite_v3_direct_dsml_attempt
   - normalize_v3_direct_complete_json_response
   - rewrite_v3_direct_complete_response_attempt
@@ -6543,27 +6547,49 @@ features:
   status: source_gate_verified
   change_risk: high
   owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: Resp03 preserves representable Anthropic business text, including complete DSML-looking text, without semantic stripping or rejection.
+  owner_scope: Resp03 preserves literal and unrecognized protocol-looking business text, governs declared leaked control markers under the user policy, and reports normalized empty attempts through typed Runtime recovery.
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   resource_bindings:
   - v3.hub.response_semantic
+  - v3.relay_response.tool_markup_context
   mainline_bindings:
   - v3-hub-relay-resp-03
+  - v3-tool-markup-relay-parser
+  - v3-tool-markup-relay-harvest-parser
+  - v3-tool-markup-relay-thinking-grammar
+  - v3-tool-markup-relay-attempt-context
   entry_symbols:
   - govern_v3_hub_relay_response
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/tool_markup_parser.rs
+  - v3/crates/routecodex-v3-runtime/src/lib.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks_dsml.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/tests.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server/issue4effed6_relay_markers.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server/issue4effed6_relay_serialized.rs
+  - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-error/src/tests.rs
   - docs/goals/v3-anthropic-dsml-text-leak-20261001.md
+  - docs/goals/4effed6-relay-control-markers.md
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml

@@ -825,6 +825,31 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     matched_policy_directive: Option<&V3ProviderErrorActionPolicyManifest>,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
 ) -> Result<V3RelayProviderFailurePolicyResult, Result<String, V3RelayErrorOperatorFault>> {
+    run_v3_relay_provider_failure_policy_with_response_source(
+        context,
+        selected,
+        source_stage,
+        status,
+        error_type,
+        message,
+        matched_policy_directive,
+        state,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
+    context: &V3RelayProviderFailurePolicyContext<'_>,
+    selected: V3Target10ConcreteProviderSelected,
+    source_stage: &'static str,
+    status: u16,
+    error_type: Option<String>,
+    message: String,
+    matched_policy_directive: Option<&V3ProviderErrorActionPolicyManifest>,
+    state: &mut V3RelayProviderFailurePolicyState<'_>,
+    response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
+) -> Result<V3RelayProviderFailurePolicyResult, Result<String, V3RelayErrorOperatorFault>> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
     // Request-local provider failure exclusion is monotonic. Record it before
     // every fallible Error-chain or health/policy step so the failed identity
@@ -833,13 +858,26 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     // Preserve the original typed Error01 source of this provider attempt before
     // the Error05 decision consumes it, so a later target-resolution failure
     // cannot erase the provider cause that actually began this attempt.
-    let (attempt_source_projection, attempt_source) = build_v3_relay_provider_attempt_source(
-        &selected,
-        source_stage,
-        error_type.as_deref(),
-        &message,
-    )
-    .map_err(Err)?;
+    let (attempt_source_projection, attempt_source) =
+        if let Some(code) = response_processing_code {
+            raise_v3_source_via_err01(
+                V3ErrorSourceKind::RuntimeFailure,
+                source_stage,
+                error_type
+                    .as_deref()
+                    .unwrap_or("relay_response_processing_failure"),
+                &message,
+                V3Err01SourceInput::Internal(code),
+            )
+        } else {
+            build_v3_relay_provider_attempt_source(
+                &selected,
+                source_stage,
+                error_type.as_deref(),
+                &message,
+            )
+        }
+        .map_err(Err)?;
     let matched_policy = matched_policy_directive.or_else(|| {
         find_matching_provider_error_policy(
             context.manifest,
@@ -852,8 +890,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         )
     });
     let reason = (!message.trim().is_empty()).then_some(message.as_str());
-    let is_request_local_compat_failure =
-        is_health_neutral_request_compat_failure(source_stage, error_type.as_deref());
+    let is_response_processing_failure =
+        routecodex_v3_error::is_v3_recoverable_response_processing_source(&attempt_source);
+    let is_request_local_compat_failure = is_response_processing_failure
+        || is_health_neutral_request_compat_failure(source_stage, error_type.as_deref());
     // SSE/transport failures are provider-health events as well. The
     // failure action builder classifies them as recoverable, so they enter
     // the shared rolling score/cooldown path instead of a synthetic local
@@ -862,7 +902,12 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         V3ProviderFailureRecord {
             scope_label: candidate_key.clone(),
             provider_key: candidate_key.clone(),
-            state: "request_local_provider_compat".to_string(),
+            state: if is_response_processing_failure {
+                "request_local_response_processing"
+            } else {
+                "request_local_provider_compat"
+            }
+            .to_string(),
             failure_count: 0,
             cooldown_until_ms: None,
             reason: reason.map(str::to_string),
@@ -1158,6 +1203,17 @@ fn terminal_disposition_for(
     state: &V3RelayProviderFailurePolicyState<'_>,
 ) -> Option<routecodex_v3_error::V3ProviderTerminalDisposition> {
     decision.clone().try_into_terminal().ok().map(|terminal| {
+        if terminal
+            .execution()
+            .exhaustion
+            .local_action
+            .classified
+            .source
+            .source_kind
+            != V3ErrorSourceKind::ProviderFailure
+        {
+            return routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse;
+        }
         V3ErrorHandlingCenter::provider_terminal_disposition(
             terminal,
             state.last_external_http.clone(),
