@@ -2059,6 +2059,7 @@ features:
   - gemini_association_think_split_json_public
   - gemini_association_think_split_sse_public
   - responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse
+  - responses_tool_search_output_preserves_replace_block_schema_on_first_provider_attempt
   - responses_discovered_custom_tools_restore_kind_and_identity_json_and_sse
   - invalid_custom_arguments_reach_client_and_recover_json_and_sse
   - responses_additional_tools_refreshes_nested_mcpx_alias_before_chat_projection

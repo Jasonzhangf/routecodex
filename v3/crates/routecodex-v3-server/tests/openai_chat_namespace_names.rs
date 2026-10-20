@@ -4,7 +4,14 @@ use axum::{
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio::sync::{mpsc, oneshot};
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -19,6 +26,12 @@ const COLLIDING_PLAIN_NAME: &str =
     "4d38cd95f8d6372ca282b6e42f30027fba935d6101a6373e0b8de162aead306b";
 const COLLIDING_PLAIN_CUSTOM: &str =
     "80a662fbb9b3fbb362dcfcd35d46859f517a5ca297457df631b99265925f6296";
+const SCHEMA_NAMESPACE: &str = "mcp__codex_apps__chatgpt_space";
+const SCHEMA_TOOL: &str = "apply_page_changes";
+const SCHEMA_WIRE_TOOL: &str = "mcp__codex_apps__chatgpt_space__apply_page_changes";
+const SCHEMA_SEARCH_CALL_ID: &str = "call_replace_block_schema";
+const SCHEMA_DISCOVERED_CALL_ID: &str = "call_apply_replace_block";
+const SCHEMA_FINAL_TEXT: &str = "SCHEMA_REPLACE_BLOCK_COMPLETED";
 
 static COUNTER_ENVIRONMENT: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -148,6 +161,375 @@ async fn strict_chat(
             .unwrap();
     }
     Response::builder().header("content-type", "application/json").body(Body::from(json!({"id":"chatcmpl-name","object":"chat.completion","model":"wire-model","choices":[{"index":0,"message":message,"finish_reason":finish}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}).to_string())).unwrap()
+}
+
+struct SchemaChatFixture {
+    attempts: AtomicUsize,
+    events: mpsc::UnboundedSender<Result<Value, String>>,
+}
+
+fn schema_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "changes": {
+                "type": "array",
+                "items": {"$ref": "#/$defs/_ReplaceBlock"}
+            }
+        },
+        "$defs": {
+            "_ReplaceBlock": {
+                "type": "object",
+                "properties": {
+                    "block_id": {"type": "string"},
+                    "operation": {"type": "string", "enum": ["replace"]},
+                    "content": {"type": "string"}
+                },
+                "required": ["block_id", "operation", "content"],
+                "additionalProperties": false
+            }
+        },
+        "required": ["changes"],
+        "additionalProperties": false
+    })
+}
+
+fn schema_tools() -> Value {
+    json!([{
+        "type": "namespace",
+        "name": SCHEMA_NAMESPACE,
+        "tools": [{
+            "type": "function",
+            "name": SCHEMA_TOOL,
+            "parameters": schema_parameters()
+        }]
+    }])
+}
+
+fn schema_request(stream: bool) -> Value {
+    json!({
+        "model": "name-client",
+        "stream": stream,
+        "input": [
+            {"role": "user", "content": "Find the page editing tool."},
+            {
+                "type": "tool_search_call",
+                "call_id": SCHEMA_SEARCH_CALL_ID,
+                "execution": "client",
+                "arguments": {"query": "replace block"}
+            },
+            {
+                "type": "tool_search_output",
+                "id": "tso_replace_block_schema",
+                "call_id": SCHEMA_SEARCH_CALL_ID,
+                "status": "completed",
+                "execution": "client",
+                "tools": schema_tools()
+            },
+            {"role": "user", "content": "Continue with the discovered tool."}
+        ]
+    })
+}
+
+fn schema_arguments() -> Value {
+    json!({
+        "changes": [{
+            "block_id": "block_1",
+            "operation": "replace",
+            "content": "Schema round trip verified"
+        }]
+    })
+}
+
+fn schema_tool_output() -> Value {
+    json!({
+        "block_id": "block_1",
+        "operation": "replace",
+        "content": "Schema round trip verified",
+        "status": "replaced"
+    })
+}
+
+fn schema_messages(body: &Value) -> Result<&[Value], String> {
+    body["messages"]
+        .as_array()
+        .map(Vec::as_slice)
+        .ok_or_else(|| format!("provider messages must be an array: {body}"))
+}
+
+fn validate_schema_declaration(body: &Value) -> Result<(), String> {
+    let tools = body["tools"]
+        .as_array()
+        .ok_or_else(|| format!("provider tools must be an array: {body}"))?;
+    let declarations = tools
+        .iter()
+        .filter(|tool| {
+            tool.pointer("/function/name").and_then(Value::as_str) == Some(SCHEMA_WIRE_TOOL)
+        })
+        .collect::<Vec<_>>();
+    if declarations.len() != 1 {
+        return Err(format!(
+            "expected one promoted {SCHEMA_WIRE_TOOL} declaration, found {}: {body}",
+            declarations.len()
+        ));
+    }
+    let declaration = declarations[0];
+    if declaration["type"] != "function" {
+        return Err(format!(
+            "promoted discovered tool must be a function declaration: {declaration}"
+        ));
+    }
+    let parameters = &declaration["function"]["parameters"];
+    if parameters != &schema_parameters() {
+        return Err(format!(
+            "promoted declaration changed the complete schema: {parameters}"
+        ));
+    }
+    Ok(())
+}
+
+fn schema_tool_pair(
+    body: &Value,
+    call_id: &str,
+    expected_name: &str,
+) -> Result<(Value, Value), String> {
+    let messages = schema_messages(body)?;
+    let calls = messages
+        .iter()
+        .enumerate()
+        .flat_map(|(message_index, message)| {
+            message["tool_calls"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(move |call| call["id"] == call_id)
+                .map(move |call| (message_index, call))
+        })
+        .collect::<Vec<_>>();
+    if calls.len() != 1 {
+        return Err(format!(
+            "expected one {call_id} assistant tool call, found {}: {body}",
+            calls.len()
+        ));
+    }
+    let (call_index, call) = calls[0];
+    if messages[call_index]["role"] != "assistant" {
+        return Err(format!(
+            "{call_id} tool call must be carried by an assistant message: {body}"
+        ));
+    }
+    if call["type"] != "function" {
+        return Err(format!(
+            "{call_id} matched tool call must have type function: {call}"
+        ));
+    }
+    let name = call["function"]["name"]
+        .as_str()
+        .ok_or_else(|| format!("{call_id} call name must be a string: {call}"))?;
+    if name != expected_name {
+        return Err(format!(
+            "{call_id} call name changed from {expected_name}: {call}"
+        ));
+    }
+    let arguments = call["function"]["arguments"]
+        .as_str()
+        .ok_or_else(|| format!("{call_id} arguments must be JSON text: {call}"))
+        .and_then(|arguments| {
+            serde_json::from_str(arguments)
+                .map_err(|error| format!("{call_id} arguments are invalid JSON: {error}"))
+        })?;
+    let outputs = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message["role"] == "tool" && message["tool_call_id"] == call_id)
+        .collect::<Vec<_>>();
+    if outputs.len() != 1 {
+        return Err(format!(
+            "expected one paired result for {call_id}, found {}: {body}",
+            outputs.len()
+        ));
+    }
+    let (output_index, output) = outputs[0];
+    if output_index != call_index + 1 {
+        return Err(format!(
+            "{call_id} result must immediately follow its assistant call: {body}"
+        ));
+    }
+    let output = output["content"]
+        .as_str()
+        .ok_or_else(|| format!("{call_id} result must preserve text content: {output}"))
+        .and_then(|content| {
+            serde_json::from_str(content)
+                .map_err(|error| format!("{call_id} result is invalid JSON: {error}: {content}"))
+        })?;
+    Ok((arguments, output))
+}
+
+fn validate_schema_search_history(body: &Value) -> Result<(), String> {
+    let (arguments, catalog) = schema_tool_pair(body, SCHEMA_SEARCH_CALL_ID, "tool_search")?;
+    if arguments != json!({"query": "replace block"}) {
+        return Err(format!(
+            "tool-search call arguments changed on the provider wire: {arguments}"
+        ));
+    }
+    if catalog != schema_tools() {
+        return Err(format!(
+            "complete tool-search catalog changed on the provider wire: {catalog}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_schema_first_provider_request(body: &Value) -> Result<(), String> {
+    validate_schema_declaration(body)?;
+    validate_schema_search_history(body)?;
+    if body.to_string().contains(SCHEMA_DISCOVERED_CALL_ID) {
+        return Err("first provider request already contained the discovered call".to_string());
+    }
+    Ok(())
+}
+
+fn validate_schema_followup_provider_request(body: &Value) -> Result<(), String> {
+    validate_schema_declaration(body)?;
+    validate_schema_search_history(body)?;
+    let (arguments, output) = schema_tool_pair(body, SCHEMA_DISCOVERED_CALL_ID, SCHEMA_WIRE_TOOL)?;
+    if arguments != schema_arguments() {
+        return Err(format!(
+            "discovered call arguments changed in follow-up history: {arguments}"
+        ));
+    }
+    if output != schema_tool_output() {
+        return Err(format!(
+            "matching discovered call result changed in follow-up history: {output}"
+        ));
+    }
+    Ok(())
+}
+
+async fn schema_chat(
+    State(fixture): State<Arc<SchemaChatFixture>>,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    let attempt = fixture.attempts.fetch_add(1, Ordering::SeqCst) + 1;
+    let validation = if attempt % 2 == 1 {
+        validate_schema_first_provider_request(&body)
+    } else {
+        validate_schema_followup_provider_request(&body)
+    };
+    if let Err(reason) = validation {
+        let reason = format!("provider attempt {attempt} rejected: {reason}");
+        let _ = fixture.events.send(Err(reason.clone()));
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"error": {"message": reason}}).to_string(),
+            ))
+            .unwrap();
+    }
+    let _ = fixture.events.send(Ok(body.clone()));
+    let message = if attempt % 2 == 1 {
+        json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [{
+                "id": SCHEMA_DISCOVERED_CALL_ID,
+                "type": "function",
+                "function": {
+                    "name": SCHEMA_WIRE_TOOL,
+                    "arguments": schema_arguments().to_string()
+                }
+            }]
+        })
+    } else {
+        json!({"role": "assistant", "content": SCHEMA_FINAL_TEXT})
+    };
+    let finish = if attempt % 2 == 1 {
+        "tool_calls"
+    } else {
+        "stop"
+    };
+    let usage = json!({"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5});
+    if body["stream"] == true {
+        let chunk = json!({
+            "id": "chatcmpl-schema",
+            "object": "chat.completion.chunk",
+            "model": "wire-model",
+            "choices": [{"index": 0, "delta": message, "finish_reason": finish}],
+            "usage": usage
+        });
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(format!("data: {chunk}\n\ndata: [DONE]\n\n")))
+            .unwrap();
+    }
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({
+                "id": "chatcmpl-schema",
+                "object": "chat.completion",
+                "model": "wire-model",
+                "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+                "usage": usage
+            })
+            .to_string(),
+        ))
+        .unwrap()
+}
+
+async fn receive_schema_provider_request(
+    rx: &mut mpsc::UnboundedReceiver<Result<Value, String>>,
+) -> Result<Value, String> {
+    let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .map_err(|_| "the controlled upstream did not receive the provider attempt".to_string())?
+        .ok_or_else(|| "the provider capture closed unexpectedly".to_string())?;
+    event
+}
+
+fn execute_replace_block_call(call: &Value) -> Result<String, String> {
+    if call["type"] != "function_call" {
+        return Err(format!("discovered tool call type changed: {call}"));
+    }
+    if call["call_id"] != SCHEMA_DISCOVERED_CALL_ID {
+        return Err(format!("discovered tool call id changed: {call}"));
+    }
+    if call["name"] != SCHEMA_TOOL {
+        return Err(format!("discovered tool leaf name changed: {call}"));
+    }
+    if call["namespace"] != SCHEMA_NAMESPACE {
+        return Err(format!("discovered tool namespace changed: {call}"));
+    }
+    let arguments: Value = serde_json::from_str(
+        call["arguments"]
+            .as_str()
+            .ok_or_else(|| format!("discovered call arguments must be JSON text: {call}"))?,
+    )
+    .map_err(|error| format!("discovered call arguments are invalid JSON: {error}"))?;
+    if arguments != schema_arguments() {
+        return Err(format!(
+            "the client did not receive the complete discovered call arguments: {arguments}"
+        ));
+    }
+    let change = &arguments["changes"][0];
+    let mut blocks = BTreeMap::new();
+    blocks.insert(
+        change["block_id"]
+            .as_str()
+            .ok_or_else(|| format!("replacement block_id must be text: {change}"))?
+            .to_string(),
+        change["content"]
+            .as_str()
+            .ok_or_else(|| format!("replacement content must be text: {change}"))?
+            .to_string(),
+    );
+    if blocks.get("block_1").map(String::as_str) != Some("Schema round trip verified") {
+        return Err("the safe local consumer did not apply the requested replacement".to_string());
+    }
+    Ok(schema_tool_output().to_string())
 }
 
 fn request(stream: bool, collision: bool) -> Value {
@@ -360,6 +742,150 @@ async fn responses_chat_long_namespace_names_round_trip_on_first_attempt_json_an
     handle.shutdown().await;
     shutdown_tx.send(()).unwrap();
     std::env::remove_var("V3_CHAT_NAME_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_tool_search_output_preserves_replace_block_schema_on_first_provider_attempt() {
+    let _counter_environment = CounterEnvironment::new();
+    std::env::set_var("V3_CHAT_NAME_TEST_KEY", "fixture-key");
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let fixture = Arc::new(SchemaChatFixture {
+        attempts: AtomicUsize::new(0),
+        events: tx,
+    });
+    let upstream_fixture = fixture.clone();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(
+            upstream,
+            Router::new()
+                .route("/v1/chat/completions", post(schema_chat))
+                .with_state(upstream_fixture),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .unwrap();
+    });
+    let handle = spawn_v3_server_aggregate(manifest(test_ports::free_port(), upstream_addr.port()))
+        .await
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let outcome: Result<(), String> = async {
+        for (case_index, stream) in [false, true].into_iter().enumerate() {
+            let attempts = fixture.attempts.load(Ordering::SeqCst);
+            if attempts != case_index * 2 {
+                return Err(format!(
+                    "previous JSON/SSE case ended with {attempts} provider attempts, expected {}",
+                    case_index * 2
+                ));
+            }
+            let mut request = schema_request(stream);
+            let first_response = client.post(&endpoint).json(&request).send().await;
+            let first_wire = receive_schema_provider_request(&mut rx).await?;
+            let attempts = fixture.attempts.load(Ordering::SeqCst);
+            if attempts != case_index * 2 + 1 {
+                return Err(format!(
+                    "the first client request produced {attempts} provider attempts, expected {}",
+                    case_index * 2 + 1
+                ));
+            }
+            let (_, catalog) = schema_tool_pair(&first_wire, SCHEMA_SEARCH_CALL_ID, "tool_search")?;
+            if catalog != schema_tools() {
+                return Err(format!(
+                    "the complete client schema catalog changed on the provider wire: {catalog}"
+                ));
+            }
+            let first = read_recovery_response(
+                first_response.map_err(|error| {
+                    format!("the accepted first attempt did not return: {error}")
+                })?,
+                stream,
+            )
+            .await?;
+            if first["status"] != "completed" {
+                return Err(format!(
+                    "the first client response did not complete: {first}"
+                ));
+            }
+            let call = first["output"]
+                .as_array()
+                .and_then(|items| items.iter().find(|item| item["type"] == "function_call"))
+                .ok_or_else(|| {
+                    format!("the provider's discovered tool call did not reach the client: {first}")
+                })?;
+            let tool_output = execute_replace_block_call(call)?;
+            if rx.try_recv().is_ok() {
+                return Err("the first client response hid a retry or provider switch".to_string());
+            }
+
+            request["input"]
+                .as_array_mut()
+                .ok_or_else(|| "the schema request input must remain an array".to_string())?
+                .push(call.clone());
+            request["input"]
+                .as_array_mut()
+                .ok_or_else(|| "the schema request input must remain an array".to_string())?
+                .push(json!({
+                    "type": "function_call_output",
+                    "call_id": SCHEMA_DISCOVERED_CALL_ID,
+                    "output": tool_output
+                }));
+            let followup_response = client.post(&endpoint).json(&request).send().await;
+            let followup_wire = receive_schema_provider_request(&mut rx).await?;
+            let attempts = fixture.attempts.load(Ordering::SeqCst);
+            if attempts != case_index * 2 + 2 {
+                return Err(format!(
+                    "the follow-up request produced {attempts} provider attempts, expected {}",
+                    case_index * 2 + 2
+                ));
+            }
+            validate_schema_followup_provider_request(&followup_wire)?;
+            let followup = read_recovery_response(
+                followup_response
+                    .map_err(|error| format!("the accepted follow-up did not return: {error}"))?,
+                stream,
+            )
+            .await?;
+            if followup["status"] != "completed" {
+                return Err(format!(
+                    "the follow-up client response did not complete: {followup}"
+                ));
+            }
+            if !followup.to_string().contains(SCHEMA_FINAL_TEXT) {
+                return Err(format!(
+                    "the final provider answer did not reach the client: {followup}"
+                ));
+            }
+            if rx.try_recv().is_ok() {
+                return Err("the follow-up hid a retry or provider switch".to_string());
+            }
+        }
+        let attempts = fixture.attempts.load(Ordering::SeqCst);
+        if attempts != 4 {
+            return Err(format!(
+                "JSON and SSE required {attempts} provider attempts, expected exactly 4"
+            ));
+        }
+        Ok(())
+    }
+    .await;
+
+    handle.shutdown().await;
+    let _ = shutdown_tx.send(());
+    upstream_task.await.unwrap();
+    std::env::remove_var("V3_CHAT_NAME_TEST_KEY");
+    assert!(
+        outcome.is_ok(),
+        "schema tool round trip failed: {outcome:?}"
+    );
 }
 
 fn manifest(
