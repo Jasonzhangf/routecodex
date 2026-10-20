@@ -5439,6 +5439,36 @@ chains:
       - v3.error.chain
       side_channel_writes:
       - v3.debug.codex_sample_persist_queue
+  - step_id: v3-responses-direct-error-evidence-01
+    from_node: V3ProviderError
+    to_node: V3RuntimeProviderFailureObservation
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: build_v3_runtime_provider_failed_attempt_evidence_from_error
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.responses_direct_mvp_architecture
+    resource_flow:
+      consumes: [v3.provider.transport_request]
+      produces: [v3.runtime.responses_observability]
+      side_channel_reads: [v3.provider.transport_request]
+      side_channel_writes: [v3.runtime.responses_observability]
+  - step_id: v3-responses-direct-error-evidence-02
+    from_node: V3RuntimeProviderFailureObservation
+    to_node: V3ChatFailedAttemptEvidenceSerialized
+    caller_symbol: take_responses_direct_terminal_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+    callee_symbol: persist_v3_chat_failure_evidence_sources
+    callee_file: v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.error.raw_wire_evidence
+    resource_flow:
+      consumes: [v3.runtime.responses_observability]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.runtime.responses_observability]
+      side_channel_writes: [v3.debug.codex_sample_persist_queue]
   - step_id: v3-responses-relay-error-evidence-02
     from_node: V3ErrorEvidencePersistQueued
     to_node: V3ErrorEvidenceFlushOnTerminalFailure
