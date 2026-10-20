@@ -94,6 +94,7 @@ fn message(
         row.keys()
             .all(|key| matches!(key.as_str(), "id" | "type" | "role" | "status" | "content"))
     });
+    let governed_part = |part: &Value| representable && known_part(part);
     let mut output = Vec::new();
     let mut pending = Vec::new();
     let mut emitted = false;
@@ -109,11 +110,11 @@ fn message(
             pending.push(part.clone());
             continue;
         };
-        let result = scan(text, context)?;
-        if !representable || !known_part(part) {
+        if !governed_part(part) {
             pending.push(part.clone());
             continue;
         }
+        let result = scan(text, context)?;
         for segment in result.segments {
             match segment {
                 ToolMarkupSegment::Text(text) => {
@@ -163,11 +164,11 @@ fn responses(
             message(item, context, &mut used)?
         } else if item["type"] == "output_text" {
             if let Some(text) = item.get("text").and_then(Value::as_str) {
-                let result = scan(text, context)?;
                 if item.as_object().is_some_and(|row| {
                     row.keys()
                         .all(|key| matches!(key.as_str(), "id" | "type" | "text"))
                 }) {
+                    let result = scan(text, context)?;
                     let mut replacements = Vec::new();
                     let mut first = true;
                     for segment in result.segments {
