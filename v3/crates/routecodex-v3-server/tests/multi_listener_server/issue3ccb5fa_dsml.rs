@@ -15,6 +15,7 @@ enum DsmlCase {
     OpaqueComplete,
     OpaqueAlternate,
     UnknownLabelOnly,
+    OpaqueEmbeddedThinking,
 }
 
 fn opaque_tool_text(case: DsmlCase) -> Option<&'static str> {
@@ -23,6 +24,7 @@ fn opaque_tool_text(case: DsmlCase) -> Option<&'static str> {
         DsmlCase::OpaqueComplete => Some("<tool_call>read_image<arg_key>file_path</arg_key><arg_value>a</arg_value><arg_key>file_path</arg_key><arg_value>b</arg_value></tool_call>"),
         DsmlCase::OpaqueAlternate => Some("<|read_image\">\n<file_path>a</file_path>\n<file_path>b</file_path>\n</read_image>"),
         DsmlCase::UnknownLabelOnly => Some("<|DSML|tool_calls>\n<tool_call>undeclared<arg_key>cmd</arg_key><arg_value>x</arg_value></tool_call>"),
+        DsmlCase::OpaqueEmbeddedThinking => Some("<tool_call>undeclared<arg_key>cmd</arg_key><arg_value><thinking>opaque argument</thinking></arg_value></tool_call>"),
         _ => None,
     }
 }
@@ -923,6 +925,12 @@ async fn responses_direct_dsml_opaque_alternate_tool_text_preserves_native_round
 async fn responses_direct_dsml_label_beside_unknown_complete_text_is_not_a_failure() {
     run(DsmlCase::UnknownLabelOnly, false).await;
     run(DsmlCase::UnknownLabelOnly, true).await;
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_opaque_embedded_thinking_preserves_native_round_trip() {
+    run(DsmlCase::OpaqueEmbeddedThinking, false).await;
+    run(DsmlCase::OpaqueEmbeddedThinking, true).await;
 }
 
 #[tokio::test]
