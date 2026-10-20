@@ -11,6 +11,22 @@ enum DsmlCase {
     Alternate,
     ToolCall,
     CallsResidueSse,
+    UnknownComplete,
+    OpaqueComplete,
+    OpaqueAlternate,
+    UnknownLabelOnly,
+    OpaqueEmbeddedThinking,
+}
+
+fn opaque_tool_text(case: DsmlCase) -> Option<&'static str> {
+    match case {
+        DsmlCase::UnknownComplete => Some("<tool_call>undeclared<arg_key>cmd</arg_key><arg_value>x</arg_value></tool_call>"),
+        DsmlCase::OpaqueComplete => Some("<tool_call>read_image<arg_key>file_path</arg_key><arg_value>a</arg_value><arg_key>file_path</arg_key><arg_value>b</arg_value></tool_call>"),
+        DsmlCase::OpaqueAlternate => Some("<|read_image\">\n<file_path>a</file_path>\n<file_path>b</file_path>\n</read_image>"),
+        DsmlCase::UnknownLabelOnly => Some("<|DSML|tool_calls>\n<tool_call>undeclared<arg_key>cmd</arg_key><arg_value>x</arg_value></tool_call>"),
+        DsmlCase::OpaqueEmbeddedThinking => Some("<tool_call>undeclared<arg_key>cmd</arg_key><arg_value><thinking>opaque argument</thinking></arg_value></tool_call>"),
+        _ => None,
+    }
 }
 
 #[derive(Clone)]
@@ -127,7 +143,16 @@ async fn upstream(
     let turn = peer.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     assert_provider_declaration(&body, peer.case);
     let output = if turn == 0 {
-        if peer.case == DsmlCase::Alternate {
+        if let Some(text) = opaque_tool_text(peer.case) {
+            let mut output = json!([
+                {"id":"opaque_message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text,"annotations":[]}]},
+                {"id":"native_sibling","type":"function_call","call_id":"native_sibling_call","name":"read_image","arguments":json!({"file_path":peer.path}).to_string(),"status":"completed"}
+            ]);
+            if peer.case == DsmlCase::UnknownLabelOnly {
+                output.as_array_mut().unwrap().pop();
+            }
+            output
+        } else if peer.case == DsmlCase::Alternate {
             json!([{
                 "id":"message_alternate",
                 "type":"message",
@@ -437,6 +462,25 @@ async fn upstream(
             .unwrap();
     }
     for (index, item) in output.as_array().unwrap().iter().enumerate() {
+        if item["type"] == "function_call" {
+            emit(
+                json!({"type":"response.output_item.added","output_index":index,"item":item}),
+                true,
+            );
+            emit(
+                json!({"type":"response.function_call_arguments.delta","output_index":index,"item_id":item["id"],"delta":item["arguments"]}),
+                true,
+            );
+            emit(
+                json!({"type":"response.function_call_arguments.done","output_index":index,"item_id":item["id"],"arguments":item["arguments"]}),
+                true,
+            );
+            emit(
+                json!({"type":"response.output_item.done","output_index":index,"item":item}),
+                true,
+            );
+            continue;
+        }
         emit(
             json!({"type":"response.output_item.added","output_index":index,"item":{"id":item["id"],"type":"message","role":"assistant","content":[]}}),
             true,
@@ -525,7 +569,10 @@ async fn run(case: DsmlCase, sse: bool) {
     assert_eq!(first.status(), 200);
     let wire = first.text().await.unwrap();
     let result: Value = if sse {
-        if case != DsmlCase::Literal && case != DsmlCase::OpaqueSse {
+        if case != DsmlCase::Literal
+            && case != DsmlCase::OpaqueSse
+            && opaque_tool_text(case).is_none()
+        {
             assert!(
                 !wire.contains("DSML"),
                 "converted envelope leaked in early SSE: {wire}"
@@ -545,6 +592,22 @@ async fn run(case: DsmlCase, sse: bool) {
         .iter()
         .filter(|i| i["type"] == "function_call")
         .collect();
+    if case == DsmlCase::UnknownLabelOnly {
+        assert!(calls.is_empty(), "unknown text must not create a tool call");
+        assert_eq!(
+            output[0]["content"][0]["text"],
+            opaque_tool_text(case)
+                .unwrap()
+                .strip_prefix("<|DSML|tool_calls>\n")
+                .unwrap()
+        );
+        assert_eq!(peer.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        handle.shutdown().await;
+        task.abort();
+        fs::remove_file(fixture).unwrap();
+        std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+        return;
+    }
     if case == DsmlCase::Literal {
         assert!(
             calls.is_empty(),
@@ -735,20 +798,36 @@ async fn run(case: DsmlCase, sse: bool) {
     assert_eq!(call["namespace"].as_str(), expected_namespace(case));
     assert_eq!(result["provider_extension"], json!({"keep":true}));
     assert_eq!(result["usage"]["output_tokens"], 2);
-    assert_eq!(output[0]["content"][0]["text"], "Before\n");
-    if case == DsmlCase::Residue {
-        assert!(
-            !output.iter().any(|item| item["type"] == "reasoning"),
-            "half thinking beside harvested tool must remain text"
-        );
-        assert!(!wire.contains("<thinking>"), "half thinking marker leaked");
-    }
-    if case == DsmlCase::Residue {
-        // The marker lines and their terminators are removed; the retained
-        // prose span keeps its exact source text.
-        assert_eq!(output[2]["content"][0]["text"], "\nAfter\n");
+    if let Some(text) = opaque_tool_text(case) {
+        assert_eq!(output[0]["content"][0]["text"], text);
+        assert_eq!(call["call_id"], "native_sibling_call");
+        assert_eq!(call["id"], "native_sibling");
+        if sse {
+            let streamed: String = wire
+                .lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .filter(|event| event["type"] == "response.output_text.delta")
+                .filter_map(|event| event["delta"].as_str().map(str::to_owned))
+                .collect();
+            assert_eq!(streamed, text, "opaque text changed in streamed deltas");
+        }
     } else {
-        assert_eq!(output[2]["content"][0]["text"], "\nAfter");
+        assert_eq!(output[0]["content"][0]["text"], "Before\n");
+        if case == DsmlCase::Residue {
+            assert!(
+                !output.iter().any(|item| item["type"] == "reasoning"),
+                "half thinking beside harvested tool must remain text"
+            );
+            assert!(!wire.contains("<thinking>"), "half thinking marker leaked");
+        }
+        if case == DsmlCase::Residue {
+            // The marker lines and their terminators are removed; the retained
+            // prose span keeps its exact source text.
+            assert_eq!(output[2]["content"][0]["text"], "\nAfter\n");
+        } else {
+            assert_eq!(output[2]["content"][0]["text"], "\nAfter");
+        }
     }
     if sse {
         let events: Vec<Value> = wire
@@ -822,6 +901,36 @@ async fn responses_direct_dsml_sse_tool_round_trip() {
 async fn responses_direct_dsml_literal_text_preserved() {
     run(DsmlCase::Literal, false).await;
     run(DsmlCase::Literal, true).await;
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_unknown_complete_tool_text_preserves_native_round_trip() {
+    run(DsmlCase::UnknownComplete, false).await;
+    run(DsmlCase::UnknownComplete, true).await;
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_opaque_complete_tool_text_preserves_native_round_trip() {
+    run(DsmlCase::OpaqueComplete, false).await;
+    run(DsmlCase::OpaqueComplete, true).await;
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_opaque_alternate_tool_text_preserves_native_round_trip() {
+    run(DsmlCase::OpaqueAlternate, false).await;
+    run(DsmlCase::OpaqueAlternate, true).await;
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_label_beside_unknown_complete_text_is_not_a_failure() {
+    run(DsmlCase::UnknownLabelOnly, false).await;
+    run(DsmlCase::UnknownLabelOnly, true).await;
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_opaque_embedded_thinking_preserves_native_round_trip() {
+    run(DsmlCase::OpaqueEmbeddedThinking, false).await;
+    run(DsmlCase::OpaqueEmbeddedThinking, true).await;
 }
 
 #[tokio::test]

@@ -28,6 +28,19 @@ pub(crate) fn project_v3_thinking_tag_text_with_tools(
     text: &str,
     has_complete_tools: bool,
 ) -> V3ThinkingTagTextProjection {
+    // Tool harvesting has already run at its payload owner. Any serialized
+    // invocation left here is opaque business text, including its arguments.
+    if crate::tool_markup_parser::scan_tool_markup(
+        text,
+        &crate::tool_markup_parser::ToolMarkupDeclarations::default(),
+    )
+    .opaque_invocation
+    {
+        return V3ThinkingTagTextProjection {
+            visible: text.to_owned(),
+            ..Default::default()
+        };
+    }
     let protected = protected_text_ranges(text);
     let mut projection = V3ThinkingTagTextProjection::default();
     let mut cursor = 0usize;

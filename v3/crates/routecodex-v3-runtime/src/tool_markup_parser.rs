@@ -107,10 +107,9 @@ pub(crate) struct ToolMarkupScan<'a> {
     pub(crate) segments: Vec<ToolMarkupSegment<'a>>,
     pub(crate) removed_label: bool,
     pub(crate) opener_label: bool,
-    pub(crate) truncated: bool,
     /// True only for a declared function invocation that started but cannot be
     /// completed. Unknown, literal and complete-but-unrepresentable text stays
-    /// opaque; `truncated` remains the broader Direct compatibility fact.
+    /// opaque.
     pub(crate) incomplete_tool_invocation: bool,
     pub(crate) opaque_invocation: bool,
 }
@@ -497,7 +496,6 @@ pub(crate) fn scan_tool_markup<'a>(
     let mut quote = None;
     let mut skip_until = 0;
     let mut blockquote = false;
-    let mut truncated = false;
     let mut incomplete_tool_invocation = false;
     let mut opaque_invocation = false;
     let mut line_start = 0;
@@ -588,10 +586,12 @@ pub(crate) fn scan_tool_markup<'a>(
                         }
                         None => {
                             opaque_invocation = true;
-                            truncated = true;
                             if declarations
                                 .get(name)
                                 .is_some_and(|identity| identity.kind == ToolMarkupKind::Function)
+                                && !text[line_end..]
+                                    .lines()
+                                    .any(|line| line_content(line) == format!("</{name}>"))
                             {
                                 incomplete_tool_invocation = true;
                             }
@@ -667,7 +667,6 @@ pub(crate) fn scan_tool_markup<'a>(
                     continue;
                 }
                 if recognized_truncated_fullwidth(tail, declarations) {
-                    truncated = true;
                     incomplete_tool_invocation = true;
                 }
                 opaque_invocation = true;
@@ -700,7 +699,6 @@ pub(crate) fn scan_tool_markup<'a>(
                     cursor = end.min(line_end);
                 } else {
                     opaque_invocation = true;
-                    truncated = true;
                     if declared_function_tool_call_start(text, tool_start, declarations)
                         && text
                             .get(tool_start..)
@@ -722,7 +720,6 @@ pub(crate) fn scan_tool_markup<'a>(
         segments,
         removed_label,
         opener_label,
-        truncated,
         incomplete_tool_invocation,
         opaque_invocation,
     }
@@ -768,7 +765,7 @@ mod tests {
             "observed fullwidth label was not removed"
         );
         assert!(
-            !scan.truncated,
+            !scan.incomplete_tool_invocation,
             "fence inside an argument must not truncate"
         );
         let calls: Vec<_> = scan
@@ -804,7 +801,7 @@ mod tests {
     #[test]
     fn tool_markup_parser_distinguishes_incomplete_declared_tool_invocations() {
         // Declared function invocation that never reaches its close: this is the
-        // recognized incomplete shape that must discard the Relay attempt.
+        // recognized incomplete shape that must discard the governed attempt.
         let truncated_fullwidth = format!(
             "{OPEN}<｜｜DSML｜｜ invoke name=\"read_image\"><｜｜DSML｜｜ parameter name=\"file_path\" string=\"true\">x"
         );
@@ -817,11 +814,13 @@ mod tests {
         assert!(scan.incomplete_tool_invocation);
 
         // Unknown or complete-but-unrepresentable business text stays opaque and
-        // must not be promoted into the Relay incomplete-invocation policy.
+        // must not be promoted into the incomplete-invocation policy.
         for opaque in [
             "<tool_call>undeclared<arg_key>cmd</arg_key><arg_value>x</arg_value>",
             "<tool_call>read_image<arg_key>file_path</arg_key><arg_value>x</arg_value><arg_key>file_path</arg_key><arg_value>y</arg_value></tool_call>",
             "<tool_call>read_image<arg_key>file_path</arg_key><arg_value>x</arg_value></tool_call>",
+            "<|read_image\">\n<file_path>a</file_path>\n<file_path>b</file_path>\n</read_image>",
+            "<|undeclared\">\n<cmd>x</cmd>",
         ] {
             let scan = scan_tool_markup(opaque, &declarations());
             assert!(
