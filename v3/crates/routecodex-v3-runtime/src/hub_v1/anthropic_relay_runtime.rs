@@ -518,9 +518,12 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let mut req02 = run_v3_anthropic_relay_runtime_req_inbound(req01)?;
     trace.push("V3HubReqInbound02Normalized");
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
-    let (runtime_timing, mut failed_candidates, mut retry_selected) =
-        super::relay_runtime_shared::relay_handoff_entry_state(initial_handoff.as_ref());
-    let mut request_local_busy_candidates = BTreeSet::new();
+    let (
+        runtime_timing,
+        mut failed_candidates,
+        mut request_local_busy_candidates,
+        mut retry_selected,
+    ) = super::relay_runtime_shared::relay_handoff_entry_state(initial_handoff.as_ref());
     let mut provider_failure_events: Vec<V3RuntimeProviderFailureObservation> = initial_handoff
         .as_ref()
         .map(|handoff| handoff.provider_failure_events.clone())

@@ -1181,7 +1181,7 @@ features:
   - Direct provider errors enter the shared Error01-06/provider-health policy; success payload semantics remain provider-owned while client transport projection follows the client stream intent
   - Direct provider raw response decode/projection errors enter the same Error01-06 provider failure policy and reselect before Error06 while alternatives remain
   - Direct target-local reselection uses the full captured Target09 candidate set; if the newly selected Target10 requires Hub Relay and no Direct-owned previous_response_id is active, Direct returns a
-    typed relay handoff side-channel carrying the complete request-local failed-candidate exclusion set so Relay cannot retry an already-failed Direct target
+    typed relay handoff side-channel carrying both the complete request-local failed-candidate exclusion set and the exact request-local capacity-busy candidate set, without inferring busy provenance from exclusions, so Relay cannot retry an already-failed Direct target
   - Direct server execution passes the server-scoped provider health store so cross-request cooldown affects subsequent selection
   - Direct server observability derives JSON finish_reason from parsed response status only for log/usage output; non-stream JSON client bodies are not mutated, while stream requests may project valid provider
     JSON as client SSE without treating provider inbound transport as client protocol truth
@@ -3451,8 +3451,8 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
-  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib all_busy_async_admission_preserves_provider_concurrency_busy_source -- --exact --nocapture
-  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhausted -- --exact --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::cooldown_exhaustion::all_busy_async_admission_preserves_provider_concurrency_busy_source -- --exact --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::cooldown_exhaustion::mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhausted -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admission -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture

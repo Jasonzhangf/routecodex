@@ -163,6 +163,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         expanded: preplan.expanded,
         protocol_candidate_keys,
         request_local_excluded_candidates: preplan.request_local_excluded_candidates,
+        request_local_busy_candidates: BTreeSet::new(),
         _route_policy_pending: resolved_target.route_policy_pending,
         _route_policy_scope: resolved_target.route_policy_scope,
     })

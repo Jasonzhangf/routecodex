@@ -199,7 +199,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
             None => V3PlanExecutionTargetSource::OpaqueHit(resolved_target.opaque_hit),
         };
         let mut failed_candidates = initial_request_local_excluded_candidates;
-        let mut request_local_busy_candidates = BTreeSet::new();
+        let mut request_local_busy_candidates = initial_relay_seeds.request_local_busy_candidates;
         let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> =
             None;
         let mut initial_selected_target = initial_selected_target;
@@ -541,6 +541,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             expanded: retained_expanded.clone(),
                             protocol_candidate_keys,
                             request_local_excluded_candidates: failed_candidates.clone(),
+                            request_local_busy_candidates: request_local_busy_candidates.clone(),
                             _route_policy_pending: route_policy_pending.clone(),
                             _route_policy_scope: route_policy_scope.clone(),
                         },
