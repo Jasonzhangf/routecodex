@@ -1,6 +1,78 @@
 use super::*;
 
 #[test]
+fn chat_canonical_redacted_reasoning_with_tool_history_restores_provider_block() {
+    let canonical =
+        crate::hub_v1::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model": "claude",
+                "tools": [{
+                    "type": "function",
+                    "name": "lookup",
+                    "parameters": {"type": "object"}
+                }],
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "I will look that up."}]
+                    },
+                    {
+                        "type": "reasoning",
+                        "encrypted_content": "native-redacted-data",
+                        "routecodex_chat_extension": {
+                            "anthropic_reasoning": {
+                                "type": "redacted_thinking",
+                                "cache_control": {"type": "ephemeral"},
+                                "opaque": {"nested": [1, {"leaf": "redacted"}]}
+                            }
+                        }
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_redacted_history",
+                        "name": "lookup",
+                        "arguments": "{\"query\":\"p0\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_redacted_history",
+                        "output": "42"
+                    }
+                ]
+            }),
+        )
+        .expect("redacted reasoning plus paired tool history must reach canonical Chat");
+
+    let provider = encode_v3_responses_semantic_as_anthropic_request(canonical)
+        .expect("canonical redacted reasoning must restore on the Anthropic wire");
+    let content = provider["messages"][0]["content"]
+        .as_array()
+        .expect("assistant content");
+    let redacted = content
+        .iter()
+        .find(|block| block["type"] == "redacted_thinking")
+        .unwrap_or_else(|| {
+            panic!("redacted reasoning block was dropped from canonical Chat replay: {provider}")
+        });
+    assert_eq!(
+        redacted,
+        &json!({
+            "type": "redacted_thinking",
+            "data": "native-redacted-data",
+            "cache_control": {"type": "ephemeral"},
+            "opaque": {"nested": [1, {"leaf": "redacted"}]}
+        })
+    );
+    assert!(
+        content
+            .iter()
+            .any(|block| block["type"] == "tool_use" && block["id"] == "call_redacted_history"),
+        "paired tool call must stay adjacent to restored reasoning: {provider}"
+    );
+}
+
+#[test]
 fn anthropic_namespace_tools_expand_to_qualified_children() {
     let object = json!({
         "tools": [{

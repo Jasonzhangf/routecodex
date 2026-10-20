@@ -18,29 +18,30 @@ use std::sync::OnceLock;
 mod message_encoding;
 mod namespace_tool_names;
 mod projection_context;
+mod reasoning_projection;
 mod response_projection;
 mod responses_to_anthropic;
 use super::usage_normalization::project_v3_responses_usage_from_canonical;
 use message_encoding::non_empty_string;
 pub use projection_context::V3AnthropicResponsesProjectionContext;
+pub(crate) use reasoning_projection::project_v3_responses_reasoning_item_as_anthropic_content;
 use response_projection::{
     anthropic_reasoning_part_as_responses_reasoning,
     flush_v3_anthropic_text_content_as_responses_message,
     project_v3_anthropic_terminal_as_responses_terminal, V3AnthropicResponseContentBlockKind,
     V3AnthropicTerminalKind,
 };
+pub(crate) use responses_to_anthropic::responses_web_search_tool_as_anthropic_tool;
 use responses_to_anthropic::{
     chat_messages_as_anthropic_messages, responses_input_as_anthropic_messages,
     responses_system_as_anthropic_system, responses_tool_choice_as_anthropic_tool_choice,
     responses_tools_for_anthropic_wire,
 };
-pub(crate) use responses_to_anthropic::{
-    project_v3_responses_reasoning_item_as_anthropic_content,
-    responses_web_search_tool_as_anthropic_tool,
-};
 
 const CLAUDE_CODE_SYSTEM_PROMPT_MD: &str = include_str!("claude_code_system_prompt.md");
 const ANTHROPIC_REQUEST_EXTENSION: &str = "anthropic_request";
+const ANTHROPIC_REASONING_EXTENSION: &str = "anthropic_reasoning";
+const ANTHROPIC_REASONING_BLOCKS_EXTENSION: &str = "anthropic_reasoning_blocks";
 const ANTHROPIC_ENTRY_PASSTHROUGH_EXTENSION_KEYS: &[&str] = &["context_management"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

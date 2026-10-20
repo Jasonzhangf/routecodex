@@ -604,7 +604,7 @@ fn anthropic_provider_signature_delta_without_string_fails_explicitly() {
 
     assert!(error
         .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+        .contains("Anthropic signature_delta requires signature"));
 }
 
 #[test]

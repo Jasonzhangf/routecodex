@@ -1,4 +1,4 @@
-use super::V3AnthropicCodecError;
+use super::{V3AnthropicCodecError, ANTHROPIC_REASONING_EXTENSION};
 use crate::protocol_tables::{map_value as table_map_value, V3TableDirection, V3TableKind};
 use serde_json::{json, Map, Value};
 
@@ -217,8 +217,7 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
         })?;
     match object.get("type").and_then(Value::as_str) {
         Some("thinking") => {
-            validate_anthropic_reasoning_object_keys(object, &["type", "thinking", "signature"])?;
-            let thinking = require_nonempty_reasoning_string(object.get("thinking"))?;
+            let thinking = require_nonempty_reasoning_string(object.get("thinking"), "thinking")?;
             let summary_text = match summary_policy {
                 None | Some("auto" | "concise" | "detailed") => thinking,
                 Some(_) => {
@@ -234,15 +233,21 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
             if let Some(signature) = optional_reasoning_string(object, "signature")? {
                 item["encrypted_content"] = Value::String(signature.to_string());
             }
+            preserve_anthropic_reasoning_extensions(
+                object,
+                &["type", "thinking", "signature"],
+                &mut item,
+            );
             Ok(item)
         }
         Some("redacted_thinking") => {
-            validate_anthropic_reasoning_object_keys(object, &["type", "data"])?;
-            let data = require_nonempty_reasoning_string(object.get("data"))?;
-            Ok(json!({
+            let data = require_nonempty_reasoning_string(object.get("data"), "data")?;
+            let mut item = json!({
                 "type":"reasoning",
                 "encrypted_content":data
-            }))
+            });
+            preserve_anthropic_reasoning_extensions(object, &["type", "data"], &mut item);
+            Ok(item)
         }
         _ => Err(V3AnthropicCodecError::MalformedField {
             field: "reasoning content",
@@ -250,16 +255,48 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
     }
 }
 
-fn require_nonempty_reasoning_string(value: Option<&Value>) -> Result<&str, V3AnthropicCodecError> {
+/// Carry provider extension fields on a reasoning block forward as opaque data
+/// so a representable provider response is not dropped. Native fields are
+/// consumed by the mapping above and are never duplicated.
+fn preserve_anthropic_reasoning_extensions(
+    object: &Map<String, Value>,
+    native: &[&str],
+    item: &mut Value,
+) {
+    let Some(target) = item.as_object_mut() else {
+        return;
+    };
+    let mut extension = Map::new();
+    if let Some(content_type) = object.get("type") {
+        extension.insert("type".to_string(), content_type.clone());
+    }
+    for (key, value) in object {
+        if !native.contains(&key.as_str()) {
+            extension.insert(key.clone(), value.clone());
+        }
+    }
+    if extension.len() > 1 {
+        let mut carrier = Map::new();
+        carrier.insert(
+            ANTHROPIC_REASONING_EXTENSION.to_string(),
+            Value::Object(extension),
+        );
+        target.insert(
+            "routecodex_chat_extension".to_string(),
+            Value::Object(carrier),
+        );
+    }
+}
+
+fn require_nonempty_reasoning_string<'a>(
+    value: Option<&'a Value>,
+    field: &'static str,
+) -> Result<&'a str, V3AnthropicCodecError> {
     let value = value
         .and_then(Value::as_str)
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "reasoning content",
-        })?;
+        .ok_or(V3AnthropicCodecError::MalformedField { field })?;
     if value.trim().is_empty() {
-        return Err(V3AnthropicCodecError::MalformedField {
-            field: "reasoning content",
-        });
+        return Err(V3AnthropicCodecError::MalformedField { field });
     }
     Ok(value)
 }
@@ -277,16 +314,4 @@ fn optional_reasoning_string<'a>(
         .ok_or(V3AnthropicCodecError::MalformedField {
             field: "reasoning content",
         })
-}
-
-fn validate_anthropic_reasoning_object_keys(
-    object: &Map<String, Value>,
-    allowed: &[&str],
-) -> Result<(), V3AnthropicCodecError> {
-    if object.keys().any(|key| !allowed.contains(&key.as_str())) {
-        return Err(V3AnthropicCodecError::MalformedField {
-            field: "reasoning content",
-        });
-    }
-    Ok(())
 }

@@ -1,7 +1,10 @@
 use crate::protocol_tables::{map_field as table_map_field, V3TableDirection};
 use provider_compat_core::namespace_tools::resolve_responses_tool_declarations;
 use serde_json::{json, Map, Value};
+mod chat_extension_merge;
 mod tool_output;
+const ANTHROPIC_REASONING_EXTENSION: &str = "anthropic_reasoning";
+const ANTHROPIC_REASONING_BLOCKS_EXTENSION: &str = "anthropic_reasoning_blocks";
 pub(super) use tool_output::{
     canonical_content as responses_tool_output_content, image_url as responses_image_url,
 };
@@ -553,22 +556,26 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
         };
         target.insert("reasoning_content".to_string(), Value::String(merged));
     }
-    // A reasoning item folded into an existing assistant message must keep its
-    // Responses `encrypted_content` association (the Anthropic thinking
-    // signature). Absent stays absent; present-empty stays distinct from
-    // non-empty.
-    if let Some(source_signature) = source
-        .get("routecodex_chat_extension")
-        .and_then(Value::as_object)
-        .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
-    {
-        let target_extension = target
-            .entry("routecodex_chat_extension".to_string())
-            .or_insert_with(|| Value::Object(Map::new()));
-        if let Some(target_extension) = target_extension.as_object_mut() {
-            target_extension
-                .entry("responses_reasoning_encrypted_content".to_string())
-                .or_insert_with(|| source_signature.clone());
+    if let Some(source_extension) = source.get("routecodex_chat_extension") {
+        // Keep the first Responses reasoning signature: a canonical assistant
+        // message carries one reasoning_content, so a later folded item must
+        // not overwrite the association captured for the first one.
+        let existing_signature = target
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object)
+            .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
+            .cloned();
+        chat_extension_merge::merge_chat_extension(target, source_extension)?;
+        if let Some(signature) = existing_signature {
+            if let Some(extension) = target
+                .get_mut("routecodex_chat_extension")
+                .and_then(Value::as_object_mut)
+            {
+                extension.insert(
+                    "responses_reasoning_encrypted_content".to_string(),
+                    signature,
+                );
+            }
         }
     }
     Ok(())
@@ -701,8 +708,9 @@ fn build_v3_openai_chat_message_from_responses_message(
     {
         message.insert(
             "reasoning_content".to_string(),
-            Value::String(reasoning_content),
+            Value::String(reasoning_content.clone()),
         );
+        retain_anthropic_reasoning_block_for_message(item, &reasoning_content, &mut message)?;
     }
     Ok(Value::Object(message))
 }
@@ -737,16 +745,103 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
         "content":"",
         "reasoning_content":reasoning_content
     });
+    if let Some(extension) = item.get("routecodex_chat_extension") {
+        let mut extension = extension.clone();
+        if let Some(extension) = extension.as_object_mut() {
+            retain_anthropic_reasoning_block_association(item, &reasoning_content, extension);
+        }
+        message["routecodex_chat_extension"] = extension;
+    } else {
+        let mut extension = Map::new();
+        retain_anthropic_reasoning_block_association(item, &reasoning_content, &mut extension);
+        message["routecodex_chat_extension"] = Value::Object(extension);
+    }
     // Preserve the Responses reasoning `encrypted_content` as an opaque business
     // association so the Anthropic outbound projection can restore the exact
     // thinking signature. Present-empty and non-empty both pass through; an
     // absent field leaves the key absent.
     if let Some(Value::String(signature)) = item.get("encrypted_content") {
-        message["routecodex_chat_extension"] = json!({
-            "responses_reasoning_encrypted_content": signature
-        });
+        if let Some(extension) = message
+            .get_mut("routecodex_chat_extension")
+            .and_then(Value::as_object_mut)
+        {
+            extension.insert(
+                "responses_reasoning_encrypted_content".to_string(),
+                Value::String(signature.clone()),
+            );
+        } else {
+            message["routecodex_chat_extension"] = json!({
+                "responses_reasoning_encrypted_content": signature
+            });
+        }
     }
     Some(message)
+}
+
+fn retain_anthropic_reasoning_block_association(
+    item: &Map<String, Value>,
+    reasoning_content: &str,
+    extension: &mut Map<String, Value>,
+) {
+    let anthropic_reasoning = extension
+        .get(ANTHROPIC_REASONING_EXTENSION)
+        .and_then(Value::as_object);
+    if extension
+        .get(ANTHROPIC_REASONING_BLOCKS_EXTENSION)
+        .and_then(Value::as_array)
+        .is_some_and(|blocks| !blocks.is_empty())
+    {
+        return;
+    }
+    let mut block = Map::new();
+    let native_type = anthropic_reasoning
+        .and_then(|extension| extension.get("type"))
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| {
+            if reasoning_content.trim().is_empty() && item.contains_key("encrypted_content") {
+                "redacted_thinking"
+            } else {
+                "thinking"
+            }
+        });
+    block.insert("type".to_string(), Value::String(native_type.to_string()));
+    block.insert(
+        "reasoning_content".to_string(),
+        Value::String(reasoning_content.to_string()),
+    );
+    if let Some(encrypted_content) = item.get("encrypted_content") {
+        block.insert("encrypted_content".to_string(), encrypted_content.clone());
+    }
+    if let Some(anthropic_reasoning) = anthropic_reasoning {
+        block.insert(
+            ANTHROPIC_REASONING_EXTENSION.to_string(),
+            Value::Object(anthropic_reasoning.clone()),
+        );
+    }
+    extension.insert(
+        ANTHROPIC_REASONING_BLOCKS_EXTENSION.to_string(),
+        Value::Array(vec![Value::Object(block)]),
+    );
+}
+
+fn retain_anthropic_reasoning_block_for_message(
+    item: &Map<String, Value>,
+    reasoning_content: &str,
+    message: &mut Map<String, Value>,
+) -> Result<(), String> {
+    let mut extension = match item.get("routecodex_chat_extension") {
+        Some(extension) => extension
+            .as_object()
+            .cloned()
+            .ok_or_else(|| "reasoning routecodex_chat_extension is not an object".to_string())?,
+        None => Map::new(),
+    };
+    retain_anthropic_reasoning_block_association(item, reasoning_content, &mut extension);
+    message.insert(
+        "routecodex_chat_extension".to_string(),
+        Value::Object(extension),
+    );
+    Ok(())
 }
 
 fn build_v3_openai_chat_assistant_tool_call_message(
@@ -786,8 +881,9 @@ fn build_v3_openai_chat_assistant_tool_call_message(
     ) {
         message.insert(
             "reasoning_content".to_string(),
-            Value::String(reasoning_content),
+            Value::String(reasoning_content.clone()),
         );
+        retain_anthropic_reasoning_block_for_message(item, &reasoning_content, &mut message)?;
     }
     Ok(Value::Object(message))
 }

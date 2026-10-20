@@ -1266,7 +1266,7 @@ async fn anthropic_provider_sse_rejects_thinking_text_alias() {
             Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_alias\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
             Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"text\":\"alias text\"}}\n\n".to_vec()),
             Ok(b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec()),
-            Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
+            Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
         ]));
     let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
         V3HubProviderWireProtocol::Anthropic,
@@ -1278,7 +1278,7 @@ async fn anthropic_provider_sse_rejects_thinking_text_alias() {
 
     assert!(error
         .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+        .contains("Anthropic codec malformed thinking"));
 }
 
 #[tokio::test]
@@ -1299,7 +1299,7 @@ async fn anthropic_provider_sse_rejects_thinking_delta_text_alias() {
 
     assert!(error
         .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+        .contains("Anthropic thinking_delta requires thinking"));
 }
 
 #[tokio::test]
@@ -1308,6 +1308,8 @@ async fn anthropic_provider_sse_rejects_redacted_signature_alias() {
     let provider = Box::pin(stream::iter(vec![
             Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_redacted_alias\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
             Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"redacted_thinking\",\"signature\":\"alias data\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec()),
+            Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
         ]));
     let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
         V3HubProviderWireProtocol::Anthropic,
@@ -1317,33 +1319,33 @@ async fn anthropic_provider_sse_rejects_redacted_signature_alias() {
     .await
     .unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+    assert!(error.to_string().contains("Anthropic codec malformed data"));
 }
 
 #[tokio::test]
-async fn anthropic_provider_sse_rejects_native_and_alias_dual_truth() {
+async fn anthropic_provider_sse_preserves_native_reasoning_with_extra_provider_fields() {
     for content_block in [
         r#"{"type":"thinking","thinking":"native","text":"alias"}"#,
         r#"{"type":"redacted_thinking","data":"native","signature":"alias"}"#,
     ] {
         let observation = V3RuntimeStreamObservation::default();
         let stream = format!(
-                "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg_dual\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{content_block}}}\n\n"
+                "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg_dual\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{content_block}}}\n\nevent: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":0}}\n\nevent: message_delta\ndata: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"end_turn\"}}}}\n\nevent: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             );
         let provider = Box::pin(stream::iter(vec![Ok(stream.into_bytes())]));
-        let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
             V3HubProviderWireProtocol::Anthropic,
             provider,
             &observation,
         )
         .await
-        .unwrap_err();
-
-        assert!(error
-            .to_string()
-            .contains("Anthropic codec malformed reasoning content"));
+        .expect("representable reasoning with extra fields must not be rejected");
+        assert_eq!(response["status"], "completed");
+        let serialized = response["output"][0].to_string();
+        assert!(
+            serialized.contains("native") && serialized.contains("alias"),
+            "{serialized}"
+        );
     }
 }
 

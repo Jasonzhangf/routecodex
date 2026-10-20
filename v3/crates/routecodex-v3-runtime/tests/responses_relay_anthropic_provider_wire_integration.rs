@@ -1336,6 +1336,210 @@ async fn responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_co
     }
 }
 
+// Controlled Anthropic provider fixture (not a live provider sample). A
+// provider `thinking` block may carry provider extension fields such as
+// `cache_control` (an Anthropic prompt-cache breakpoint). The transparent
+// proxy contract requires a compatible provider response to survive
+// projection, so the native reasoning payload and the extension must both
+// reach the client.
+struct AnthropicProviderSseReasoningCacheControlTransport;
+
+#[async_trait]
+impl ResponsesTransport for AnthropicProviderSseReasoningCacheControlTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let stream = futures_util::stream::iter([
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_sse_cache","type":"message","role":"assistant","model":"MiniMax-M3","content":[],"usage":{"input_tokens":3,"output_tokens":4}}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"plan ","cache_control":{"type":"ephemeral"}}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"step"}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":"answer"}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+"#.to_vec()),
+            Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}
+
+"#.to_vec()),
+            Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#.to_vec()),
+            Ok(b"data: [DONE]
+
+".to_vec()),
+        ]);
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_provider_sse_preserves_thinking_cache_control_extension() {
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-anthropic-sse-cache-control".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[{"role":"user","content":[{"type":"input_text","text":"reason"}]}],
+                "stream":false
+            }),
+        },
+        &AnthropicProviderSseReasoningCacheControlTransport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200, "runtime output: {output:?}");
+    let client = match output.client_body {
+        V3ResponsesRelayClientBody::Json(value) => value,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+    };
+    let reasoning = &client["output"][0];
+    assert_eq!(reasoning["type"], "reasoning");
+    assert_eq!(reasoning["summary"][0]["text"], "plan step");
+    assert_eq!(
+        reasoning["routecodex_chat_extension"]["anthropic_reasoning"]["cache_control"],
+        json!({"type":"ephemeral"}),
+        "a representable provider reasoning extension must survive projection: {client}"
+    );
+    assert_eq!(client["output"][1]["content"][0]["text"], "answer");
+    assert_eq!(client["status"], "completed");
+}
+
+// Controlled Anthropic provider fixture (not a live provider sample). A
+// reasoning block that omits its own native payload is a real malformed
+// business response: the runtime must surface a typed internal error and
+// must not fabricate a client payload for it.
+struct AnthropicProviderSseMalformedReasoningTransport;
+
+#[async_trait]
+impl ResponsesTransport for AnthropicProviderSseMalformedReasoningTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let stream = futures_util::stream::iter([
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_sse_bad","type":"message","role":"assistant","model":"MiniMax-M3","content":[]}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","text":"alias without native payload"}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#.to_vec()),
+            Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}
+
+"#.to_vec()),
+            Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#.to_vec()),
+            Ok(b"data: [DONE]
+
+".to_vec()),
+        ]);
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_provider_sse_malformed_reasoning_is_internal_typed_error() {
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-anthropic-sse-malformed-reasoning".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[{"role":"user","content":[{"type":"input_text","text":"reason"}]}],
+                "stream":false
+            }),
+        },
+        &AnthropicProviderSseMalformedReasoningTransport,
+    )
+    .await
+    .unwrap();
+
+    // The runtime keeps the failure in the typed internal Error chain; the
+    // server turns a populated error chain into a no-response transport break,
+    // so no provider error payload reaches the client.
+    assert!(
+        output.error_chain.is_some(),
+        "a reasoning block missing its native payload must stay a typed internal error: {output:?}"
+    );
+    assert_eq!(output.status, 502);
+    let observability = output.observability.as_ref().expect("observability");
+    let failure = observability
+        .provider_failure_events
+        .first()
+        .expect("provider failure event");
+    assert!(
+        failure
+            .message
+            .contains("Anthropic codec malformed thinking"),
+        "the typed diagnostic must stay distinct: {failure:?}"
+    );
+    assert_eq!(
+        failure.error_type.as_deref(),
+        Some("provider_response_event_codec_failure")
+    );
+}
+
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
