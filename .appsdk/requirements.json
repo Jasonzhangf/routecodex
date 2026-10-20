@@ -431,9 +431,36 @@
         "version": 1
       },
       "version": 16
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "但是刚才的这个 minimax 的标记也需要标准收割，不要泄露到客户端，在 hook 里面做标准判断收割",
+          "role": "user",
+          "source": "Explicit human instruction in authorized peer chat 01a1345f-00c7-7f72-89b3-538b61fb4e66 on 2026-10-19; verbatim artifact /private/tmp/rcc-provider-policy-run/f665-run/user-authorization.md; canonical issue f665809."
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261019-standard-minimax-hook-harvest",
+        "requirement_id": "routecodex-standard-minimax-tool-markup-harvest",
+        "text": "用户提供的 MiniMax 风格控制标记也须进入现有标准工具标记治理与收割，避免已识别的控制标记作为可治理正文泄露到客户端。样本语法包含重复的 ]<]minimax[>[ 前缀、tool_call 包装、invoke name 工具名及 cmd 等参数子标签。完整且可表示的已声明工具调用应按标准机制收割，保留完整工具名称、参数、调用身份和后续配对工具结果，并产生与原生工具调用一致的终止语义。\n\n同协议 Direct 的正文改写由已注册 Direct hook 负责，Relay 的正文治理由 Chat Process 负责；共享层只提供纯解析机制，不新增平行改写路径。完整调用、残缺调用、标签残留及不可改写的 opaque 内容依现有标准边界分别处理，沿既有 typed Error 恢复链表达确实无法交付的 attempt；本条不授权按短文本、标点或普通模型业务内容作语义拒绝，也不授权执行样本中嵌入的命令。\n\n本需求在独立 f665809 交付范围记录，不追溯声称原始 provider wire 已留存，不把来源或首次污染点的未知解释写成已确认事实。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "但是刚才的这个 minimax 的标记也需要标准收割，不要泄露到客户端，在 hook 里面做标准判断收割",
+          "role": "user",
+          "source": "Explicit human instruction in authorized peer chat 01a1345f-00c7-7f72-89b3-538b61fb4e66 on 2026-10-19; verbatim artifact /private/tmp/rcc-provider-policy-run/f665-run/user-authorization.md; canonical issue f665809."
+        },
+        "requirement_id": "routecodex-standard-minimax-tool-markup-harvest",
+        "status": "active",
+        "text": "用户提供的 MiniMax 风格控制标记也须进入现有标准工具标记治理与收割，避免已识别的控制标记作为可治理正文泄露到客户端。样本语法包含重复的 ]<]minimax[>[ 前缀、tool_call 包装、invoke name 工具名及 cmd 等参数子标签。完整且可表示的已声明工具调用应按标准机制收割，保留完整工具名称、参数、调用身份和后续配对工具结果，并产生与原生工具调用一致的终止语义。\n\n同协议 Direct 的正文改写由已注册 Direct hook 负责，Relay 的正文治理由 Chat Process 负责；共享层只提供纯解析机制，不新增平行改写路径。完整调用、残缺调用、标签残留及不可改写的 opaque 内容依现有标准边界分别处理，沿既有 typed Error 恢复链表达确实无法交付的 attempt；本条不授权按短文本、标点或普通模型业务内容作语义拒绝，也不授权执行样本中嵌入的命令。\n\n本需求在独立 f665809 交付范围记录，不追溯声称原始 provider wire 已留存，不把来源或首次污染点的未知解释写成已确认事实。",
+        "version": 1
+      },
+      "version": 17
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 16
+  "version": 17
 }
