@@ -68,7 +68,7 @@ fn failed(status: StatusCode, message: &str) -> Response<Body> {
 }
 
 /// The cooled (preferred) provider. It serves exactly two behaviours:
-/// the runtime cooldown rescue probe (probe body) and the pinned business
+/// the runtime cooldown rescue probe (probe body) and the pooled business
 /// request. Both are held by semaphores so the test controls their order.
 async fn cooled_provider(
     State(peer): State<Arc<Peer>>,
@@ -127,7 +127,11 @@ async fn healthy_provider(
         return ok_responses("pong", false);
     }
     let text = body.to_string();
-    assert!(text.contains(POOLED_MARKER) || text.contains("issue231 healthy sibling"));
+    assert!(
+        text.contains(POOLED_MARKER)
+            || text.contains(BUSINESS_FAILURE_MARKER)
+            || text.contains("issue231 healthy sibling")
+    );
     peer.captures.lock().await.push(body.clone());
     ok_responses(
         HEALTHY_PAYLOAD,

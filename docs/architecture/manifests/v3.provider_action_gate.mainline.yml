@@ -73,7 +73,7 @@ edges:
     to: V3Error05RecoveryWitness
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: run_v3_relay_provider_failure_policy
+    caller_symbol: run_v3_relay_provider_failure_policy_with_response_source
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_action_failure_in_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -91,7 +91,7 @@ edges:
     to: V3Error06ClientProjected
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: run_v3_relay_provider_failure_policy
+    caller_symbol: run_v3_relay_provider_failure_policy_with_response_source
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: terminal_projection_for
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -174,7 +174,7 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: handle_v3_responses_relay_provider_failure
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-    callee_symbol: run_v3_relay_provider_failure_policy
+    callee_symbol: run_v3_relay_provider_failure_policy_with_response_source
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-16
     from: V3Error01SourceRaised

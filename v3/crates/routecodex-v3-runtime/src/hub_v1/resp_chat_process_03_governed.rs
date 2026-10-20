@@ -1276,6 +1276,9 @@ fn govern_v3_hub_relay_response(
             profile.toolreason_client_projection_enabled(),
         );
     }
+    let before_marker_governance = profile
+        .complete_provider_attempt
+        .then(|| input.provider_payload().clone());
     if profile.serialized_tool_context().identities.is_empty() {
         govern_v3_relay_control_markers_at_resp03(&mut input);
     } else {
@@ -1284,6 +1287,9 @@ fn govern_v3_hub_relay_response(
     if profile.complete_provider_attempt {
         tool_markup::govern_thinking(&mut input);
     }
+    let marker_governance_changed = before_marker_governance
+        .as_ref()
+        .is_some_and(|before| input.provider_payload().as_ref() != before.as_ref());
     let _identified_servertool_tool = super::servertool_hooks::inspect_v3_servertool_response_tool(
         input.provider_payload().as_ref(),
     );
@@ -1328,7 +1334,9 @@ fn govern_v3_hub_relay_response(
             web_search_hook_outcome,
             V3WebSearchHookOutcome::NotApplicable
         );
-    if profile.complete_provider_attempt
+    // Raw-attempt admission already handles the provider protocol's business
+    // outcomes. Recheck only content changed by this marker governance.
+    if marker_governance_changed
         && !typed_servertool_continuation
         && !super::v3_provider_attempt_has_deliverable_business_content(
             input.semantic_protocol(),
