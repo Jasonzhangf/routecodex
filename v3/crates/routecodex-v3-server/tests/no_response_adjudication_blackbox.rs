@@ -222,6 +222,68 @@ async fn issuec1090f9_relay_sse_byte_order_mark_final_recovers() {
 }
 
 #[tokio::test]
+async fn issuec1090f9_empty_final_switches_provider_and_returns_business() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["direct", "relay"] {
+        for stream in [false, true] {
+            let first = issuec1090f9_body(stream, "\u{200b}");
+            let recovered = text_response("RECOVERED_DIFFERENT_PROVIDER_C1090F9");
+            let second = if stream {
+                response_sse(&recovered)
+            } else {
+                recovered.to_string()
+            };
+            let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+                "responses",
+                process,
+                StatusCode::OK,
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+                first.clone(),
+                EntryOptions {
+                    attempt_bodies: vec![first, second],
+                    two_provider_route: true,
+                    ..EntryOptions::default()
+                },
+            )
+            .await;
+            let consumed = consume_response(
+                client()
+                    .post(&endpoint)
+                    .json(&json!({"model":"router-test","input":"recover invisible output using another provider","stream":stream}))
+                    .send()
+                    .await,
+            )
+            .await;
+            let attempts: Vec<_> = std::iter::from_fn(|| captures.try_recv().ok()).collect();
+            stop_entry(handle, shutdown).await;
+            assert_eq!(
+                attempts.len(),
+                2,
+                "must dispatch exactly two providers: {consumed:?}"
+            );
+            assert_eq!(attempts[0]["model"], "wire-test");
+            assert_eq!(attempts[1]["model"], "wire-independent");
+            assert!(
+                consumed.transport_error.is_none(),
+                "provider recovery must complete: {process} stream={stream}: {consumed:?}"
+            );
+            assert!(consumed
+                .body
+                .contains("RECOVERED_DIFFERENT_PROVIDER_C1090F9"));
+            assert!(!consumed.body.contains("PRIVATE_THOUGHT_0FF"));
+            assert!(!consumed.body.contains("provider_response_empty"));
+            assert!(!consumed.body.contains('\u{200b}'));
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
 async fn issuec1090f9_remaining_paths_and_last_candidate() {
     for (process, stream) in [("direct", true), ("relay", false)] {
         issuec1090f9_invisible_final_recovers(process, stream, "\u{200e}\u{202e}\u{2060}\u{fe0f}")
@@ -3386,6 +3448,7 @@ struct EntryOptions {
     capture_headers: bool,
     wire_model: Option<String>,
     live_forward: Option<LiveForward>,
+    two_provider_route: bool,
 }
 
 async fn start_entry(
@@ -3494,6 +3557,7 @@ async fn start_entry_configured(
         mixed,
         wire_model,
         live_forward,
+        two_provider_route,
     } = options;
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -3604,6 +3668,21 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test"{target_
     );
     let mut manifest =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    if two_provider_route {
+        let pool = manifest
+            .route_groups
+            .get_mut("default")
+            .unwrap()
+            .pools
+            .get_mut("default")
+            .unwrap();
+        pool.targets[0].priority = Some(10);
+        let mut second = pool.targets[0].clone();
+        second.provider = Some("independent".into());
+        second.key = Some("key".into());
+        second.priority = Some(1);
+        pool.targets.push(second);
+    }
     if let Some(root) = memory_project_root {
         manifest.memory_raw_capture.enabled = true;
         manifest.memory_raw_capture.project_root = root;
