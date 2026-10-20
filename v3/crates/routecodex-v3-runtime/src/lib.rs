@@ -22,6 +22,7 @@ mod shared_custom_tool_function_sse;
 mod shared_direct_thinking_compat;
 pub(crate) mod sse_object_pipeline;
 mod token_estimation;
+mod tool_markup_parser;
 
 pub use diagnostics::{project_v3_virtual_router_dry_run, project_v3_virtual_router_status};
 pub use direct_response_hooks::{

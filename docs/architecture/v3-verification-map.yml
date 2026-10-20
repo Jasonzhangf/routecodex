@@ -1340,7 +1340,7 @@ features:
   owner_kind: rust_project_v3
   owner_scope: P3 global Debug plus P4 global Error and Provider-owned session-isolated health/availability foundation
   recovery_delta_contract:
-  - Only typed V3DirectResp14UnharvestableToolMarkup (500-211), RuntimeFailure/internal599, gains health-neutral request-local Error02-05 reselection; actual upstream200 remains a separate witness.
+  - Only exact typed Direct V3DirectResp14UnharvestableToolMarkup (500-211) or Relay V3HubRelayResp03UnharvestableToolMarkup (500-231), RuntimeFailure/internal599, gain health-neutral request-local Error02-05 reselection; the actual upstream status remains a separate witness.
   - Other RuntimeFailure codes remain terminal. Native model-generated invalid arguments remain business content. Direct never excludes candidates outside the existing Error05-authorized recovery path.
   owner_modules:
   - v3/crates/routecodex-v3-debug
@@ -4164,7 +4164,7 @@ features:
   status: source_gate_verified
   change_risk: high
   owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: Public HTTP and unit verification preserves complete and literal Anthropic text without stripping, rejection or provider reselection.
+  owner_scope: Public HTTP and unit verification preserves literal and unrecognized protocol-looking business text while governing declared control-marker leakage in Relay Chat Process.
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
@@ -4173,8 +4173,9 @@ features:
   mainline_bindings:
   - v3-hub-relay-resp-03
   required_contract:
-  - complete, incomplete, suspect, quoted and literal DSML-looking business text is forwarded unchanged
-  - representable business text never causes provider rejection, reselection or a fabricated terminal error
+  - Quoted, code, literal and unrecognized DSML-looking business text is forwarded unchanged; declared leaked orphan control labels are removed only in Relay response Chat Process while preserving surrounding prose and native calls.
+  - Shared pure marker recognition has one grammar owner; Direct hooks and Relay Chat Process retain distinct payload rewrite ownership. Native invalid model arguments never trigger provider rejection or reselection.
+  - After governance, a complete attempt with only removed labels enters existing typed provider_response_empty recovery; exhausted recovery detectably terminates only that request transport without client errors or empty success.
   - genuine HTTP and native protocol errors retain the existing internal Error chain and client transport-break boundary
   required_gates:
   - npm run verify:v3-architecture-ci
@@ -4186,6 +4187,10 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay_suspect_anthropic_text_is_preserved_without_reselection
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay_anthropic_dsml_complete_text
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_control_marker_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server relay_control_marker_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server relay_serialized_tool_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_serialized_tool_
   - git diff --check
   completion_rule:
     source: Complete when the faithful-text public HTTP cases, runtime and error tests, and affected map/resource/mainline gates pass on the exact candidate.

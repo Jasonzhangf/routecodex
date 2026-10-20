@@ -1,60 +1,23 @@
 //! Complete Responses Direct tool-envelope projection. No routing or error policy.
 use super::V3DirectResponseHookFailure;
+use crate::tool_markup_parser::{
+    scan_tool_markup, ParsedToolCall, ToolMarkupDeclarations, ToolMarkupIdentity, ToolMarkupKind,
+    ToolMarkupParamKind, ToolMarkupSegment,
+};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const OPEN: &str = "<｜｜DSML｜｜ calls>";
-const CLOSE: &str = "</｜｜DSML｜｜ calls>";
-const INVOKE: &str = "<｜｜DSML｜｜ invoke";
-const END_INVOKE: &str = "</｜｜DSML｜｜ invoke>";
-const PARAM: &str = "<｜｜DSML｜｜ parameter";
-const END_PARAM: &str = "</｜｜DSML｜｜ parameter>";
-const BARE_DSML: &str = "<｜｜DSML｜｜>";
-const ASCII_TOOL_CALLS: &str = "<|DSML|tool_calls>";
-const ANALYSIS_CLOSINGS: &[&str] = &["<|end_of_analysis|>", "<|end▁of▁analysis|>"];
-const CLOSING_FRAGMENTS: &[&str] = &[" calls>", "｜｜DSML｜｜ calls>"];
-const TOOL_CALL_OPEN: &str = "<tool_call>";
-const TOOL_CALL_CLOSE: &str = "</tool_call>";
-const ARG_KEY_OPEN: &str = "<arg_key>";
-const ARG_KEY_CLOSE: &str = "</arg_key>";
-const ARG_VALUE_OPEN: &str = "<arg_value>";
-const ARG_VALUE_CLOSE: &str = "</arg_value>";
-
 #[derive(Default)]
 pub(crate) struct V3DirectDsmlContext {
     tools: HashMap<String, DsmlToolIdentity>,
+    declarations: ToolMarkupDeclarations,
 }
 
 #[derive(Clone, PartialEq)]
 struct DsmlToolIdentity {
     namespace: Option<String>,
     leaf: String,
-    kind: provider_compat_core::namespace_tools::ToolKind,
-    parameter_kinds: HashMap<String, ParamKind>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ParamKind {
-    String,
-    Number,
-    Boolean,
-    Array,
-    Object,
-    Other,
-}
-
-impl ParamKind {
-    fn declared(value: &str) -> Self {
-        match value {
-            "string" => Self::String,
-            "integer" | "number" => Self::Number,
-            "boolean" => Self::Boolean,
-            "array" => Self::Array,
-            "object" => Self::Object,
-            _ => Self::Other,
-        }
-    }
 }
 
 fn declared_parameter_objects(source: &Value) -> Option<&Map<String, Value>> {
@@ -65,7 +28,7 @@ fn declared_parameter_objects(source: &Value) -> Option<&Map<String, Value>> {
         .and_then(Value::as_object)
 }
 
-fn declared_parameter_kinds(source: &Value) -> HashMap<String, ParamKind> {
+fn declared_parameter_kinds(source: &Value) -> HashMap<String, ToolMarkupParamKind> {
     declared_parameter_objects(source)
         .map(|properties| {
             properties
@@ -74,7 +37,7 @@ fn declared_parameter_kinds(source: &Value) -> HashMap<String, ParamKind> {
                     schema
                         .get("type")
                         .and_then(Value::as_str)
-                        .map(|kind| (name.clone(), ParamKind::declared(kind)))
+                        .map(|kind| (name.clone(), ToolMarkupParamKind::declared(kind)))
                 })
                 .collect()
         })
@@ -105,7 +68,16 @@ impl V3DirectDsmlContext {
             let resolved = DsmlToolIdentity {
                 namespace: namespace.clone(),
                 leaf: identity.leaf_name.clone(),
-                kind: identity.kind,
+            };
+            let declaration = ToolMarkupIdentity {
+                kind: match identity.kind {
+                    provider_compat_core::namespace_tools::ToolKind::Function => {
+                        ToolMarkupKind::Function
+                    }
+                    provider_compat_core::namespace_tools::ToolKind::Custom => {
+                        ToolMarkupKind::Custom
+                    }
+                },
                 parameter_kinds: declared_parameter_kinds(&identity.source),
             };
             // The exact attempt inverse is authoritative for the wire name.
@@ -130,11 +102,13 @@ impl V3DirectDsmlContext {
                 if result.tools.get(&key).is_some_and(|old| old != &resolved) {
                     ambiguous.insert(key.clone());
                 }
-                result.tools.insert(key, resolved.clone());
+                result.tools.insert(key.clone(), resolved.clone());
+                result.declarations.insert(key, declaration.clone());
             }
         }
         for name in ambiguous {
             result.tools.remove(&name);
+            result.declarations.remove(&name);
         }
         result
     }
@@ -149,113 +123,7 @@ fn fresh_id(prefix: &str) -> String {
     )
 }
 
-fn attributes<'a>(text: &'a str, start: &str) -> Option<(Map<String, Value>, &'a str)> {
-    let mut rest = text.strip_prefix(start)?;
-    let mut attrs = Map::new();
-    loop {
-        if let Some(after) = rest.strip_prefix('>') {
-            return Some((attrs, after));
-        }
-        let trimmed = rest.trim_start();
-        if trimmed.len() == rest.len() {
-            return None;
-        }
-        rest = trimmed;
-        if let Some(after) = rest.strip_prefix('>') {
-            return Some((attrs, after));
-        }
-        let (name, after) = rest.split_once("=\"")?;
-        if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            return None;
-        }
-        let (value, after) = after.split_once('"')?;
-        if attrs
-            .insert(name.to_owned(), Value::String(value.to_owned()))
-            .is_some()
-        {
-            return None;
-        }
-        rest = after;
-    }
-}
-
-fn envelope<'a>(text: &'a str, context: &V3DirectDsmlContext) -> Option<(Vec<Value>, &'a str)> {
-    let mut rest = text.strip_prefix(OPEN)?;
-    let mut calls = Vec::new();
-    loop {
-        rest = rest.trim_start();
-        if let Some(after) = rest.strip_prefix(CLOSE) {
-            return (!calls.is_empty()).then_some((calls, after));
-        }
-        let (attrs, after) = attributes(rest, INVOKE)?;
-        if attrs.keys().any(|k| k != "name" && k != "call_id") {
-            return None;
-        }
-        let name = attrs.get("name")?.as_str()?;
-        let identity = context.tools.get(name)?;
-        // A custom declaration takes freeform `input`, not the DSML parameter
-        // map. Emitting a function call would change the declared kind, so the
-        // complete envelope stays provider text.
-        if identity.kind != provider_compat_core::namespace_tools::ToolKind::Function {
-            return None;
-        }
-        rest = after;
-        let mut arguments: Vec<(String, String)> = Vec::new();
-        loop {
-            rest = rest.trim_start();
-            if let Some(after) = rest.strip_prefix(END_INVOKE) {
-                rest = after;
-                break;
-            }
-            let (param, after) = attributes(rest, PARAM)?;
-            if param.len() != 2 || !param.contains_key("name") || !param.contains_key("string") {
-                return None;
-            }
-            let key = param["name"].as_str()?;
-            let (value, after) = after.split_once(END_PARAM)?;
-            let value = match param["string"].as_str()? {
-                "true" => serde_json::to_string(value).ok()?,
-                "false" => {
-                    // Validate syntax without materializing numbers as f64.
-                    // The complete JSON value remains the provider's text.
-                    serde_json::from_str::<serde::de::IgnoredAny>(value).ok()?;
-                    value.to_owned()
-                }
-                _ => return None,
-            };
-            if arguments.iter().any(|(name, _)| name == key) {
-                return None;
-            }
-            arguments.push((key.to_owned(), value));
-            rest = after;
-        }
-        let call_id = attrs
-            .get("call_id")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .unwrap_or_else(|| fresh_id("call"));
-        calls.push(dsml_function_call(identity, arguments, call_id));
-    }
-}
-
-enum Segment {
-    Text(String),
-    Calls(Vec<Value>),
-}
-
-fn dsml_function_call(
-    identity: &DsmlToolIdentity,
-    arguments: Vec<(String, String)>,
-    call_id: String,
-) -> Value {
-    let arguments = format!(
-        "{{{}}}",
-        arguments
-            .iter()
-            .map(|(name, value)| format!("{}:{value}", Value::String(name.clone())))
-            .collect::<Vec<_>>()
-            .join(",")
-    );
+fn dsml_function_call(identity: &DsmlToolIdentity, arguments: String, call_id: String) -> Value {
     let mut call = json!({"id":fresh_id("fc"),"type":"function_call","call_id":call_id,"name":identity.leaf.clone(),"arguments":arguments,"status":"completed"});
     if let Some(namespace) = &identity.namespace {
         call["namespace"] = namespace.clone().into();
@@ -263,433 +131,16 @@ fn dsml_function_call(
     call
 }
 
-struct Scan {
-    segments: Vec<Segment>,
-    removed_label: bool,
-    opener_label: bool,
-    truncated: bool,
-}
-
-fn line_content(line: &str) -> &str {
-    let line = line.strip_suffix('\n').unwrap_or(line);
-    line.strip_suffix('\r').unwrap_or(line)
-}
-
-/// Exact demonstrated standalone protocol labels. The bool is tool-intent.
-fn removable_label(content: &str) -> Option<bool> {
-    if content == OPEN || content == ASCII_TOOL_CALLS {
-        Some(true)
-    } else if content == CLOSE
-        || content == BARE_DSML
-        || ANALYSIS_CLOSINGS.contains(&content)
-        || CLOSING_FRAGMENTS.contains(&content)
-    {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-fn close_residue_end(text: &str, start: usize) -> Option<usize> {
-    let mut cursor = start;
-    let mut bare_closings = 0;
-    for line in text.get(start..)?.split_inclusive('\n') {
-        cursor += line.len();
-        match line_content(line) {
-            ">" => bare_closings += 1,
-            CLOSE if bare_closings > 0 => return Some(cursor),
-            _ => return None,
-        }
-    }
-    None
-}
-
-/// The demonstrated malformed alternate opener is `<|name">`. A normal
-/// `<name>` XML shape is deliberately not recognized.
-fn alternate_opener_name(content: &str) -> Option<&str> {
-    let name = content.strip_prefix("<|")?.strip_suffix("\">")?;
-    (!name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
-        && !name.starts_with('|'))
-    .then_some(name)
-}
-
-fn alternate_close_residue(name: &str) -> Option<String> {
-    name.find('_').map(|index| format!("{}>", &name[index..]))
-}
-
-fn render_alternate_value(text: &str, kind: Option<ParamKind>) -> String {
-    let valid_json = serde_json::from_str::<serde::de::IgnoredAny>(text).is_ok();
-    let number = matches!(text.as_bytes().first().copied(), Some(b'-' | b'0'..=b'9')) && valid_json;
-    let string = || serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_owned());
-    match kind {
-        Some(ParamKind::String) => string(),
-        Some(ParamKind::Number) if number => text.to_owned(),
-        Some(ParamKind::Boolean) if matches!(text, "true" | "false") => text.to_owned(),
-        Some(ParamKind::Array) if text.starts_with('[') && valid_json => text.to_owned(),
-        Some(ParamKind::Object) if text.starts_with('{') && valid_json => text.to_owned(),
-        Some(ParamKind::Other) | None if valid_json && !text.starts_with('"') => text.to_owned(),
-        _ => string(),
-    }
-}
-
-fn valid_grammar_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
-}
-
-/// Harvest the demonstrated bounded `<tool_call>` grammar. Every argument is
-/// delimited, typed only by the current declaration registry, and retained in
-/// its source order. A recognized but incomplete invocation is not text.
-fn parse_tool_call_invocation(
-    text: &str,
-    start: usize,
-    context: &V3DirectDsmlContext,
-) -> Option<(Value, usize)> {
-    let rest = text.get(start..)?.strip_prefix(TOOL_CALL_OPEN)?;
-    let argument_start = rest.find(ARG_KEY_OPEN)?;
-    let name = &rest[..argument_start];
-    let mut rest = &rest[argument_start..];
-    if !valid_grammar_name(name) {
-        return None;
-    }
-    let identity = context.tools.get(name)?;
-    if identity.kind != provider_compat_core::namespace_tools::ToolKind::Function {
-        return None;
-    }
-    let mut arguments = Vec::new();
-    loop {
-        if let Some(after) = rest.strip_prefix(TOOL_CALL_CLOSE) {
-            if arguments.is_empty() {
-                return None;
-            }
-            return Some((
-                dsml_function_call(identity, arguments, fresh_id("call")),
-                text.len() - after.len(),
-            ));
-        }
-        let after = rest.strip_prefix(ARG_KEY_OPEN)?;
-        let (key, after) = after.split_once(ARG_KEY_CLOSE)?;
-        if !valid_grammar_name(key)
-            || arguments
-                .iter()
-                .any(|(existing, _): &(String, String)| existing == key)
-        {
-            return None;
-        }
-        let after = after.strip_prefix(ARG_VALUE_OPEN)?;
-        let (value, after) = after.split_once(ARG_VALUE_CLOSE)?;
-        arguments.push((
-            key.to_owned(),
-            render_alternate_value(value, identity.parameter_kinds.get(key).copied()),
-        ));
-        rest = after;
-    }
-}
-
-struct AlternateHarvest {
-    calls: Vec<Value>,
-    end: usize,
-}
-
-/// A bounded alternate invocation has one malformed opener line, one or more
-/// fully delimited `<parameter>value</parameter>` lines, one matching close
-/// line, and at most one directly associated close residue line.
-fn parse_alternate_invocation(
-    text: &str,
-    body_start: usize,
-    name: &str,
-    identity: Option<&DsmlToolIdentity>,
-) -> Option<AlternateHarvest> {
-    let identity = identity?;
-    if identity.kind != provider_compat_core::namespace_tools::ToolKind::Function {
-        return None;
-    }
-    let mut offset = body_start;
-    let mut arguments = Vec::new();
-    loop {
-        let rest = text.get(offset..)?;
-        let line = rest.split_inclusive('\n').next()?;
-        let content = line_content(line);
-        let line_end = offset + line.len();
-        if let Some(close_name) = content.strip_prefix("</") {
-            if close_name.strip_suffix('>')? != name {
-                return None;
-            }
-            let mut end = line_end;
-            if let Some(residue) = alternate_close_residue(name) {
-                let tail = text.get(end..).unwrap_or_default();
-                if !tail.is_empty() {
-                    let residue_line = tail.split_inclusive('\n').next().unwrap_or_default();
-                    if line_content(residue_line) == residue {
-                        end += residue_line.len();
-                    }
-                }
-            }
-            return Some(AlternateHarvest {
-                calls: vec![dsml_function_call(identity, arguments, fresh_id("call"))],
-                end,
-            });
-        }
-        let (parameter, value_and_close) = content.strip_prefix('<')?.split_once('>')?;
-        if parameter.is_empty()
-            || !parameter
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            return None;
-        }
-        let value = value_and_close.strip_suffix(format!("</{parameter}>").as_str())?;
-        if arguments.iter().any(|(existing, _)| existing == parameter) {
-            return None;
-        }
-        arguments.push((
-            parameter.to_owned(),
-            render_alternate_value(value, identity.parameter_kinds.get(parameter).copied()),
-        ));
-        offset = line_end;
-    }
-}
-
-/// A declared function invocation that failed the complete fullwidth envelope
-/// parse and has no outer close is recognized executable truncation rather
-/// than literal text. Complete but unrepresentable envelopes stay preserved.
-fn recognized_truncated_fullwidth(text: &str, context: &V3DirectDsmlContext) -> bool {
-    let Some(rest) = text.strip_prefix(OPEN) else {
-        return false;
-    };
-    let Some((attrs, after)) = attributes(rest.trim_start(), INVOKE) else {
-        return false;
-    };
-    if attrs.keys().any(|key| key != "name" && key != "call_id") {
-        return false;
-    }
-    let Some(name) = attrs.get("name").and_then(Value::as_str) else {
-        return false;
-    };
-    let Some(identity) = context.tools.get(name) else {
-        return false;
-    };
-    identity.kind == provider_compat_core::namespace_tools::ToolKind::Function
-        && !after.contains(CLOSE)
-}
-
-fn segments(text: &str, context: &V3DirectDsmlContext) -> Scan {
-    let mut segments = Vec::new();
-    let mut removed_label = false;
-    let mut opener_label = false;
-    let mut consumed = 0;
-    let mut cursor = 0;
-    let mut fence: Option<(char, usize)> = None;
-    let mut inline = None;
-    let mut quote = None;
-    let mut skip_until = 0;
-    let mut blockquote = false;
-    let mut truncated = false;
-    let mut line_start = 0;
-    for line in text.split_inclusive('\n') {
-        let current_line_start = line_start;
-        let line_end = line_start + line.len();
-        cursor = cursor
-            .max(current_line_start)
-            .max(consumed.max(skip_until))
-            .min(line_end);
-        line_start = line_end;
-        if cursor == line_end {
-            continue;
-        }
-        let trimmed = line.trim_start();
-        // Envelope arguments are consumed atomically. Their Markdown-like
-        // contents must not change the lexical scope of subsequent text.
-        if cursor == current_line_start {
-            if trimmed.trim().is_empty() {
-                blockquote = false;
-            }
-            let marker = trimmed.chars().next().unwrap_or('\n');
-            let run = trimmed.chars().take_while(|c| *c == marker).count();
-            if let Some((opening, length)) = fence {
-                if marker == opening && run >= length && trimmed[run..].trim().is_empty() {
-                    fence = None;
-                }
-                cursor = line_end;
-                continue;
-            }
-            if line.starts_with("    ") || line.starts_with('\t') {
-                cursor = line_end;
-                continue;
-            }
-            if matches!(marker, '`' | '~') && run >= 3 {
-                fence = Some((marker, run));
-                cursor = line_end;
-                continue;
-            }
-            if fence.is_none() && inline.is_none() && quote.is_none() && !blockquote {
-                let content = line_content(line);
-                if let Some(end) = close_residue_end(text, current_line_start) {
-                    if cursor > consumed {
-                        segments.push(Segment::Text(text[consumed..cursor].to_owned()));
-                    }
-                    consumed = end;
-                    cursor = line_end;
-                    removed_label = true;
-                    continue;
-                }
-                if let Some(tool_intent) = removable_label(content) {
-                    // Complete representable envelopes keep atomic conversion
-                    // priority even when their open wrapper is on its own line.
-                    let complete_fullwidth_follows = content == OPEN
-                        && text
-                            .get(line_end..)
-                            .map(str::trim_start)
-                            .is_some_and(|rest| rest.starts_with(INVOKE));
-                    if !complete_fullwidth_follows {
-                        if cursor > consumed {
-                            segments.push(Segment::Text(text[consumed..cursor].to_owned()));
-                        }
-                        consumed = line_end;
-                        cursor = line_end;
-                        removed_label = true;
-                        opener_label |= tool_intent;
-                        continue;
-                    }
-                }
-                if let Some(name) = alternate_opener_name(content) {
-                    match parse_alternate_invocation(text, line_end, name, context.tools.get(name))
-                    {
-                        Some(harvest) => {
-                            if cursor > consumed {
-                                segments.push(Segment::Text(text[consumed..cursor].to_owned()));
-                            }
-                            segments.push(Segment::Calls(harvest.calls));
-                            consumed = harvest.end;
-                            // Keep the line iterator aligned: later physical
-                            // lines are skipped by the consumed offset above,
-                            // just like a multi-line fullwidth envelope.
-                            cursor = line_end;
-                        }
-                        None => {
-                            truncated = true;
-                            break;
-                        }
-                    }
-                    continue;
-                }
-            }
-            blockquote |= trimmed.starts_with('>');
-            if blockquote {
-                cursor = line_end;
-                continue;
-            }
-        }
-        while cursor < line_end {
-            if cursor < consumed.max(skip_until) {
-                cursor = consumed.max(skip_until).min(line_end);
-                continue;
-            }
-            let tail = &text[cursor..];
-            let ch = tail.chars().next().unwrap();
-            if ch == '`' && quote.is_none() {
-                let run = tail.bytes().take_while(|c| *c == b'`').count();
-                if inline == Some(run) {
-                    inline = None;
-                } else if inline.is_none() {
-                    inline = Some(run);
-                }
-                cursor += run;
-                continue;
-            }
-            if inline.is_none() {
-                if ch == '\\' && quote.is_some() {
-                    cursor += ch.len_utf8();
-                    if let Some(escaped) = text[cursor..].chars().next() {
-                        cursor += escaped.len_utf8();
-                    }
-                    continue;
-                }
-                let previous = text[..cursor].chars().next_back();
-                let next = tail.chars().nth(1);
-                let apostrophe = matches!(ch, '\'' | '’')
-                    && previous.is_some_and(|c| c.is_ascii_alphanumeric())
-                    && next.is_some_and(|c| c.is_ascii_alphanumeric());
-                if quote == Some(ch) && !apostrophe {
-                    quote = None;
-                } else if quote.is_none() && !apostrophe {
-                    quote = match ch {
-                        '“' => Some('”'),
-                        '‘' => Some('’'),
-                        '「' => Some('」'),
-                        '『' => Some('』'),
-                        '"' | '\''
-                            if previous.is_none_or(|p| {
-                                p.is_whitespace() || matches!(p, '(' | '[' | '{' | ':')
-                            }) =>
-                        {
-                            Some(ch)
-                        }
-                        _ => None,
-                    };
-                }
-            }
-            if inline.is_none() && quote.is_none() && tail.starts_with(OPEN) {
-                if let Some((calls, rest)) = envelope(tail, context) {
-                    if cursor > consumed {
-                        segments.push(Segment::Text(text[consumed..cursor].to_owned()));
-                    }
-                    segments.push(Segment::Calls(calls));
-                    consumed = text.len() - rest.len();
-                    cursor = consumed.min(line_end);
-                    continue;
-                }
-                if recognized_truncated_fullwidth(tail, context) {
-                    truncated = true;
-                }
-                // Do not extract a nested call from an envelope that failed
-                // atomic parsing. The original complete span remains visible.
-                skip_until = tail
-                    .find(CLOSE)
-                    .map(|end| cursor + end + CLOSE.len())
-                    .unwrap_or(text.len());
-                cursor = skip_until.min(line_end);
-                continue;
-            }
-            let paired_tool_start = (cursor == current_line_start
-                && tail.starts_with(" calls><tool_call>"))
-            .then_some(cursor + " calls>".len());
-            if inline.is_none()
-                && quote.is_none()
-                && !blockquote
-                && (tail.starts_with(TOOL_CALL_OPEN) || paired_tool_start.is_some())
-            {
-                let tool_start = paired_tool_start.unwrap_or(cursor);
-                if let Some((call, end)) = parse_tool_call_invocation(text, tool_start, context) {
-                    if cursor > consumed {
-                        segments.push(Segment::Text(text[consumed..cursor].to_owned()));
-                    }
-                    segments.push(Segment::Calls(vec![call]));
-                    consumed = end;
-                    cursor = end.min(line_end);
-                } else {
-                    truncated = true;
-                    cursor += ch.len_utf8();
-                }
-                continue;
-            }
-            cursor += ch.len_utf8();
-        }
-    }
-    if consumed < text.len() {
-        segments.push(Segment::Text(text[consumed..].to_owned()));
-    }
-    Scan {
-        segments,
-        removed_label,
-        opener_label,
-        truncated,
-    }
+fn direct_function_call(call: ParsedToolCall<'_>, context: &V3DirectDsmlContext) -> Value {
+    let identity = context
+        .tools
+        .get(call.wire_name)
+        .expect("declaration and Direct identity are built together");
+    let call_id = call
+        .call_id
+        .map(str::to_owned)
+        .unwrap_or_else(|| fresh_id("call"));
+    dsml_function_call(identity, call.arguments, call_id)
 }
 
 struct Replacement {
@@ -775,22 +226,26 @@ fn normalize_with_protected(
         let mut content = Vec::new();
         let mut changed = false;
         for part in parts {
-            let scan = segments(part["text"].as_str().unwrap(), context);
+            let scan = scan_tool_markup(part["text"].as_str().unwrap(), &context.declarations);
             changed |= scan.removed_label;
             opening_tool_label |= scan.opener_label;
             truncated_invocation |= scan.truncated;
             for segment in scan.segments {
                 match segment {
-                    Segment::Text(text) => {
+                    ToolMarkupSegment::Text(text) => {
                         let mut p = part.clone();
                         p["text"] = text.into();
                         content.push(p);
                     }
-                    Segment::Calls(calls) => {
+                    ToolMarkupSegment::Calls(calls) => {
                         changed = true;
                         harvested_calls += calls.len();
                         flush_message(item, &mut content, &mut items);
-                        items.extend(calls);
+                        items.extend(
+                            calls
+                                .into_iter()
+                                .map(|call| direct_function_call(call, context)),
+                        );
                     }
                 }
             }
@@ -1631,6 +1086,7 @@ fn emit_items(output: &mut Vec<Vec<u8>>, sequence: &mut u64, plan: &Replacement)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tool_markup_parser::{ASCII_TOOL_CALLS, CLOSE, END_INVOKE, END_PARAM, OPEN};
     fn sample(text: &str) -> Value {
         json!({"status":"completed","output_text":text,"output":[{"id":"m","type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}],"usage":{"output_tokens":42},"extension":{"keep":true}})
     }

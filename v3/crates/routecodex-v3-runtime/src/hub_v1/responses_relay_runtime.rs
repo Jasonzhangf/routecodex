@@ -285,7 +285,7 @@ async fn handle_v3_responses_relay_provider_failure(
     if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
     }
-    let result = match run_v3_relay_provider_failure_policy(
+    let result = match crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source(
         context,
         selected,
         failure.source_stage,
@@ -304,6 +304,7 @@ async fn handle_v3_responses_relay_provider_failure(
             trace: state.trace,
             last_external_http: state.last_external_http,
         },
+        failure.response_processing_code,
     )
     .await
     {
@@ -1360,6 +1361,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             error_operator_fault: Some(fault.clone()),
             failed_attempt_evidence: None,
             matched_policy: None,
+            response_processing_code: None,
         };
         let context = V3RelayProviderFailurePolicyContext {
             manifest: &manifest,

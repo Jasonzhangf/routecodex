@@ -1118,11 +1118,34 @@ resources:
       tool_thinking_native_item_rule: protocol adapters preserve each complete native tool-call item, original native item, and exact parameter JSON bytes through RespInbound02 without inspecting auxiliary names
       tool_thinking_duplicate_key_rule: Resp03 alone performs duplicate-aware strict parsing over retained parameter bytes; generic Value decoding may not erase duplicate-key evidence before the owner
       tool_thinking_adapter_boundary: adapters may assemble protocol fragments and retain raw parameter bytes but may not classify, redact, restore custom shape, format reasoning, observe status, or project Tool-Thinking
+      serialized_tool_owner: Resp03 consumes the shared pure grammar and the typed exact-attempt declaration/identity context; complete recognized tools become native calls in source order, with candidate associations remapped only at this owner
+      serialized_tool_failure: recognized incomplete declared invocations discard the whole attempt even beside complete tools or prose; Relay internal code 500-231 and RuntimeFailure/internal599 enter existing Error02-05 health-neutral exact-attempt recovery, with actual upstream status retained separately
+      serialized_tool_preservation: native invalid model arguments, literal/unknown complete envelopes and opaque associations remain business content; no guessed identity or control state enters the payload
+      complete_attempt_admission: the Runtime marks a buffered complete provider attempt in the typed response hook profile; only that scope runs post-governance whole-attempt empty admission, never a transport keepalive, delta or terminal fragment alone
     allowed_writers: [V3HubRespInbound02Normalized, V3HubRespChatProcess03Governed]
     allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespOutbound05ClientSemantic]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3ServerRespOutbound06ClientFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.relay_response.tool_markup_context
+    resource_kind: side_channel
+    lifecycle: v3.hub_pipeline.v1
+    owner_feature_id: v3.anthropic_control_text_resp03
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubRespChatProcess03Governed
+    identity: [requestId, providerProtocol, toolWireName]
+    semantic_contract:
+      source: immutable exact-attempt NamespaceToolIdentityRegistry supplied by the existing request/outbound owner
+      content: parser declaration kinds, parameter encoding kinds and exact wire-name to client namespace/leaf association; no arguments or routing decisions
+      failure: typed UnharvestableToolMarkup reaches Runtime as internal code 500-231 and the existing Error graph, never as client payload state
+    allowed_writers: [V3HubRelaySerializedToolContext::from_registry]
+    allowed_readers: [V3HubRespChatProcess03Governed, govern_v3_hub_relay_response]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, payload_writer, sse_framer]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: buffered_attempt_response_governance_return
     binding_status: anchored
   - resource_id: v3.hub.tool_governance_truth
     resource_kind: side_channel
@@ -3053,7 +3076,7 @@ resources:
       empty_after_non_client_removal: if declared non-client envelope removal leaves no text, tool call, reasoning, refusal, or content_filter result, return ProviderFailure/provider_response_empty as internal 502 into Error01
       representable_business_failure: if a real representable business result is lost, corrupted, or rejected during rewrite, projection, or framing, return RuntimeFailure/internal 599 into Error01 instead of upstream blame or an empty success
       unharvestable_tool_markup: recognized attempted tool markup that cannot be represented as a complete native call rejects the entire attempt through the registered Direct response hook and existing typed response-processing Error recovery, even with visible prose; no control flag enters the payload
-      recovery_identity: V3DirectResp14UnharvestableToolMarkup internal code 500-211 is the sole new health-neutral RuntimeFailure recovery identity; Error02-05 owns eligibility, exact candidate exclusion and exhaustion, and keeps internal599 separate from actual upstream200
+      recovery_identity: this Direct boundary emits only V3DirectResp14UnharvestableToolMarkup internal code 500-211; Relay Resp03 separately emits 500-231. Error02-05 owns their exact typed eligibility, candidate exclusion and exhaustion, keeping internal599 separate from the actual upstream status
       preservation_rule: tool-call-only, reasoning, refusal, content_filter, and visible text remain deliverable without semantic judgment
     may_enter_provider_body: false
     may_enter_client_body: false
