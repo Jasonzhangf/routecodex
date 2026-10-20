@@ -153,10 +153,6 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 turn_assistant_tail_index = None;
             }
             "tool_search_call" => {
-                ensure_v3_openai_chat_hosted_tool_event_has_no_side_channel(
-                    item,
-                    V3OpenAiChatHostedToolHistoryKind::ToolSearch,
-                )?;
                 let assistant = build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
                     item,
                     read_v3_non_empty_str(item.get("call_id")).ok_or_else(|| {
@@ -175,7 +171,6 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 turn_assistant_tail_index = None;
             }
             "tool_search_output" => {
-                ensure_v3_openai_chat_hosted_tool_output_has_no_side_channel(item)?;
                 let call_id = read_v3_non_empty_str(item.get("call_id")).ok_or_else(|| {
                     "Responses tool_search_output is missing call_id before Chat canonicalization"
                         .to_string()
@@ -249,7 +244,23 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     if messages.is_empty() {
         return Err("OpenAI Chat provider encoding produced no messages".to_string());
     }
-    let mut request = Map::new();
+    let mut request = root.clone();
+    for mapped in [
+        "input",
+        // The continuation owner consumes this known protocol locator. It is
+        // not an opaque business extension in canonical Chat.
+        "previous_response_id",
+        "instructions",
+        "metadata",
+        "client_metadata",
+        "prompt_cache_key",
+        "store",
+        "text",
+        "max_output_tokens",
+        "reasoning",
+    ] {
+        request.remove(mapped);
+    }
     if let Some(model) = root.get("model") {
         request.insert("model".to_string(), model.clone());
     }
@@ -984,23 +995,6 @@ impl V3OpenAiChatHostedToolHistoryKind {
     }
 }
 
-fn ensure_v3_openai_chat_hosted_tool_output_has_no_side_channel(
-    item: &Map<String, Value>,
-) -> Result<(), String> {
-    // 唯一的控制字段守卫是 typed side-channel key 检测（
-    // `V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS`），它只匹配 RouteCodex 自己写入的
-    // 控制键。tool_search_output 携带客户端工具目录，其中的 JSON Schema
-    // `$defs` 名可以是任意合法标识符（实测 `_ReplaceBlock`）；按 `_` 前缀扫描
-    // 会把客户端数据判成私有调试字段并拒绝整个请求，属于代理新增的越界校验。
-    let event = Value::Object(item.clone());
-    if let Some(key) = super::find_v3_hub_side_channel_key(&event) {
-        return Err(format!(
-            "Responses tool_search_output contains RouteCodex side-channel field before Chat canonicalization: {key}"
-        ));
-    }
-    Ok(())
-}
-
 fn append_v3_openai_chat_hosted_tool_call_history_pair(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
@@ -1010,7 +1004,6 @@ fn append_v3_openai_chat_hosted_tool_call_history_pair(
     input_index: usize,
     kind: V3OpenAiChatHostedToolHistoryKind,
 ) -> Result<(), String> {
-    ensure_v3_openai_chat_hosted_tool_event_has_no_side_channel(item, kind)?;
     let call_id = build_v3_openai_chat_hosted_tool_history_call_id(item, input_index, kind);
     let assistant =
         build_v3_openai_chat_hosted_tool_assistant_tool_call_message(item, call_id.as_str(), kind)?;
@@ -1030,20 +1023,6 @@ fn append_v3_openai_chat_hosted_tool_call_history_pair(
         pending_tool_adjacent_deferred_messages,
         tool_result,
     )
-}
-
-fn ensure_v3_openai_chat_hosted_tool_event_has_no_side_channel(
-    item: &Map<String, Value>,
-    kind: V3OpenAiChatHostedToolHistoryKind,
-) -> Result<(), String> {
-    let event = Value::Object(item.clone());
-    let item_type = kind.responses_item_type();
-    if let Some(key) = super::find_v3_hub_side_channel_key(&event) {
-        return Err(format!(
-            "Responses {item_type} contains RouteCodex side-channel field before OpenAI Chat provider encoding: {key}"
-        ));
-    }
-    Ok(())
 }
 
 fn build_v3_openai_chat_hosted_tool_history_call_id(

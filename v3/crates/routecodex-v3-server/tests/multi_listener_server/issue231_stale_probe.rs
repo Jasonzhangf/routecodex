@@ -11,7 +11,7 @@
 //! Sequence under test (no product test-only business fields; every marker is
 //! ordinary client input text the controlled upstream keys on):
 //!
-//! 1. A pinned `cooled.<model>` business request is parked in the controlled
+//! 1. A pooled business request with two eligible candidates is parked in the controlled
 //!    upstream before any cooldown exists, so it selects `cooled` normally.
 //! 2. A manual cooldown `probe` is seeded through the public
 //!    `/_routecodex/health/cooldown-pool/add` operator hook.
@@ -20,13 +20,13 @@
 //!    holds it in flight upstream (probe A).
 //! 4. The parked `cooled` business request is released and fails with a genuine
 //!    provider HTTP error, advancing the same identity's health generation
-//!    while probe A is still in flight.
+//!    while probe A is still in flight, then completes on `healthy`.
 //! 5. Probe A is released (stale success 2xx or stale failure 503). Its
 //!    completion must be a no-op that keeps the newer cooldown, releases only
 //!    its own permit, and never mutates the sibling/replacement identity.
 //! 6. The client already received the true `healthy` business payload, with no
 //!    598, no `target_resolution_failure` and no replacement error payload.
-//! 7. All-cooled exhaustion closes only its own transport while a concurrent
+//! 7. A single-provider failure closes only its own transport while a concurrent
 //!    healthy request still completes.
 //!
 //! Owner: `v3.provider_key_health_scoring` (Provider health / probe state) with
@@ -72,13 +72,13 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
     let endpoint = format!("{base}/v1/responses");
     let client = reqwest::Client::new();
 
-    // 1. Park the pinned same-identity business request while `cooled` has no
+    // 1. Park the pooled same-identity business request while `cooled` has no
     //    cooldown yet, so it selects the preferred provider as a normal
     //    business attempt and reaches the controlled upstream.
     let earlier_business = tokio::spawn(send_for_outcome(
         client.clone(),
         endpoint.clone(),
-        "cooled.wire-test",
+        "wire-test",
         BUSINESS_FAILURE_MARKER,
     ));
     timeout(
@@ -86,7 +86,7 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
         cooled_peer.business_entered.acquire(),
     )
     .await
-    .expect("pinned same-identity business request must reach the provider")
+    .expect("pooled same-identity business request must reach the preferred provider")
     .unwrap()
     .forget();
 
@@ -190,18 +190,17 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
     // 4. Release the parked business failure so the same identity's health
     //    generation advances while probe A is still in flight.
     cooled_peer.business_release.add_permits(1);
-    let pinned_outcome = timeout(Duration::from_secs(5), earlier_business)
+    let earlier_outcome = timeout(Duration::from_secs(5), earlier_business)
         .await
         .expect("business failure must be processed")
         .unwrap();
-    match pinned_outcome {
-        // A provider HTTP failure never becomes a client error status, a
-        // client error payload, or a replacement error body.
-        ClientOutcome::TransportBreak => {}
+    match earlier_outcome {
+        ClientOutcome::TransportBreak => panic!("eligible healthy fallback must complete"),
         ClientOutcome::Response(response) => {
-            let status = response.status();
-            let text = response.text().await.expect("unexpected response body");
-            panic!("no deliverable provider response must close transport, got {status}: {text}");
+            assert_no_client_error_projection("earlier fallback", &response);
+            assert_eq!(response.status(), 200);
+            let body: Value = response.json().await.unwrap();
+            assert_eq!(body["output_text"], HEALTHY_PAYLOAD);
         }
     }
 
@@ -255,13 +254,14 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
         "the stale cooled probe must not create or mutate a healthy sibling entry"
     );
 
-    // 6. Exhaustion closes only its own transport; a concurrent healthy
+    // 6. A singleton bypasses automatic cooldown and its real failure closes
+    // only its own transport; a concurrent healthy
     //    request still completes.
     let exhausted = tokio::spawn(send_for_outcome(
         client.clone(),
         endpoint.clone(),
         "cooled.wire-test",
-        "issue231 all cooled exhaustion",
+        "issue231 singleton terminal failure",
     ));
     let sibling = client
         .post(&endpoint)
@@ -285,7 +285,7 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
         "concurrent healthy request must complete while another request is exhausted: {sibling_body}"
     );
     match timeout(Duration::from_secs(5), exhausted).await {
-        Err(_) => panic!("all-cooled exhaustion must not wait for future recovery"),
+        Err(_) => panic!("singleton terminal failure must not wait for future recovery"),
         Ok(Err(join_error)) => panic!("exhausted request task must not fail: {join_error}"),
         Ok(Ok(ClientOutcome::TransportBreak)) => {}
         Ok(Ok(ClientOutcome::Response(response))) => {

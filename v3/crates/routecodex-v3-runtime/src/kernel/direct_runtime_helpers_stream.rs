@@ -249,11 +249,33 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal(
 }
 
 pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
+    stream: V3SseAttemptStream,
+    provider_protocol: V3HubProviderWireProtocol,
+    attempt_budget: crate::nodes::V3AttemptBudget,
+    manifest: Option<&V3Config05ManifestPublished>,
+    request_id: Option<&str>,
+) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
+    collect_direct_sse_attempt_after_terminal_with_hooks(
+        stream,
+        provider_protocol,
+        attempt_budget,
+        manifest,
+        request_id,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
     mut stream: V3SseAttemptStream,
     provider_protocol: V3HubProviderWireProtocol,
     attempt_budget: crate::nodes::V3AttemptBudget,
     manifest: Option<&V3Config05ManifestPublished>,
     request_id: Option<&str>,
+    response_hook: Option<(
+        &crate::hooks::V3HookRegistry,
+        &crate::direct_response_hooks::V3DirectDsmlContext,
+    )>,
 ) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
     let deadline = tokio::time::Instant::from_std(attempt_budget.residence_deadline());
     let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
@@ -341,19 +363,21 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                 )
             })?;
             if disposition == V3SseFrameDisposition::LegalCloseout {
-                if !has_business_content {
-                    return Err(direct_sse_empty_attempt_failure());
-                }
-                rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(
+                let _ = rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(
                     |error| {
-                        crate::shared::direct_plain_error(
-                            V3ErrorSourceKind::RuntimeFailure,
+                        direct_attempt_store_error_source(
+                            error,
                             "V3ExecutionAttemptPayloadStore",
                             "direct_sse_memory_strip_failed",
-                            error.to_string(),
                         )
                     },
                 )?;
+                apply_complete_response_hook(&mut committed, response_hook)?;
+                has_business_content =
+                    direct_sse_frames_have_business_content(provider_protocol, committed.frames());
+                if !has_business_content {
+                    return Err(direct_sse_empty_attempt_failure());
+                }
                 let sealed = committed.seal_after_validated_terminal();
                 let sealed = sealed.map_err(|error| {
                     crate::shared::direct_plain_error(
@@ -368,9 +392,6 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         }
     }
     if terminal_seen {
-        if !has_business_content {
-            return Err(direct_sse_empty_attempt_failure());
-        }
         // OpenAI Chat's client protocol terminal is the `data: [DONE]`
         // sentinel. A chat-wire provider may close after the semantic
         // terminal without ever emitting it; synthesize the protocol closeout
@@ -389,14 +410,20 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                     )
                 })?;
         }
-        rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|error| {
-            crate::shared::direct_plain_error(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3ExecutionAttemptPayloadStore",
-                "direct_sse_memory_strip_failed",
-                error.to_string(),
-            )
-        })?;
+        let _ =
+            rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|error| {
+                direct_attempt_store_error_source(
+                    error,
+                    "V3ExecutionAttemptPayloadStore",
+                    "direct_sse_memory_strip_failed",
+                )
+            })?;
+        apply_complete_response_hook(&mut committed, response_hook)?;
+        has_business_content =
+            direct_sse_frames_have_business_content(provider_protocol, committed.frames());
+        if !has_business_content {
+            return Err(direct_sse_empty_attempt_failure());
+        }
         let sealed = committed.seal_after_validated_terminal();
         let sealed = sealed.map_err(|error| {
             crate::shared::direct_plain_error(
@@ -414,6 +441,45 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         "provider_response_sse_stream",
         "provider SSE ended without a protocol terminal",
     ))
+}
+
+fn apply_complete_response_hook(
+    committed: &mut crate::execution_control::V3CommittedClientSseBuilder,
+    hook: Option<(
+        &crate::hooks::V3HookRegistry,
+        &crate::direct_response_hooks::V3DirectDsmlContext,
+    )>,
+) -> crate::shared::V3DirectSourceResult<()> {
+    if let Some((registry, context)) = hook {
+        registry
+            .project_complete_direct_sse(committed, context)
+            .map_err(|error| match error {
+                crate::hooks::V3DirectCompleteResponseError::Normalization(failure) => {
+                    crate::hooks::direct_complete_response_hook_failure_source(failure)
+                }
+                crate::hooks::V3DirectCompleteResponseError::Store(error) => {
+                    direct_attempt_store_error_source(
+                        error,
+                        "V3DirectResp14ProviderProjectionPrepared",
+                        "direct_response_hook_budget",
+                    )
+                }
+            })?;
+    }
+    Ok(())
+}
+
+fn direct_sse_frames_have_business_content(
+    provider_protocol: V3HubProviderWireProtocol,
+    frames: &[Vec<u8>],
+) -> bool {
+    let mut facts = crate::hub_v1::V3ProviderAttemptBusinessContent::default();
+    for frame in frames {
+        for value in parse_direct_sse_json_frames(frame) {
+            facts.observe_event(provider_protocol, &value);
+        }
+    }
+    facts.has_deliverable_business_content()
 }
 
 /// Typed provider-failure source for a complete Direct SSE attempt that carries
@@ -498,15 +564,15 @@ fn rewrite_direct_sse_memory(
     committed: &mut crate::execution_control::V3CommittedClientSseBuilder,
     manifest: Option<&V3Config05ManifestPublished>,
     request_id: Option<&str>,
-) -> Result<(), crate::execution_control::V3AttemptStoreError> {
+) -> Result<Option<bool>, crate::execution_control::V3AttemptStoreError> {
     let Some(manifest) = manifest else {
-        return Ok(());
+        return Ok(None);
     };
     let Some(request_id) = request_id else {
-        return Ok(());
+        return Ok(None);
     };
     if !manifest.memory_raw_capture.enabled {
-        return Ok(());
+        return Ok(None);
     }
     let host_id = routecodex_v3_agent_memory::stable_host_id(&format!(
         "{}{}",
@@ -522,7 +588,7 @@ fn rewrite_direct_sse_memory(
     let canonical_output_texts = accumulator.canonical_output_texts();
     let report = accumulator.finalize(&host_id, request_id);
     if !report.memory_unit_found {
-        return Ok(());
+        return Ok(None);
     }
     for captured in &report.captured {
         if let Err(error) = routecodex_v3_agent_memory::publish_l3_entry(
@@ -542,6 +608,7 @@ fn rewrite_direct_sse_memory(
         })
         .collect::<std::collections::BTreeMap<_, _>>();
     let mut visible_chars_by_key = std::collections::BTreeMap::<(usize, usize), usize>::new();
+    let mut has_business_content = false;
     committed.rewrite_frames_non_increasing(|frame| {
         rewrite_direct_sse_frame(&frame, |mut value| {
             match value.get("type").and_then(serde_json::Value::as_str) {
@@ -575,6 +642,20 @@ fn rewrite_direct_sse_memory(
                         );
                     }
                 }
+                Some("response.output_item.added" | "response.output_item.done") => {
+                    if let Some(item) = value.get_mut("item") {
+                        routecodex_v3_agent_memory::strip_memory_envelope_from_responses_output_item(
+                            item, &report,
+                        );
+                    }
+                }
+                Some("response.content_part.added" | "response.content_part.done") => {
+                    if let Some(part) = value.get_mut("part") {
+                        routecodex_v3_agent_memory::strip_memory_envelope_from_responses_output_part(
+                            part, &report,
+                        );
+                    }
+                }
                 Some("response.completed" | "response.done") => {
                     if let Some(response) = value.get_mut("response") {
                         routecodex_v3_agent_memory::strip_memory_envelope_from_responses_payload(
@@ -588,9 +669,17 @@ fn rewrite_direct_sse_memory(
                 }
                 _ => {}
             }
+            // Reuse the complete-attempt predicate on the final projected
+            // value. The removed memory text cannot count toward admission.
+            has_business_content |=
+                crate::hub_v1::v3_provider_event_has_deliverable_business_content(
+                    V3HubProviderWireProtocol::Responses,
+                    &value,
+                );
             value
         })
-    })
+    })?;
+    Ok(Some(has_business_content))
 }
 
 fn direct_sse_output_text_key(event: &serde_json::Value) -> (usize, usize) {
@@ -691,6 +780,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
     request_id: &str,
     retain_response_cipher: bool,
     compat_plan: &crate::direct_response_hooks::V3DirectResponseCompatPlan,
+    dsml_context: &crate::direct_response_hooks::V3DirectDsmlContext,
     namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
     hook_registry: &V3HookRegistry,
     failure_session_scope: &V3ProviderFailureSessionScope,
@@ -721,12 +811,13 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
         true,
         namespace_tool_identities,
     );
-    collect_direct_sse_attempt_after_terminal_with_memory(
+    collect_direct_sse_attempt_after_terminal_with_hooks(
         projected,
         compat_plan.provider_protocol,
         attempt_budget,
         Some(manifest),
         Some(request_id),
+        Some((hook_registry, dsml_context)),
     )
     .await
 }

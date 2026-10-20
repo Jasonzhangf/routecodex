@@ -40,6 +40,7 @@ provider HTTP / complete SSE attempt
 - Anthropic refusal remains output and maps to the representable Responses incomplete reason.
 - Responses incomplete reasons remain opaque business values.
 - Empty output and zero usage do not make a successful protocol response fail.
+- A reasoning-plus-explicit-final attempt whose final contains only nonrendering code points is empty; visible text mixed with those code points remains complete business content.
 - Content keywords cannot turn successful provider output into a failure.
 
 ### Directive and policy execution
@@ -57,6 +58,7 @@ provider HTTP / complete SSE attempt
 - Second attempt success commits only successful response.
 - Exhausted attempts leave continuation at pre-request state.
 - Real HTTP failures use the provider-scoped typed recovery path and never become a client error response.
+- Public Direct and Relay requests discard a reasoning-plus-explicit-final attempt whose final contains only U+200B or FEFF, recover through the next candidate, and expose neither the source attempt nor an internal error.
 - One recoverable failure leaves the provider eligible; a subsequent real success resets the pre-cooldown streak.
 - Positive control: normal provider HTTP 200 content completes unchanged.
 - Responses custom calls projected to Chat keep their existing custom-kind association and input wrapper. Submit the returned JSON/SSE call unchanged with the actual client result; the next Responses request must retain the original custom call, complete input or absence, and matching custom output.

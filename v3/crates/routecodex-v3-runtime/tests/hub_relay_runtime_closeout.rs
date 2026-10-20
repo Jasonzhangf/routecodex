@@ -1661,12 +1661,13 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
         timing.internal.checked_add(timing.external),
         Some(timing.runtime_total)
     );
-    // One recoverable 400 excludes the candidate for this request and, under
-    // the immediate-cooldown contract, cools the exact provider interface
-    // identity: the failed provider is held until its recovery probe succeeds.
+    // The first provider returns a request-local 400. Target excludes only that
+    // exact candidate and reselects MiniMax before response projection.
     assert_eq!(
         observability.unavailable_candidates,
-        vec!["limited:default:key1:gpt-5.5:availability(provider_key_health_cooldown|provider_cooldown_probe_pending|provider_cooldown_probe_pending|request_local_provider_failure)".to_string()]
+        vec![
+            "limited:default:key1:gpt-5.5:availability(request_local_provider_failure)".to_string()
+        ]
     );
     assert_eq!(
         observability

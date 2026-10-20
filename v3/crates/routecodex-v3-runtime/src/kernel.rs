@@ -912,6 +912,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 continue;
             }
             Err(error) => {
+                let failed_attempt_evidence =
+                    crate::hub_v1::build_v3_runtime_provider_failed_attempt_evidence_from_error(
+                        total_attempts(&accumulator, send_attempts),
+                        provider_request_snapshot.clone(),
+                        &error,
+                    );
                 if let Some(witness) =
                     crate::hub_v1::external_http_witness_from_provider_error(&error)
                 {
@@ -1012,7 +1018,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         )
                     }
                 };
-                if let Some(event) = policy_result.event.clone() {
+                if let Some(mut event) = policy_result.event.clone() {
+                    event.failed_attempt_evidence = failed_attempt_evidence;
                     provider_failure_events.push(event.clone());
                     publish_v3_direct_provider_failure_event(
                         provider_failure_event_sink.as_ref(),
@@ -1128,6 +1135,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             ));
         }
 
+        let direct_dsml_context = crate::direct_response_hooks::V3DirectDsmlContext::from_request(
+            &standardized.body,
+            &ns_tool_identities,
+        );
         let compat_context = match v3_direct_protocol_codec::build_direct_response_compat_context(
             &policy.target,
             ns_tool_identities.clone(),
@@ -1334,56 +1345,60 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 _ => None,
             };
         if let V3ProviderAttemptBody::Json(body) = &mut response_projection.attempt_payload.body {
-            crate::direct_response_hooks::apply_v3_direct_response_projection_hooks(
-                body,
-                crate::shared::v3_strip_client_response_id_enabled_for_server(
-                    manifest,
-                    &standardized.server_id,
-                ),
-                retain_response_cipher,
-            );
-            match apply_v3_responses_direct_web_search_json_response_control(
-                server_tool_state.as_deref(),
-                server_tool_scope.as_ref(),
-                body,
-                &mut trace,
-            ) {
-                Ok(Some(state)) => {
-                    // Mode B 本地 websearch 拦截成功。MiniMax hosted
-                    // search：结果已随同一响应返回（SearchResultCaptured）
-                    // → 跳过搜索 hop；否则执行异步搜索 hop（backend
-                    // direct pin 走正常 Hub 链 + VR 路由）。结果投影为
-                    // hosted web_search_call + 原 call_id 配对。
-                    let captured = if state.phase()
-                        == crate::hub_v1::V3WebSearchCenterPhase::SearchResultCaptured
-                    {
-                        state
-                    } else {
-                        let Some(server_tool_scope) = server_tool_scope.as_ref() else {
-                            return direct_runtime_helpers_stream::source_failure_output(
-                                runtime_source(
-                                    "V3DirectWebSearchResp02RuntimeControlUpdated",
-                                    "web_search execution scope is unavailable",
-                                ),
-                                last_external_http.clone(),
-                                trace,
-                                &hook_registry,
-                            );
-                        };
-                        match crate::hub_v1::execute_web_search_through_hooks_sidecar(
-                            server_tool_state
-                                .as_deref()
-                                .and_then(V3ResponsesDirectServerToolState::hooks_sidecar_socket),
-                            &standardized.request_id,
-                            server_tool_scope,
-                            &request_execution_control,
-                            &state,
-                        )
-                        .await
+            let normalization = hook_registry
+                .project_complete_direct_json(body, &direct_dsml_context)
+                .map_err(crate::hooks::direct_complete_response_error_source);
+            if normalization.is_ok() {
+                crate::direct_response_hooks::apply_v3_direct_response_projection_hooks(
+                    body,
+                    crate::shared::v3_strip_client_response_id_enabled_for_server(
+                        manifest,
+                        &standardized.server_id,
+                    ),
+                    retain_response_cipher,
+                );
+                match apply_v3_responses_direct_web_search_json_response_control(
+                    server_tool_state.as_deref(),
+                    server_tool_scope.as_ref(),
+                    body,
+                    &mut trace,
+                ) {
+                    Ok(Some(state)) => {
+                        // Mode B 本地 websearch 拦截成功。MiniMax hosted
+                        // search：结果已随同一响应返回（SearchResultCaptured）
+                        // → 跳过搜索 hop；否则执行异步搜索 hop（backend
+                        // direct pin 走正常 Hub 链 + VR 路由）。结果投影为
+                        // hosted web_search_call + 原 call_id 配对。
+                        let captured = if state.phase()
+                            == crate::hub_v1::V3WebSearchCenterPhase::SearchResultCaptured
                         {
-                            Ok(captured) => captured,
-                            Err(error) => {
-                                let source = match error {
+                            state
+                        } else {
+                            let Some(server_tool_scope) = server_tool_scope.as_ref() else {
+                                return direct_runtime_helpers_stream::source_failure_output(
+                                    runtime_source(
+                                        "V3DirectWebSearchResp02RuntimeControlUpdated",
+                                        "web_search execution scope is unavailable",
+                                    ),
+                                    last_external_http.clone(),
+                                    trace,
+                                    &hook_registry,
+                                );
+                            };
+                            match crate::hub_v1::execute_web_search_through_hooks_sidecar(
+                                server_tool_state.as_deref().and_then(
+                                    V3ResponsesDirectServerToolState::hooks_sidecar_socket,
+                                ),
+                                &standardized.request_id,
+                                server_tool_scope,
+                                &request_execution_control,
+                                &state,
+                            )
+                            .await
+                            {
+                                Ok(captured) => captured,
+                                Err(error) => {
+                                    let source = match error {
                                     crate::hub_v1::V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
                                         call_id,
                                         code,
@@ -1397,64 +1412,183 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                         error,
                                     ),
                                 };
+                                    return direct_runtime_helpers_stream::source_failure_output(
+                                        source,
+                                        last_external_http.clone(),
+                                        trace,
+                                        &hook_registry,
+                                    );
+                                }
+                            }
+                        };
+                        match crate::hub_v1::project_web_search_result_into_finalized(
+                            body, &captured,
+                        ) {
+                            Ok(()) => {}
+                            Err(error) => {
                                 return direct_runtime_helpers_stream::source_failure_output(
-                                    source,
+                                    runtime_source(
+                                        "V3DirectWebSearchResp03HostedResultProjected",
+                                        error,
+                                    ),
+                                    last_external_http.clone(),
+                                    trace,
+                                    &hook_registry,
+                                )
+                            }
+                        }
+                        if let (Some(control), Some(scope)) =
+                            (server_tool_state.as_ref(), server_tool_scope.as_ref())
+                        {
+                            if let Err(error) = control.web_search_store_for_scope(
+                                scope,
+                                captured,
+                                V3ServerToolCenterWriteOrigin {
+                                    module: "kernel",
+                                    symbol: "resp02_direct_web_search_control_updated",
+                                    stage: "resp02_runtime_control_updated",
+                                },
+                                Some("resp02 persist captured web_search state"),
+                                None,
+                            ) {
+                                return direct_runtime_helpers_stream::source_failure_output(
+                                    runtime_source(
+                                        "V3DirectWebSearchResp02RuntimeControlUpdated",
+                                        error,
+                                    ),
                                     last_external_http.clone(),
                                     trace,
                                     &hook_registry,
                                 );
                             }
                         }
-                    };
-                    match crate::hub_v1::project_web_search_result_into_finalized(body, &captured) {
-                        Ok(()) => {}
-                        Err(error) => {
-                            return direct_runtime_helpers_stream::source_failure_output(
-                                runtime_source(
-                                    "V3DirectWebSearchResp03HostedResultProjected",
-                                    error,
-                                ),
-                                last_external_http.clone(),
-                                trace,
-                                &hook_registry,
-                            )
-                        }
+                        trace.push("V3DirectWebSearchResp03HostedResultProjected");
                     }
-                    if let (Some(control), Some(scope)) =
-                        (server_tool_state.as_ref(), server_tool_scope.as_ref())
-                    {
-                        if let Err(error) = control.web_search_store_for_scope(
-                            scope,
-                            captured,
-                            V3ServerToolCenterWriteOrigin {
-                                module: "kernel",
-                                symbol: "resp02_direct_web_search_control_updated",
-                                stage: "resp02_runtime_control_updated",
-                            },
-                            Some("resp02 persist captured web_search state"),
-                            None,
-                        ) {
-                            return direct_runtime_helpers_stream::source_failure_output(
-                                runtime_source(
-                                    "V3DirectWebSearchResp02RuntimeControlUpdated",
-                                    error,
-                                ),
-                                last_external_http.clone(),
-                                trace,
-                                &hook_registry,
-                            );
-                        }
+                    Ok(None) => {}
+                    Err(source) => {
+                        return direct_runtime_helpers_stream::source_failure_output(
+                            source,
+                            last_external_http.clone(),
+                            trace,
+                            &hook_registry,
+                        )
                     }
-                    trace.push("V3DirectWebSearchResp03HostedResultProjected");
                 }
-                Ok(None) => {}
-                Err(source) => {
-                    return direct_runtime_helpers_stream::source_failure_output(
-                        source,
-                        last_external_http.clone(),
-                        trace,
-                        &hook_registry,
-                    )
+            }
+            if let Err(source) = normalization.and_then(|()| {
+                crate::shared::enforce_v3_provider_json_attempt_admission(
+                    response_projection.compat_plan.provider_protocol,
+                    body,
+                    &policy.target.candidate.provider_id,
+                    provider_status,
+                )
+            }) {
+                let source = match source {
+                    Ok(source) => source,
+                    Err(fault) => {
+                        return direct_runtime_helpers_stream::source_failure_output(
+                            Err(fault),
+                            last_external_http.clone(),
+                            trace,
+                            &hook_registry,
+                        )
+                    }
+                };
+                drop(provider_action_permit.take());
+                let policy_result = match run_v3_direct_provider_failure_policy(
+                    &V3DirectProviderFailurePolicyContext {
+                        failure_session_scope: &direct_failure_session_scope,
+                        provider_health: &provider_health,
+                        availability: &availability,
+                        expanded: expanded.as_ref(),
+                        provider_pinned: false,
+                        now_epoch_ms,
+                    },
+                    &policy.target,
+                    source,
+                    provider_status,
+                    &mut V3DirectProviderFailurePolicyState {
+                        failed_candidates: &mut failed_candidates,
+                        same_candidate_retries: &mut same_candidate_retries,
+                        trace: &mut trace,
+                    },
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(failure) => {
+                        return direct_runtime_helpers_stream::policy_failure_output_with_observability(
+                            failure,
+                            last_external_http,
+                            trace,
+                            None,
+                        )
+                    }
+                };
+                if let Some(event) = policy_result.event.clone() {
+                    provider_failure_events.push(event.clone());
+                    publish_v3_direct_provider_failure_event(
+                        provider_failure_event_sink.as_ref(),
+                        &policy.target,
+                        "responses",
+                        "json",
+                        event.external_error_status,
+                        &provider_failure_events,
+                        &event,
+                        total_attempts(&accumulator, send_attempts),
+                    );
+                }
+                match &policy_result.decision.action {
+                    V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                        if !policy_result.retryable_transient {
+                            pending_provider_action_recovery = Some(recovery.clone());
+                        }
+                        continue;
+                    }
+                    V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
+                        retry_selected = policy_result.retry_selected.map(|selected| *selected);
+                        if !policy_result.retryable_transient {
+                            pending_provider_action_recovery = Some(recovery.clone());
+                        }
+                        continue;
+                    }
+                    V3Error05ExecutionAction::ProjectTerminal => {
+                        let mut observability = build_v3_direct_runtime_observability(
+                            &policy.target,
+                            "responses",
+                            "json",
+                            policy_result.event.as_ref().map(|event| event.status),
+                            "failed",
+                            provider_failure_events.clone(),
+                        );
+                        observability.attempts = Some(total_attempts(&accumulator, send_attempts));
+                        return direct_runtime_helpers_stream::provider_terminal_output(
+                            policy_result.decision,
+                            last_external_http,
+                            trace,
+                            Some(observability),
+                            provider_request_snapshot,
+                            None,
+                        );
+                    }
+                    V3Error05ExecutionAction::ClientDisconnected => {
+                        return direct_runtime_helpers_stream::client_disconnect_terminal_output(
+                            policy_result.decision,
+                            trace,
+                            None,
+                        );
+                    }
+                    V3Error05ExecutionAction::RejectNonProviderError => {
+                        return direct_runtime_helpers_stream::source_failure_output(
+                            runtime_source(
+                                "V3Error05ExecutionDecision",
+                                "post-hook admission entered a non-provider Error05 lane",
+                            ),
+                            last_external_http.clone(),
+                            trace,
+                            &hook_registry,
+                        )
+                    }
                 }
             }
         }
@@ -1480,6 +1614,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &standardized.request_id,
                         retain_response_cipher,
                         &response_projection.compat_plan,
+                        &direct_dsml_context,
                         ns_tool_identities.clone(),
                         &hook_registry,
                         &direct_failure_session_scope,
@@ -1506,7 +1641,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             );
                         }
                         Err(Ok(source))
-                            if source.source_kind != V3ErrorSourceKind::ProviderFailure =>
+                            if source.source_kind != V3ErrorSourceKind::ProviderFailure
+                                && !routecodex_v3_error::is_v3_recoverable_response_processing_source(&source) =>
                         {
                             if let Err(error) = runtime_timing.finish_external_if_active() {
                                 return direct_runtime_helpers_stream::source_failure_output(
@@ -1545,7 +1681,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 },
                                 &policy.target,
                                 source,
-                                502,
+                                provider_status,
                                 &mut V3DirectProviderFailurePolicyState {
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,

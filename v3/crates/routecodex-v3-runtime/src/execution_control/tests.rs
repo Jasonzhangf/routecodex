@@ -19,6 +19,36 @@ fn test_limits(
 }
 
 #[test]
+fn direct_dsml_complete_rewrite_keeps_budget_and_terminal_reservation() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), process.clone());
+    let mut builder = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
+    builder.push(vec![1, 2]).unwrap();
+    builder.mark_last_frame_as_terminal().unwrap();
+    builder
+        .rewrite_complete_attempt::<V3AttemptStoreError>(|_| {
+            Ok(Some((vec![vec![3, 4], vec![5, 6]], 1)))
+        })
+        .unwrap();
+    assert_eq!(process.load(Ordering::Acquire), 4);
+    assert_eq!(builder.terminal_frame_index, Some(1));
+    assert!(matches!(
+        builder.rewrite_complete_attempt(|_| Ok::<_, V3AttemptStoreError>(Some((
+            vec![vec![0; 9]],
+            0
+        )))),
+        Err(V3AttemptStoreError::LocalResourceExhausted(_))
+    ));
+    assert_eq!(process.load(Ordering::Acquire), 4);
+    builder
+        .rewrite_complete_attempt::<V3AttemptStoreError>(|_| Ok(Some((vec![vec![7]], 0))))
+        .unwrap();
+    assert_eq!(process.load(Ordering::Acquire), 1);
+    drop(builder);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+}
+
+#[test]
 fn attempt_budget_counts_all_transport_attempts_without_reset() {
     let process_bytes = Arc::new(AtomicUsize::new(0));
     let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), Arc::clone(&process_bytes));

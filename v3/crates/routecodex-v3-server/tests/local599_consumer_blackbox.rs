@@ -663,7 +663,7 @@ async fn local599_real_transport_handoff_failure() {
 }
 
 #[tokio::test]
-async fn empty_http200_attempt_is_typed502_and_cools_only_attempted_identity() {
+async fn empty_http200_attempt_is_typed502_without_last_candidate_health_mutation() {
     let (output, upstream, health, _transport, shutdown) =
         run_local599_case(AttemptMode::Empty, "req-empty-typed502").await;
     assert_eq!(upstream.statuses(), vec![200]);
@@ -679,14 +679,10 @@ async fn empty_http200_attempt_is_typed502_and_cools_only_attempted_identity() {
     );
     assert!(output.terminal_disposition.is_some());
     let entries = health_snapshot(&health);
-    assert_eq!(
-        entries.len(),
-        1,
-        "only the attempted identity is cooled: {entries:?}"
+    assert!(
+        entries.is_empty(),
+        "the last candidate must not acquire cooldown: {entries:?}"
     );
-    assert_eq!(entries[0]["provider_id"], PROVIDER_ID);
-    assert_eq!(entries[0]["auth_alias"], "key1");
-    assert_eq!(entries[0]["model_id"], MODEL_ID);
     let _ = shutdown.send(());
 }
 

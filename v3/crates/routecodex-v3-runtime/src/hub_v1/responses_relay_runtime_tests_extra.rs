@@ -518,6 +518,73 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
     assert_eq!(chat["messages"][1]["content"], "README contents");
 }
 
+#[test]
+fn relay_control_marker_sole_labels_map_to_typed_empty_semantic_failure() {
+    let request = json!({
+        "tools": [],
+        "input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]
+    });
+    let provider_response = json!({
+        "id":"chat_marker_empty",
+        "object":"chat.completion",
+        "model":"wire-test",
+        "choices":[{
+            "index":0,
+            "message":{
+                "role":"assistant",
+                "content":"<｜end▁of▁analysis｜>\n<|DSML|tool_calls>"
+            },
+            "finish_reason":"stop"
+        }]
+    });
+    let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            &request,
+            "openai-responses",
+        )
+        .unwrap();
+    let error = run_json_response_hooks(
+        V3ResponsesRelayJsonResponseHookInput {
+            session_id: "relay-control-empty",
+            request_id: "relay-control-empty",
+            provider_value: &provider_response,
+            provider_semantic_body: &request,
+            manifest: &manifest,
+            server_id: "test",
+            provider_id: Some("openai_second"),
+            interface_id: Some("default"),
+            expected_model_id: "chat-test",
+            provider_protocol: V3HubProviderWireProtocol::OpenAiChat,
+            source_provider_protocol: V3HubProviderWireProtocol::OpenAiChat,
+            namespace_registry: &registry,
+            provider_response_transport_intent: V3HubTransportIntent::Json,
+            compatibility_profile: None,
+            opencode_zen_tcm_bridge: None,
+            custom_tool_function_binding: None,
+            web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
+            web_search_center_state: None,
+            retain_response_cipher: false,
+            tool_thinking_enabled: false,
+            tool_thinking_turn_context: &V3ToolThinkingTurnContext::disabled(),
+        },
+        &mut Vec::new(),
+    )
+    .expect_err("sole labels must enter the existing typed empty recovery path");
+    match error {
+        V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+            status,
+            code,
+            message,
+        } => {
+            assert_eq!(status, 502);
+            assert_eq!(code, "provider_response_empty");
+            assert!(message.contains("no deliverable business content"));
+        }
+        other => panic!("expected provider_response_empty semantic failure, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn responses_provider_sse_restores_declared_mcp_identity_for_tool_followup() {
     let observation = V3RuntimeStreamObservation::default();
@@ -1128,23 +1195,27 @@ fn anthropic_json_relay_keeps_literal_control_text_unchanged() {
 }
 
 #[test]
-fn anthropic_sse_whole_item_thinking_literal_stays_visible() {
-    // Complete and literal DSML-looking text remains ordinary provider output.
-    // A whole-item `<thinking>...</thinking>` literal that does not carry the
-    // exact DSML closing block is representable provider text and must be
-    // forwarded unchanged instead of being dropped as internal-only.
-    let provider_response = json!({
-        "id":"resp_thinking_literal",
-        "status":"completed",
-        "output":[{
-            "type":"message",
-            "role":"assistant",
-            "content":[{"type":"output_text","text":"<thinking>private</thinking>"}]
-        }]
-    });
-    let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
-    let mut trace = Vec::new();
-    let (response, _) = run_json_response_hooks(
+fn anthropic_sse_thinking_harvest_preserves_quoted_literal() {
+    // The current user policy harvests recognized unquoted thinking wrappers;
+    // quoted examples remain visible business text.
+    for literal in [false, true] {
+        let text = if literal {
+            "\"<thinking>private</thinking>\""
+        } else {
+            "<thinking>private</thinking>"
+        };
+        let provider_response = json!({
+            "id":"resp_thinking_literal",
+            "status":"completed",
+            "output":[{
+                "type":"message",
+                "role":"assistant",
+                "content":[{"type":"output_text","text":text}]
+            }]
+        });
+        let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
+        let mut trace = Vec::new();
+        let (response, _) = run_json_response_hooks(
         V3ResponsesRelayJsonResponseHookInput {
             session_id: "anthropic-sse-thinking-literal",
             opencode_zen_tcm_bridge: None,
@@ -1171,10 +1242,24 @@ fn anthropic_sse_whole_item_thinking_literal_stays_visible() {
         },
         &mut trace,
     )
-    .expect("Anthropic SSE whole-item literal must pass through Resp03");
-    let serialized = serde_json::to_string(&response).unwrap();
-    assert!(
-        serialized.contains("<thinking>private</thinking>"),
-        "whole-item `<thinking>` literal must stay visible: {serialized}"
-    );
+    .expect("thinking must remain deliverable business content");
+        let output = response["output"].as_array().unwrap();
+        if literal {
+            assert!(output.iter().any(|item| item["type"] == "message"
+                && item["content"]
+                    .as_array()
+                    .is_some_and(|parts| parts.iter().any(|part| part["text"] == text))));
+            assert!(!output.iter().any(|item| item["type"] == "reasoning"));
+        } else {
+            assert!(
+                output
+                    .iter()
+                    .any(|item| item["type"] == "reasoning"
+                        && item["summary"][0]["text"] == "private")
+            );
+            assert!(!output
+                .iter()
+                .any(|item| item["type"] == "message" && item.to_string().contains("<thinking>")));
+        }
+    }
 }

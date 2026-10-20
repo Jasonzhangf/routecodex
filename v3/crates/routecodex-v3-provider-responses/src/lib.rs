@@ -25,8 +25,8 @@ pub use health::{
     V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
     V3ProviderAvailabilityRegistry, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
     V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
-    V3ProviderGlobalSubscriptionPolicy, V3ProviderHealthError, V3ProviderHealthStore,
-    V3ProviderSessionAvailabilityReader, V3_COOLDOWN_MANUAL_MAX_MS,
+    V3ProviderGlobalSubscriptionPolicy, V3ProviderHealthError, V3ProviderHealthListenerScope,
+    V3ProviderHealthStore, V3ProviderSessionAvailabilityReader, V3_COOLDOWN_MANUAL_MAX_MS,
 };
 pub use key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
@@ -64,8 +64,8 @@ pub use transport_handoff::{
 };
 pub use wire::{
     apply_v3_response_cipher_policy, build_v3_provider_12_responses_wire_payload,
-    find_v3_routecodex_control_payload_key, v3_provider_auth_handle_from_manifest_entry,
+    v3_provider_auth_handle_from_manifest_entry,
     v3_provider_auth_secret_handle_from_declaration_fields, V3Provider12ResponsesWirePayload,
     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ResponsesProviderTarget,
-    V3ResponsesRequestEndpoint, V3ResponsesStreamIntent, V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS,
+    V3ResponsesRequestEndpoint, V3ResponsesStreamIntent,
 };

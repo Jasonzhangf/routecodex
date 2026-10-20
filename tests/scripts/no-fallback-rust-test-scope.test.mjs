@@ -40,6 +40,17 @@ test('all-files no-fallback gate excludes the cfg(test) hooks module and still r
     const neighboringProduct = run();
     assert.equal(neighboringProduct.status, 1, neighboringProduct.stdout);
     assert.match(neighboringProduct.stderr, /real_transport\.rs:2 \[fallback-keyword\]/);
+
+    write('v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar/real_transport.rs', 'fn production() {}\n');
+    write('v3/crates/routecodex-v3-runtime/src/provider_probe_fairness_tests.rs', 'assert!(available, "eligible fallback must deliver");\n');
+    write('v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs', '#[cfg(test)]\n#[path = "provider_probe_fairness_tests.rs"]\nmod provider_probe_fairness_tests;\n');
+    const fairnessTestOnly = run();
+    assert.equal(fairnessTestOnly.status, 0, fairnessTestOnly.stderr);
+
+    write('v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs', 'fn production() {\n    fallback();\n}\n');
+    const fairnessProduct = run();
+    assert.equal(fairnessProduct.status, 1, fairnessProduct.stdout);
+    assert.match(fairnessProduct.stderr, /provider_probe_lifecycle\.rs:2 \[fallback-keyword\]/);
   } finally {
     rmSync(root, { recursive: true, force: true });
     assert.equal(existsSync(root), false);

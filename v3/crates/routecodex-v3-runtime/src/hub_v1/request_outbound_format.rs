@@ -36,7 +36,6 @@ use super::request_outbound_metadata::{
     project_openai_chat_reasoning_summary_policy, project_openai_client_metadata_to_metadata,
     validate_openai_metadata,
 };
-use std::collections::BTreeSet;
 #[path = "request_outbound_responses_items.rs"]
 mod request_outbound_responses_items;
 #[path = "signature_target_projection.rs"]
@@ -606,17 +605,8 @@ fn project_outbound_payload_for_target_protocol_inner_with_drops(
     }
     promote_tool_search_output_tools_to_provider_tools(&mut source)?;
     let source = &source;
-    let control_paths = collect_outbound_control_field_paths(source);
-    if !control_paths.is_empty() {
-        return Err(format!(
-            "ControlFieldLeak target_protocol={} paths={}",
-            target_protocol.as_str(),
-            control_paths.join(",")
-        ));
-    }
-    // stage 3 白名单投影是「最大兼容优先，其次丢弃」：目标协议白名单之外的字段
-    // 不携带目标协议可表示的语义，按规则 DROP + RECORD + PRINT 后继续请求，
-    // 绝不变成客户端错误。`ControlFieldLeak`（上方）仍是 hard error 不变量。
+    // Unknown business fields remain opaque. Only a concrete target-protocol
+    // representation limit can produce a projection drop.
     let unmapped = collect_unmapped_outbound_field_paths(source, target_protocol);
     let mut drops = Vec::new();
     for json_path in &unmapped {
@@ -1153,36 +1143,6 @@ fn project_openai_responses_reasoning_extensions_to_reasoning(
     Ok(())
 }
 
-fn collect_outbound_control_field_paths(value: &Value) -> Vec<String> {
-    let mut paths = Vec::new();
-    collect_outbound_control_field_paths_inner(value, "$", &mut paths);
-    paths
-}
-
-fn collect_outbound_control_field_paths_inner(value: &Value, path: &str, paths: &mut Vec<String>) {
-    match value {
-        Value::Object(map) => {
-            for (key, child) in map {
-                let child_path = json_path_child(path, key);
-                if is_provider_outbound_control_key(key) {
-                    paths.push(child_path.clone());
-                }
-                collect_outbound_control_field_paths_inner(child, &child_path, paths);
-            }
-        }
-        Value::Array(items) => {
-            for (index, child) in items.iter().enumerate() {
-                collect_outbound_control_field_paths_inner(
-                    child,
-                    &format!("{path}[{index}]"),
-                    paths,
-                );
-            }
-        }
-        _ => {}
-    }
-}
-
 fn json_path_child(parent: &str, key: &str) -> String {
     // An empty key must take the quoted branch: the bare form would render as
     // `$.`, which the path reader rejects, so the drop would be recorded
@@ -1201,96 +1161,12 @@ fn json_path_child(parent: &str, key: &str) -> String {
     }
 }
 
-fn is_provider_outbound_control_key(key: &str) -> bool {
-    matches!(
-        key,
-        "routecodex_internal"
-            | "routecodexInternal"
-            | "route_hint"
-            | "routeHint"
-            | "metadata_center"
-            | "metadataCenter"
-            | "__metadataCenter"
-            | "debug_snapshot"
-            | "debugSnapshot"
-            | "_debug"
-            | "provider_protocol"
-            | "providerProtocol"
-            | "provider_runtime"
-            | "providerRuntime"
-            | "resource_handle"
-            | "resourceHandle"
-            | "continuation_owner"
-            | "continuationOwner"
-            | "runtime_control"
-            | "runtimeControl"
-            | "request_truth"
-            | "requestTruth"
-            | "route_selection"
-            | "routeSelection"
-            | "retry_exclusion_set"
-            | "retryExclusionSet"
-            | "selected_target"
-            | "selectedTarget"
-            | "opaque_target"
-            | "opaqueTarget"
-            | "resume_meta"
-            | "resumeMeta"
-            | "servertool_state"
-            | "servertoolState"
-            | "error_chain"
-            | "errorChain"
-            | "node_trace"
-            | "nodeTrace"
-            | "capturedChatRequest"
-            | "entryOriginRequest"
-            | "requestSemantics"
-            | "responsesRequestContext"
-            | "__raw_request_body"
-            | "__rt"
-            | "__rccDryRunSerialized"
-            | "request_capabilities"
-            | "requestCapabilities"
-            | "required_capabilities"
-            | "requiredCapabilities"
-            | "model_capabilities"
-            | "modelCapabilities"
-            | "selection_plan"
-            | "selectionPlan"
-    )
-}
-
-fn project_outbound_nested_payload_for_target_protocol(
-    source: &Value,
-    target_protocol: V3OutboundTargetProtocol,
-) -> Result<Value, String> {
-    let control_paths = collect_outbound_control_field_paths(source);
-    if !control_paths.is_empty() {
-        return Err(format!(
-            "ControlFieldLeak target_protocol={} paths={}",
-            target_protocol.as_str(),
-            control_paths.join(",")
-        ));
-    }
-    Ok(source.clone())
-}
-
 fn collect_unmapped_outbound_field_paths(
     source: &Value,
     target_protocol: V3OutboundTargetProtocol,
 ) -> Vec<String> {
-    let Some(map) = source.as_object() else {
-        return Vec::new();
-    };
-    let allowed = allowed_top_level_outbound_fields(target_protocol);
-    let mut paths: Vec<String> = map
-        .keys()
-        .filter(|key| !allowed.contains(key.as_str()))
-        .map(|key| json_path_child("$", key))
-        .collect();
-    paths.extend(
-        signature_target_projection::unrepresentable_call_extension_paths(source, target_protocol),
-    );
+    let mut paths =
+        signature_target_projection::unrepresentable_call_extension_paths(source, target_protocol);
     if !matches!(target_protocol, V3OutboundTargetProtocol::OpenAiResponses) {
         if let Some(messages) = source.get("messages").and_then(Value::as_array) {
             for (index, message) in messages.iter().enumerate() {
@@ -1306,20 +1182,6 @@ fn collect_unmapped_outbound_field_paths(
         }
     }
     paths
-}
-
-fn allowed_top_level_outbound_fields(
-    target_protocol: V3OutboundTargetProtocol,
-) -> BTreeSet<&'static str> {
-    // 出站顶层字段白名单以 request_field_map.json 为真源（查表；表缺失时 fail-fast）。
-    let protocol = match target_protocol {
-        V3OutboundTargetProtocol::OpenAiChat => "openai_chat",
-        V3OutboundTargetProtocol::OpenAiResponses => "responses",
-        V3OutboundTargetProtocol::Anthropic => "anthropic",
-        V3OutboundTargetProtocol::Gemini => "gemini",
-    };
-    crate::protocol_tables::whitelisted_fields(protocol)
-        .unwrap_or_else(|error| panic!("request_field_map lookup failed for {protocol}: {error}"))
 }
 
 pub(crate) fn build_responses_input_from_chat_messages(

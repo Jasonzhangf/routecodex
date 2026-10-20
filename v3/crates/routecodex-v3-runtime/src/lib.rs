@@ -22,6 +22,7 @@ mod shared_custom_tool_function_sse;
 mod shared_direct_thinking_compat;
 pub(crate) mod sse_object_pipeline;
 mod token_estimation;
+mod tool_markup_parser;
 
 pub use diagnostics::{project_v3_virtual_router_dry_run, project_v3_virtual_router_status};
 pub use direct_response_hooks::{
@@ -66,4 +67,5 @@ pub use provider_failure_runtime_policy::{
     V3ProviderFailureRuntimeHealth, V3ProviderHealthProbeFailure, V3RelayErrorOperatorFault,
 };
 pub use route_policy::*;
+pub use routecodex_v3_provider_responses::V3ProviderHealthListenerScope;
 pub use runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};

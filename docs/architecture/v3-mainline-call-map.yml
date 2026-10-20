@@ -2141,6 +2141,9 @@ chains:
     status: anchored
     owner_feature_id: v3.responses_direct_mvp_architecture
     semantic_contract:
+      - Both the Responses kernel and generic Direct kernel invoke the fallible registered complete-response hook before final JSON admission or SSE sealing; both SSE exits recompute business facts after rewriting, and parsing remains in the Direct owners rather than the collector
+      - Recognized unharvestable tool markup rejects the entire provider attempt through existing response-processing Error recovery even with surviving prose; label-only normalized attempts use provider_response_empty, never normal empty success
+      - Harvested tools replace serialized tool spans and use native protocol tool termination; complete tools with partial thinking labels retain body text, and isolated closing labels preserve text on either side
       - Runtime builds the request-local Direct context from the exact provider wire inverse before response projection; it does not infer an alias from provider or namespace strings
       - JSON and SSE item and terminal projection consume the same inverse and preserve kind, call ID, input and arguments; retry uses the current attempt binding
     resource_flow:
@@ -2366,6 +2369,95 @@ chains:
       side_channel_reads:
       - v3.secret.provider_auth_handle
       side_channel_writes: []
+- chain_id: v3.provider_tool_markup.direct_parser_binding
+  owner_feature_id: v3.responses_direct_mvp_architecture
+  summary: The Direct payload hook consumes the shared pure grammar inside its existing projection stage; this binding adds no runtime stage.
+  edges:
+  - step_id: v3-tool-markup-direct-parser
+    from_node: V3ProviderResp14Raw
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: normalize_with_protected
+    caller_file: v3/crates/routecodex-v3-runtime/src/direct_response_hooks_dsml.rs
+    callee_symbol: scan_tool_markup
+    callee_file: v3/crates/routecodex-v3-runtime/src/tool_markup_parser.rs
+    status: anchored
+    binding_kind: adjacent_protocol_codec_helper
+    owner_feature_id: v3.responses_direct_mvp_architecture
+    resource_flow:
+      consumes:
+      - v3.response.provider_raw
+      produces: []
+      side_channel_reads:
+      - v3.direct_response.compat_context
+      side_channel_writes: []
+- chain_id: v3.provider_tool_markup.relay_parser_bindings
+  owner_feature_id: v3.anthropic_control_text_resp03
+  summary: Relay Resp03 consumes the same pure grammar and its typed attempt context inside the existing response stage, with one payload rewrite owner and no new runtime stage.
+  edges:
+  - step_id: v3-tool-markup-relay-parser
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3HubRespChatProcess03Governed
+    caller_symbol: strip_v3_relay_control_marker_text
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    callee_symbol: scan_tool_markup
+    callee_file: v3/crates/routecodex-v3-runtime/src/tool_markup_parser.rs
+    status: anchored
+    binding_kind: adjacent_protocol_codec_helper
+    owner_feature_id: v3.anthropic_control_text_resp03
+    resource_flow:
+      consumes:
+      - v3.hub.response_semantic
+      produces:
+      - v3.hub.response_semantic
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-tool-markup-relay-harvest-parser
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3HubRespChatProcess03Governed
+    caller_symbol: scan
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs
+    callee_symbol: scan_tool_markup
+    callee_file: v3/crates/routecodex-v3-runtime/src/tool_markup_parser.rs
+    status: anchored
+    binding_kind: adjacent_protocol_codec_helper
+    owner_feature_id: v3.anthropic_control_text_resp03
+    resource_flow:
+      consumes: [v3.hub.response_semantic]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: [v3.relay_response.tool_markup_context]
+      side_channel_writes: []
+  - step_id: v3-tool-markup-relay-thinking-grammar
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3HubRespChatProcess03Governed
+    caller_symbol: govern_thinking
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs
+    callee_symbol: project_v3_thinking_tag_text_with_tools
+    callee_file: v3/crates/routecodex-v3-runtime/src/shared_direct_thinking_compat.rs
+    status: anchored
+    binding_kind: adjacent_protocol_codec_helper
+    owner_feature_id: v3.anthropic_control_text_resp03
+    semantic_contract:
+    - Only the existing pure literal-aware text projector is reused; Relay mutates its own payload in Resp03 and never invokes a Direct payload hook.
+    resource_flow:
+      consumes: [v3.hub.response_semantic]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-tool-markup-relay-attempt-context
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3HubRespChatProcess03Governed
+    caller_symbol: run_json_response_hooks
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+    callee_symbol: V3HubRelaySerializedToolContext::from_registry
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    status: anchored
+    binding_kind: adjacent_protocol_codec_helper
+    owner_feature_id: v3.anthropic_control_text_resp03
+    resource_flow:
+      consumes: [v3.hub.response_semantic]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: []
+      side_channel_writes: [v3.relay_response.tool_markup_context]
 - chain_id: v3.protocol_conversion_field_parity.outbound_helper_bindings
   owner_feature_id: v3.protocol_conversion_field_parity
   summary: Verification bindings for OpenAI, Anthropic, and Gemini outbound helper calls inside the existing Req07 to ProviderCompat06 adjacent codec edge; this chain does not add runtime nodes.
@@ -5436,6 +5528,36 @@ chains:
       - v3.error.chain
       side_channel_writes:
       - v3.debug.codex_sample_persist_queue
+  - step_id: v3-responses-direct-error-evidence-01
+    from_node: V3ProviderError
+    to_node: V3RuntimeProviderFailureObservation
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: build_v3_runtime_provider_failed_attempt_evidence_from_error
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.responses_direct_mvp_architecture
+    resource_flow:
+      consumes: [v3.provider.transport_request]
+      produces: [v3.runtime.responses_observability]
+      side_channel_reads: [v3.provider.transport_request]
+      side_channel_writes: [v3.runtime.responses_observability]
+  - step_id: v3-responses-direct-error-evidence-02
+    from_node: V3RuntimeProviderFailureObservation
+    to_node: V3ChatFailedAttemptEvidenceSerialized
+    caller_symbol: take_responses_direct_terminal_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+    callee_symbol: persist_v3_chat_failure_evidence_sources
+    callee_file: v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.error.raw_wire_evidence
+    resource_flow:
+      consumes: [v3.runtime.responses_observability]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.runtime.responses_observability]
+      side_channel_writes: [v3.debug.codex_sample_persist_queue]
   - step_id: v3-responses-relay-error-evidence-02
     from_node: V3ErrorEvidencePersistQueued
     to_node: V3ErrorEvidenceFlushOnTerminalFailure
@@ -6992,7 +7114,7 @@ chains:
     - step_id: v3-provider-action-gate-03
       from_node: V3Error05ExecutionDecision
       to_node: V3Error05RecoveryWitness
-      caller_symbol: run_v3_relay_provider_failure_policy
+      caller_symbol: run_v3_relay_provider_failure_policy_with_response_source
       caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_action_failure_in_scope
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -7031,24 +7153,20 @@ chains:
           - v3.error.provider_action_gate
     - step_id: v3-provider-action-gate-05
       from_node: V3Error05ExecutionDecision
-      to_node: V3ProviderActionGateTerminalAdmission
-      caller_symbol: run_v3_relay_provider_failure_policy
+      to_node: V3Error06ClientProjected
+      caller_symbol: run_v3_relay_provider_failure_policy_with_response_source
       caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_terminal_provider_projection_in_scope
+      callee_symbol: terminal_projection_for
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
         consumes:
           - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
         produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
+          - v3.error.client_projection
+        side_channel_reads: []
+        side_channel_writes: []
     - step_id: v3-provider-action-gate-06
       from_node: V3ProviderActionGateTerminalAdmission
       to_node: V3ProviderActionGateTerminalCommitted
@@ -7214,7 +7332,7 @@ chains:
       to_node: V3Error05ExecutionDecision
       caller_symbol: handle_v3_responses_relay_provider_failure
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-      callee_symbol: run_v3_relay_provider_failure_policy
+      callee_symbol: run_v3_relay_provider_failure_policy_with_response_source
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -8383,7 +8501,7 @@ chains:
   - step_id: v3-provider-global-probe-02-resume
     from_node: V3ServerProbeOwner
     to_node: V3ProviderGlobalProbeExecution
-    caller_symbol: AggregateProbeLifecycle::start
+    caller_symbol: AggregateProbeLifecycle::supervise
     caller_file: v3/crates/routecodex-v3-server/src/aggregate_probe_lifecycle.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle_resume
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
@@ -8397,6 +8515,8 @@ chains:
     semantic_contract:
       - The Server owner retains old task custody through cancellation and join, then synchronously registers the due-only Runtime owner before releasing reversible maintenance.
       - Preparation error, cancellation, drop and returned exec failure restore the retained runtime; terminal shutdown suppresses late restoration.
+      - Terminal supervisor exit cancels and joins every listener probe owner before aggregate shutdown or terminal exec preparation returns; a terminal notification alone is not a completed cleanup.
+      - Fault exit removes the completed handle and joins every surviving owner; registration failure drops only unspawned futures, so every supervisor return has no live detached child and never restores admission after terminal intent.
 
   - step_id: v3-provider-global-probe-02-quiesce
     from_node: V3ServerAggregateLifecycle
@@ -10325,8 +10445,8 @@ chains:
     producer: ErrorErr05ExecutionDecision
     legal_values: [retry, terminal_client_error]
     retry:
-      consumers: [ErrorErr06ClientProjected, RuntimeRetryLaunch, RuntimeAttemptCleanup, V3OperationRunnerNormalizeRequest]
-      effect: Error06 stages no client error; Runtime discards that empty result, releases failed attempt context through typed attempt_cleanup, and re-enters the request graph; RuntimeRequestFinalizer is not triggered
+      consumers: [RuntimeRetryLaunch, RuntimeAttemptCleanup, V3OperationRunnerNormalizeRequest]
+      effect: Error05 returns the recoverable decision without invoking Error06; Runtime releases only failed attempt context through typed attempt_cleanup and launches a new attempt outside the static graph; RuntimeRequestFinalizer is not triggered
     terminal_client_error:
       consumers: [ErrorErr06ClientProjected, RuntimeAttemptCleanup, RuntimeRequestFinalizer]
       effect: Error06 records internal failure evidence; Runtime terminates the affected transport through Server/SSE without committing a client error
@@ -10724,12 +10844,18 @@ chains:
   - step_id: v3-direct-sse-empty-attempt-01
     from_node: V3ProviderResp14Raw
     to_node: V3Error01SourceRaised
-    caller_symbol: collect_direct_sse_attempt_after_terminal_with_memory
+    caller_symbol: collect_direct_sse_attempt_after_terminal_with_hooks
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
-    callee_symbol: direct_sse_chunk_has_business_content
+    callee_symbol: direct_sse_frames_have_business_content
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
     status: anchored
     owner_feature_id: v3.provider_response_error_policy_closeout
+    whole_attempt_contract:
+      phase: after_all_declared_rewrites_before_terminal_seal
+      current_binding: post_rewrite_whole_attempt_public_blackbox_candidate
+      empty: ProviderFailure/provider_response_empty/internal_502
+      processing_failure: RuntimeFailure/internal_599
+      internal_followup: typed_servertool_followup_without_client_commit
     resource_flow:
       consumes: [v3.response.provider_raw, v3.sse.direct.full_attempt_buffer]
       produces: [v3.error.source]

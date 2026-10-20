@@ -431,6 +431,9 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3Req04StandardizedResponses
     identity: [requestId, endpoint]
+    semantic_contract:
+      control_provenance: typed_owner_not_business_key_spelling
+      opaque_names: business schema, arguments, results and extensions remain complete even when their names match typed control members
     allowed_writers: [V3Req04StandardizedResponses, V3HubReqInbound02Normalized]
     allowed_readers: [V3Router05RequestClassified, V3ResponsesDirect11Policy, V3HubReqChatProcess04Governed]
     forbidden_writers: [V3ProviderResp14Raw, V3Resp15ClientPayload, V3DebugArtifact]
@@ -688,6 +691,7 @@ resources:
     owner_node: V3DirectResp14ProviderCompat
     identity: [providerProtocol, modelId, compatibilityProfile]
     semantic_contract:
+      serialized_tools: the complete Direct response hook reads current request declarations together with the exact attempt namespace inverse; no declaration context is reconstructed from response text, metadata or logs
       namespace_inverse: the exact attempt wire binding restores only declared namespace identities or renamed plain names; original kind and business arguments remain provider content
       namespace_scope: context is request-local, is rebuilt for each retry attempt, and is released on completion, cancellation or exhaustion; it never grants undeclared calls or overwrites a non-null namespace
     allowed_writers: [V3DirectResponseCompatContext]
@@ -1114,11 +1118,34 @@ resources:
       tool_thinking_native_item_rule: protocol adapters preserve each complete native tool-call item, original native item, and exact parameter JSON bytes through RespInbound02 without inspecting auxiliary names
       tool_thinking_duplicate_key_rule: Resp03 alone performs duplicate-aware strict parsing over retained parameter bytes; generic Value decoding may not erase duplicate-key evidence before the owner
       tool_thinking_adapter_boundary: adapters may assemble protocol fragments and retain raw parameter bytes but may not classify, redact, restore custom shape, format reasoning, observe status, or project Tool-Thinking
+      serialized_tool_owner: Resp03 consumes the shared pure grammar and the typed exact-attempt declaration/identity context; complete recognized tools become native calls in source order, with candidate associations remapped only at this owner
+      serialized_tool_failure: recognized incomplete declared invocations discard the whole attempt even beside complete tools or prose; Relay internal code 500-231 and RuntimeFailure/internal599 enter existing Error02-05 health-neutral exact-attempt recovery, with actual upstream status retained separately
+      serialized_tool_preservation: native invalid model arguments, literal/unknown complete envelopes and opaque associations remain business content; no guessed identity or control state enters the payload
+      complete_attempt_admission: the Runtime marks a buffered complete provider attempt in the typed response hook profile; only that scope runs post-governance whole-attempt empty admission, never a transport keepalive, delta or terminal fragment alone
     allowed_writers: [V3HubRespInbound02Normalized, V3HubRespChatProcess03Governed]
     allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespOutbound05ClientSemantic]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3ServerRespOutbound06ClientFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.relay_response.tool_markup_context
+    resource_kind: side_channel
+    lifecycle: v3.hub_pipeline.v1
+    owner_feature_id: v3.anthropic_control_text_resp03
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubRespChatProcess03Governed
+    identity: [requestId, providerProtocol, toolWireName]
+    semantic_contract:
+      source: immutable exact-attempt NamespaceToolIdentityRegistry supplied by the existing request/outbound owner
+      content: parser declaration kinds, parameter encoding kinds and exact wire-name to client namespace/leaf association; no arguments or routing decisions
+      failure: typed UnharvestableToolMarkup reaches Runtime as internal code 500-231 and the existing Error graph, never as client payload state
+    allowed_writers: [V3HubRelaySerializedToolContext::from_registry]
+    allowed_readers: [V3HubRespChatProcess03Governed, govern_v3_hub_relay_response]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, payload_writer, sse_framer]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: buffered_attempt_response_governance_return
     binding_status: anchored
   - resource_id: v3.hub.tool_governance_truth
     resource_kind: side_channel
@@ -1262,7 +1289,7 @@ resources:
     semantic_contract:
       owner: ErrorErr05ExecutionDecision
       legal_values: [retry, terminal_client_error]
-      retry_rule: retry remains a typed control decision; the fixed Error graph still reaches Error06, which emits no error projection, RuntimeRetryLaunch consumes the decision and runs typed attempt_cleanup, then re-enters the request graph without client SSE commit and without RuntimeRequestFinalizer
+      retry_rule: recoverable retry/reselect decisions exit at Error05 without invoking Error06; RuntimeRetryLaunch consumes the decision and runs typed attempt_cleanup, then launches a new attempt outside the static graph without client SSE commit and without RuntimeRequestFinalizer
       terminal_rule: the legacy terminal_client_error value means terminal no-commit; Error06 retains internal diagnostic evidence only, Server consumes the typed transport outcome and ends the affected transport without error bytes or success completion; RuntimeAttemptCleanup releases attempt scope before RuntimeRequestFinalizer releases request scope
       payload_rule: this decision is typed control resource; it is never reconstructed from response payload or debug state
     allowed_writers: [build_v3_error_05_execution_decision_from_v3_error_04, execute_v3_operation_runner_error_err05_execution_decision, run_v3_error_02_to_05_decision_operators]
@@ -1300,6 +1327,7 @@ resources:
     lifecycle: v3.debug_error_foundation.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStateMutated
+    listener_scope: [serverId, bind, port]
     identity: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
     allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::cancel_provider_cooldown_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderSessionAvailabilityReader::availability, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
@@ -1313,6 +1341,7 @@ resources:
     owner_feature_id: v3.provider_key_health_model_granularity
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStore
+    listener_scope: [serverId, bind, port]
     identity: [providerId, interfaceId, authAlias, modelId]
     semantic_contract:
       score_baseline: every configured or unseen identity starts at score 100
@@ -1334,6 +1363,7 @@ resources:
     lifecycle: v3.provider_cooldown_rescue_probe
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderCooldownProbeState
+    listener_scope: [serverId, bind, port]
     identity: [providerId, interfaceId, authAlias, modelId]
     semantic_contract:
       score_baseline: every configured or unseen identity starts at score 100
@@ -1345,7 +1375,7 @@ resources:
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
       exhaustion_disposition: after one request-owned rescue pass, reselect from the captured candidates and return internal exhaustion if none is available; do not wait for future scheduled recovery or the attempt-store residence deadline
       healthy_rescue_initiation: immediately admit and poll an eligible guarded probe once before healthy later-tier commitment, then transfer pending work to the aggregate owner without awaiting DNS or transport completion
-      aggregate_probe_lifetime: one retained aggregate task polls due and transferred probes under shared bounded admission; shutdown and exec cancel and join it, and aggregate drop aborts it; cancellation releases matching ownership without recording a provider failure
+      aggregate_probe_lifetime: one aggregate supervisor retains a recovery owner per listener; each polls its own due and transferred probes; shutdown and exec cancel and join every owner, aggregate drop aborts all; cancellation releases matching ownership without recording a provider failure
       generation_state: rescueProbeAttempted remains attached to the providerId+authAlias+modelId cooldown block until an HTTP 2xx probe or matching 429-owned business success removes the block
       in_flight_rule: if another request owns a cooldown probe, this request skips the cooled candidate and continues to the selected later tier without waiting
       acquisition_ownership: active_probe is an optional opaque store-lifetime acquisition identity carried by the existing permit; only its matching owner may release it, independently of health generation
@@ -1401,9 +1431,10 @@ resources:
     lifecycle: v3.server.startup_and_provider_failure.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderGlobalCooldownPersistence
+    listener_scope: [serverId, bind, port]
     identity: [providerId, authAlias, modelId, failureClass, cooldownUntilMs, nextProbeAtMs]
     allowed_writers: [V3ProviderCooldownCoordinator::load, V3ProviderCooldownCoordinator::record_failure, V3ProviderCooldownCoordinator::replace_entries, V3ProviderCooldownCoordinator::persist]
-    allowed_readers: [V3ProviderHealthStore::from_manifest, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys_due]
+    allowed_readers: [V3ProviderHealthStore::from_manifest, V3ProviderHealthStore::from_manifest_for_listener, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys_due]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -2064,12 +2095,14 @@ resources:
     owner_node: V3RuntimeObservability
     identity: [requestId, entryProtocol, executionMode, routingGroupId, providerId, modelId]
     allowed_readers: [emit_v3_request_complete_console_line, emit_direct_sse_complete_console_lines, build_v3_route_selection_event_sink, build_v3_provider_failure_event_sink, emit_v3_request_route_hit_console_line_for_observability, emit_v3_provider_failure_console_event, emit_v3_provider_observability_console_lines, persist_v3_chat_failure_evidence, execute_v3_openai_chat_direct_server_outcome, persist_v3_chat_failure_evidence_sources]
-    allowed_writers: [build_v3_relay_observability_from_selected, build_v3_direct_runtime_observability, record_timing, handle_v3_responses_relay_provider_failure, handle_v3_responses_direct_provider_failure, handle_provider_failure, execute_v3_relay_runtime_core, execute_v3_direct_runtime_kernel_core, build_v3_runtime_provider_failure_observation_from_policy_event, build_v3_runtime_provider_failed_attempt_evidence_from_error, build_v3_runtime_provider_failed_attempt_evidence_from_response, build_v3_runtime_provider_failed_attempt_evidence_no_response]
+    allowed_writers: [build_v3_relay_observability_from_selected, build_v3_direct_runtime_observability, record_timing, handle_v3_responses_relay_provider_failure, handle_v3_responses_direct_provider_failure, handle_provider_failure, execute_v3_relay_runtime_core, execute_v3_direct_runtime_kernel_core, execute_v3_responses_direct_runtime_kernel_core, build_v3_runtime_provider_failure_observation_from_policy_event, build_v3_runtime_provider_failed_attempt_evidence_from_error, build_v3_runtime_provider_failed_attempt_evidence_from_response, build_v3_runtime_provider_failed_attempt_evidence_no_response]
     forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload, provider.wire_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
-    required_gates: [npm run verify:v3-resource-map]
+    required_gates:
+      - npm run verify:v3-resource-map
+      - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test issue885bb74_responses_failed_attempt_evidence -- --nocapture --test-threads=1
 
 
   - resource_id: v3.runtime.responses_timing_observability
@@ -3041,9 +3074,17 @@ resources:
     owner_node: V3CommittedClientSseBuilder
     identity: [requestId, attemptId, providerKey, protocol]
     allowed_writers: [V3CommittedClientSseBuilder::push, V3CommittedClientSseBuilder::seal, V3CommittedClientSseBuilder::drop, collect_direct_sse_attempt_after_terminal]
-    allowed_readers: [collect_direct_sse_attempt_after_terminal, V3CommittedClientSseStream, collapse_direct_client_sse_to_json]
+    allowed_readers: [collect_direct_sse_attempt_after_terminal, collect_direct_sse_attempt_after_terminal_with_memory, V3CommittedClientSseStream, collapse_direct_client_sse_to_json]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload, session.cache]
     must_pass_through: [V3ProviderResp14Raw, V3DirectResp14ProviderProjectionPrepared, Error01, Error03, Error04, Error05]
+    semantic_contract:
+      whole_attempt_admission: deliverability is checked across the complete buffered Direct SSE attempt after every registered response rewrite, including memory envelope stripping, and before terminal seal or client commit
+      blank_assistant_final: explicit assistant text that remains entirely whitespace across the complete attempt is internal 502 even with preceding reasoning; independent tools, refusal, content_filter and opaque business remain deliverable, and reasoning without an assistant final remains deliverable
+      empty_after_non_client_removal: if declared non-client envelope removal leaves no text, tool call, reasoning, refusal, or content_filter result, return ProviderFailure/provider_response_empty as internal 502 into Error01
+      representable_business_failure: if a real representable business result is lost, corrupted, or rejected during rewrite, projection, or framing, return RuntimeFailure/internal 599 into Error01 instead of upstream blame or an empty success
+      unharvestable_tool_markup: recognized attempted tool markup that cannot be represented as a complete native call rejects the entire attempt through the registered Direct response hook and existing typed response-processing Error recovery, even with visible prose; no control flag enters the payload
+      recovery_identity: this Direct boundary emits only V3DirectResp14UnharvestableToolMarkup internal code 500-211; Relay Resp03 separately emits 500-231. Error02-05 owns their exact typed eligibility, candidate exclusion and exhaustion, keeping internal599 separate from the actual upstream status
+      preservation_rule: tool-call-only, reasoning, refusal, content_filter, and visible text remain deliverable without semantic judgment
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -3547,8 +3588,13 @@ resources:
       producer: govern_v3_operation_runner_chat_response
       legal_values: [client_commit, servertool_followup]
       graph_rule: every response node runs once in fixed order; the disposition never changes graph topology or skips a node
-      client_commit_effect: RuntimeClientCommit may submit the staged client-frame-candidate only after the graph returns and this typed value is client_commit
-      servertool_effect: inverse and frame staging produce an empty candidate for servertool_followup; Runtime discards it, executes the declared sidecar, and re-enters the request graph
+      whole_attempt_rule: business deliverability is checked after every declared Direct or Relay response rewrite, across the complete attempt, without usage/output-token or last-frame inference
+      client_commit_effect: after all declared rewrites, the complete attempt must retain deliverable business content; RuntimeClientCommit may submit the staged client-frame-candidate only after the graph returns and this typed value is client_commit
+      empty_attempt_effect: if only a deliberately removed non-client control envelope remains after all declared rewrites, no frame is committed and ProviderFailure/provider_response_empty enters Error01 as internal 502
+      processing_failure_effect: loss or failure of representable business content during rewrite, inverse projection, or framing enters Error01 as RuntimeFailure/internal 599 instead of upstream blame or partial success
+      business_content_rule: ordinary text, tool-call-only, reasoning, refusal, and content_filter are deliverable business results
+      blank_assistant_final: an explicit whitespace-only assistant final without independent business invalidates the complete attempt even with earlier reasoning; drop the candidate and enter Error01 with internal 502 for declared reselection
+      servertool_effect: inverse and frame staging produce an empty candidate for servertool_followup; Runtime discards it, executes the declared typed sidecar plan, and re-enters the request graph without client commit
       retry_rule: retry is owned by ErrorErr05ExecutionDecision through v3.error.execution_decision, not by Resp03
       cancel_rule: cancellation is owned by RuntimeCancellation, not produced by Resp03
       finalization: client_commit reaches RuntimeClientCommit and then RuntimeRequestFinalizer; terminal_client_error_cancel_and_disconnect run typed attempt_cleanup before RuntimeRequestFinalizer; servertool_followup runs RuntimeInternalFollowup, typed attempt_cleanup, and re-enters the request graph without request-scoped finalization
@@ -3586,7 +3632,11 @@ resources:
     identity: [requestId, successfulAttemptId, entryProtocol, frameSequence]
     semantic_contract:
       staging_only: this resource is a staged candidate produced by the fixed response graph; it is never written directly to a client body
-      committer: RuntimeClientCommit alone submits the staged candidate to Server/SSE after the graph returns and execution_disposition=client_commit
+      committer: RuntimeClientCommit alone submits the staged candidate to Server/SSE after all declared rewrites leave deliverable whole-attempt business content and execution_disposition=client_commit
+      deliverable_rule: ordinary text, tool-call-only, reasoning, refusal, and content_filter are business results; usage and the last frame alone do not establish deliverability
+      blank_assistant_final: do not commit an explicit whitespace-only assistant final solely because earlier reasoning exists; preserve independent business results and reasoning-only attempts without an assistant final
+      empty_attempt_rule: no candidate is committed when the complete attempt is empty after declared non-client envelope removal; ProviderFailure/provider_response_empty enters Error01 as internal 502
+      processing_failure_rule: loss or failure of representable business content enters Error01 as RuntimeFailure/internal 599, not as client success or upstream failure
       servertool_rule: RespOutbound and frame staging return an empty candidate for servertool_followup; Runtime discards it and re-enters the request graph
       terminal_rule: terminal failures produce no client frame candidate; Runtime consumes the typed no-commit decision and Server/SSE aborts the affected transport
       client_communication_owner: Server/SSE owns actual HTTP/WebSocket/SSE framing and final delivery; graph nodes do not communicate with the client
@@ -3629,8 +3679,8 @@ resources:
     identity: [requestId, decision, status, code, errorNode]
     semantic_contract:
       staging_only: this legacy-named resource carries internal error evidence only; it never contains a model-client error candidate
-      retry_rule: Error06 always runs but returns an empty candidate for retry; Runtime discards it and re-enters the request graph
-      terminal_rule: the legacy terminal_client_error decision means terminal no-commit; Runtime consumes the typed outcome, Server/SSE aborts the affected transport, and typed cleanup releases attempt and request scopes
+      retry_rule: recoverable retry/reselect decisions exit at Error05 without invoking Error06; RuntimeRetryLaunch performs typed attempt_cleanup and launches a new attempt outside the static graph
+      terminal_rule: only the terminal_client_error decision invokes Error06 to record this internal evidence; Runtime consumes the typed outcome, Server/SSE aborts the affected transport, and typed cleanup releases attempt and request scopes
       committer: Runtime consumes internal evidence only; Server/SSE receives successful business data or typed no-response intent, never an error payload
     allowed_writers: [ErrorErr06ClientProjected, build_v3_error_06_client_projected_from_v3_error_05]
     allowed_readers: [runtime_client_commit]
@@ -3638,7 +3688,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    release_point: runtime_client_commit_for_terminal_projection; attempt_cleanup_for_terminal_projection_before_request_finalizer; empty_retry_candidate_released_by_attempt_cleanup_before_request_reentry
+    release_point: attempt_cleanup_for_terminal_projection_before_request_finalizer; recoverable_attempt_cleanup_before_external_new_attempt; never_runtime_client_commit
     binding_status: design_pending
 
   - resource_id: v3.operation_runner.metadata_center_control

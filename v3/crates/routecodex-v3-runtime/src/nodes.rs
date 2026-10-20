@@ -290,11 +290,6 @@ pub struct V3Resp15ClientPayload {
 pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
     raw: V3Server03HttpRequestRaw,
 ) -> Result<V3Req04StandardizedResponses, String> {
-    if let Some(key) = crate::hub_v1::find_v3_hub_side_channel_key(&raw.body) {
-        return Err(format!(
-            "RouteCodex side-channel field {key} cannot enter request payload"
-        ));
-    }
     let mut body = raw.body;
     match body.get("previous_response_id") {
         None | Some(Value::Null) => None,
@@ -331,11 +326,6 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
 pub fn build_v3_chat_req_04_standardized_from_v3_server_03(
     raw: V3Server03HttpRequestRaw,
 ) -> Result<V3Req04StandardizedChat, String> {
-    if let Some(key) = crate::hub_v1::find_v3_hub_side_channel_key(&raw.body) {
-        return Err(format!(
-            "RouteCodex side-channel field {key} cannot enter request payload"
-        ));
-    }
     let mut body = raw.body;
     if body.get("messages").and_then(Value::as_array).is_none() {
         return Err("Chat request payload must contain a messages array".to_string());

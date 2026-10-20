@@ -295,6 +295,7 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
     pub(crate) error_operator_fault: Option<V3RelayErrorOperatorFault>,
     pub(crate) failed_attempt_evidence: Option<Arc<V3RuntimeProviderFailedAttemptEvidence>>,
     pub(crate) matched_policy: Option<V3ProviderFailureDirective>,
+    pub(crate) response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
 }
 
 impl From<V3RelayErrorOperatorFault> for V3ResponsesRelayProviderFailure {
@@ -312,6 +313,7 @@ impl From<V3RelayErrorOperatorFault> for V3ResponsesRelayProviderFailure {
             error_operator_fault: Some(fault),
             failed_attempt_evidence: None,
             matched_policy: None,
+            response_processing_code: None,
         }
     }
 }
@@ -890,7 +892,6 @@ impl V3LiveSnapProviderSnapshotRecorder {
             V3ProviderError::InvalidWireBody { request_id }
             | V3ProviderError::InvalidStreamIntent { request_id }
             | V3ProviderError::InvalidDataImage { request_id, .. }
-            | V3ProviderError::ControlFieldInWireBody { request_id, .. }
             | V3ProviderError::NamespaceToolFlattenFailed { request_id, .. }
             | V3ProviderError::FunctionToolShapeFailed { request_id, .. } => {
                 self.record_transport_provider_error(attempt, request_id, "unknown", error)

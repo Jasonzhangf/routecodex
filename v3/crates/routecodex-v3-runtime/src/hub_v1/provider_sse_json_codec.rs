@@ -868,13 +868,6 @@ pub(crate) fn record_v3_provider_sse_json_frame(
     let Some(event) = parse_v3_provider_sse_json_data(&data)? else {
         return Ok(());
     };
-    if let Some(field) =
-        routecodex_v3_provider_responses::find_v3_routecodex_control_payload_key(&event)
-    {
-        return Err(format!(
-            "provider SSE event carries RouteCodex control payload key {field:?}"
-        ));
-    }
     stream_observation.record_provider_event_json(&event)
 }
 
