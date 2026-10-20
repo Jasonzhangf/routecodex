@@ -1995,6 +1995,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/message_encoding.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/namespace_tool_names.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/reasoning_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
@@ -2660,6 +2661,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec/chat_extension_merge.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec/tool_output.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
@@ -2685,6 +2687,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/reasoning_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/namespace_tool_names.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
@@ -2833,6 +2836,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec/chat_extension_merge.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
@@ -2854,6 +2858,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/reasoning_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs

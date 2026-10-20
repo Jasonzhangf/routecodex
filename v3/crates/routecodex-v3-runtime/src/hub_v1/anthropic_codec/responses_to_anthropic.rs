@@ -1,5 +1,9 @@
 use super::super::responses_openai_codec::{responses_image_url, responses_tool_output_content};
 use super::namespace_tool_names::anthropic_tool_call_wire_name;
+use super::reasoning_projection::{
+    chat_message_reasoning_as_anthropic_content,
+    project_v3_responses_reasoning_item_as_anthropic_content,
+};
 use super::*;
 
 pub(super) fn responses_system_as_anthropic_system(value: &Value) -> Option<String> {
@@ -96,29 +100,7 @@ pub(super) fn chat_messages_as_anthropic_messages(
             continue;
         }
         let mut content = Vec::new();
-        if let Some(reasoning_content) = object.get("reasoning_content") {
-            if let Some(reasoning_content) = reasoning_content.as_str() {
-                if !reasoning_content.is_empty() {
-                    let mut thinking_block = json!({
-                        "type":"thinking",
-                        "thinking":reasoning_content
-                    });
-                    // Restore the Anthropic thinking `signature` from the opaque
-                    // business association captured while folding the Responses
-                    // reasoning item into the canonical Chat message. Absent
-                    // stays absent; present-empty and non-empty pass through
-                    // unchanged.
-                    if let Some(signature) = chat_reasoning_encrypted_content(object) {
-                        thinking_block["signature"] = Value::String(signature.to_string());
-                    }
-                    content.push(thinking_block);
-                }
-            } else if !reasoning_content.is_null() {
-                return Err(V3AnthropicCodecError::MalformedField {
-                    field: "reasoning_content",
-                });
-            }
-        }
+        content.extend(chat_message_reasoning_as_anthropic_content(object)?);
         content.extend(responses_content_as_anthropic_content(
             object.get("content"),
         )?);
@@ -136,14 +118,6 @@ pub(super) fn chat_messages_as_anthropic_messages(
         }));
     }
     Ok(output)
-}
-
-fn chat_reasoning_encrypted_content(object: &Map<String, Value>) -> Option<&str> {
-    object
-        .get("routecodex_chat_extension")
-        .and_then(Value::as_object)
-        .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
-        .and_then(Value::as_str)
 }
 
 pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(
@@ -498,107 +472,6 @@ fn responses_tool_result_is_error(status: Option<&Value>) -> Result<bool, V3Anth
             })
         }
     })
-}
-
-pub(crate) fn project_v3_responses_reasoning_item_as_anthropic_content(
-    item: &Value,
-) -> Result<Value, V3AnthropicCodecError> {
-    let object = item
-        .as_object()
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "reasoning item",
-        })?;
-    let content_text =
-        responses_reasoning_text_entries(object.get("content"), &["reasoning_text"])?;
-    let summary_text = responses_reasoning_text_entries(object.get("summary"), &["summary_text"])?;
-    if !content_text.is_empty() && !summary_text.is_empty() {
-        return Err(V3AnthropicCodecError::MalformedField {
-            field: "reasoning item",
-        });
-    }
-    let thinking = if !content_text.is_empty() {
-        content_text.join("\n\n")
-    } else {
-        summary_text.join("\n\n")
-    };
-    let encrypted_content = match object.get("encrypted_content") {
-        None | Some(Value::Null) => None,
-        Some(value) => {
-            let value = value
-                .as_str()
-                .ok_or(V3AnthropicCodecError::MalformedField {
-                    field: "reasoning item",
-                })?;
-            if value.trim().is_empty() {
-                return Err(V3AnthropicCodecError::MalformedField {
-                    field: "reasoning item",
-                });
-            }
-            Some(value)
-        }
-    };
-    if !thinking.is_empty() {
-        let mut block = json!({
-            "type":"thinking",
-            "thinking":thinking
-        });
-        if let Some(signature) = encrypted_content {
-            block["signature"] = Value::String(signature.to_string());
-        }
-        return Ok(block);
-    }
-    if let Some(data) = encrypted_content {
-        return Ok(json!({
-            "type":"redacted_thinking",
-            "data":data
-        }));
-    }
-    Err(V3AnthropicCodecError::MalformedField {
-        field: "reasoning item",
-    })
-}
-
-pub(super) fn responses_reasoning_text_entries(
-    value: Option<&Value>,
-    accepted_types: &[&str],
-) -> Result<Vec<String>, V3AnthropicCodecError> {
-    let Some(value) = value else {
-        return Ok(Vec::new());
-    };
-    if value.is_null() {
-        return Ok(Vec::new());
-    }
-    let entries = value
-        .as_array()
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "reasoning item",
-        })?;
-    let mut text = Vec::new();
-    for entry in entries {
-        let object = entry
-            .as_object()
-            .ok_or(V3AnthropicCodecError::MalformedField {
-                field: "reasoning item",
-            })?;
-        if !accepted_types
-            .iter()
-            .any(|accepted| object.get("type").and_then(Value::as_str) == Some(*accepted))
-        {
-            return Err(V3AnthropicCodecError::MalformedField {
-                field: "reasoning item",
-            });
-        }
-        let value = object
-            .get("text")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or(V3AnthropicCodecError::MalformedField {
-                field: "reasoning item",
-            })?;
-        text.push(value.to_string());
-    }
-    Ok(text)
 }
 
 pub(super) fn responses_web_search_call_as_anthropic_server_tool_history(
