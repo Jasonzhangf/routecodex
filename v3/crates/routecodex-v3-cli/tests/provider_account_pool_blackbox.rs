@@ -24,6 +24,7 @@ static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 #[derive(Clone)]
 struct RecoveryPeer {
     business: Arc<AtomicUsize>,
+    sibling_business: Arc<AtomicUsize>,
     probe_body: Arc<Mutex<String>>,
     receipts: mpsc::UnboundedSender<Value>,
 }
@@ -33,6 +34,15 @@ async fn recovery_peer(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
+    if headers.get("authorization").unwrap() == "Bearer pool-key-02" {
+        peer.sibling_business
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error":{"type":"server_error","message":"eligible sibling unavailable"}})),
+        )
+            .into_response();
+    }
     assert_eq!(headers.get("authorization").unwrap(), "Bearer pool-key-01");
     assert_eq!(body["model"], "wire-pool-model");
     if body.pointer("/messages/0/content") == Some(&json!("Reply exactly OK. Do not call tools.")) {
@@ -73,8 +83,10 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let probe_body = Arc::new(Mutex::new("data: [DONE]\n\n".to_string()));
     let business = Arc::new(AtomicUsize::new(0));
+    let sibling_business = Arc::new(AtomicUsize::new(0));
     let peer = RecoveryPeer {
         business: business.clone(),
+        sibling_business: sibling_business.clone(),
         probe_body: probe_body.clone(),
         receipts: tx,
     };
@@ -97,7 +109,7 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
         .unwrap()
         .auth
         .entries
-        .truncate(1);
+        .truncate(2);
     for pool in config
         .route_groups
         .get_mut("default")
@@ -105,7 +117,9 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
         .pools
         .values_mut()
     {
-        pool.targets.truncate(1);
+        pool.targets.truncate(2);
+        pool.targets[0].priority = Some(10);
+        pool.targets[1].priority = Some(1);
     }
     let server = spawn_v3_server_aggregate(config).await.unwrap();
     let base = format!("http://{}", server.listeners[0].addr);
@@ -113,10 +127,12 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
         .timeout(Duration::from_secs(30))
         .build()
         .unwrap();
+    let mut routed_request = request(false);
+    routed_request["model"] = json!("router");
     for number in 1..=3 {
         let reply = client
             .post(format!("{base}/v1/responses"))
-            .json(&request(false))
+            .json(&routed_request)
             .send()
             .await;
         if let Ok(reply) = reply {
@@ -134,6 +150,7 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
         if number < 3 {
             assert_eq!(pool["entries"], json!([]), "429 {number} must not cool");
         } else {
+            assert_eq!(pool["entries"].as_array().unwrap().len(), 1);
             assert!(pool["entries"]
                 .as_array()
                 .unwrap()
@@ -144,6 +161,10 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
         }
     }
     assert_eq!(business.load(std::sync::atomic::Ordering::SeqCst), 3);
+    assert_eq!(
+        sibling_business.load(std::sync::atomic::Ordering::SeqCst),
+        3
+    );
     // Recovery is scheduled automatically after the third business 429.
     // A nonterminal 2xx SSE response is sufficient, regardless of its body.
     tokio::time::timeout(Duration::from_secs(15), rx.recv())
@@ -170,7 +191,7 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
     .expect("HTTP 2xx probe must restore identity");
     let reply = client
         .post(format!("{base}/v1/responses"))
-        .json(&request(false))
+        .json(&routed_request)
         .send()
         .await
         .unwrap();
@@ -180,6 +201,10 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
     );
     assert_eq!(reply.json::<Value>().await.unwrap()["status"], "completed");
     assert_eq!(business.load(std::sync::atomic::Ordering::SeqCst), 4);
+    assert_eq!(
+        sibling_business.load(std::sync::atomic::Ordering::SeqCst),
+        3
+    );
     server.shutdown().await;
     peer_task.abort();
 }
