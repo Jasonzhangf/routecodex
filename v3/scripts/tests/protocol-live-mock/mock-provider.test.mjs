@@ -125,7 +125,12 @@ function observeScriptPrefix(url, body, expectedPrefix, timeoutMs = 2000) {
 }
 
 function firstRawFrame(script) {
-  const raw = script.sse_events?.[0]?.raw;
+  const event = script.sse_events?.[0];
+  const raw = event?.raw ?? (event
+    ? `${event.event ? `event: ${event.event}\n` : ''}data: ${
+      typeof event.data === 'string' ? event.data : JSON.stringify(event.data)
+    }\n\n`
+    : undefined);
   assert.equal(typeof raw, 'string', 'hold-open path smoke requires its actual raw prefix');
   const boundary = raw.indexOf('\n\n');
   assert.ok(boundary >= 0, 'hold-open script must contain a complete initial SSE frame');
@@ -302,6 +307,42 @@ test('reset destroys the transport and hold-open stays open until close()', asyn
   assert.notEqual(await pending, 'end');
 });
 
+test('controlled hold releases the same captured response exactly once', async (t) => {
+  const server = await startMockProvider();
+  t.after(() => server.close());
+  server.setActiveCase({
+    case_id: 'controlled-hold-case',
+    cell: { provider_protocol: 'openai_chat' },
+    upstream_response: {
+      protocol: 'openai_chat',
+      mode: 'fault',
+      status: 200,
+      content_type: 'text/event-stream',
+      fault: 'hold-open-controlled',
+      attempts: [{
+        kind: 'fault',
+        fault: 'hold-open-controlled',
+        sse_events: [
+          { data: { id: 'held', choices: [{ delta: { content: 'held' } }] } },
+          { data: '[DONE]' },
+        ],
+      }],
+    },
+  });
+  const pending = postJson(`${server.url}/v1/chat/completions`, { stream: true });
+  await server.waitForHeld('controlled-hold-case', 1000);
+  assert.equal(server.getCaptures('controlled-hold-case').length, 1);
+  assert.equal(server.getCaptures('controlled-hold-case')[0].attempt_kind, 'business');
+  assert.equal(await server.releaseHeld('controlled-hold-case'), 1);
+  const released = await pending;
+  assert.equal(released.status, 200);
+  assert.match(released.bodyText, /"content":"held"/);
+  assert.ok(released.bodyText.endsWith('data: [DONE]\n\n'));
+  assert.equal(released.ended, true);
+  assert.equal(await server.releaseHeld('controlled-hold-case'), 0);
+  assert.equal(server.getCaptures('controlled-hold-case').length, 1);
+});
+
 test('multi-turn fixtures switch scripts by turn and reset the per-turn attempt index', async (t) => {
   const server = await startMockProvider();
   t.after(() => server.close());
@@ -411,6 +452,40 @@ test('executes real corpus fault, [DONE], attempts, and multi-turn scripts', asy
   assert.deepEqual(secondTurn.json, followupCase.turns[1].upstream_response.body);
 });
 
+test('advanceTurnAfterResponse moves a real client to its follow-up turn atomically', async (t) => {
+  const server = await startMockProvider();
+  t.after(() => server.close());
+  const multiTurn = fixture({
+    case_id: 'atomic-turn-transition',
+    turns: [
+      {
+        upstream_response: {
+          protocol: 'openai_chat',
+          mode: 'json',
+          status: 200,
+          content_type: 'application/json',
+          body: { turn: 'tool-call' },
+        },
+      },
+      {
+        upstream_response: {
+          protocol: 'openai_chat',
+          mode: 'json',
+          status: 200,
+          content_type: 'application/json',
+          body: { turn: 'follow-up' },
+        },
+      },
+    ],
+  });
+  server.setActiveCase(multiTurn, 0);
+  server.advanceTurnAfterResponse(multiTurn.case_id, 0, 1);
+  const url = `${server.url}/v1/chat/completions`;
+  assert.deepEqual((await postJson(url, { request: 1 })).json, { turn: 'tool-call' });
+  assert.deepEqual((await postJson(url, { request: 2 })).json, { turn: 'follow-up' });
+  assert.deepEqual(server.getCaptures(multiTurn.case_id).map((capture) => capture.turn), [0, 1]);
+});
+
 test('every real corpus provider path is served by the mock', async (t) => {
   const manifest = JSON.parse(readFileSync(join(caseRoot, '..', 'manifest.json'), 'utf8'));
   const server = await startMockProvider();
@@ -420,10 +495,13 @@ test('every real corpus provider path is served by the mock', async (t) => {
     server.setActiveCase(corpusCase);
     const providerPath = corpusCase.expected_provider.paths[0];
     const script = corpusCase.upstream_response;
-    const heldOpen = script.fault === 'hold-open';
+    const controlledAttempt = script.attempts?.[0];
+    const frameScript = controlledAttempt?.fault === 'hold-open-controlled' ? controlledAttempt : script;
+    const heldOpen = script.fault === 'hold-open' || script.fault === 'hold-open-controlled';
     const result = heldOpen
-      ? await observeScriptPrefix(`${server.url}${providerPath}`, { smoke: caseId }, firstRawFrame(script))
+      ? await observeScriptPrefix(`${server.url}${providerPath}`, { smoke: caseId }, firstRawFrame(frameScript))
       : await postJson(`${server.url}${providerPath}`, { smoke: caseId });
+    if (script.fault === 'hold-open-controlled') await server.releaseHeld(caseId);
     assert.ok(result.status >= 200 && result.status < 600, `${caseId} got status ${result.status} for ${providerPath}`);
     if (heldOpen) {
       assert.equal(result.status, script.status);

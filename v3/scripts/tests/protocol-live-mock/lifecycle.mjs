@@ -53,7 +53,9 @@ export async function startRcc(binary, generated, rccPort, report = {}, options 
     ...(options.env ?? {}),
   };
   const declaredListeners = declaredListenerSet(generated, host, port);
-  const child = spawn(binary, ['server', 'start', '--foreground', '--config', generated.path], {
+  const spawnArgs = ['server', 'start', '--foreground', '--config', generated.path];
+  if (options.snapshotAll === true) spawnArgs.push('--snapall');
+  const child = spawn(binary, spawnArgs, {
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -97,6 +99,7 @@ export async function startRcc(binary, generated, rccPort, report = {}, options 
     child,
     pid: child.pid ?? null,
     binary,
+    start_args: [...spawnArgs],
     config_path: generated.path,
     home: generated.home,
     state_root: generated.state,

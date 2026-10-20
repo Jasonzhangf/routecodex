@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { collectExecutionModeEvidence, runCase } from './case-runner.mjs';
+import {
+  REQUIRED_EXECUTION_MODES,
+  collectExecutionModeEvidence,
+  runCase,
+} from './case-runner.mjs';
+import { CURRENT_CODEX_EXEC_COMMAND_DESCRIPTION } from './codex-exec-consumer.mjs';
 import { applyExecutionModeAcceptance, collectCaseExecutionModeEvidence } from '../v3-protocol-live-mock-matrix.mjs';
 import {
   createMock,
@@ -30,6 +35,179 @@ test('required mode collector exception fails acceptance and preserves prior bus
 function loadCase(id) {
   return JSON.parse(readFileSync(new URL(`${id}.json`, caseRoot), 'utf8'));
 }
+
+test('all Codex replay fixtures require explicit relay execution mode', () => {
+  for (const caseId of [
+    'issue-3192e71-codex-integer-positive',
+    'issue-3192e71-fractional-negative',
+    'issue-3192e71-user-schema-negative',
+    'issue-3192e71-duplicate-keys-negative',
+    'issue-3192e71-over-safe-int-negative',
+    'issue-3192e71-nested-extra-negative',
+    'issue-3192e71-missing-optional-preserved',
+    'issue-57c0176-singular-tool-call-text',
+  ]) {
+    assert.equal(REQUIRED_EXECUTION_MODES[caseId], 'relay', caseId);
+  }
+});
+
+test('runCase dispatches codex-real-exec through the injected real-client executor without sendHttp', async () => {
+  const root = tempEvidenceRoot();
+  const fixture = loadCase('issue-3192e71-codex-integer-positive');
+  const runRoot = join(root, 'codex-real-exec');
+  const workdir = join(runRoot, 'workdir');
+  mkdirSync(workdir, { recursive: true });
+  const output = `${workdir}\n`;
+  const functionCallOutput = [
+    'Chunk ID: a3c03a',
+    'Wall time: 0.0000 seconds',
+    'Process exited with code 0',
+    'Original token count: 512',
+    'Output:',
+    output,
+  ].join('\n');
+  const sampleRoot = join(root, 'home', '.rcc', 'codex-samples');
+  const sampleDir = join(sampleRoot, 'openai-responses', 'ports', '12345', 'req-followup');
+  mkdirSync(sampleDir, { recursive: true });
+  writeFileSync(join(sampleDir, 'request.json'), `${JSON.stringify({
+    model: 'mock.chat-model',
+    stream: true,
+    input: [
+      {
+        type: 'function_call',
+        call_id: 'call_int_1',
+        name: 'exec_command',
+        arguments: fixture.tool_followup.expected_arguments,
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_int_1',
+        output: functionCallOutput,
+      },
+    ],
+  }, null, 2)}\n`);
+  const expectedArguments = fixture.tool_followup.expected_arguments;
+  const parameters = structuredClone(fixture.client_request.body.tools[0].parameters);
+  parameters.properties.max_output_tokens.type = 'integer';
+  parameters.properties.yield_time_ms.type = 'integer';
+  const captures = [];
+  const mock = {
+    setActiveCase() {},
+    setTurn() {},
+    advanceTurnAfterResponse() {},
+    getCaptures() { return captures; },
+  };
+  const codexExecutor = async () => {
+    captures.push(
+      {
+        attempt_kind: 'business',
+        turn: 0,
+        path: '/v1/chat/completions',
+        method: 'POST',
+        raw_body: '{}',
+        headers: { authorization: TEST_PROVIDER_AUTH },
+        captured_at_epoch_ms: 10,
+        body: {
+          model: 'chat-model',
+          messages: [{ role: 'user', content: 'run pwd' }],
+          tools: [{
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              description: CURRENT_CODEX_EXEC_COMMAND_DESCRIPTION,
+              parameters,
+            },
+          }],
+          stream: true,
+        },
+      },
+      {
+        attempt_kind: 'business',
+        turn: 1,
+        path: '/v1/chat/completions',
+        method: 'POST',
+        raw_body: '{}',
+        headers: { authorization: TEST_PROVIDER_AUTH },
+        captured_at_epoch_ms: 20,
+        body: {
+          model: 'chat-model',
+          messages: [
+            { role: 'user', content: 'run pwd' },
+            {
+              role: 'assistant',
+              tool_calls: [{
+                id: 'call_int_1',
+                type: 'function',
+                function: { name: 'exec_command', arguments: expectedArguments },
+              }],
+            },
+            { role: 'tool', tool_call_id: 'call_int_1', content: functionCallOutput },
+          ],
+          stream: true,
+        },
+      },
+    );
+    return {
+      child_pid: 5151,
+      stdout: [
+        {
+          type: 'item.completed',
+          item: {
+            type: 'command_execution',
+            command: 'pwd',
+            aggregated_output: output,
+            exit_code: 0,
+            status: 'completed',
+          },
+        },
+        {
+          type: 'item.completed',
+          item: {
+            type: 'agent_message',
+            text: 'done',
+          },
+        },
+        { type: 'turn.completed' },
+      ].map((event) => JSON.stringify(event)).join('\n').concat('\n'),
+      stderr: '',
+      exit_code: 0,
+      signal: null,
+      timed_out: false,
+      binary: 'fake-codex',
+      args: ['exec'],
+      workdir,
+      codex_home: join(runRoot, 'codex-home'),
+      config_path: join(runRoot, 'codex-home', 'config.toml'),
+      prompt_path: join(runRoot, 'prompt.txt'),
+      stdout_path: join(runRoot, 'codex-exec.stdout.jsonl'),
+      stderr_path: join(runRoot, 'codex-exec.stderr.log'),
+    };
+  };
+
+  try {
+    const report = await runCase({
+      fixture,
+      mock,
+      rccUrl: 'http://127.0.0.1:1',
+      evidenceRoot: root,
+      codexExecutor,
+      sampleRoot,
+      listenerPort: 12345,
+    });
+    assert.equal(report.status, 'passed', report.diagnostic);
+    assert.equal(report.classification, 'pass');
+    assert.equal(report.turn_attempts.length, 2);
+    assert.ok(report.turn_attempts.every((attempt) => attempt.source === 'codex-real-exec'));
+    assert.ok(report.turn_results.every((turn) => turn.request_source === 'codex-real-exec'));
+    assert.equal(report.observations.live[0].kind, 'turn');
+    assert.equal(report.observations.live.at(-1).kind, 'codex_real_execution');
+    assert.equal(report.observations.live.at(-1).ok, true);
+    assert.equal(report.observations.live.at(-1).final_client.text, 'done');
+    assert.ok(report.evidence_refs.some((ref) => ref.endsWith('codex-exec.receipt.json')));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('runCase passes a single-turn case through the supplied real HTTP adapter and writes raw evidence', async () => {
   const root = tempEvidenceRoot();

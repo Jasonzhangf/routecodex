@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // CLI glue only. Protocol behavior, assertions and evidence have one helper owner.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -15,6 +17,11 @@ import {
   captureRuntimeIdentity, generateRccConfig, sendHttp, startRcc, stopRcc,
 } from './protocol-live-mock/lifecycle.mjs';
 import { collectExecutionModeEvidence, REQUIRED_EXECUTION_MODES, runCase } from './protocol-live-mock/case-runner.mjs';
+import {
+  collectProviderConcurrencyEvidence,
+  isProviderConcurrencyReplay,
+  runProviderConcurrencyReplay,
+} from './protocol-live-mock/provider-concurrency.mjs';
 import { finalizeReport, renderMarkdown } from './protocol-live-mock/report.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -196,14 +203,24 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
           stderr: check.stderr, error: check.error ? { message: check.error.message, code: check.error.code } : null };
         if (check.error || check.status !== 0) throw new Error('config check failed: ' + JSON.stringify(setup.config_check));
         phase = 'rcc_start';
-        rcc = await startRcc(binary, generated, rccPort, setup, { startupTimeoutMs: options.startupTimeoutMs });
+        rcc = await startRcc(binary, generated, rccPort, setup, {
+          startupTimeoutMs: options.startupTimeoutMs,
+          snapshotAll: isProviderConcurrencyReplay(fixture),
+        });
         if (!rcc.ready) throw new Error(setup.infra_failure?.diagnostic ?? 'RCC did not become ready');
         setup.health = rcc.health;
         phase = 'run_case';
-        entry = await runCase({
-          fixture, mock, rccUrl: 'http://127.0.0.1:' + rccPort, sendHttp,
-          evidenceRoot: caseRoot, timeoutMs: options.requestTimeoutMs,
-        });
+        entry = isProviderConcurrencyReplay(fixture)
+          ? await runProviderConcurrencyReplay({
+            fixture, mock, rccUrl: 'http://127.0.0.1:' + rccPort, sendHttp,
+            evidenceRoot: caseRoot, timeoutMs: options.requestTimeoutMs,
+          })
+          : await runCase({
+            fixture, mock, rccUrl: 'http://127.0.0.1:' + rccPort, sendHttp,
+            evidenceRoot: caseRoot, timeoutMs: options.requestTimeoutMs,
+            sampleRoot: join(generated.home, '.rcc', 'codex-samples'),
+            listenerPort: rccPort,
+          });
         if (entry.status === 'infra_failure') haltReason = 'case infrastructure failed: ' + entry.diagnostic;
       }
     } catch (error) {
@@ -234,18 +251,46 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
         } catch (error) {
           captureError = error.message;
         }
-        entry.execution_mode = collectCaseExecutionModeEvidence({
+        const storePath = generated
+          ? join(generated.root, 'logs', `server-v3-${generated.rcc_port}.request-records.jsonl`)
+          : null;
+        const sourceSampleRoot = generated ? join(generated.home, '.rcc', 'codex-samples') : null;
+        const retainedSampleRoot = generated ? join(caseRoot, 'codex-samples') : null;
+        if (sourceSampleRoot && retainedSampleRoot && existsSync(sourceSampleRoot)) {
+          try {
+            cpSync(sourceSampleRoot, retainedSampleRoot, { recursive: true, force: true });
+          } catch (error) {
+            cleanup.complete = false;
+            cleanup.sample_copy_error = error.message;
+          }
+        }
+        entry.execution_mode = isProviderConcurrencyReplay(fixture)
+          ? collectProviderConcurrencyEvidence({
+            fixture,
+            caseRoot,
+            storePath,
+            sampleRoot: retainedSampleRoot ?? sourceSampleRoot,
+            listenerPort: generated?.rcc_port ?? null,
+            exhaustedWindow: entry.observations?.provider_concurrency?.exhausted_window ?? {},
+            collectionPhase,
+            stopReceipt: cleanup.rcc ?? null,
+          })
+          : collectCaseExecutionModeEvidence({
             caseId: fixture.case_id,
             caseRoot,
-            storePath: generated ? join(generated.root, 'logs', `server-v3-${generated.rcc_port}.request-records.jsonl`) : null,
+            storePath,
             attempts: entry.turn_attempts ?? [],
             captures,
             listenerPort: generated?.rcc_port ?? null,
             collectionPhase,
             stopReceipt: cleanup.rcc ?? null,
-        });
+          });
         if (captureError) entry.execution_mode.findings.push(`provider capture read failed: ${captureError}`);
-        for (const reference of [entry.execution_mode.records_ref, entry.execution_mode.evidence_ref]) {
+        for (const reference of [
+          entry.execution_mode.records_ref,
+          entry.execution_mode.typed_source_ref,
+          entry.execution_mode.evidence_ref,
+        ]) {
           if (reference) entry.evidence_refs = [...(entry.evidence_refs ?? []), reference];
         }
       }
@@ -312,7 +357,8 @@ export function applyExecutionModeAcceptance(entry) {
   if (!mode || mode.expected_mode === null || mode.expected_mode === undefined) return;
   if (mode.status === 'pass') return;
   const detail = Array.isArray(mode.findings) && mode.findings.length ? mode.findings.join('; ') : 'no detail';
-  entry.diagnostic = [entry.diagnostic, `execution mode ${mode.status}: ${detail}`].filter(Boolean).join('; ');
+  const label = mode.kind ?? 'execution mode';
+  entry.diagnostic = [entry.diagnostic, `${label} ${mode.status}: ${detail}`].filter(Boolean).join('; ');
   if (entry.status !== 'passed') return;
   entry.status = 'failed';
   entry.classification = mode.status === 'mismatch' ? 'product' : 'evidence';
