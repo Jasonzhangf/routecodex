@@ -4,6 +4,7 @@
 - Change: only `server run-managed-child` requests an 8 MiB Tokio worker stack. Parent restart/status runtimes keep the default stack. No old business-child module, route, identity, or continuity skeleton is reintroduced.
 - Source evidence: `cargo fmt --check` PASS; both CLI stack-boundary tests PASS; `npm run verify:v3-architecture-ci` PASS 35/35; build PASS; install PASS to `/Users/fanzhang/.local/bin/rccv3` version `0.90.4924`.
 - `npm run test:v3-managed-server-lifecycle` result: 47 PASS / 5 FAIL; all five failures panic at `previous_release_restart.rs:19` because `ROUTECODEX_V3_PREVIOUS_RELEASE_BINARY` is unavailable. This is an existing fixture prerequisite, not a stack-boundary failure.
+- `managed_restart_control_budget_blackbox` PASS 5/5 on temporary listeners, including delayed replacement ack, replacement observation, and shared control budget. This proves the control protocol under controlled ports; it does not prove the live 4444/7777 process was replaced.
 - Formal restart attempt: `rccv3 restart -c ~/.rcc/config.toml` exited 1 with `managed lifecycle control timed out: control challenge v3-287d9097ba1fad3b217b`. PID 19583 and start time `2026-10-20 04:19:36` are unchanged, so the installed candidate is not proven loaded. 4444/7777 health remains 200 and build version `0.90.4924`; health is not candidate-load evidence. Exactly one restart was attempted; do not repeat blindly.
 
 ## 2026-10-18 Magpie matrix and Source01 integration
