@@ -3116,54 +3116,55 @@ Manifest: `docs/architecture/manifests/v3.provider_global_subscription_probe.mai
 ```mermaid
 flowchart TD
   subgraph c_74_v3_provider_global_subscription_probe_m_v3_error["v3-error"]
-    c_74_v3_provider_global_subscription_probe_22["v3-error<br/>build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy<br/><small>routecodex-v3-error/src/lib.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_23["v3-error<br/>build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy<br/><small>routecodex-v3-error/src/lib.rs</small>"]
   end
   subgraph c_74_v3_provider_global_subscription_probe_m_v3_provider_responses["v3-provider-responses"]
     c_74_v3_provider_global_subscription_probe_1["v3-provider-responses<br/>V3ProviderHealthStore::acquire_provider_cooldown_probe<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_9["v3-provider-responses<br/>V3ProviderHealthStore::provider_cooldown_probe_keys_with_interface<br/><small>routecodex-v3-provider-responses/src/health/probe_schedule.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_12["v3-provider-responses<br/>ProviderResponsesTransport::send_probe<br/><small>routecodex-v3-provider-responses/src/transport/probe.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_14["v3-provider-responses<br/>V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_15["v3-provider-responses<br/>V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_17["v3-provider-responses<br/>V3ProviderHealthStore::cancel_provider_cooldown_probe<br/><small>routecodex-v3-provider-responses/src/health/probe_schedule.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_10["v3-provider-responses<br/>V3ProviderHealthStore::provider_cooldown_probe_keys_with_interface<br/><small>routecodex-v3-provider-responses/src/health/probe_schedule.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_13["v3-provider-responses<br/>ProviderResponsesTransport::send_probe<br/><small>routecodex-v3-provider-responses/src/transport/probe.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_15["v3-provider-responses<br/>V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_16["v3-provider-responses<br/>V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_18["v3-provider-responses<br/>V3ProviderHealthStore::cancel_provider_cooldown_probe<br/><small>routecodex-v3-provider-responses/src/health/probe_schedule.rs</small>"]
   end
   subgraph c_74_v3_provider_global_subscription_probe_m_v3_runtime["v3-runtime"]
     c_74_v3_provider_global_subscription_probe_0["v3-runtime<br/>V3ProviderFailureRuntimeHealth::run_due_provider_health_probes<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_74_v3_provider_global_subscription_probe_4["v3-runtime<br/>V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_5["v3-runtime<br/>V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle_resume<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_8["v3-runtime<br/>V3ProviderFailureRuntimeHealth::aggregate_provider_probe_scheduler<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_10["v3-runtime<br/>probe_v3_provider_global_target<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_11["v3-runtime<br/>probe_v3_provider_global_target_impl<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_13["v3-runtime<br/>complete_v3_provider_health_probe<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_16["v3-runtime<br/>V3ProviderProbeCancellationGuard::drop<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_18["v3-runtime<br/>V3ProviderFailureRuntimeHealth::run_cooldown_rescue_probes_for_candidates<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_21["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_6["v3-runtime<br/>V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle_resume<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_9["v3-runtime<br/>V3ProviderFailureRuntimeHealth::aggregate_provider_probe_scheduler<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_11["v3-runtime<br/>probe_v3_provider_global_target<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_12["v3-runtime<br/>probe_v3_provider_global_target_impl<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_14["v3-runtime<br/>complete_v3_provider_health_probe<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_17["v3-runtime<br/>V3ProviderProbeCancellationGuard::drop<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_19["v3-runtime<br/>V3ProviderFailureRuntimeHealth::run_cooldown_rescue_probes_for_candidates<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_22["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small>"]
   end
   subgraph c_74_v3_provider_global_subscription_probe_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
-    c_74_v3_provider_global_subscription_probe_20["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_21["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
   end
   subgraph c_74_v3_provider_global_subscription_probe_m_v3_server["v3-server"]
     c_74_v3_provider_global_subscription_probe_2["v3-server<br/>spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_74_v3_provider_global_subscription_probe_3["v3-server<br/>AggregateProbeLifecycle::start<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_6["v3-server<br/>V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_7["v3-server<br/>AggregateProbeLifecycle::quiesce<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small>"]
-    c_74_v3_provider_global_subscription_probe_19["v3-server<br/>spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_5["v3-server<br/>AggregateProbeLifecycle::supervise<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_7["v3-server<br/>V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_8["v3-server<br/>AggregateProbeLifecycle::quiesce<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small>"]
+    c_74_v3_provider_global_subscription_probe_20["v3-server<br/>spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
   c_74_v3_provider_global_subscription_probe_0 -->|v3-provider-global-probe-01<br/>V3ProviderHealthStore → V3ProviderHealthProbePermit| c_74_v3_provider_global_subscription_probe_1
   c_74_v3_provider_global_subscription_probe_2 -->|v3-provider-global-probe-02-owner<br/>V3ServerAggregateLifecycle → V3ServerProbeOwner| c_74_v3_provider_global_subscription_probe_3
   c_74_v3_provider_global_subscription_probe_3 -->|v3-provider-global-probe-02<br/>V3ServerProbeOwner → V3ProviderGlobalProbeExecution| c_74_v3_provider_global_subscription_probe_4
-  c_74_v3_provider_global_subscription_probe_3 -->|v3-provider-global-probe-02-resume<br/>V3ServerProbeOwner → V3ProviderGlobalProbeExecution| c_74_v3_provider_global_subscription_probe_5
-  c_74_v3_provider_global_subscription_probe_6 -->|v3-provider-global-probe-02-quiesce<br/>V3ServerAggregateLifecycle → V3ServerProbeOwner| c_74_v3_provider_global_subscription_probe_7
-  c_74_v3_provider_global_subscription_probe_8 -->|v3-provider-global-probe-02-schedule<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_9
-  c_74_v3_provider_global_subscription_probe_0 -->|v3-provider-global-probe-02-target<br/>V3ProviderHealthProbePermit → V3ProviderGlobalProbeExecution| c_74_v3_provider_global_subscription_probe_10
-  c_74_v3_provider_global_subscription_probe_11 -->|v3-provider-global-probe-http-status<br/>V3ProviderGlobalProbeExecution → V3ProviderProbeHttpStatus| c_74_v3_provider_global_subscription_probe_12
-  c_74_v3_provider_global_subscription_probe_13 -->|v3-provider-global-probe-02-success<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_14
-  c_74_v3_provider_global_subscription_probe_13 -->|v3-provider-global-probe-02-failure<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_15
-  c_74_v3_provider_global_subscription_probe_16 -->|v3-provider-global-probe-owner-cancel<br/>V3ProviderProbeCancellationGuard → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_17
-  c_74_v3_provider_global_subscription_probe_18 -->|v3-provider-global-probe-inline-rescue-success<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_14
-  c_74_v3_provider_global_subscription_probe_18 -->|v3-provider-global-probe-inline-rescue-failure<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_15
-  c_74_v3_provider_global_subscription_probe_19 -->|v3-provider-global-probe-02-persistent<br/>V3ServerAggregateLifecycle → V3ProviderGlobalProbeExecution| c_74_v3_provider_global_subscription_probe_0
-  c_74_v3_provider_global_subscription_probe_20 -->|v3-provider-global-probe-03<br/>V3Error02Classified → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_21
-  c_74_v3_provider_global_subscription_probe_20 -->|v3-provider-global-probe-error-classification<br/>V3Error01SourceRaised → V3Error02Classified| c_74_v3_provider_global_subscription_probe_22
+  c_74_v3_provider_global_subscription_probe_5 -->|v3-provider-global-probe-02-resume<br/>V3ServerProbeOwner → V3ProviderGlobalProbeExecution| c_74_v3_provider_global_subscription_probe_6
+  c_74_v3_provider_global_subscription_probe_7 -->|v3-provider-global-probe-02-quiesce<br/>V3ServerAggregateLifecycle → V3ServerProbeOwner| c_74_v3_provider_global_subscription_probe_8
+  c_74_v3_provider_global_subscription_probe_9 -->|v3-provider-global-probe-02-schedule<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_10
+  c_74_v3_provider_global_subscription_probe_0 -->|v3-provider-global-probe-02-target<br/>V3ProviderHealthProbePermit → V3ProviderGlobalProbeExecution| c_74_v3_provider_global_subscription_probe_11
+  c_74_v3_provider_global_subscription_probe_12 -->|v3-provider-global-probe-http-status<br/>V3ProviderGlobalProbeExecution → V3ProviderProbeHttpStatus| c_74_v3_provider_global_subscription_probe_13
+  c_74_v3_provider_global_subscription_probe_14 -->|v3-provider-global-probe-02-success<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_15
+  c_74_v3_provider_global_subscription_probe_14 -->|v3-provider-global-probe-02-failure<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_16
+  c_74_v3_provider_global_subscription_probe_17 -->|v3-provider-global-probe-owner-cancel<br/>V3ProviderProbeCancellationGuard → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_18
+  c_74_v3_provider_global_subscription_probe_19 -->|v3-provider-global-probe-inline-rescue-success<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_15
+  c_74_v3_provider_global_subscription_probe_19 -->|v3-provider-global-probe-inline-rescue-failure<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_16
+  c_74_v3_provider_global_subscription_probe_20 -->|v3-provider-global-probe-02-persistent<br/>V3ServerAggregateLifecycle → V3ProviderGlobalProbeExecution| c_74_v3_provider_global_subscription_probe_0
+  c_74_v3_provider_global_subscription_probe_21 -->|v3-provider-global-probe-03<br/>V3Error02Classified → V3ProviderHealthStore| c_74_v3_provider_global_subscription_probe_22
+  c_74_v3_provider_global_subscription_probe_21 -->|v3-provider-global-probe-error-classification<br/>V3Error01SourceRaised → V3Error02Classified| c_74_v3_provider_global_subscription_probe_23
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -3171,7 +3172,7 @@ flowchart TD
 | `v3-provider-global-probe-01` | `V3ProviderHealthStore` → `V3ProviderHealthProbePermit` | anchored | V3ProviderFailureRuntimeHealth::run_due_provider_health_probes<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::acquire_provider_cooldown_probe<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-02-owner` | `V3ServerAggregateLifecycle` → `V3ServerProbeOwner` | anchored | spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket<br/><small>routecodex-v3-server/src/lib.rs</small> | AggregateProbeLifecycle::start<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-02` | `V3ServerProbeOwner` → `V3ProviderGlobalProbeExecution` | anchored | AggregateProbeLifecycle::start<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small> | V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-global-probe-02-resume` | `V3ServerProbeOwner` → `V3ProviderGlobalProbeExecution` | anchored | AggregateProbeLifecycle::start<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small> | V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle_resume<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-provider-global-probe-02-resume` | `V3ServerProbeOwner` → `V3ProviderGlobalProbeExecution` | anchored | AggregateProbeLifecycle::supervise<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small> | V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle_resume<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-02-quiesce` | `V3ServerAggregateLifecycle` → `V3ServerProbeOwner` | anchored | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small> | AggregateProbeLifecycle::quiesce<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-02-schedule` | `V3ProviderGlobalProbeExecution` → `V3ProviderHealthStore` | anchored | V3ProviderFailureRuntimeHealth::aggregate_provider_probe_scheduler<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small> | V3ProviderHealthStore::provider_cooldown_probe_keys_with_interface<br/><small>routecodex-v3-provider-responses/src/health/probe_schedule.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-02-target` | `V3ProviderHealthProbePermit` → `V3ProviderGlobalProbeExecution` | anchored | V3ProviderFailureRuntimeHealth::run_due_provider_health_probes<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | probe_v3_provider_global_target<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_global_subscription_probe` |

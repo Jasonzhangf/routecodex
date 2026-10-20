@@ -5055,6 +5055,7 @@ features:
   - V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle_resume
   - V3ProviderFailureRuntimeHealth::aggregate_provider_probe_scheduler
   - AggregateProbeLifecycle::start
+  - AggregateProbeLifecycle::supervise
   - AggregateProbeLifecycle::quiesce
   - AggregateProbeLifecycle::join
   - V3ProviderFailureRuntimeHealth::initiate_cooldown_rescue_probe

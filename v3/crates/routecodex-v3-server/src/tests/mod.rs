@@ -14,6 +14,7 @@ mod frame_sdk_fault;
 mod local599_output;
 mod post_commit_sse_sdk_fault;
 mod websocket_sdk_fault;
+mod terminal_probe_join;
 
 #[tokio::test]
 async fn listener_bind_retries_eintr_once_before_success() {

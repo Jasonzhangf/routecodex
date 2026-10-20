@@ -108,6 +108,8 @@ features:
   - issue127_disabled_health_persistence_direct_public_blackbox proves a real Direct Responses consumer ignores persisted cooldown when health is disabled, attempts a genuine upstream failure without persisting automatic cooldown, and preserves fresh and independent requests; the health-enabled control honors the same seed
   - persisted cooldown remains unavailable after restart until startup probe succeeds
   - d9fd985 public consumer proves listener-local failure, exact identity, probe outcomes, explicit-override persistence rebuild and all-owner lifecycle rollback
+  - id9_terminal_join_releases_both_listener_probe_permits exercises two public listener control entries with held probes, then public shutdown and terminal exec preparation; both probe permits and scheduler registrations must be released before either method returns
+  - id9_terminal_supervisor_joins_held_owners rejects detached child tasks at the exact supervisor join return boundary, independently of later listener or persistence shutdown yields
   - due probe failure preserves cooldown and success removes it
   - provider startup or cooldown probe HTTP/transport failure is recorded as provider-local degraded health and never escapes as a listener or managed-lifecycle startup failure
   required_negative:
@@ -117,6 +119,8 @@ features:
   required_gates:
   - npm run test:v3-provider-global-cooldown-persistence
   - npm run test:v3-port-local-provider-health
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib id9_terminal_join_releases_both_listener_probe_permits -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib id9_terminal_supervisor_joins_held_owners -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue127_disabled_health_persistence_direct_public_blackbox -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries

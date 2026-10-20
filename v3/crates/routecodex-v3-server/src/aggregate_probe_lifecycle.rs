@@ -125,7 +125,15 @@ impl AggregateProbeLifecycle {
         manifest: Arc<V3Config05ManifestPublished>,
         healths: Vec<Arc<V3ResponsesRelayProviderHealthHandle>>,
     ) -> Result<Self, String> {
-        let mut owners = ListenerProbeOwners::start(&manifest, &healths, false)?;
+        let owners = ListenerProbeOwners::start(&manifest, &healths, false)?;
+        Self::supervise(manifest, healths, owners)
+    }
+
+    fn supervise(
+        manifest: Arc<V3Config05ManifestPublished>,
+        healths: Vec<Arc<V3ResponsesRelayProviderHealthHandle>>,
+        mut owners: ListenerProbeOwners,
+    ) -> Result<Self, String> {
         let (commands, mut receiver) = mpsc::unbounded_channel::<Quiesce>();
         let (terminal, mut terminal_rx) = watch::channel(false);
         let terminal_state = Arc::new(std::sync::Mutex::new(false));
@@ -161,7 +169,12 @@ impl AggregateProbeLifecycle {
                     }
                 };
                 match wake {
-                    SupervisorWake::Terminal => return,
+                    SupervisorWake::Terminal => {
+                        if let Some(error) = owners.stop().await {
+                            eprintln!("V3 aggregate terminal probe join failed: {error}");
+                        }
+                        return;
+                    }
                     SupervisorWake::Stopped { index, error } => {
                         eprintln!(
                             "V3 aggregate probe owner {index} stopped unexpectedly: {error}; scheduled recovery unavailable"
@@ -298,5 +311,79 @@ impl Drop for AggregateProbeLifecycle {
         // The single aggregate supervisor owns terminal cleanup; never spawn a
         // per-preparation cleanup task or restore after aggregate disposal.
         self.terminate();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn id9_terminal_supervisor_joins_held_owners() {
+        let manifest = Arc::new(V3Config05ManifestPublished {
+            version: 3,
+            hub_v1: None,
+            servers: Default::default(),
+            providers: Default::default(),
+            forwarders: Default::default(),
+            route_groups: Default::default(),
+            features: Default::default(),
+            memory_raw_capture: Default::default(),
+            debug: routecodex_v3_config::V3DebugManifest {
+                log_console: false,
+                log_file: None,
+                projection_drop_log_file: None,
+                snapshots: false,
+                codex_samples: false,
+                snapshot_stages: None,
+                snapshot_direct: false,
+                dry_run: false,
+                retention: Default::default(),
+                full_codex_sampling: false,
+            },
+            error: routecodex_v3_config::V3ErrorManifest {
+                policies: Default::default(),
+                provider_error_default_path: Vec::new(),
+                provider_error_action_policy: Vec::new(),
+                client_error_projection_policy: Vec::new(),
+            },
+        });
+        let permits = Arc::new(tokio::sync::Semaphore::new(2));
+        let mut owners = Vec::new();
+        for _ in 0..2 {
+            let permit = permits.clone().acquire_owned().await.unwrap();
+            let (shutdown, receiver) = oneshot::channel();
+            let probe = tokio::spawn(async move {
+                let _permit = permit;
+                let _receiver = receiver;
+                // A notification cannot stand in for task cancellation/join.
+                std::future::pending::<()>().await;
+            });
+            owners.push(ListenerProbeOwner {
+                probe,
+                shutdown: Some(shutdown),
+            });
+        }
+        let aborts: Vec<_> = owners
+            .iter()
+            .map(|owner| owner.probe.abort_handle())
+            .collect();
+        let mut lifecycle = AggregateProbeLifecycle::supervise(
+            manifest,
+            Vec::new(),
+            ListenerProbeOwners { owners },
+        )
+        .unwrap();
+        lifecycle.join().await;
+        let released = permits.available_permits();
+        let finished = aborts.iter().all(|task| task.is_finished());
+        // Reap a failed regression's detached children before asserting.
+        for task in aborts {
+            task.abort();
+        }
+        assert!(
+            finished && released == 2,
+            "terminal join returned with detached owners: finished={finished} permits={released}"
+        );
     }
 }

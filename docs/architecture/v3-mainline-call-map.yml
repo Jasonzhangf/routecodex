@@ -8501,7 +8501,7 @@ chains:
   - step_id: v3-provider-global-probe-02-resume
     from_node: V3ServerProbeOwner
     to_node: V3ProviderGlobalProbeExecution
-    caller_symbol: AggregateProbeLifecycle::start
+    caller_symbol: AggregateProbeLifecycle::supervise
     caller_file: v3/crates/routecodex-v3-server/src/aggregate_probe_lifecycle.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::aggregate_provider_probe_lifecycle_resume
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
@@ -8515,6 +8515,7 @@ chains:
     semantic_contract:
       - The Server owner retains old task custody through cancellation and join, then synchronously registers the due-only Runtime owner before releasing reversible maintenance.
       - Preparation error, cancellation, drop and returned exec failure restore the retained runtime; terminal shutdown suppresses late restoration.
+      - Terminal supervisor exit cancels and joins every listener probe owner before aggregate shutdown or terminal exec preparation returns; a terminal notification alone is not a completed cleanup.
 
   - step_id: v3-provider-global-probe-02-quiesce
     from_node: V3ServerAggregateLifecycle
