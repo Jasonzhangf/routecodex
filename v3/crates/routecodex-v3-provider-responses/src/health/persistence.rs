@@ -1071,6 +1071,11 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         fs::write(&legacy, b"{}").expect("write legacy scope state");
         let unrelated = root.path().join("provider-cooldowns.json");
         fs::write(&unrelated, b"{}").expect("write undigested legacy state");
+        let other_listener = root
+            .path()
+            .join("provider-cooldowns-revision-listener.json");
+        fs::write(&other_listener, b"{}").expect("write another listener state");
+        backdate(&other_listener);
         let mut generations = Vec::new();
         for index in 0..6 {
             let path = root
@@ -1089,7 +1094,12 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         let concurrent = root.path().join("provider-cooldowns-concurrent.json");
         fs::write(&concurrent, b"{}").expect("write concurrent scope state");
 
-        prune_stale_provider_cooldown_scope_files(&current, Some(&legacy));
+        prune_stale_provider_cooldown_scope_files(&current, Some(&legacy), &[], None);
+
+        assert!(
+            other_listener.exists(),
+            "an unscoped owner must not prune listener state"
+        );
 
         assert!(
             current.exists(),
