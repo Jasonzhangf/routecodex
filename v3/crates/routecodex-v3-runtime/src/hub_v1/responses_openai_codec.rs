@@ -708,8 +708,9 @@ fn build_v3_openai_chat_message_from_responses_message(
     {
         message.insert(
             "reasoning_content".to_string(),
-            Value::String(reasoning_content),
+            Value::String(reasoning_content.clone()),
         );
+        retain_anthropic_reasoning_block_for_message(item, &reasoning_content, &mut message)?;
     }
     Ok(Value::Object(message))
 }
@@ -823,6 +824,26 @@ fn retain_anthropic_reasoning_block_association(
     );
 }
 
+fn retain_anthropic_reasoning_block_for_message(
+    item: &Map<String, Value>,
+    reasoning_content: &str,
+    message: &mut Map<String, Value>,
+) -> Result<(), String> {
+    let mut extension = match item.get("routecodex_chat_extension") {
+        Some(extension) => extension
+            .as_object()
+            .cloned()
+            .ok_or_else(|| "reasoning routecodex_chat_extension is not an object".to_string())?,
+        None => Map::new(),
+    };
+    retain_anthropic_reasoning_block_association(item, reasoning_content, &mut extension);
+    message.insert(
+        "routecodex_chat_extension".to_string(),
+        Value::Object(extension),
+    );
+    Ok(())
+}
+
 fn build_v3_openai_chat_assistant_tool_call_message(
     item: &Map<String, Value>,
 ) -> Result<Value, String> {
@@ -860,8 +881,9 @@ fn build_v3_openai_chat_assistant_tool_call_message(
     ) {
         message.insert(
             "reasoning_content".to_string(),
-            Value::String(reasoning_content),
+            Value::String(reasoning_content.clone()),
         );
+        retain_anthropic_reasoning_block_for_message(item, &reasoning_content, &mut message)?;
     }
     Ok(Value::Object(message))
 }

@@ -5383,6 +5383,12 @@ async fn responses_client_anthropic_mixed_reasoning_blocks_keep_both_orders_and_
                 "tools":tools,
                 "input":[
                     {"role":"user","content":"mixed-reasoning-order"},
+                    {
+                        "type":"message",
+                        "role":"assistant",
+                        "content":[{"type":"output_text","text":"I will look up the value."}],
+                        "reasoning_content":"message-carried reasoning"
+                    },
                     ordered_reasoning[0].clone(),
                     ordered_reasoning[1].clone(),
                     call,
@@ -5421,6 +5427,10 @@ async fn responses_client_anthropic_mixed_reasoning_blocks_keep_both_orders_and_
             vec![
                 json!({
                     "type":"thinking",
+                    "thinking":"message-carried reasoning"
+                }),
+                json!({
+                    "type":"thinking",
                     "thinking":"plain reasoning",
                     "signature":"plain-signature"
                 }),
@@ -5432,6 +5442,10 @@ async fn responses_client_anthropic_mixed_reasoning_blocks_keep_both_orders_and_
             ]
         } else {
             vec![
+                json!({
+                    "type":"thinking",
+                    "thinking":"message-carried reasoning"
+                }),
                 json!({
                     "type":"redacted_thinking",
                     "data":"redacted-encrypted",
@@ -5457,6 +5471,32 @@ async fn responses_client_anthropic_mixed_reasoning_blocks_keep_both_orders_and_
         assert_eq!(
             reasoning_content,
             expected_reasoning.as_slice(),
+            "{order} provider wire: {}",
+            second_capture.body
+        );
+        let expected_content_types = if order == "plain-first" {
+            vec![
+                "thinking",
+                "thinking",
+                "redacted_thinking",
+                "text",
+                "tool_use",
+            ]
+        } else {
+            vec![
+                "thinking",
+                "redacted_thinking",
+                "thinking",
+                "text",
+                "tool_use",
+            ]
+        };
+        assert_eq!(
+            assistant_content
+                .iter()
+                .filter_map(|block| block["type"].as_str())
+                .collect::<Vec<_>>(),
+            expected_content_types,
             "{order} provider wire: {}",
             second_capture.body
         );

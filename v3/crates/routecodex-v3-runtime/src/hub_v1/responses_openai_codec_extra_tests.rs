@@ -648,6 +648,138 @@ fn responses_mixed_reasoning_blocks_keep_complete_ordered_records_in_both_orders
 }
 
 #[test]
+fn responses_message_and_tool_call_reasoning_keep_ordered_records_with_standalone_item() {
+    let user = json!({
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": "find the value"}]
+    });
+    let message_reasoning = json!({
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "I will look it up."}],
+        "reasoning_content": "message reasoning"
+    });
+    let standalone_reasoning = json!({
+        "type": "reasoning",
+        "summary": [{"type": "summary_text", "text": "standalone reasoning"}]
+    });
+    let function_call = json!({
+        "type": "function_call",
+        "call_id": "call_reasoning_sources",
+        "name": "lookup",
+        "arguments": "{\"query\":\"answer\",\"limit\":3}",
+        "reasoning_content": "tool reasoning"
+    });
+    let function_output = json!({
+        "type": "function_call_output",
+        "call_id": "call_reasoning_sources",
+        "output": "42"
+    });
+
+    for (order, reasoning_sources, expected_reasoning) in [
+        (
+            "message-first",
+            vec![message_reasoning.clone(), standalone_reasoning.clone()],
+            [
+                "message reasoning",
+                "standalone reasoning",
+                "tool reasoning",
+            ],
+        ),
+        (
+            "standalone-first",
+            vec![standalone_reasoning, message_reasoning],
+            [
+                "standalone reasoning",
+                "message reasoning",
+                "tool reasoning",
+            ],
+        ),
+    ] {
+        let mut input = vec![user.clone()];
+        input.extend(reasoning_sources);
+        input.push(function_call.clone());
+        input.push(function_output.clone());
+        let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "claude",
+            "input": input
+        }))
+        .unwrap_or_else(|error| {
+            panic!("{order}: every accepted reasoning source must reach canonical Chat: {error}")
+        });
+
+        let assistant = &canonical["messages"][1];
+        assert_eq!(
+            assistant["reasoning_content"],
+            expected_reasoning.join("\n"),
+            "{order}: {canonical}"
+        );
+        let blocks = assistant["routecodex_chat_extension"]["anthropic_reasoning_blocks"]
+            .as_array()
+            .unwrap_or_else(|| {
+                panic!("{order}: message and tool-call reasoning need block records: {canonical}")
+            });
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|block| block["reasoning_content"].as_str().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            expected_reasoning,
+            "{order}: {canonical}"
+        );
+
+        let provider =
+            crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+                canonical,
+            )
+            .expect("all canonical reasoning sources must restore on the Anthropic wire");
+        let assistant_content = provider["messages"][1]["content"]
+            .as_array()
+            .expect("assistant content");
+        let mut expected_assistant_content = expected_reasoning
+            .iter()
+            .map(|reasoning| {
+                json!({
+                    "type": "thinking",
+                    "thinking": reasoning
+                })
+            })
+            .collect::<Vec<_>>();
+        expected_assistant_content.push(json!({
+            "type": "text",
+            "text": "I will look it up."
+        }));
+        expected_assistant_content.push(json!({
+            "type": "tool_use",
+            "id": "call_reasoning_sources",
+            "name": "lookup",
+            "input": {"query": "answer", "limit": 3}
+        }));
+        assert_eq!(
+            assistant_content, &expected_assistant_content,
+            "{order}: {provider}"
+        );
+        assert!(
+            provider["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(
+                    |message| message["content"].as_array().is_some_and(|content| {
+                        content.iter().any(|block| {
+                            block["type"] == "tool_result"
+                                && block["tool_use_id"] == "call_reasoning_sources"
+                                && block["content"].to_string().contains("42")
+                        })
+                    })
+                ),
+            "{order}: {provider}"
+        );
+    }
+}
+
+#[test]
 fn responses_encrypted_only_reasoning_item_keeps_empty_reasoning_content() {
     // Codex 只回传 encrypted_content 密文（无 text/summary 明文）时，入口归一化
     // 必须保留 reasoning 条目并以空 reasoning_content 呈现——opencode/DeepSeek 语义
