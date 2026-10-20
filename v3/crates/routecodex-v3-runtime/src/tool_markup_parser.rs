@@ -70,10 +70,11 @@ fn invoke_envelope<'a>(
         {
             return Err(true);
         }
-        let complete_inner = !prefixed
-            && !calls.is_empty()
-            && !trimmed.starts_with("<invoke")
-            && !trimmed.starts_with("invoke ");
+        let bare_invoke = trimmed
+            .strip_prefix("invoke ")
+            .is_some_and(|rest| rest.trim_start().starts_with("name=\""));
+        let complete_inner =
+            !prefixed && !calls.is_empty() && !trimmed.starts_with("<invoke") && !bare_invoke;
         if closed.is_some() || complete_inner {
             if calls.is_empty() {
                 return Err(false);
@@ -864,6 +865,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tool_markup_parser_issue03c2a07_review_prose_tail() {
+        let text = "<tool_call>invoke name=\"read_image\"><file_path>x</file_path></invoke>\ninvoke the next step only after confirmation.";
+        let scan = scan_tool_markup(text, &declarations());
+        assert!(!scan.incomplete_tool_invocation, "{scan:?}");
+        assert!(matches!(&scan.segments[0], ToolMarkupSegment::Calls(calls) if calls.len() == 1));
+        assert_eq!(
+            scan.segments[1],
+            ToolMarkupSegment::Text("\ninvoke the next step only after confirmation.")
+        );
+    }
+
+    #[test]
     fn tool_markup_parser_issue03c2a07_inner_completion_and_preservation() {
         let declarations = declarations();
         let value = "  \"quoted\"\\path\n```\n]<]minimax[>[ e\u{301}  ";
@@ -919,7 +932,7 @@ mod tests {
             ),
             "{scan:?}"
         );
-        for tail in ["<inv", "<invoke", "invoke "] {
+        for tail in ["<inv", "<invoke", "invoke name=\"read_image\""] {
             let text = format!("{complete}{tail}");
             assert!(
                 scan_tool_markup(&text, &declarations).incomplete_tool_invocation,

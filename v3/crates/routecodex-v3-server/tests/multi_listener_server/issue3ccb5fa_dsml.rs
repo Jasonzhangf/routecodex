@@ -22,6 +22,13 @@ enum DsmlCase {
     MinimaxUnknown,
     MinimaxNamespace,
     PlainInvoke,
+    PlainInvokeProse,
+}
+
+impl DsmlCase {
+    fn plain_invoke(self) -> bool {
+        matches!(self, Self::PlainInvoke | Self::PlainInvokeProse)
+    }
 }
 
 fn opaque_tool_text(case: DsmlCase) -> Option<&'static str> {
@@ -47,6 +54,7 @@ struct DsmlPeer {
 }
 
 const PLAIN_INVOKE_TEXT: &str = "\n<tool_call>invoke name=\"view_image\"><detail>high</detail><path>OWNED.png</path></invoke>\n";
+const INVOKE_PROSE: &str = "invoke the next step only after confirmation.";
 
 const NESTED_NAMESPACE: &str = "mcp__mcpx.workspace";
 const NESTED_LEAF: &str = "read";
@@ -75,7 +83,7 @@ fn client_tools(case: DsmlCase) -> Value {
         DsmlCase::Discovered => {
             json!([{"type":"function","name":"read_image","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}])
         }
-        DsmlCase::PlainInvoke => json!([{
+        DsmlCase::PlainInvoke | DsmlCase::PlainInvokeProse => json!([{
             "type":"function",
             "name":"view_image",
             "parameters":{
@@ -111,7 +119,7 @@ fn invoke_name(case: DsmlCase) -> &'static str {
     match case {
         DsmlCase::Nested | DsmlCase::MinimaxNamespace => NESTED_WIRE,
         DsmlCase::Discovered => DISCOVERED_WIRE,
-        DsmlCase::PlainInvoke => "view_image",
+        DsmlCase::PlainInvoke | DsmlCase::PlainInvokeProse => "view_image",
         DsmlCase::Alternate | DsmlCase::ToolCall | DsmlCase::CallsResidueSse => "exec_command",
         _ => "read_image",
     }
@@ -121,7 +129,7 @@ fn expected_leaf(case: DsmlCase) -> &'static str {
     match case {
         DsmlCase::Nested | DsmlCase::MinimaxNamespace => NESTED_LEAF,
         DsmlCase::Discovered => DISCOVERED_LEAF,
-        DsmlCase::PlainInvoke => "view_image",
+        DsmlCase::PlainInvoke | DsmlCase::PlainInvokeProse => "view_image",
         DsmlCase::Alternate | DsmlCase::ToolCall | DsmlCase::CallsResidueSse => "exec_command",
         _ => "read_image",
     }
@@ -138,7 +146,7 @@ fn expected_namespace(case: DsmlCase) -> Option<&'static str> {
 fn first_input(case: DsmlCase) -> Value {
     let mut input = vec![json!({
         "role":"user",
-        "content":if case == DsmlCase::PlainInvoke { "Inspect the owned image" } else { "Read the owned image" }
+        "content":if case.plain_invoke() { "Inspect the owned image" } else { "Read the owned image" }
     })];
     if case == DsmlCase::Discovered {
         input.push(discovery_item());
@@ -174,8 +182,13 @@ async fn upstream(
     let turn = peer.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     assert_provider_declaration(&body, peer.case);
     let output = if turn == 0 {
-        if peer.case == DsmlCase::PlainInvoke {
-            json!([{"id":"plain_invoke_message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":PLAIN_INVOKE_TEXT,"annotations":[]}]}])
+        if peer.case.plain_invoke() {
+            let text = if peer.case == DsmlCase::PlainInvokeProse {
+                format!("{PLAIN_INVOKE_TEXT}{INVOKE_PROSE}")
+            } else {
+                PLAIN_INVOKE_TEXT.to_owned()
+            };
+            json!([{"id":"plain_invoke_message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text,"annotations":[]}]}])
         } else if let Some(text) = opaque_tool_text(peer.case) {
             let mut output = json!([
                 {"id":"opaque_message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text,"annotations":[]}]},
@@ -271,7 +284,7 @@ async fn upstream(
         }
     } else {
         assert_eq!(turn, 1, "no retry or duplicate attempt allowed");
-        if peer.case == DsmlCase::PlainInvoke {
+        if peer.case.plain_invoke() {
             let calls: Vec<_> = body["input"]
                 .as_array()
                 .unwrap()
@@ -665,7 +678,7 @@ async fn run(case: DsmlCase, sse: bool) {
 async fn run_mode(case: DsmlCase, sse: bool, relay: bool) {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_PROTOCOL_DECISION_KEY", "dsml-test-key");
-    let fixture = if case == DsmlCase::PlainInvoke {
+    let fixture = if case.plain_invoke() {
         std::env::temp_dir()
             .join(format!(
                 "rcc-dsml-issue03c2a07-{}-{}-{sse}",
@@ -692,7 +705,7 @@ async fn run_mode(case: DsmlCase, sse: bool, relay: bool) {
     }
     fs::write(&fixture, png).unwrap();
     let peer = DsmlPeer {
-        path: if case == DsmlCase::PlainInvoke {
+        path: if case.plain_invoke() {
             "OWNED.png".to_owned()
         } else {
             fixture.to_str().unwrap().to_owned()
@@ -944,12 +957,21 @@ async fn run_mode(case: DsmlCase, sse: bool, relay: bool) {
         std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
         return;
     }
-    if case == DsmlCase::PlainInvoke {
+    if case.plain_invoke() {
         assert!(
             !wire.contains("<tool_call>") && !wire.contains("invoke name="),
             "plain invoke markup leaked: {wire}"
         );
         assert_eq!(calls.len(), 1, "plain invoke must become one native call");
+        if case == DsmlCase::PlainInvokeProse {
+            let visible: String = output
+                .iter()
+                .filter(|i| i["type"] == "message")
+                .flat_map(|i| i["content"].as_array().unwrap())
+                .filter_map(|p| p["text"].as_str())
+                .collect();
+            assert_eq!(visible, format!("\n\n{INVOKE_PROSE}"));
+        }
         let call = calls[0];
         assert_eq!(call["name"], "view_image");
         assert_eq!(call["namespace"], Value::Null);
@@ -1370,5 +1392,14 @@ pub(super) async fn run_issue03c2a07_plain_invoke(stream: bool, relay: bool) {
 async fn responses_direct_dsml_issue03c2a07_plain_invoke_json_and_sse_round_trip() {
     for stream in [false, true] {
         run_issue03c2a07_plain_invoke(stream, false).await;
+    }
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_issue03c2a07_review_prose_tail_round_trip() {
+    for relay in [false, true] {
+        for stream in [false, true] {
+            run_mode(DsmlCase::PlainInvokeProse, stream, relay).await;
+        }
     }
 }
