@@ -208,7 +208,8 @@ fn normalize_with_protected(
     let mut plans = Vec::new();
     let mut opening_tool_label = false;
     let mut harvested_calls = 0usize;
-    let mut truncated_invocation = false;
+    let mut incomplete_invocation = false;
+    let mut opaque_invocation = false;
     for (index, item) in output.iter().enumerate() {
         if protected.contains(&index) {
             next.push(item.clone());
@@ -229,7 +230,8 @@ fn normalize_with_protected(
             let scan = scan_tool_markup(part["text"].as_str().unwrap(), &context.declarations);
             changed |= scan.removed_label;
             opening_tool_label |= scan.opener_label;
-            truncated_invocation |= scan.truncated;
+            incomplete_invocation |= scan.incomplete_tool_invocation;
+            opaque_invocation |= scan.opaque_invocation;
             for segment in scan.segments {
                 match segment {
                     ToolMarkupSegment::Text(text) => {
@@ -262,8 +264,9 @@ fn normalize_with_protected(
             next.push(item.clone());
         }
     }
-    if truncated_invocation
+    if incomplete_invocation
         || (opening_tool_label
+            && !opaque_invocation
             && !native_complete_call
             && harvested_calls == 0
             && !only_removable_labels_remain(&next))
@@ -1518,8 +1521,6 @@ mod tests {
         let native = json!({"type":"function_call","id":"native","name":"exec_command","call_id":"native_call","arguments":"not-json","status":"completed"});
         for text in [
             "Continue.\n<tool_call>exec_command<arg_key>cmd</arg_key><arg_value>printf 42</arg_value>",
-            "Continue.\n<tool_call>undeclared<arg_key>cmd</arg_key><arg_value>printf 42</arg_value></tool_call>",
-            "Continue.\n<tool_call>exec_command<arg_key>cmd</arg_key><arg_value>printf 42</arg_value><arg_key>cmd</arg_key><arg_value>x</arg_value></tool_call>",
         ] {
             let mut payload = sample(text);
             payload["output"].as_array_mut().unwrap().push(native.clone());
@@ -1532,6 +1533,25 @@ mod tests {
                 error,
                 V3DirectResponseHookFailure::UnharvestableToolMarkup
             ));
+        }
+    }
+
+    #[test]
+    fn direct_dsml_complete_opaque_and_unknown_calls_preserve_native_sibling() {
+        let native = json!({"type":"function_call","id":"native","name":"exec_command","call_id":"native_call","arguments":"not-json","status":"completed"});
+        for text in [
+            "Continue.\n<tool_call>undeclared<arg_key>cmd</arg_key><arg_value>printf 42</arg_value></tool_call>",
+            "Continue.\n<tool_call>exec_command<arg_key>cmd</arg_key><arg_value>printf 42</arg_value><arg_key>cmd</arg_key><arg_value>x</arg_value></tool_call>",
+            "<|exec_command\">\n<cmd>a</cmd>\n<cmd>b</cmd>\n</exec_command>",
+        ] {
+            let mut payload = sample(text);
+            payload["output"].as_array_mut().unwrap().push(native.clone());
+            let original = payload.clone();
+            normalize_v3_direct_dsml_response(
+                &mut payload,
+                &dispatch_context(&json!({"tools":[{"type":"function","name":"exec_command"}]})),
+            ).expect("unknown and complete opaque calls remain business data");
+            assert_eq!(payload, original);
         }
     }
 
@@ -2040,14 +2060,19 @@ mod tests {
     }
 
     #[test]
-    fn direct_dsml_unresolvable_alternate_opener_rejects_attempt() {
+    fn direct_dsml_only_declared_incomplete_alternate_rejects_attempt() {
+        let context =
+            dispatch_context(&json!({"tools":[{"type":"function","name":"exec_command"}]}));
+        let mut unknown = sample("Continue.\n<|undeclared_tool\">");
+        let original = unknown.clone();
+        normalize_v3_direct_dsml_response(&mut unknown, &context).unwrap();
+        assert_eq!(unknown, original, "unknown opener remains business text");
         for text in [
-            "Continue.\n<|undeclared_tool\">".to_owned(),
             "Continue.\n<|exec_command\">".to_owned(),
             "Continue.\n<|exec_command\">\n<cmd>printf 42</cmd>".to_owned(),
         ] {
             let mut payload = sample(&text);
-            let error = normalize_v3_direct_dsml_response(&mut payload, &context())
+            let error = normalize_v3_direct_dsml_response(&mut payload, &context)
                 .expect_err("an unharvestable alternate invocation must reject");
             assert!(matches!(
                 error,
