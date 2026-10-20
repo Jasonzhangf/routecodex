@@ -1222,16 +1222,19 @@ pub(crate) fn relay_handoff_entry_state(
 ) -> (
     crate::runtime_timing::V3RuntimeTimingState,
     std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
     Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
 ) {
     match handoff {
         Some(handoff) => (
             handoff.observability_accumulator.timing(),
             handoff.request_local_excluded_candidates.clone(),
+            handoff.request_local_busy_candidates.clone(),
             Some(handoff.target.clone()),
         ),
         None => (
             crate::runtime_timing::V3RuntimeTimingState::start(),
+            std::collections::BTreeSet::new(),
             std::collections::BTreeSet::new(),
             None,
         ),
