@@ -637,7 +637,7 @@ resources:
       release: Runtime admission drop, pre-acquired transport request drop, and Provider permit-guard drop release the lease exactly once on early exit, cancellation, transport failure, response completion, or stream drop
       boundary: lease and capacity state remain typed process-local control state and never enter request, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [V3AdaptiveConcurrencyController::ensure_initial_budget, V3AdaptiveConcurrencyController::try_acquire_business, V3AdaptiveConcurrencyController::try_acquire_scheduled_probe, V3AdaptiveConcurrencyController::release, V3AdaptiveConcurrencyController::complete_probe, V3AdaptiveConcurrencyController::observe_business_success, V3RuntimeProviderAdmission::drop, V3PreAcquiredProviderAdmission::release, V3AdaptiveConcurrencyPermitGuard::drop]
-    allowed_readers: [V3AdaptiveConcurrencyController::snapshot, select_v3_expanded_target_with_admission_rescue, V3ProviderResponsesTransport::send]
+    allowed_readers: [V3AdaptiveConcurrencyController::snapshot, try_admit_v3_selected_target, V3ProviderResponsesTransport::send]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-error, request.normal_payload, provider.wire_payload, response.client_payload, MetadataCenter.payload, Debug.payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -3140,7 +3140,7 @@ resources:
       immutable_after_hit: true
       recovery_scope: Target-local reselect consumes this plan and never re-enters Router classify, route policy evaluation, or opaque pool hit.
     allowed_writers: [V3Target09CandidateSetExpanded]
-    allowed_readers: [execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core, V3Error05ExecutionDecision, resolve_v3_relay_entry_target]
+    allowed_readers: [execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core, V3Error05ExecutionDecision, run_v3_plan_execution_operator_with_probes]
     forbidden_writers: [SSE_stream_wrapper, ProviderTransport, protocol_codec, compat_hook, observability]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -3384,13 +3384,15 @@ resources:
     lifecycle: v3.operation_runner.request
     owner_feature_id: v3.unified_operation_runner_design
     owner_crate: routecodex-v3-runtime
-    owner_node: RuntimeErrorActionConsumed
+    owner_node: V3OperationRunnerPlanExecution
     identity: [requestId, invocationId, attemptId]
     semantic_contract:
-      storage_owner: reference to the existing request-local excluded-candidate set consumed by Target; not a second exclusion store
-      mutation_owner: the existing typed Error action consumer updates exclusions before a new attempt
-      request_boundary: exclusions never enter request, response, provider, or client bodies
-    allowed_writers: [RuntimeErrorActionConsumed]
+      storage_owner: V3OperationRunnerPlanExecution persists one request-local exclusion set plus exact capacity-busy provenance; this is not a process-global store or a second admission controller
+      mutation_owner: typed Error action consumption adds non-capacity exclusions; capacity admission and post-transport ConcurrencyBusy readmission add only exact candidate keys proven busy before captured-target reselection
+      provenance_rule: busy evidence never comes from cooldown, capability mismatch, provider failure, an initial exclusion, or attempted_candidates
+      classification: pure all-busy requires a nonempty captured Target09 set, every captured key busy, and every exclusion busy; any other exclusion cause leaves generic mixed exhaustion
+      request_boundary: exclusion and busy provenance never enter request, response, provider, client, MetadataCenter, or Debug payloads
+    allowed_writers: [RuntimeErrorActionConsumed, V3OperationRunnerPlanExecution]
     allowed_readers: [V3OperationRunnerPlanExecution]
     forbidden_writers: [V3OperationRunnerResolveTarget, routecodex-v3-server, routecodex-v3-debug]
     may_enter_provider_body: false

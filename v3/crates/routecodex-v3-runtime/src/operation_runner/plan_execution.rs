@@ -53,6 +53,7 @@ pub(crate) struct V3PlanExecutionCompleted {
     pub(crate) selected: V3Target10ConcreteProviderSelected,
     pub(crate) admission: crate::provider_failure_runtime_policy::V3RuntimeProviderAdmission,
     pub(crate) request_local_excluded_candidates: BTreeSet<String>,
+    pub(crate) request_local_busy_candidates: BTreeSet<String>,
     pub(crate) execution_mode: V3HubExecutionMode,
     pub(crate) protocol_decision: crate::nodes::V3Execution11ProtocolDecision,
 }
@@ -61,6 +62,7 @@ pub(crate) enum V3PlanExecutionStop {
     Exhausted {
         expanded: V3Target09CandidateSetExpanded,
         exhaustion: V3TargetExhaustion,
+        source: Option<V3Error01SourceRaised>,
     },
     Failed(V3Error01SourceRaised),
     OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
@@ -74,6 +76,7 @@ pub(crate) enum V3PlanExecutionOutcome {
     Exhausted {
         expanded: V3Target09CandidateSetExpanded,
         exhaustion: V3TargetExhaustion,
+        source: Option<V3Error01SourceRaised>,
     },
     Failed(V3Error01SourceRaised),
     OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
@@ -81,11 +84,13 @@ pub(crate) enum V3PlanExecutionOutcome {
         expanded: V3Target09CandidateSetExpanded,
         rescue_candidates: Vec<V3TargetCandidate>,
         request_local_excluded_candidates: BTreeSet<String>,
+        request_local_busy_candidates: BTreeSet<String>,
     },
     NeedExhaustionProbes {
         expanded: V3Target09CandidateSetExpanded,
         exhaustion: V3TargetExhaustion,
         request_local_excluded_candidates: BTreeSet<String>,
+        request_local_busy_candidates: BTreeSet<String>,
     },
 }
 
@@ -100,10 +105,12 @@ enum PlanExecutionOperatorOutput {
         decision: crate::nodes::V3Execution11ProtocolDecision,
         admission: crate::provider_failure_runtime_policy::V3RuntimeProviderAdmission,
         request_local_excluded_candidates: BTreeSet<String>,
+        request_local_busy_candidates: BTreeSet<String>,
     },
     Exhausted {
         expanded: V3Target09CandidateSetExpanded,
         exhaustion: V3TargetExhaustion,
+        source: Option<V3Error01SourceRaised>,
     },
     Failed(V3Error01SourceRaised),
     OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
@@ -111,11 +118,13 @@ enum PlanExecutionOperatorOutput {
         expanded: V3Target09CandidateSetExpanded,
         rescue_candidates: Vec<V3TargetCandidate>,
         request_local_excluded_candidates: BTreeSet<String>,
+        request_local_busy_candidates: BTreeSet<String>,
     },
     NeedExhaustionProbes {
         expanded: V3Target09CandidateSetExpanded,
         exhaustion: V3TargetExhaustion,
         request_local_excluded_candidates: BTreeSet<String>,
+        request_local_busy_candidates: BTreeSet<String>,
     },
 }
 
@@ -126,6 +135,7 @@ struct PlanExecutionOperator {
     failure_session_scope: V3ProviderFailureSessionScope,
     provider_health: V3ProviderFailureRuntimeHealth,
     request_local_excluded_candidates: BTreeSet<String>,
+    request_local_busy_candidates: BTreeSet<String>,
     now_ms: u64,
     deterministic_sample: u64,
     allow_exhaustion_rescue_probe: bool,
@@ -144,6 +154,7 @@ impl PlanExecutionOperator {
         failure_session_scope: V3ProviderFailureSessionScope,
         provider_health: V3ProviderFailureRuntimeHealth,
         request_local_excluded_candidates: BTreeSet<String>,
+        request_local_busy_candidates: BTreeSet<String>,
         now_ms: u64,
         deterministic_sample: u64,
         allow_exhaustion_rescue_probe: bool,
@@ -160,6 +171,7 @@ impl PlanExecutionOperator {
             failure_session_scope,
             provider_health,
             request_local_excluded_candidates,
+            request_local_busy_candidates,
             now_ms,
             deterministic_sample,
             allow_exhaustion_rescue_probe,
@@ -230,6 +242,7 @@ impl PlanExecutionOperator {
                     return PlanExecutionOperatorOutput::Exhausted {
                         expanded,
                         exhaustion,
+                        source: None,
                     }
                 }
             };
@@ -251,6 +264,7 @@ impl PlanExecutionOperator {
             failure_session_scope: &self.failure_session_scope,
             provider_health: &self.provider_health,
             request_local_excluded_candidates: &self.request_local_excluded_candidates,
+            request_local_busy_candidates: &self.request_local_busy_candidates,
             now_ms: self.now_ms,
             deterministic_sample: self.deterministic_sample,
             allow_exhaustion_rescue_probe: self.allow_exhaustion_rescue_probe,
@@ -262,12 +276,14 @@ impl PlanExecutionOperator {
             V3SynchronousTargetAdmissionStep::Selected {
                 selected,
                 request_local_excluded_candidates,
+                request_local_busy_candidates,
             } => match self.decide_execution_mode(selected.selected) {
                 Ok(decision) => PlanExecutionOperatorOutput::Selected {
                     expanded,
                     decision,
                     admission: selected.admission,
                     request_local_excluded_candidates,
+                    request_local_busy_candidates,
                 },
                 Err(Ok(source)) => PlanExecutionOperatorOutput::Failed(source),
                 Err(Err(fault)) => PlanExecutionOperatorOutput::OperatorFault(fault),
@@ -276,24 +292,29 @@ impl PlanExecutionOperator {
                 expanded,
                 rescue_candidates,
                 request_local_excluded_candidates,
+                request_local_busy_candidates,
             } => PlanExecutionOperatorOutput::NeedPreExhaustionProbes {
                 expanded,
                 rescue_candidates,
                 request_local_excluded_candidates,
+                request_local_busy_candidates,
             },
             V3SynchronousTargetAdmissionStep::NeedExhaustionProbes {
                 expanded,
                 exhaustion,
                 request_local_excluded_candidates,
+                request_local_busy_candidates,
             } => PlanExecutionOperatorOutput::NeedExhaustionProbes {
                 expanded,
                 exhaustion,
                 request_local_excluded_candidates,
+                request_local_busy_candidates,
             },
-            V3SynchronousTargetAdmissionStep::Exhausted(exhaustion) => {
+            V3SynchronousTargetAdmissionStep::Exhausted { exhaustion, source } => {
                 PlanExecutionOperatorOutput::Exhausted {
                     expanded,
                     exhaustion,
+                    source,
                 }
             }
             V3SynchronousTargetAdmissionStep::Failed(source) => {
@@ -351,6 +372,7 @@ pub(crate) fn run_v3_plan_execution_operator(
     failure_session_scope: V3ProviderFailureSessionScope,
     provider_health: V3ProviderFailureRuntimeHealth,
     request_local_excluded_candidates: BTreeSet<String>,
+    request_local_busy_candidates: BTreeSet<String>,
     now_ms: u64,
     deterministic_sample: u64,
     allow_exhaustion_rescue_probe: bool,
@@ -367,6 +389,7 @@ pub(crate) fn run_v3_plan_execution_operator(
         failure_session_scope,
         provider_health,
         request_local_excluded_candidates,
+        request_local_busy_candidates,
         now_ms,
         deterministic_sample,
         allow_exhaustion_rescue_probe,
@@ -411,6 +434,7 @@ pub(crate) fn run_v3_plan_execution_operator(
                     decision,
                     admission,
                     request_local_excluded_candidates,
+                    request_local_busy_candidates,
                 } => V3PlanExecutionOutcome::Selected {
                     execution_planned_request,
                     plan: V3PlanExecutionCompleted {
@@ -418,6 +442,7 @@ pub(crate) fn run_v3_plan_execution_operator(
                         selected: decision.target.clone(),
                         admission,
                         request_local_excluded_candidates,
+                        request_local_busy_candidates,
                         execution_mode: match decision.mode {
                             V3Execution11ProtocolDecisionMode::SameProtocolDirect => {
                                 V3HubExecutionMode::Direct
@@ -432,9 +457,11 @@ pub(crate) fn run_v3_plan_execution_operator(
                 PlanExecutionOperatorOutput::Exhausted {
                     expanded,
                     exhaustion,
+                    source,
                 } => V3PlanExecutionOutcome::Exhausted {
                     expanded,
                     exhaustion,
+                    source,
                 },
                 PlanExecutionOperatorOutput::Failed(source) => {
                     V3PlanExecutionOutcome::Failed(source)
@@ -446,19 +473,23 @@ pub(crate) fn run_v3_plan_execution_operator(
                     expanded,
                     rescue_candidates,
                     request_local_excluded_candidates,
+                    request_local_busy_candidates,
                 } => V3PlanExecutionOutcome::NeedPreExhaustionProbes {
                     expanded,
                     rescue_candidates,
                     request_local_excluded_candidates,
+                    request_local_busy_candidates,
                 },
                 PlanExecutionOperatorOutput::NeedExhaustionProbes {
                     expanded,
                     exhaustion,
                     request_local_excluded_candidates,
+                    request_local_busy_candidates,
                 } => V3PlanExecutionOutcome::NeedExhaustionProbes {
                     expanded,
                     exhaustion,
                     request_local_excluded_candidates,
+                    request_local_busy_candidates,
                 },
             })
         }
@@ -490,6 +521,7 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
         failure_session_scope,
         provider_health,
         request_local_excluded_candidates,
+        BTreeSet::new(),
         now_ms,
         deterministic_sample,
         false,
@@ -550,9 +582,11 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
         Some(PlanExecutionOperatorOutput::Exhausted {
             expanded,
             exhaustion,
+            source,
         }) => Err(V3PlanExecutionStop::Exhausted {
             expanded,
             exhaustion,
+            source,
         }),
         Some(PlanExecutionOperatorOutput::Failed(source)) => {
             Err(V3PlanExecutionStop::Failed(source))
@@ -591,6 +625,7 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
     failure_session_scope: &'a V3ProviderFailureSessionScope,
     provider_health: &'a V3ProviderFailureRuntimeHealth,
     request_local_excluded_candidates: &'a BTreeSet<String>,
+    request_local_busy_candidates: &'a BTreeSet<String>,
     now_ms: u64,
     deterministic_sample: u64,
     allow_exhaustion_rescue_probe: bool,
@@ -611,6 +646,7 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
         failure_session_scope,
         provider_health,
         request_local_excluded_candidates,
+        request_local_busy_candidates,
         now_ms,
         deterministic_sample,
         allow_exhaustion_rescue_probe,
@@ -626,6 +662,7 @@ async fn run_v3_plan_execution_with_probes_unboxed(
     failure_session_scope: &V3ProviderFailureSessionScope,
     provider_health: &V3ProviderFailureRuntimeHealth,
     request_local_excluded_candidates: &BTreeSet<String>,
+    request_local_busy_candidates: &BTreeSet<String>,
     mut now_ms: u64,
     deterministic_sample: u64,
     allow_exhaustion_rescue_probe: bool,
@@ -635,6 +672,7 @@ async fn run_v3_plan_execution_with_probes_unboxed(
     let mut source = target_source;
     let mut preferred = preferred_selected;
     let mut request_local_excluded_candidates = request_local_excluded_candidates.clone();
+    let mut request_local_busy_candidates = request_local_busy_candidates.clone();
     let mut pre_exhaustion_probes_completed = false;
     let mut exhaustion_probes_completed = false;
     let mut exhaustion_generation = None;
@@ -658,6 +696,7 @@ async fn run_v3_plan_execution_with_probes_unboxed(
             failure_session_scope.clone(),
             provider_health.clone(),
             request_local_excluded_candidates.clone(),
+            request_local_busy_candidates.clone(),
             now_ms,
             deterministic_sample,
             allow_exhaustion_rescue_probe,
@@ -683,6 +722,7 @@ async fn run_v3_plan_execution_with_probes_unboxed(
                 expanded,
                 rescue_candidates,
                 request_local_excluded_candidates: admitted_exclusions,
+                request_local_busy_candidates: admitted_busy,
             } => {
                 match initiate_v3_target_pre_exhaustion_rescue_probes(
                     provider_health,
@@ -697,6 +737,7 @@ async fn run_v3_plan_execution_with_probes_unboxed(
                     Err(Err(fault)) => return Err(V3PlanExecutionStop::OperatorFault(fault)),
                 }
                 request_local_excluded_candidates.extend(admitted_exclusions);
+                request_local_busy_candidates.extend(admitted_busy);
                 exhaustion_probes_completed = false;
                 exhaustion_generation = None;
                 now_ms = match current_time("target_pre_exhaustion_rescue_clock_failed") {
@@ -710,8 +751,10 @@ async fn run_v3_plan_execution_with_probes_unboxed(
                 expanded,
                 exhaustion,
                 request_local_excluded_candidates: admitted_exclusions,
+                request_local_busy_candidates: admitted_busy,
             } => {
                 request_local_excluded_candidates.extend(admitted_exclusions);
+                request_local_busy_candidates.extend(admitted_busy);
                 pre_exhaustion_probes_completed = false;
                 exhaustion_probes_completed = false;
                 let generation = provider_health.target_availability_generation();
@@ -737,9 +780,18 @@ async fn run_v3_plan_execution_with_probes_unboxed(
                         source = V3PlanExecutionTargetSource::Expanded(expanded);
                     }
                     Ok(false) => {
+                        let source = match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
+                            &expanded,
+                            &request_local_excluded_candidates,
+                            &request_local_busy_candidates,
+                        ) {
+                            Ok(source) => source,
+                            Err(fault) => return Err(V3PlanExecutionStop::OperatorFault(fault)),
+                        };
                         return Err(V3PlanExecutionStop::Exhausted {
                             expanded,
                             exhaustion,
+                            source,
                         });
                     }
                     Err(error) => {
@@ -763,10 +815,12 @@ async fn run_v3_plan_execution_with_probes_unboxed(
             V3PlanExecutionOutcome::Exhausted {
                 expanded,
                 exhaustion,
+                source,
             } => {
                 return Err(V3PlanExecutionStop::Exhausted {
                     expanded,
                     exhaustion,
+                    source,
                 });
             }
             V3PlanExecutionOutcome::Failed(source) => {
@@ -859,6 +913,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             V3PlanExecutionTargetSource::OpaqueHit(hit),
             scope,
             health,
+            BTreeSet::new(),
             BTreeSet::new(),
             now_ms,
             0,
@@ -999,6 +1054,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             scope,
             health,
             BTreeSet::new(),
+            BTreeSet::new(),
             now_ms,
             0,
             false,
@@ -1134,6 +1190,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             scope.clone(),
             health.clone(),
             BTreeSet::new(),
+            BTreeSet::new(),
             now_ms,
             0,
             false,
@@ -1202,6 +1259,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             V3PlanExecutionTargetSource::Expanded(expanded),
             scope,
             health,
+            BTreeSet::new(),
             BTreeSet::new(),
             now_ms,
             0,
@@ -1276,6 +1334,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             V3PlanExecutionTargetSource::Expanded(expanded),
             scope,
             health,
+            BTreeSet::new(),
             BTreeSet::new(),
             now_ms,
             sample,
@@ -1528,6 +1587,7 @@ targets = [
                 &task_scope,
                 &task_health,
                 &initial_exclusions,
+                &BTreeSet::new(),
                 now_ms,
                 0,
                 true,

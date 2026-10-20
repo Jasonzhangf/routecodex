@@ -199,6 +199,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
             None => V3PlanExecutionTargetSource::OpaqueHit(resolved_target.opaque_hit),
         };
         let mut failed_candidates = initial_request_local_excluded_candidates;
+        let mut request_local_busy_candidates = BTreeSet::new();
         let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> =
             None;
         let mut initial_selected_target = initial_selected_target;
@@ -223,6 +224,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                 &input.failure_session_scope,
                 &provider_health,
                 &failed_candidates,
+                &request_local_busy_candidates,
                 v3_relay_provider_policy_now_epoch_ms()
                     .map_err(V3ResponsesRelayRuntimeError::Target)?,
                 deterministic_sample,
@@ -251,7 +253,29 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                         0,
                     ));
                 }
-                Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
+                Err(V3PlanExecutionStop::Exhausted {
+                    expanded: exhausted_expanded,
+                    exhaustion,
+                    source,
+                    ..
+                }) => {
+                    let source = match source {
+                        Some(source) => Some(source),
+                        None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
+                            &exhausted_expanded,
+                            &failed_candidates,
+                            &request_local_busy_candidates,
+                        ) {
+                            Ok(source) => source,
+                            Err(fault) => {
+                                return Ok(provider_failure_output(
+                                    V3ResponsesRelayProviderFailure::from(fault),
+                                    trace,
+                                    0,
+                                ))
+                            }
+                        },
+                    };
                     let failure = V3ResponsesRelayProviderFailure {
                         status: 502,
                         provider_status: None,
@@ -271,7 +295,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                         response_processing_code: None,
                     };
                     return Ok(provider_failure_output(
-                        terminalize_v3_responses_relay_provider_failure(failure, None),
+                        super::responses_relay_failures::terminalize_v3_responses_relay_provider_failure_with_source(
+                            failure, source, None,
+                        ),
                         trace,
                         0,
                     ));
@@ -280,6 +306,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
         let initial_execution_mode = initial_plan.execution_mode;
         let retained_expanded = initial_plan.expanded;
         failed_candidates.extend(initial_plan.request_local_excluded_candidates);
+        request_local_busy_candidates.extend(initial_plan.request_local_busy_candidates);
         let mut initial_admitted = Some((
             initial_plan.selected,
             initial_plan.admission,
@@ -358,6 +385,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                     &input.failure_session_scope,
                     &provider_health,
                     &failed_candidates,
+                    &request_local_busy_candidates,
                     v3_relay_provider_policy_now_epoch_ms()
                         .map_err(V3ResponsesRelayRuntimeError::Target)?,
                     deterministic_sample,
@@ -374,6 +402,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                         req05.previous.previous.previous.payload.0 =
                             std::sync::Arc::new(execution_planned_request);
                         failed_candidates.extend(plan.request_local_excluded_candidates);
+                        request_local_busy_candidates.extend(plan.request_local_busy_candidates);
                         (plan.selected, Some(plan.admission), plan.protocol_decision)
                     }
                     Err(V3PlanExecutionStop::Failed(source)) => {
@@ -392,7 +421,32 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             0,
                         ));
                     }
-                    Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
+                    Err(V3PlanExecutionStop::Exhausted {
+                        expanded: exhausted_expanded,
+                        exhaustion,
+                        source,
+                        ..
+                    }) => {
+                        let source = match source {
+                            Some(source) => Some(source),
+                            None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
+                                &exhausted_expanded,
+                                &failed_candidates,
+                                &request_local_busy_candidates,
+                            ) {
+                                Ok(source) => source,
+                                Err(fault) => {
+                                    return Ok(provider_failure_output(
+                                        terminalize_v3_responses_relay_provider_failure(
+                                            V3ResponsesRelayProviderFailure::from(fault),
+                                            last_external_http.clone(),
+                                        ),
+                                        trace,
+                                        0,
+                                    ))
+                                }
+                            },
+                        };
                         let failure = V3ResponsesRelayProviderFailure {
                             status: 502,
                             provider_status: None,
@@ -412,8 +466,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             response_processing_code: None,
                         };
                         return Ok(provider_failure_output(
-                            terminalize_v3_responses_relay_provider_failure(
+                            super::responses_relay_failures::terminalize_v3_responses_relay_provider_failure_with_source(
                                 failure,
+                                source,
                                 last_external_http.clone(),
                             ),
                             trace,
@@ -647,8 +702,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                                 selected_admission = Some(admission)
                             }
                             V3AdmitAfterRecovery::Busy => {
-                                failed_candidates
-                                    .insert(v3_relay_provider_candidate_key(&selected.candidate));
+                                let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                                failed_candidates.insert(busy_key.clone());
+                                request_local_busy_candidates.insert(busy_key);
                                 drop(_provider_action_permit.take());
                                 provider_action_permit_target = None;
                                 continue;
@@ -717,7 +773,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                     handle_error_before_resp03!(runtime_timing
                         .finish_external()
                         .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-                    failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                    let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                    failed_candidates.insert(busy_key.clone());
+                    request_local_busy_candidates.insert(busy_key);
                     drop(_provider_action_permit.take());
                     provider_action_permit_target = None;
                     continue;
