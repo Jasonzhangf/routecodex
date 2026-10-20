@@ -29,6 +29,68 @@ pub(crate) const ARG_KEY_OPEN: &str = "<arg_key>";
 pub(crate) const ARG_KEY_CLOSE: &str = "</arg_key>";
 pub(crate) const ARG_VALUE_OPEN: &str = "<arg_value>";
 pub(crate) const ARG_VALUE_CLOSE: &str = "</arg_value>";
+const MINIMAX_PREFIX: &str = "]<]minimax[>[";
+const MINIMAX_OPEN: &str = "]<]minimax[>[<tool_call>";
+const MINIMAX_CLOSE: &str = "]<]minimax[>[</tool_call>";
+
+// Parse only the observed prefixed invoke dialect. The error bool identifies
+// an unfinished declared invocation; unknown/opaque envelopes remain business
+// text. Structural prefixes are consumed here, never stripped from values.
+fn minimax_envelope<'a>(
+    text: &'a str,
+    start: usize,
+    declarations: &ToolMarkupDeclarations,
+) -> Result<(Vec<ParsedToolCall<'a>>, usize), bool> {
+    let mut rest = text[start..].strip_prefix(MINIMAX_OPEN).ok_or(false)?;
+    let mut calls: Vec<ParsedToolCall<'a>> = Vec::new();
+    loop {
+        rest = rest.trim_start();
+        if let Some(after) = rest.strip_prefix(MINIMAX_CLOSE) {
+            if calls.is_empty() {
+                return Err(false);
+            }
+            let end = text.len() - after.len();
+            for call in &mut calls {
+                call.envelope = &text[start..end];
+            }
+            return Ok((calls, end));
+        }
+        let invocation = rest.strip_prefix(MINIMAX_PREFIX).ok_or(!calls.is_empty())?;
+        let (attrs, after) = attributes(invocation, "<invoke").ok_or(!calls.is_empty())?;
+        let name = attribute(&attrs, "name").ok_or(false)?;
+        let identity = declarations.get(name).ok_or(false)?;
+        if attrs.len() != 1 || identity.kind != ToolMarkupKind::Function {
+            return Err(false);
+        }
+        rest = after;
+        let mut arguments: Vec<(String, String)> = Vec::new();
+        loop {
+            rest = rest.trim_start();
+            if let Some(after) = rest.strip_prefix("]<]minimax[>[</invoke>") {
+                rest = after;
+                break;
+            }
+            let field = rest.strip_prefix("]<]minimax[>[<").ok_or(true)?;
+            let (key, value_start) = field.split_once('>').ok_or(true)?;
+            if !valid_grammar_name(key) || arguments.iter().any(|(existing, _)| existing == key) {
+                return Err(false);
+            }
+            let closing = format!("{MINIMAX_PREFIX}</{key}>");
+            let (value, after) = value_start.split_once(&closing).ok_or(true)?;
+            arguments.push((
+                key.to_owned(),
+                render_alternate_value(value, identity.parameter_kinds.get(key).copied()),
+            ));
+            rest = after;
+        }
+        calls.push(ParsedToolCall {
+            wire_name: name,
+            call_id: None,
+            arguments: render_function_arguments(&arguments),
+            envelope: "",
+        });
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ToolMarkupKind {
@@ -656,6 +718,29 @@ pub(crate) fn scan_tool_markup<'a>(
                     };
                 }
             }
+            if inline.is_none() && quote.is_none() && !blockquote && tail.starts_with(MINIMAX_OPEN)
+            {
+                match minimax_envelope(text, cursor, declarations) {
+                    Ok((calls, end)) => {
+                        if cursor > consumed {
+                            segments.push(ToolMarkupSegment::Text(&text[consumed..cursor]));
+                        }
+                        segments.push(ToolMarkupSegment::Calls(calls));
+                        consumed = end;
+                        cursor = end.min(line_end);
+                    }
+                    Err(incomplete) => {
+                        incomplete_tool_invocation |= incomplete;
+                        opaque_invocation = true;
+                        skip_until = tail
+                            .find(MINIMAX_CLOSE)
+                            .map(|end| cursor + end + MINIMAX_CLOSE.len())
+                            .unwrap_or(text.len());
+                        cursor = skip_until.min(line_end);
+                    }
+                }
+                continue;
+            }
             if inline.is_none() && quote.is_none() && tail.starts_with(OPEN) {
                 if let Some((calls, rest)) = envelope(tail, declarations) {
                     if cursor > consumed {
@@ -728,6 +813,70 @@ pub(crate) fn scan_tool_markup<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_markup_parser_f665809_minimax_values_and_atomic_boundaries() {
+        let mut declared = declarations();
+        declared.insert(
+            "exec_command".into(),
+            ToolMarkupIdentity {
+                kind: ToolMarkupKind::Function,
+                parameter_kinds: HashMap::from([
+                    ("cmd".into(), ToolMarkupParamKind::String),
+                    ("workdir".into(), ToolMarkupParamKind::String),
+                    ("max_output_tokens".into(), ToolMarkupParamKind::Number),
+                    ("yield_time_ms".into(), ToolMarkupParamKind::Number),
+                ]),
+            },
+        );
+        let value = "  printf \"hi\"\\path\n```\n]<]minimax[>[ ordinary value  ";
+        let text = format!("{MINIMAX_OPEN}{MINIMAX_PREFIX}<invoke name=\"exec_command\">{MINIMAX_PREFIX}<cmd>{value}{MINIMAX_PREFIX}</cmd>{MINIMAX_PREFIX}<workdir>123{MINIMAX_PREFIX}</workdir>{MINIMAX_PREFIX}<max_output_tokens>4000{MINIMAX_PREFIX}</max_output_tokens>{MINIMAX_PREFIX}<yield_time_ms>bad-model-value{MINIMAX_PREFIX}</yield_time_ms>{MINIMAX_PREFIX}</invoke>{MINIMAX_CLOSE}");
+        let scan = scan_tool_markup(&text, &declared);
+        assert!(!scan.incomplete_tool_invocation);
+        let ToolMarkupSegment::Calls(calls) = &scan.segments[0] else {
+            panic!("not harvested: {scan:?}")
+        };
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&calls[0].arguments).unwrap(),
+            serde_json::json!({"cmd":value,"workdir":"123","max_output_tokens":4000,"yield_time_ms":"bad-model-value"})
+        );
+        for text in [
+            format!("```xml\n{text}\n```"),
+            format!("`{text}`"),
+            format!("\"{text}\""),
+            format!("    {text}"),
+        ] {
+            let scan = scan_tool_markup(&text, &declared);
+            assert!(
+                scan.segments
+                    .iter()
+                    .all(|segment| matches!(segment, ToolMarkupSegment::Text(_))),
+                "literal was harvested: {scan:?}"
+            );
+            assert!(!scan.incomplete_tool_invocation);
+        }
+        for suffix in [
+            "",
+            "]<]minimax[>[<file_path>x",
+            "]<]minimax[>[<file_path>x]<]minimax[>[</file_path>",
+            "]<]minimax[>[</invoke>",
+        ] {
+            let truncated =
+                format!("{MINIMAX_OPEN}{MINIMAX_PREFIX}<invoke name=\"read_image\">{suffix}");
+            assert!(
+                scan_tool_markup(&truncated, &declared).incomplete_tool_invocation,
+                "declared truncation escaped: {truncated}"
+            );
+        }
+        let unknown = format!("{MINIMAX_OPEN}{MINIMAX_PREFIX}<invoke name=\"unknown\">{MINIMAX_PREFIX}<cmd>x{MINIMAX_PREFIX}</cmd>{MINIMAX_PREFIX}</invoke>{MINIMAX_CLOSE}");
+        let scan = scan_tool_markup(&unknown, &declared);
+        assert!(!scan.incomplete_tool_invocation);
+        assert_eq!(
+            scan.segments,
+            vec![ToolMarkupSegment::Text(unknown.as_str())]
+        );
+    }
 
     fn declarations() -> ToolMarkupDeclarations {
         let mut declarations = ToolMarkupDeclarations::default();

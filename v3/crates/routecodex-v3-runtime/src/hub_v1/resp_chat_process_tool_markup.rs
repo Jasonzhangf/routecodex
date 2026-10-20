@@ -91,8 +91,16 @@ fn message(
         return Ok(vec![item.clone()]);
     };
     let representable = item.as_object().is_some_and(|row| {
-        row.keys()
-            .all(|key| matches!(key.as_str(), "id" | "type" | "role" | "status" | "content"))
+        // Responses SSE normalization attaches this positional association.
+        // Opaque business extensions still prevent lossy item replacement.
+        row.keys().all(|key| {
+            matches!(
+                key.as_str(),
+                "id" | "type" | "role" | "status" | "content" | "output_index"
+            )
+        }) && row
+            .get("output_index")
+            .is_none_or(|value| value.as_u64().is_some())
     });
     let governed_part = |part: &Value| representable && known_part(part);
     let mut output = Vec::new();

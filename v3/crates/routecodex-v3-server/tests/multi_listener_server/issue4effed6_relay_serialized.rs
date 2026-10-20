@@ -11,6 +11,8 @@ enum Mode {
     HalfThinking,
     Namespace,
     Recovered,
+    Minimax,
+    MinimaxPartial,
 }
 #[derive(Clone)]
 struct Peer {
@@ -51,6 +53,29 @@ async fn upstream(State(peer): State<Peer>, axum::Json(body): axum::Json<Value>)
             turn, 1,
             "first attempt must be accepted without reselection"
         );
+        if matches!(peer.mode, Mode::Minimax) {
+            let calls: Vec<_> = messages
+                .iter()
+                .filter(|message| message["role"] == "assistant")
+                .filter_map(|message| message["tool_calls"].as_array())
+                .flatten()
+                .collect();
+            assert_eq!(calls.len(), 2);
+            assert_ne!(calls[0]["id"], calls[1]["id"]);
+            for call in calls {
+                assert_eq!(call["function"]["name"], wire_name);
+                assert_eq!(call["function"]["arguments"], ARGS);
+                assert!(messages.iter().any(|message| message["role"] == "tool"
+                    && message["tool_call_id"] == call["id"]
+                    && message["content"] == "42"));
+            }
+            return chat_provider_response(
+                body["stream"] == true,
+                "MATCHED_TOOL_RESULT_42",
+                json!([]),
+                "stop",
+            );
+        }
         for (id, arguments, result) in std::iter::once((CALL, ARGS, "42")).chain(
             matches!(peer.mode, Mode::InvalidNative).then_some((
                 "native_bad",
@@ -78,6 +103,14 @@ async fn upstream(State(peer): State<Peer>, axum::Json(body): axum::Json<Value>)
             .any(|message| message.to_string().contains("SERIALIZED_FIXTURE")));
         let envelope = format!("<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name=\"{wire_name}\" call_id=\"{CALL}\"><｜｜DSML｜｜ parameter name=\"value\" string=\"true\">42</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>");
         text = match peer.mode {
+            Mode::Minimax | Mode::MinimaxPartial => {
+                let call = format!("]<]minimax[>[<invoke name=\"{wire_name}\">]<]minimax[>[<value>42]<]minimax[>[</value>]<]minimax[>[</invoke>");
+                if matches!(peer.mode, Mode::MinimaxPartial) {
+                    format!("FAILED_ATTEMPT_PROSE\n]<]minimax[>[<tool_call>{call}]<]minimax[>[<invoke name=\"{wire_name}\">]<]minimax[>[<value>broken")
+                } else {
+                    format!("<thinking>Preparing.\n]<]minimax[>[<tool_call>{call}{call}]<]minimax[>[</tool_call>\nDone preparing.")
+                }
+            }
             Mode::Partial => format!("FAILED_ATTEMPT_PROSE\n{envelope}\n<tool_call>printf42<arg_key>value</arg_key><arg_value>broken"),
             Mode::HalfThinking => format!("<thinking>Preparing.\n{envelope}\nDone preparing."),
             _ => format!("Preparing.\n{envelope}\nDone preparing."),
@@ -152,6 +185,47 @@ async fn round_trip(stream: bool, mode: Mode) {
     );
     let result = completed(&wire, stream);
     let output = result["output"].as_array().unwrap();
+    if matches!(mode, Mode::Minimax) {
+        assert!(!wire.contains("]<]minimax[>[") && !wire.contains("<invoke"));
+        let harvested: Vec<_> = output
+            .iter()
+            .filter(|item| item["type"] == "function_call")
+            .collect();
+        assert_eq!(harvested.len(), 2);
+        assert_ne!(harvested[0]["call_id"], harvested[1]["call_id"]);
+        let mut input = vec![message];
+        input.extend(output.clone());
+        for call in harvested {
+            assert_eq!(call["name"], "printf42");
+            assert_eq!(call["arguments"], ARGS);
+            let args: Value = serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+            let executed = std::process::Command::new("printf")
+                .arg("%s")
+                .arg(args["value"].as_str().unwrap())
+                .output()
+                .unwrap();
+            assert!(executed.status.success());
+            let stdout = String::from_utf8(executed.stdout).unwrap();
+            assert_eq!(stdout, "42");
+            input.push(
+                json!({"type":"function_call_output","call_id":call["call_id"],"output":stdout}),
+            );
+        }
+        let followup = client
+            .post(&url)
+            .json(&json!({"model":"client-test","stream":stream,"tools":tools,"input":input}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(followup.status(), 200);
+        assert!(completed(&followup.text().await.unwrap(), stream)
+            .to_string()
+            .contains("MATCHED_TOOL_RESULT_42"));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        handle.shutdown().await;
+        task.abort();
+        return;
+    }
     if matches!(mode, Mode::HalfThinking) {
         let prose: String = output
             .iter()
@@ -208,12 +282,16 @@ async fn round_trip(stream: bool, mode: Mode) {
 }
 
 async fn partial(stream: bool, recover: bool) {
+    partial_mode(stream, recover, Mode::Partial).await;
+}
+
+async fn partial_mode(stream: bool, recover: bool, mode: Mode) {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_P6_TEST_KEY", "test-key");
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let (primary, task) = spawn_marker_upstream(
         Peer {
-            mode: Mode::Partial,
+            mode,
             calls: calls.clone(),
         },
         post(upstream),
@@ -278,6 +356,7 @@ async fn partial(stream: bool, recover: bool) {
             "response.completed",
             "response.failed",
             "network_error",
+            "]<]minimax[>[",
         ] {
             assert!(!wire.contains(forbidden), "{wire}");
         }
@@ -599,6 +678,22 @@ async fn opaque_counterexample(stream: bool) {
 async fn relay_serialized_tool_complete_json_and_sse_round_trip() {
     for stream in [false, true] {
         round_trip(stream, Mode::Complete).await;
+    }
+}
+
+#[tokio::test]
+async fn relay_serialized_tool_f665809_minimax_json_and_sse_round_trip() {
+    for stream in [false, true] {
+        round_trip(stream, Mode::Minimax).await;
+    }
+}
+
+#[tokio::test]
+async fn relay_serialized_tool_f665809_minimax_partial_recovery_and_exhaustion() {
+    for stream in [false, true] {
+        for recover in [false, true] {
+            partial_mode(stream, recover, Mode::MinimaxPartial).await;
+        }
     }
 }
 #[tokio::test]

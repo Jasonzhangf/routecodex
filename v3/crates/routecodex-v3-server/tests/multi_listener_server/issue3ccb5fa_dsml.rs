@@ -16,10 +16,17 @@ enum DsmlCase {
     OpaqueAlternate,
     UnknownLabelOnly,
     OpaqueEmbeddedThinking,
+    Minimax,
+    MinimaxPartial,
+    MinimaxLiteral,
+    MinimaxUnknown,
+    MinimaxNamespace,
 }
 
 fn opaque_tool_text(case: DsmlCase) -> Option<&'static str> {
     match case {
+        DsmlCase::MinimaxLiteral => Some("```xml\n]<]minimax[>[<tool_call>]<]minimax[>[<invoke name=\"read_image\">]<]minimax[>[<file_path>literal.png]<]minimax[>[</file_path>]<]minimax[>[</invoke>]<]minimax[>[</tool_call>\n```"),
+        DsmlCase::MinimaxUnknown => Some("]<]minimax[>[<tool_call>]<]minimax[>[<invoke name=\"unknown\">]<]minimax[>[<cmd>ordinary business]<]minimax[>[</cmd>]<]minimax[>[</invoke>]<]minimax[>[</tool_call>"),
         DsmlCase::UnknownComplete => Some("<tool_call>undeclared<arg_key>cmd</arg_key><arg_value>x</arg_value></tool_call>"),
         DsmlCase::OpaqueComplete => Some("<tool_call>read_image<arg_key>file_path</arg_key><arg_value>a</arg_value><arg_key>file_path</arg_key><arg_value>b</arg_value></tool_call>"),
         DsmlCase::OpaqueAlternate => Some("<|read_image\">\n<file_path>a</file_path>\n<file_path>b</file_path>\n</read_image>"),
@@ -54,11 +61,13 @@ fn discovery_item() -> Value {
 
 fn client_tools(case: DsmlCase) -> Value {
     match case {
-        DsmlCase::Nested => json!([{"type":"namespace","name":"mcp__mcpx","tools":[
-            {"type":"namespace","name":"workspace","tools":[
-                {"type":"function","name":"read","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}
-            ]}
-        ]}]),
+        DsmlCase::Nested | DsmlCase::MinimaxNamespace => {
+            json!([{"type":"namespace","name":"mcp__mcpx","tools":[
+                {"type":"namespace","name":"workspace","tools":[
+                    {"type":"function","name":"read","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}
+                ]}
+            ]}])
+        }
         DsmlCase::Discovered => {
             json!([{"type":"function","name":"read_image","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}])
         }
@@ -83,7 +92,7 @@ fn client_tools(case: DsmlCase) -> Value {
 
 fn invoke_name(case: DsmlCase) -> &'static str {
     match case {
-        DsmlCase::Nested => NESTED_WIRE,
+        DsmlCase::Nested | DsmlCase::MinimaxNamespace => NESTED_WIRE,
         DsmlCase::Discovered => DISCOVERED_WIRE,
         DsmlCase::Alternate | DsmlCase::ToolCall | DsmlCase::CallsResidueSse => "exec_command",
         _ => "read_image",
@@ -92,7 +101,7 @@ fn invoke_name(case: DsmlCase) -> &'static str {
 
 fn expected_leaf(case: DsmlCase) -> &'static str {
     match case {
-        DsmlCase::Nested => NESTED_LEAF,
+        DsmlCase::Nested | DsmlCase::MinimaxNamespace => NESTED_LEAF,
         DsmlCase::Discovered => DISCOVERED_LEAF,
         DsmlCase::Alternate | DsmlCase::ToolCall | DsmlCase::CallsResidueSse => "exec_command",
         _ => "read_image",
@@ -101,7 +110,7 @@ fn expected_leaf(case: DsmlCase) -> &'static str {
 
 fn expected_namespace(case: DsmlCase) -> Option<&'static str> {
     match case {
-        DsmlCase::Nested => Some(NESTED_NAMESPACE),
+        DsmlCase::Nested | DsmlCase::MinimaxNamespace => Some(NESTED_NAMESPACE),
         DsmlCase::Discovered => Some(DISCOVERED_NAMESPACE),
         _ => None,
     }
@@ -152,6 +161,20 @@ async fn upstream(
                 output.as_array_mut().unwrap().pop();
             }
             output
+        } else if matches!(
+            peer.case,
+            DsmlCase::Minimax | DsmlCase::MinimaxPartial | DsmlCase::MinimaxNamespace
+        ) {
+            let invocation = format!(
+                "]<]minimax[>[<invoke name=\"{}\">]<]minimax[>[<file_path>{}]<]minimax[>[</file_path>]<]minimax[>[</invoke>",
+                invoke_name(peer.case), peer.path
+            );
+            let text = if peer.case == DsmlCase::MinimaxPartial {
+                format!("FAILED_ATTEMPT_PROSE\n]<]minimax[>[<tool_call>{invocation}]<]minimax[>[<invoke name=\"read_image\">]<]minimax[>[<file_path>broken")
+            } else {
+                format!("Before\n]<]minimax[>[<tool_call>\n{invocation}\n{invocation}\n]<]minimax[>[</tool_call>\nAfter")
+            };
+            json!([{"id":"minimax_message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text,"annotations":[]}]}])
         } else if peer.case == DsmlCase::Alternate {
             json!([{
                 "id":"message_alternate",
@@ -227,6 +250,37 @@ async fn upstream(
         let input = body["input"].as_array().unwrap();
         let call = input.iter().find(|i| i["type"] == "function_call").unwrap();
         let leaf = expected_leaf(peer.case);
+        if matches!(peer.case, DsmlCase::Minimax | DsmlCase::MinimaxNamespace) {
+            let calls: Vec<_> = input
+                .iter()
+                .filter(|item| item["type"] == "function_call")
+                .collect();
+            let results: Vec<_> = input
+                .iter()
+                .filter(|item| item["type"] == "function_call_output")
+                .collect();
+            assert_eq!(calls.len(), 2);
+            assert_eq!(results.len(), 2);
+            assert_ne!(calls[0]["call_id"], calls[1]["call_id"]);
+            for (call, result) in calls.iter().zip(results) {
+                let name = call["name"].as_str().unwrap();
+                assert!(name == expected_leaf(peer.case) || name == invoke_name(peer.case));
+                if name == expected_leaf(peer.case) {
+                    assert_eq!(call["namespace"].as_str(), expected_namespace(peer.case));
+                }
+                assert_eq!(
+                    serde_json::from_str::<Value>(call["arguments"].as_str().unwrap()).unwrap(),
+                    json!({"file_path":peer.path})
+                );
+                assert_eq!(call["call_id"], result["call_id"]);
+                assert_eq!(
+                    serde_json::from_str::<Value>(result["output"].as_str().unwrap()).unwrap(),
+                    json!({"width":3,"height":2})
+                );
+            }
+            return Response::builder().header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&json!({"id":"minimax_followup","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Two images are 3 by 2."}]}]})).unwrap())).unwrap();
+        }
         if matches!(
             peer.case,
             DsmlCase::Alternate | DsmlCase::ToolCall | DsmlCase::CallsResidueSse
@@ -513,6 +567,17 @@ async fn upstream(
         json!({"type":"response.completed","response":response}),
         false,
     );
+    if matches!(peer.case, DsmlCase::Minimax | DsmlCase::MinimaxPartial) {
+        let fragments: Vec<_> = wire
+            .as_bytes()
+            .chunks(7)
+            .map(|chunk| Ok::<_, std::io::Error>(chunk.to_vec()))
+            .collect();
+        return Response::builder()
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(futures_util::stream::iter(fragments)))
+            .unwrap();
+    }
     Response::builder()
         .header("content-type", "text/event-stream")
         .body(Body::from(wire))
@@ -520,6 +585,10 @@ async fn upstream(
 }
 
 async fn run(case: DsmlCase, sse: bool) {
+    run_mode(case, sse, false).await;
+}
+
+async fn run_mode(case: DsmlCase, sse: bool, relay: bool) {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_PROTOCOL_DECISION_KEY", "dsml-test-key");
     let fixture = std::env::temp_dir().join(format!(
@@ -549,13 +618,20 @@ async fn run(case: DsmlCase, sse: bool) {
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    let manifest = responses_direct_binding_provider_protocol_manifest(
+    let mut manifest = responses_direct_binding_provider_protocol_manifest(
         free_port(),
         free_port(),
         "responses",
         &format!("http://{addr}/v1"),
-        "\"direct\"",
+        "\"direct\", \"relay\"",
     );
+    if relay {
+        let provider = manifest.providers.get_mut("mixed").unwrap();
+        let responses =
+            serde_json::from_value(json!({"process":"chat","streaming":"always"})).unwrap();
+        provider.responses = Some(responses);
+        provider.interfaces.get_mut("default").unwrap().responses = provider.responses.clone();
+    }
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
@@ -592,6 +668,54 @@ async fn run(case: DsmlCase, sse: bool) {
         .iter()
         .filter(|i| i["type"] == "function_call")
         .collect();
+    if matches!(case, DsmlCase::Minimax | DsmlCase::MinimaxNamespace) {
+        assert_eq!(
+            calls.len(),
+            2,
+            "f665809 complete invoke envelopes must become two native calls: {result}"
+        );
+        assert!(
+            !wire.contains("]<]minimax[>[") && !wire.contains("<invoke"),
+            "f665809 wrapper leaked: {wire}"
+        );
+        assert_ne!(calls[0]["call_id"], calls[1]["call_id"]);
+        let mut input = first_input(case).as_array().unwrap().clone();
+        input.extend(output.clone());
+        for call in &calls {
+            assert_eq!(call["name"], expected_leaf(case));
+            assert_eq!(call["namespace"].as_str(), expected_namespace(case));
+            let args: Value = serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+            assert_eq!(args, json!({"file_path":peer.path}));
+            let bytes = fs::read(args["file_path"].as_str().unwrap()).unwrap();
+            assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+            let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+            let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+            assert_eq!((width, height), (3, 2));
+            input.push(json!({"type":"function_call_output","call_id":call["call_id"],"output":json!({"width":width,"height":height}).to_string()}));
+        }
+        let followup = client
+            .post(&endpoint)
+            .json(&json!({"model":"client-test","input":input,"tools":tools,"stream":false}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(followup.status(), 200);
+        assert!(followup
+            .text()
+            .await
+            .unwrap()
+            .contains("Two images are 3 by 2."));
+        assert_eq!(
+            peer.calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "no retry or duplicate business attempt"
+        );
+        handle.shutdown().await;
+        task.abort();
+        fs::remove_file(fixture).unwrap();
+        std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+        return;
+    }
     if case == DsmlCase::UnknownLabelOnly {
         assert!(calls.is_empty(), "unknown text must not create a tool call");
         assert_eq!(
@@ -890,6 +1014,116 @@ async fn run(case: DsmlCase, sse: bool) {
 #[tokio::test]
 async fn responses_direct_dsml_json_tool_round_trip() {
     run(DsmlCase::RoundTrip, false).await
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_f665809_minimax_json_round_trip() {
+    run(DsmlCase::Minimax, false).await;
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_f665809_minimax_sse_round_trip() {
+    run(DsmlCase::Minimax, true).await;
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_f665809_namespace_round_trip() {
+    for stream in [false, true] {
+        run(DsmlCase::MinimaxNamespace, stream).await;
+    }
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_f665809_literal_and_unknown_preserve_native_pair() {
+    for case in [DsmlCase::MinimaxLiteral, DsmlCase::MinimaxUnknown] {
+        for stream in [false, true] {
+            run(case, stream).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_f665809_explicit_relay_responses_round_trip() {
+    for stream in [false, true] {
+        run_mode(DsmlCase::Minimax, stream, true).await;
+    }
+}
+
+#[tokio::test]
+async fn responses_direct_dsml_f665809_partial_attempt_exhaustion_is_transport_failure() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "dsml-test-key");
+    for stream in [false, true] {
+        let peer = DsmlPeer {
+            path: "owned.png".into(),
+            calls: Arc::default(),
+            sse: stream,
+            case: DsmlCase::MinimaxPartial,
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/v1/responses", post(upstream))
+            .with_state(peer.clone());
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let handle =
+            spawn_v3_server_aggregate(responses_direct_binding_provider_protocol_manifest(
+                free_port(),
+                free_port(),
+                "responses",
+                &format!("http://{addr}/v1"),
+                "\"direct\"",
+            ))
+            .await
+            .unwrap();
+        let url = format!("http://{}/v1/responses", handle.listeners[0].addr);
+        let response = reqwest::Client::builder().timeout(Duration::from_secs(10)).build().unwrap().post(url)
+            .json(&json!({"model":"client-test","input":"owned incomplete fixture","stream":stream,"tools":client_tools(DsmlCase::MinimaxPartial)})).send().await;
+        match response {
+            Err(error) => assert!(
+                !error.is_timeout(),
+                "timeout is not transport failure: {error}"
+            ),
+            Ok(response) => {
+                use futures_util::StreamExt;
+                let mut chunks = response.bytes_stream();
+                let mut wire = Vec::new();
+                let mut failed = false;
+                while let Some(chunk) = chunks.next().await {
+                    match chunk {
+                        Ok(bytes) => wire.extend_from_slice(&bytes),
+                        Err(error) => {
+                            assert!(!error.is_timeout());
+                            failed = true;
+                            break;
+                        }
+                    }
+                }
+                assert!(failed, "truncated executable envelope completed silently");
+                let wire = String::from_utf8_lossy(&wire);
+                for forbidden in [
+                    "FAILED_ATTEMPT_PROSE",
+                    "minimax",
+                    "function_call",
+                    "response.completed",
+                    "response.failed",
+                    "network_error",
+                ] {
+                    assert!(!wire.contains(forbidden), "failed attempt leaked: {wire}");
+                }
+            }
+        }
+        assert_eq!(peer.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let health = reqwest::get(format!("http://{}/health", handle.listeners[0].addr))
+            .await
+            .unwrap();
+        assert_eq!(health.status(), 200);
+        handle.shutdown().await;
+        task.abort();
+    }
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
 }
 
 #[tokio::test]

@@ -1187,6 +1187,9 @@ features:
   - Client stream requests keep text/event-stream for Error06 and success frames; non-stream requests keep JSON while valid provider JSON may omit top-level finish_reason
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_dsml_ -- --nocapture
+  # f665809: exact prefixed invoke grammar is harvested by the shared parser
+  # through registered Direct hooks; executable truncation uses processing Error.
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_dsml_f665809_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_dsml_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_thinking_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_tool_markup_recovery_is_exact_and_health_neutral -- --nocapture
@@ -4207,6 +4210,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_control_marker_
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server relay_control_marker_
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server relay_serialized_tool_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server relay_serialized_tool_f665809_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_serialized_tool_
   - git diff --check
   completion_rule:
