@@ -820,6 +820,7 @@ features:
   - v3.response.provider_raw
   - v3.response.client_payload
   - v3.error.source
+  - v3.runtime.responses_observability
   mainline_bindings:
   - v3-rd-09
   - v3-rd-09-direct-policy
@@ -830,6 +831,7 @@ features:
   entry_symbols:
   - execute_v3_responses_direct_runtime_kernel
   - execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug
+  - execute_v3_responses_direct_runtime_kernel_core
   - V3Execution11ProtocolDecision
   - V3Execution11ProtocolDecisionMode
   - build_v3_execution_11_protocol_decision_from_v3_target_10
@@ -849,6 +851,7 @@ features:
   - kernel::tests::responses_provider_process_chat_forces_hub_relay
   - build_v3_server_16_http_frame_from_v3_resp_15
   - execute_responses_direct_server_outcome
+  - build_v3_runtime_provider_failed_attempt_evidence_from_error
   - pending_endpoint
   - multi_listener_server::responses_direct_shared_provider_health_reselects_after_unrecoverable_failure
   - multi_listener_server::responses_direct_provider_request_dry_run_does_not_send_to_any_provider
@@ -4586,6 +4589,8 @@ features:
   - finalize_v3_responses_relay_server_output
   - persist_v3_chat_failure_evidence
   - persist_v3_chat_failure_evidence_sources
+  - take_responses_direct_terminal_outcome
+  - issue885bb74_responses_direct_http502_recovers_with_wire_evidence_json_and_sse
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
@@ -4604,6 +4609,7 @@ features:
   - response.client_payload
   required_gates:
   - npm run verify:v3-resource-map
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test issue885bb74_responses_failed_attempt_evidence -- --nocapture --test-threads=1
   mainline_bindings:
   - v3-responses-relay-error-evidence-01
   - v3-responses-relay-error-evidence-02

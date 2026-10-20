@@ -912,6 +912,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 continue;
             }
             Err(error) => {
+                let failed_attempt_evidence =
+                    crate::hub_v1::build_v3_runtime_provider_failed_attempt_evidence_from_error(
+                        total_attempts(&accumulator, send_attempts),
+                        provider_request_snapshot.clone(),
+                        &error,
+                    );
                 if let Some(witness) =
                     crate::hub_v1::external_http_witness_from_provider_error(&error)
                 {
@@ -1012,7 +1018,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         )
                     }
                 };
-                if let Some(event) = policy_result.event.clone() {
+                if let Some(mut event) = policy_result.event.clone() {
+                    event.failed_attempt_evidence = failed_attempt_evidence;
                     provider_failure_events.push(event.clone());
                     publish_v3_direct_provider_failure_event(
                         provider_failure_event_sink.as_ref(),

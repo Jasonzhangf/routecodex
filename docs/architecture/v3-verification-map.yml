@@ -3105,12 +3105,14 @@ features:
   - Worker filesystem failures for error evidence are logged immediately and retained as request/file-qualified barrier errors.
   - Pinned Chat Direct JSON and SSE GOOD/DROP/GOOD controls attempt the exact one-candidate pin once per request, never admit the unrelated default pool, and retain the original typed failed-attempt source plus the separate terminal source in the request-qualified private artifact.
   - Direct recovered success retains the original ordered failed-attempt sources; clean Direct success without failures or a terminal source creates no provider-failed-attempt artifact.
+  - Public Responses Direct JSON and SSE requests recover from a Provider A HTTP 502 to a distinct Provider B business response while retaining A's admitted ordinal, provider request projection, actual response head, body bytes, and original typed source in the final private artifact; Provider B does not overwrite or duplicate A's failed attempt.
   - Direct attempt-zero failure persists the exact original Error06 source as terminal_source with an empty attempts array and no provider transport attempt.
   - 'Seeded Chat Relay success and terminal failure record the receiving output authoritative sequence once: original Direct failure A followed by later Relay failure B, preserving their exact typed sources and order.'
   - The existing compaction early-return branch records any preceding typed failures before returning, without moving or reusing a consumed handoff and without changing its existing client behavior.
   required_negative:
   - Clean successes without a failed attempt or terminal source do not force failure evidence persistence.
   - Private source fields never enter client payload, SSE frames, or ordinary diagnostic projections; no generic reason code substitutes for the original source.
+  - Responses Direct HTTP 502 recovery never exposes Provider A's error body, credential material, failed-attempt evidence, or proxy error semantics in the JSON or SSE client response.
   - Failure evidence never enters MetadataCenter, provider payload, or client payload.
   - Direct recording cannot alter pin selection, captured candidate plans, exclusions, cumulative attempt budgets, configured hard ceilings, deadlines, retries, health, payloads or client framing.
   - Recording the seeded Relay output must not concatenate a preceding handoff sequence or duplicate A; removing only the seeded Server recording call loses the artifact while the same business continuation remains unchanged.
@@ -3124,6 +3126,7 @@ features:
   - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_provider_continuation -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_failure_evidence -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_relay_handoff -- --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test issue885bb74_responses_failed_attempt_evidence -- --nocapture --test-threads=1
   completion_rule:
     source: Resource, function, mainline, module, and Server unit gates pass.
     runtime: Live failed request evidence capture remains required before production closeout.
