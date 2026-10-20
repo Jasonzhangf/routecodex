@@ -473,14 +473,13 @@ fn direct_sse_frames_have_business_content(
     provider_protocol: V3HubProviderWireProtocol,
     frames: &[Vec<u8>],
 ) -> bool {
-    frames.iter().any(|frame| {
-        parse_direct_sse_json_frames(frame).iter().any(|value| {
-            crate::hub_v1::v3_provider_event_has_deliverable_business_content(
-                provider_protocol,
-                value,
-            )
-        })
-    })
+    let mut facts = crate::hub_v1::V3ProviderAttemptBusinessContent::default();
+    for frame in frames {
+        for value in parse_direct_sse_json_frames(frame) {
+            facts.observe_event(provider_protocol, &value);
+        }
+    }
+    facts.has_deliverable_business_content()
 }
 
 /// Typed provider-failure source for a complete Direct SSE attempt that carries

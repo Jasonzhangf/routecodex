@@ -4,6 +4,12 @@
 
 ## 目标与边界
 
+### 0ff6700：显式空白 assistant final
+
+完整 attempt 完成所有注册响应治理后，由共享业务内容 owner 汇总判定，再进入唯一响应处置出口。存在显式 assistant final 且最终文本只有空白、没有工具/refusal/content_filter/其他可表示独立业务结果时，整次响应丢弃并产生内部 provider_response_empty/502；此前非空 reasoning 不覆盖此规则。没有 assistant final 的纯 reasoning 保持合法。单个空白 delta、added 占位或尚未完成的片段不能触发该判定。
+
+可交付结果沿原投影到 Runtime client commit；空白 final 走独立 Error01–06 图，Runtime 仅在图外创建下一未尝试候选的 attempt。最后候选没有替代时终止传输，不添加健康、冷却、等待或同候选循环。响应与 Error 的既有 SESE 拓扑保持；此处修改的是完整尝试处置条件。
+
 RouteCodex 的业务目标是透明代理：在不同客户端和上游协议之间最大限度保持请求、响应、历史、工具与流语义的连通性。代理新增的语义校验不得拦截本可兼容传递的请求或响应。信任边界、目标协议确实无法表达的字段和真实上游错误必须显式处理。控制资源、路由决策、provider 健康与业务 payload 分开。
 
 控制来源只由真实 typed owner 及其生产写入边界证明。普通业务 JSON 的字段拼写不能证明控制泄漏；schema、工具参数、结果、历史和 opaque 扩展中的同名字段须完整保留，也不得成为运行时控制真源。`normalize_request_losslessly` 和 Provider/客户端投影都不增加递归名称准入（03df769）。

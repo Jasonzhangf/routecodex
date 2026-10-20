@@ -29,6 +29,272 @@ static TEST_LOCK: fa22072_test_home::ServerTestLock = fa22072_test_home::ServerT
 const KEY_ENV: &str = "V3_NO_RESPONSE_TEST_KEY";
 const RECOVERY_KEY_ENV: &str = "V3_NO_RESPONSE_RECOVERY_KEY";
 
+fn issue0ff6700_blank_final() -> Value {
+    let mut response = text_response("\n\n\n\n");
+    response["output"].as_array_mut().unwrap().insert(
+        0,
+        json!({
+            "id":"reasoning_blank_final", "type":"reasoning",
+            "summary":[{"type":"summary_text","text":"PRIVATE_THOUGHT_0FF"}]
+        }),
+    );
+    response
+}
+
+async fn issue0ff6700_run(process: &str, stream: bool, recover: bool) {
+    issue0ff6700_run_body(process, stream, recover, None).await;
+}
+
+async fn issue0ff6700_run_body(
+    process: &str,
+    stream: bool,
+    recover: bool,
+    blank_body: Option<String>,
+) {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let encode = |body: &Value| {
+        if stream {
+            response_sse(body)
+        } else {
+            body.to_string()
+        }
+    };
+    let blank = issue0ff6700_blank_final();
+    let blank_body = blank_body.unwrap_or_else(|| encode(&blank));
+    let options = EntryOptions {
+        attempt_bodies: if recover {
+            vec![blank_body.clone(), encode(&text_response("RECOVERED_0FF"))]
+        } else {
+            Vec::new()
+        },
+        auth_entries: if recover {
+            vec![
+                ("first".into(), KEY_ENV.into()),
+                ("second".into(), KEY_ENV.into()),
+            ]
+        } else {
+            Vec::new()
+        },
+        ..EntryOptions::default()
+    };
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        process,
+        StatusCode::OK,
+        if stream {
+            "text/event-stream"
+        } else {
+            "application/json"
+        },
+        blank_body,
+        options,
+    )
+    .await;
+    let response = client()
+        .post(&endpoint)
+        .json(&json!({"model":"test.test","input":"controlled blank final","stream":stream}))
+        .send()
+        .await;
+    let consumed = consume_response(response).await;
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    if !recover {
+        let base = endpoint.trim_end_matches("/v1/responses");
+        let health: Value = client()
+            .get(format!("{base}/_routecodex/health/cooldown-pool"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(
+            health["entries"].as_array().unwrap().is_empty(),
+            "last candidate must not cool: {health}"
+        );
+        let next = consume_response(
+            client()
+                .post(&endpoint)
+                .json(&json!({"model":"test.test","input":"new blank request","stream":stream}))
+                .send()
+                .await,
+        )
+        .await;
+        assert!(
+            next.transport_error.is_some(),
+            "next request must still fail detectably: {next:?}"
+        );
+        assert_eq!(
+            std::iter::from_fn(|| captures.try_recv().ok()).count(),
+            1,
+            "new request must try the same uncooled candidate once"
+        );
+    }
+    stop_entry(handle, shutdown).await;
+    std::env::remove_var(KEY_ENV);
+    assert_eq!(
+        attempts,
+        if recover { 2 } else { 1 },
+        "whole-attempt candidate count: {consumed:?}"
+    );
+    assert!(
+        !consumed.body.contains("PRIVATE_THOUGHT_0FF"),
+        "discard the complete blank attempt: {consumed:?}"
+    );
+    if recover {
+        assert!(
+            consumed.transport_error.is_none() && consumed.body.contains("RECOVERED_0FF"),
+            "next candidate must supply visible business: {consumed:?}"
+        );
+    } else {
+        assert!(
+            consumed.transport_error.is_some(),
+            "blank exhaustion cannot complete normally: {consumed:?}"
+        );
+        assert!(!consumed.body.contains("response.completed") && !consumed.body.contains("[DONE]"));
+    }
+    assert!(
+        !consumed.body.contains("provider_response_empty") && !consumed.body.contains("\"error\"")
+    );
+}
+
+#[tokio::test]
+async fn issue0ff6700_direct_json_recovers() {
+    issue0ff6700_run("direct", false, true).await;
+}
+#[tokio::test]
+async fn issue0ff6700_direct_sse_recovers() {
+    issue0ff6700_run("direct", true, true).await;
+}
+#[tokio::test]
+async fn issue0ff6700_relay_json_recovers() {
+    issue0ff6700_run("relay", false, true).await;
+}
+#[tokio::test]
+async fn issue0ff6700_relay_sse_recovers() {
+    issue0ff6700_run("relay", true, true).await;
+}
+#[tokio::test]
+async fn issue0ff6700_direct_json_exhausts() {
+    issue0ff6700_run("direct", false, false).await;
+}
+#[tokio::test]
+async fn issue0ff6700_direct_sse_exhausts() {
+    issue0ff6700_run("direct", true, false).await;
+}
+#[tokio::test]
+async fn issue0ff6700_relay_json_exhausts() {
+    issue0ff6700_run("relay", false, false).await;
+}
+#[tokio::test]
+async fn issue0ff6700_relay_sse_exhausts() {
+    issue0ff6700_run("relay", true, false).await;
+}
+
+fn issue0ff6700_fragmented_blank() -> String {
+    let response = issue0ff6700_blank_final();
+    format!(
+        "{}{}{}{}{}",
+        sse(
+            "response.output_item.done",
+            &json!({"type":"response.output_item.done","output_index":0,"item":response["output"][0]})
+        ),
+        sse(
+            "response.output_item.added",
+            &json!({"type":"response.output_item.added","output_index":1,"item":{"id":"blank_message","type":"message","role":"assistant","content":[]}})
+        ),
+        sse(
+            "response.output_text.delta",
+            &json!({"type":"response.output_text.delta","item_id":"blank_message","output_index":1,"content_index":0,"delta":"\n\n\n\n"})
+        ),
+        sse(
+            "response.output_text.done",
+            &json!({"type":"response.output_text.done","item_id":"blank_message","output_index":1,"content_index":0,"text":"\n\n\n\n"})
+        ),
+        response_sse(
+            &json!({"id":"fragmented_blank","object":"response","status":"completed","output":[]})
+        )
+    )
+}
+
+#[tokio::test]
+async fn issue0ff6700_direct_fragmented_blank_recovers() {
+    issue0ff6700_run_body("direct", true, true, Some(issue0ff6700_fragmented_blank())).await;
+}
+#[tokio::test]
+async fn issue0ff6700_relay_fragmented_blank_recovers() {
+    issue0ff6700_run_body("relay", true, true, Some(issue0ff6700_fragmented_blank())).await;
+}
+
+#[tokio::test]
+async fn issue0ff6700_independent_business_controls_survive() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let blank = issue0ff6700_blank_final();
+    let mut reasoning = blank.clone();
+    reasoning["output"].as_array_mut().unwrap().pop();
+    let mut tool = blank.clone();
+    tool["output"].as_array_mut().unwrap().push(json!({"type":"function_call","id":"tool_0ff","call_id":"call_0ff","name":"lookup","arguments":"{invalid model arguments"}));
+    let mut refusal = blank.clone();
+    refusal["output"][1]["content"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"type":"refusal","refusal":"declined"}));
+    let mut filtered = blank.clone();
+    filtered["status"] = json!("incomplete");
+    filtered["incomplete_details"] = json!({"reason":"content_filter"});
+    let mut opaque = blank.clone();
+    opaque["output"].as_array_mut().unwrap().push(json!({"type":"mcp_call","id":"opaque_0ff","server_label":"opaque","name":"lookup","arguments":"{}","output":"done","status":"completed","vendor_payload":{"ok":true}}));
+    for process in ["direct", "relay"] {
+        for stream in [false, true] {
+            for response in [
+                &reasoning,
+                &tool,
+                &refusal,
+                &filtered,
+                &opaque,
+                &text_response("visible answer"),
+            ] {
+                let body = if stream {
+                    response_sse(response)
+                } else {
+                    response.to_string()
+                };
+                let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+                    "responses",
+                    process,
+                    StatusCode::OK,
+                    if stream {
+                        "text/event-stream"
+                    } else {
+                        "application/json"
+                    },
+                    body,
+                    EntryOptions::default(),
+                )
+                .await;
+                let consumed = consume_response(client().post(&endpoint).json(&json!({"model":"test.test","input":"controlled business","stream":stream})).send().await).await;
+                let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+                stop_entry(handle, shutdown).await;
+                assert_eq!(attempts, 1);
+                assert!(
+                    consumed.transport_error.is_none(),
+                    "{process} stream={stream} control={response}: {consumed:?}"
+                );
+                assert!(!consumed.body.contains("provider_response_empty"));
+                if response == &opaque {
+                    assert!(
+                        consumed.body.contains("opaque_0ff")
+                            && consumed.body.contains("vendor_payload"),
+                        "independent opaque business must survive: {consumed:?}"
+                    );
+                }
+            }
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 struct ProviderState {
     kind: String,
     health_enabled: bool,

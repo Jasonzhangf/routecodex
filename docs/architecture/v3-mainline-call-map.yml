@@ -10842,9 +10842,9 @@ chains:
   - step_id: v3-direct-sse-empty-attempt-01
     from_node: V3ProviderResp14Raw
     to_node: V3Error01SourceRaised
-    caller_symbol: collect_direct_sse_attempt_after_terminal_with_memory
+    caller_symbol: collect_direct_sse_attempt_after_terminal_with_hooks
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
-    callee_symbol: direct_sse_chunk_has_business_content
+    callee_symbol: direct_sse_frames_have_business_content
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
     status: anchored
     owner_feature_id: v3.provider_response_error_policy_closeout

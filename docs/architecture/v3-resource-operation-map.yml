@@ -3079,6 +3079,7 @@ resources:
     must_pass_through: [V3ProviderResp14Raw, V3DirectResp14ProviderProjectionPrepared, Error01, Error03, Error04, Error05]
     semantic_contract:
       whole_attempt_admission: deliverability is checked across the complete buffered Direct SSE attempt after every registered response rewrite, including memory envelope stripping, and before terminal seal or client commit
+      blank_assistant_final: explicit assistant text that remains entirely whitespace across the complete attempt is internal 502 even with preceding reasoning; independent tools, refusal, content_filter and opaque business remain deliverable, and reasoning without an assistant final remains deliverable
       empty_after_non_client_removal: if declared non-client envelope removal leaves no text, tool call, reasoning, refusal, or content_filter result, return ProviderFailure/provider_response_empty as internal 502 into Error01
       representable_business_failure: if a real representable business result is lost, corrupted, or rejected during rewrite, projection, or framing, return RuntimeFailure/internal 599 into Error01 instead of upstream blame or an empty success
       unharvestable_tool_markup: recognized attempted tool markup that cannot be represented as a complete native call rejects the entire attempt through the registered Direct response hook and existing typed response-processing Error recovery, even with visible prose; no control flag enters the payload
@@ -3592,6 +3593,7 @@ resources:
       empty_attempt_effect: if only a deliberately removed non-client control envelope remains after all declared rewrites, no frame is committed and ProviderFailure/provider_response_empty enters Error01 as internal 502
       processing_failure_effect: loss or failure of representable business content during rewrite, inverse projection, or framing enters Error01 as RuntimeFailure/internal 599 instead of upstream blame or partial success
       business_content_rule: ordinary text, tool-call-only, reasoning, refusal, and content_filter are deliverable business results
+      blank_assistant_final: an explicit whitespace-only assistant final without independent business invalidates the complete attempt even with earlier reasoning; drop the candidate and enter Error01 with internal 502 for declared reselection
       servertool_effect: inverse and frame staging produce an empty candidate for servertool_followup; Runtime discards it, executes the declared typed sidecar plan, and re-enters the request graph without client commit
       retry_rule: retry is owned by ErrorErr05ExecutionDecision through v3.error.execution_decision, not by Resp03
       cancel_rule: cancellation is owned by RuntimeCancellation, not produced by Resp03
@@ -3632,6 +3634,7 @@ resources:
       staging_only: this resource is a staged candidate produced by the fixed response graph; it is never written directly to a client body
       committer: RuntimeClientCommit alone submits the staged candidate to Server/SSE after all declared rewrites leave deliverable whole-attempt business content and execution_disposition=client_commit
       deliverable_rule: ordinary text, tool-call-only, reasoning, refusal, and content_filter are business results; usage and the last frame alone do not establish deliverability
+      blank_assistant_final: do not commit an explicit whitespace-only assistant final solely because earlier reasoning exists; preserve independent business results and reasoning-only attempts without an assistant final
       empty_attempt_rule: no candidate is committed when the complete attempt is empty after declared non-client envelope removal; ProviderFailure/provider_response_empty enters Error01 as internal 502
       processing_failure_rule: loss or failure of representable business content enters Error01 as RuntimeFailure/internal 599, not as client success or upstream failure
       servertool_rule: RespOutbound and frame staging return an empty candidate for servertool_followup; Runtime discards it and re-enters the request graph
