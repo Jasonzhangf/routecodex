@@ -51,7 +51,7 @@ async fn serve(
     eprintln!("fairness authenticated HTTP capture={capture}");
     peer.captures.lock().await.push(capture);
     let marker = body["messages"][0]["content"].as_str().unwrap();
-    if marker == "genuine failure"
+    if (marker == "genuine failure" && index != 5)
         || (marker == "ping; reply pong" && !peer.ready.load(Ordering::SeqCst))
     {
         return (
@@ -129,6 +129,29 @@ max_context_tokens = 1000000
     }
     let targets = ids.iter().map(|id| format!(r#"{{ kind = "provider_model", provider = "{id}", model = "recovery", key = "key", priority = 1 }}"#)).collect::<Vec<_>>().join(",");
     source.push_str(&format!("\n[route_groups.fairness.pools.default]\nselection = {{ strategy = \"priority\" }}\ntargets = [{targets}]\n"));
+    source.push_str(&format!(
+        r#"
+[providers.fairness_spare]
+type = "openai_chat"
+base_url = "{base}/5/v1"
+default_model = "recovery"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FA22072_FAIRNESS_KEY" }}] }}
+[providers.fairness_spare.models.recovery]
+wire_name = "recovery"
+capabilities = ["text", "tools"]
+max_context_tokens = 1000000
+"#
+    ));
+    // Cooldown setup needs an eligible alternative. A singleton pin failure is
+    // deliberately health-neutral under the last-candidate contract.
+    for id in &ids {
+        source.push_str(&format!(r#"
+[route_groups.fairness.pools.{id}]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 20, models = ["{id}-failure"] }}
+targets = [{{ kind = "provider_model", provider = "{id}", model = "recovery", key = "key", priority = 10 }}, {{ kind = "provider_model", provider = "fairness_spare", model = "recovery", key = "key", priority = 1 }}]
+"#));
+    }
     (
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap(),
         ids,

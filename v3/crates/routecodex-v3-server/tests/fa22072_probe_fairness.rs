@@ -6,8 +6,7 @@ use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
     time::{timeout, Duration},
 };
 
@@ -33,19 +32,15 @@ fn exact<'a>(pool: &'a Value, id: &str) -> Option<&'a Value> {
 }
 
 async fn fail(port: u16, id: &str) {
-    let body = json!({"model":format!("{id}.recovery"),"messages":[{"role":"user","content":"genuine failure"}],"stream":false}).to_string();
-    let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    socket.write_all(format!("POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
-    let mut bytes = Vec::new();
-    if let Err(error) = socket.read_to_end(&mut bytes).await {
-        assert!(matches!(
-            error.kind(),
-            std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof
-        ));
-    }
-    assert!(
-        bytes.is_empty(),
-        "genuine provider failure must close without client status/body: {bytes:?}"
+    let response = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
+        .json(&json!({"model":format!("{id}-failure"),"messages":[{"role":"user","content":"genuine failure"}],"stream":false}))
+        .send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        fixture::business("recovery"),
+        "a genuine first-candidate failure must recover through its declared spare"
     );
 }
 
@@ -67,7 +62,27 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         futures_util::future::join_all(ids.iter().map(|id| fail(port, id))),
     )
     .await
-    .expect("real failures must terminate independently");
+    .expect("real failures must recover independently");
+    let captures = peer.captures.lock().await;
+    for index in 0..5 {
+        assert_eq!(
+            captures
+                .iter()
+                .filter(|capture| capture["index"] == index
+                    && capture["body"]["messages"][0]["content"] == "genuine failure")
+                .count(),
+            1
+        );
+    }
+    assert_eq!(
+        captures
+            .iter()
+            .filter(|capture| capture["index"] == 5
+                && capture["body"]["messages"][0]["content"] == "genuine failure")
+            .count(),
+        5
+    );
+    drop(captures);
     let before = pool(&client, &base).await;
     eprintln!("fairness genuine-failure cooldown={before}");
     for id in &ids {
