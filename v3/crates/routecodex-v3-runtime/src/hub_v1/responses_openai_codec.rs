@@ -750,6 +750,10 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
             retain_anthropic_reasoning_block_association(item, &reasoning_content, extension);
         }
         message["routecodex_chat_extension"] = extension;
+    } else {
+        let mut extension = Map::new();
+        retain_anthropic_reasoning_block_association(item, &reasoning_content, &mut extension);
+        message["routecodex_chat_extension"] = Value::Object(extension);
     }
     // Preserve the Responses reasoning `encrypted_content` as an opaque business
     // association so the Anthropic outbound projection can restore the exact
@@ -778,12 +782,9 @@ fn retain_anthropic_reasoning_block_association(
     reasoning_content: &str,
     extension: &mut Map<String, Value>,
 ) {
-    let Some(anthropic_reasoning) = extension
+    let anthropic_reasoning = extension
         .get(ANTHROPIC_REASONING_EXTENSION)
-        .and_then(Value::as_object)
-    else {
-        return;
-    };
+        .and_then(Value::as_object);
     if extension
         .get(ANTHROPIC_REASONING_BLOCKS_EXTENSION)
         .and_then(Value::as_array)
@@ -792,6 +793,17 @@ fn retain_anthropic_reasoning_block_association(
         return;
     }
     let mut block = Map::new();
+    let native_type = anthropic_reasoning
+        .and_then(|extension| extension.get("type"))
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| {
+            if reasoning_content.trim().is_empty() && item.contains_key("encrypted_content") {
+                "redacted_thinking"
+            } else {
+                "thinking"
+            }
+        });
+    block.insert("type".to_string(), Value::String(native_type.to_string()));
     block.insert(
         "reasoning_content".to_string(),
         Value::String(reasoning_content.to_string()),
@@ -799,10 +811,12 @@ fn retain_anthropic_reasoning_block_association(
     if let Some(encrypted_content) = item.get("encrypted_content") {
         block.insert("encrypted_content".to_string(), encrypted_content.clone());
     }
-    block.insert(
-        ANTHROPIC_REASONING_EXTENSION.to_string(),
-        Value::Object(anthropic_reasoning.clone()),
-    );
+    if let Some(anthropic_reasoning) = anthropic_reasoning {
+        block.insert(
+            ANTHROPIC_REASONING_EXTENSION.to_string(),
+            Value::Object(anthropic_reasoning.clone()),
+        );
+    }
     extension.insert(
         ANTHROPIC_REASONING_BLOCKS_EXTENSION.to_string(),
         Value::Array(vec![Value::Object(block)]),

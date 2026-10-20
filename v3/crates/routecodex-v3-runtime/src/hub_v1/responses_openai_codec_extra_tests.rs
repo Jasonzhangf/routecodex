@@ -483,6 +483,171 @@ fn responses_reasoning_extensions_keep_distinct_block_associations() {
 }
 
 #[test]
+fn responses_mixed_reasoning_blocks_keep_complete_ordered_records_in_both_orders() {
+    let extended = json!({
+        "type": "reasoning",
+        "encrypted_content": "redacted-encrypted",
+        "routecodex_chat_extension": {
+            "anthropic_reasoning": {
+                "type": "redacted_thinking",
+                "cache_control": {"type": "ephemeral"}
+            }
+        }
+    });
+    let plain = json!({
+        "type": "reasoning",
+        "summary": [{"type": "summary_text", "text": "plain reasoning"}],
+        "encrypted_content": "plain-signature"
+    });
+    let plain_record = json!({
+        "type": "thinking",
+        "reasoning_content": "plain reasoning",
+        "encrypted_content": "plain-signature"
+    });
+    let extended_record = json!({
+        "type": "redacted_thinking",
+        "reasoning_content": "",
+        "encrypted_content": "redacted-encrypted",
+        "anthropic_reasoning": {
+            "type": "redacted_thinking",
+            "cache_control": {"type": "ephemeral"}
+        }
+    });
+
+    for (order, reasoning_items, expected_records) in [
+        (
+            "plain-first",
+            [plain.clone(), extended.clone()],
+            vec![plain_record.clone(), extended_record.clone()],
+        ),
+        (
+            "extended-first",
+            [extended.clone(), plain.clone()],
+            vec![extended_record.clone(), plain_record.clone()],
+        ),
+    ] {
+        let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "claude",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "mixed reasoning"}]
+                },
+                reasoning_items[0].clone(),
+                reasoning_items[1].clone(),
+                {
+                    "type": "function_call",
+                    "call_id": format!("call_mixed_{order}"),
+                    "name": "lookup",
+                    "arguments": "{\"query\":\"p0\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": format!("call_mixed_{order}"),
+                    "output": "42"
+                }
+            ]
+        }))
+        .expect("mixed reasoning blocks must reach canonical Chat");
+
+        let blocks = canonical["messages"][1]["routecodex_chat_extension"]
+            ["anthropic_reasoning_blocks"]
+            .as_array()
+            .unwrap_or_else(|| {
+                panic!("missing ordered reasoning records for {order}: {canonical}")
+            });
+        assert_eq!(blocks, &expected_records, "{order}: {canonical}");
+
+        let provider =
+            crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+                canonical,
+            )
+            .expect("mixed canonical reasoning records must restore on the Anthropic wire");
+        let assistant_content = provider["messages"][1]["content"]
+            .as_array()
+            .expect("assistant content");
+        let expected_wire = if order == "plain-first" {
+            vec![
+                json!({
+                    "type": "thinking",
+                    "thinking": "plain reasoning",
+                    "signature": "plain-signature"
+                }),
+                json!({
+                    "type": "redacted_thinking",
+                    "data": "redacted-encrypted",
+                    "cache_control": {"type": "ephemeral"}
+                }),
+            ]
+        } else {
+            vec![
+                json!({
+                    "type": "redacted_thinking",
+                    "data": "redacted-encrypted",
+                    "cache_control": {"type": "ephemeral"}
+                }),
+                json!({
+                    "type": "thinking",
+                    "thinking": "plain reasoning",
+                    "signature": "plain-signature"
+                }),
+            ]
+        };
+        let reasoning_content = assistant_content
+            .iter()
+            .filter(|block| {
+                matches!(
+                    block["type"].as_str(),
+                    Some("thinking" | "redacted_thinking")
+                )
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            reasoning_content,
+            expected_wire.as_slice(),
+            "{order}: {provider}"
+        );
+        let tool_call_id = format!("call_mixed_{order}");
+        let tool_use = assistant_content
+            .iter()
+            .find(|block| block["type"] == "tool_use" && block["id"] == tool_call_id)
+            .unwrap_or_else(|| panic!("{order}: missing paired tool_use: {provider}"));
+        assert_eq!(
+            tool_use,
+            &json!({
+                "type": "tool_use",
+                "id": tool_call_id,
+                "name": "lookup",
+                "input": {"query": "p0"}
+            }),
+            "{order}: {provider}"
+        );
+        let tool_result = provider["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|message| {
+                message["content"].as_array().and_then(|content| {
+                    content.iter().find(|block| {
+                        block["type"] == "tool_result" && block["tool_use_id"] == tool_call_id
+                    })
+                })
+            })
+            .unwrap_or_else(|| panic!("{order}: missing paired tool_result: {provider}"));
+        assert_eq!(
+            tool_result["tool_use_id"], tool_call_id,
+            "{order}: {provider}"
+        );
+        assert!(
+            tool_result["content"].to_string().contains("42"),
+            "{order}: {provider}"
+        );
+    }
+}
+
+#[test]
 fn responses_encrypted_only_reasoning_item_keeps_empty_reasoning_content() {
     // Codex 只回传 encrypted_content 密文（无 text/summary 明文）时，入口归一化
     // 必须保留 reasoning 条目并以空 reasoning_content 呈现——opencode/DeepSeek 语义

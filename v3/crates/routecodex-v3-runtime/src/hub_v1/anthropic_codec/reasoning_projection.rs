@@ -35,7 +35,14 @@ pub(super) fn chat_message_reasoning_as_anthropic_content(
     let encrypted_content = extension
         .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
         .and_then(Value::as_str);
-    project_chat_reasoning_block(reasoning_content, encrypted_content, anthropic_reasoning)
+    project_chat_reasoning_block(
+        reasoning_content,
+        encrypted_content,
+        anthropic_reasoning
+            .and_then(|extension| extension.get("type"))
+            .and_then(Value::as_str),
+        anthropic_reasoning,
+    )
 }
 
 fn project_chat_reasoning_block_record(value: &Value) -> Result<Vec<Value>, V3AnthropicCodecError> {
@@ -61,25 +68,44 @@ fn project_chat_reasoning_block_record(value: &Value) -> Result<Vec<Value>, V3An
     };
     let anthropic_reasoning = record
         .get(ANTHROPIC_REASONING_EXTENSION)
-        .and_then(Value::as_object)
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "anthropic_reasoning_blocks.anthropic_reasoning",
-        })?;
+        .map(|value| {
+            value
+                .as_object()
+                .ok_or(V3AnthropicCodecError::MalformedField {
+                    field: "anthropic_reasoning_blocks.anthropic_reasoning",
+                })
+        })
+        .transpose()?;
+    let native_type = record
+        .get("type")
+        .map(|value| {
+            value
+                .as_str()
+                .filter(|value| matches!(*value, "thinking" | "redacted_thinking"))
+                .ok_or(V3AnthropicCodecError::MalformedField {
+                    field: "anthropic_reasoning_blocks.type",
+                })
+        })
+        .transpose()?
+        .or_else(|| {
+            anthropic_reasoning
+                .and_then(|extension| extension.get("type"))
+                .and_then(Value::as_str)
+        });
     project_chat_reasoning_block(
         reasoning_content,
         encrypted_content,
-        Some(anthropic_reasoning),
+        native_type,
+        anthropic_reasoning,
     )
 }
 
 fn project_chat_reasoning_block(
     reasoning_content: &str,
     encrypted_content: Option<&str>,
+    block_type: Option<&str>,
     anthropic_reasoning: Option<&Map<String, Value>>,
 ) -> Result<Vec<Value>, V3AnthropicCodecError> {
-    let block_type = anthropic_reasoning
-        .and_then(|extension| extension.get("type"))
-        .and_then(Value::as_str);
     if block_type == Some("redacted_thinking") {
         let data = encrypted_content.filter(|value| !value.is_empty()).ok_or(
             V3AnthropicCodecError::MalformedField {
