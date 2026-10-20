@@ -317,7 +317,7 @@ features:
   - live managed 5555 restart with concurrent V2 health and real JSON/SSE Responses
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test managed_restart_control_budget_blackbox -- --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --bin rccv3 managed_child_uses_bounded_worker_stack -- --exact --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --bin rccv3 tests:: -- --nocapture
   - npm run verify:v3-dagpipe-feature-graphs
   - npm run test:v3-managed-server-lifecycle
   - npm run verify:v3-architecture-docs
