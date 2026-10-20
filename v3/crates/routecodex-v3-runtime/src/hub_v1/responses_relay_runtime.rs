@@ -29,8 +29,9 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload, v3_provider_auth_handle_from_manifest_entry,
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle, V3ProviderError,
-    V3ProviderHealthStore, V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
-    V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
+    V3ProviderHealthListenerScope, V3ProviderHealthStore, V3ProviderResp14Raw,
+    V3ProviderResponseBody, V3ProviderResponseHeader, V3ResponsesProviderTarget,
+    V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
@@ -69,6 +70,17 @@ impl V3ResponsesRelayProviderHealthHandle {
     pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         Self {
             runtime_health: V3ProviderFailureRuntimeHealth::from_manifest(manifest),
+        }
+    }
+
+    pub fn from_manifest_for_listener(
+        manifest: &V3Config05ManifestPublished,
+        listener: &V3ProviderHealthListenerScope,
+    ) -> Self {
+        Self {
+            runtime_health: V3ProviderFailureRuntimeHealth::from_manifest_for_listener(
+                manifest, listener,
+            ),
         }
     }
 

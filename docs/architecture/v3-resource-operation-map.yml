@@ -1300,6 +1300,7 @@ resources:
     lifecycle: v3.debug_error_foundation.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStateMutated
+    listener_scope: [serverId, bind, port]
     identity: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
     allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::cancel_provider_cooldown_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderSessionAvailabilityReader::availability, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
@@ -1313,6 +1314,7 @@ resources:
     owner_feature_id: v3.provider_key_health_model_granularity
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStore
+    listener_scope: [serverId, bind, port]
     identity: [providerId, interfaceId, authAlias, modelId]
     semantic_contract:
       score_baseline: every configured or unseen identity starts at score 100
@@ -1334,6 +1336,7 @@ resources:
     lifecycle: v3.provider_cooldown_rescue_probe
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderCooldownProbeState
+    listener_scope: [serverId, bind, port]
     identity: [providerId, interfaceId, authAlias, modelId]
     semantic_contract:
       score_baseline: every configured or unseen identity starts at score 100
@@ -1345,7 +1348,7 @@ resources:
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
       exhaustion_disposition: after one request-owned rescue pass, reselect from the captured candidates and return internal exhaustion if none is available; do not wait for future scheduled recovery or the attempt-store residence deadline
       healthy_rescue_initiation: immediately admit and poll an eligible guarded probe once before healthy later-tier commitment, then transfer pending work to the aggregate owner without awaiting DNS or transport completion
-      aggregate_probe_lifetime: one retained aggregate task polls due and transferred probes under shared bounded admission; shutdown and exec cancel and join it, and aggregate drop aborts it; cancellation releases matching ownership without recording a provider failure
+      aggregate_probe_lifetime: one aggregate supervisor retains a recovery owner per listener; each polls its own due and transferred probes; shutdown and exec cancel and join every owner, aggregate drop aborts all; cancellation releases matching ownership without recording a provider failure
       generation_state: rescueProbeAttempted remains attached to the providerId+authAlias+modelId cooldown block until an HTTP 2xx probe or matching 429-owned business success removes the block
       in_flight_rule: if another request owns a cooldown probe, this request skips the cooled candidate and continues to the selected later tier without waiting
       acquisition_ownership: active_probe is an optional opaque store-lifetime acquisition identity carried by the existing permit; only its matching owner may release it, independently of health generation
@@ -1401,9 +1404,10 @@ resources:
     lifecycle: v3.server.startup_and_provider_failure.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderGlobalCooldownPersistence
+    listener_scope: [serverId, bind, port]
     identity: [providerId, authAlias, modelId, failureClass, cooldownUntilMs, nextProbeAtMs]
     allowed_writers: [V3ProviderCooldownCoordinator::load, V3ProviderCooldownCoordinator::record_failure, V3ProviderCooldownCoordinator::replace_entries, V3ProviderCooldownCoordinator::persist]
-    allowed_readers: [V3ProviderHealthStore::from_manifest, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys_due]
+    allowed_readers: [V3ProviderHealthStore::from_manifest, V3ProviderHealthStore::from_manifest_for_listener, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys_due]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
