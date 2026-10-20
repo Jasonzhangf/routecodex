@@ -29,6 +29,11 @@ const ATTEMPT_STORE_KEYS = [
   'process_max_bytes',
   'residence_timeout_ms',
 ];
+const PROVIDER_CONCURRENCY_KEYS = [
+  'maxInFlight',
+  'acquireTimeoutMs',
+  'staleLeaseMs',
+];
 
 /**
  * Write a task-owned V3 config and its referenced provider directory.
@@ -62,6 +67,7 @@ export async function generateRccConfig(options = {}) {
     throw new Error('mode must be direct or relay');
   }
   const attemptStore = normalizeAttemptStore(options.runtimeSetup?.attempt_store);
+  const providerConcurrency = normalizeProviderConcurrency(options.runtimeSetup?.provider_concurrency);
   const serverId = requireIdentifier(options.serverId ?? 'loopback', 'serverId');
   const defaultProviderId = requireIdentifier(options.providerId ?? `mock-${providerProtocol}`, 'providerId');
   const defaultModel = options.model ?? `mock.${MODEL_FOR_PROTOCOL[providerProtocol]}`;
@@ -96,6 +102,7 @@ export async function generateRccConfig(options = {}) {
       wireModel: candidate.wireModel,
       model: candidate.model,
       token: candidate.token,
+      providerConcurrency,
     });
     writeFileSync(providerPath, text);
     validateProviderFile(providerPath, candidate);
@@ -198,6 +205,12 @@ tiers = ${renderDefaultTier(plan.candidates)}
       policy: attemptStore,
       config_section: attemptStore ? `servers.${serverId}.execution.attempt_store` : null,
     },
+    provider_concurrency: providerConcurrency,
+    provider_concurrency_receipt: {
+      configured: Boolean(providerConcurrency),
+      policy: providerConcurrency,
+      config_section: providerConcurrency ? 'provider.concurrency' : null,
+    },
     provider_id: primary.provider_id,
     model: primary.model,
     model_alias: primary.model,
@@ -285,7 +298,21 @@ function resolveCandidatePlan({ runtimeSetup, defaultProviderId, defaultModel, d
   };
 }
 
-function renderProviderFile({ providerId, providerProtocol, baseURL, wireModel, model, token }) {
+function renderProviderFile({
+  providerId,
+  providerProtocol,
+  baseURL,
+  wireModel,
+  model,
+  token,
+  providerConcurrency,
+}) {
+  const concurrency = providerConcurrency
+    ? `\n[provider.concurrency]\n${PROVIDER_CONCURRENCY_KEYS
+      .filter((key) => providerConcurrency[key] !== undefined)
+      .map((key) => `${key} = ${providerConcurrency[key]}`)
+      .join('\n')}\n`
+    : '';
   return `version = "2.0.0"
 providerId = "${providerId}"
 
@@ -295,6 +322,7 @@ enabled = true
 type = "${providerProtocol}"
 baseURL = "${baseURL}"
 defaultModel = "${wireModel}"
+${concurrency}
 
 [provider.auth]
 type = "apikey"
@@ -351,6 +379,28 @@ function normalizeAttemptStore(raw) {
     normalized[key] = value;
   }
   return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+function normalizeProviderConcurrency(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('runtime_setup.provider_concurrency must be an object when present');
+  }
+  const normalized = {};
+  for (const key of Object.keys(raw)) {
+    if (!PROVIDER_CONCURRENCY_KEYS.includes(key)) {
+      throw new Error(`runtime_setup.provider_concurrency.${key} is not a supported field`);
+    }
+    const value = raw[key];
+    if (!Number.isInteger(value) || value < 1) {
+      throw new Error(`runtime_setup.provider_concurrency.${key} must be a positive integer`);
+    }
+    normalized[key] = value;
+  }
+  if (Object.keys(normalized).length === 0) {
+    throw new Error('runtime_setup.provider_concurrency must declare at least one field');
+  }
+  return normalized;
 }
 
 /**

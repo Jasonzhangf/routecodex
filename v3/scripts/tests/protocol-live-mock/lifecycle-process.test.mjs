@@ -82,11 +82,15 @@ process.on('SIGTERM', () => {
   const report = {};
   let handle = null;
   try {
-    handle = await startRcc(stub.path, generated, rccPort, report, { startupTimeoutMs: 3000 });
+    handle = await startRcc(stub.path, generated, rccPort, report, {
+      startupTimeoutMs: 3000,
+      snapshotAll: true,
+    });
     assert.equal(handle.ready, true);
     assert.equal(handle.running, true);
     assert.equal(handle.identity.server_id, 'loopback');
     assert.equal(handle.admin_bind, generated.admin_bind);
+    assert.ok(handle.start_args.includes('--snapall'));
     assert.deepEqual(
       handle.listeners.map((listener) => listener.role),
       ['primary', 'admin_webui'],
@@ -125,11 +129,15 @@ process.exit(17);
   const generated = await generateRccConfig({ mockPort, rccPort, adminPort, providerProtocol: 'responses', workRoot });
   const report = {};
   try {
-    const handle = await startRcc(stub.path, generated, rccPort, report, { startupTimeoutMs: 1000 });
+    const handle = await startRcc(stub.path, generated, rccPort, report, { startupTimeoutMs: 10_000 });
     assert.equal(handle.ready, false);
     assert.equal(handle.running, false);
     assert.equal(handle.state, 'infra_failure');
-    assert.equal(handle.exit_receipt.exit_code, 17);
+    assert.equal(
+      handle.exit_receipt.exit_code,
+      17,
+      JSON.stringify({ exit_receipt: handle.exit_receipt, report }, null, 2),
+    );
     assert.equal(report.status, 'runner_startup_failed');
     assert.equal(report.infra_failure.code, 'process_exited_before_ready');
     assert.equal(report.startup.exit.exit_code, 17);

@@ -148,6 +148,39 @@ test('generateRccConfig authors the declared runtime attempt_store policy', asyn
   }
 });
 
+test('generateRccConfig authors provider concurrency on the provider owner', async () => {
+  const workRoot = mkdtempSync(join(tmpdir(), 'lifecycle-provider-concurrency-test-'));
+  const providerConcurrency = {
+    maxInFlight: 1,
+    acquireTimeoutMs: 60000,
+    staleLeaseMs: 300000,
+  };
+  const generated = await generateRccConfig({
+    mockPort: 12345, rccPort: 12346, adminPort: 12370, providerProtocol: 'responses',
+    mode: 'direct', workRoot,
+    runtimeSetup: {
+      provider_id: 'mock-responses',
+      model: 'mock.responses-model',
+      wire_model: 'responses-model',
+      candidate_ids: ['mock-responses/mock.responses-model'],
+      provider_concurrency: providerConcurrency,
+    },
+  });
+  try {
+    assert.deepEqual(generated.provider_concurrency, providerConcurrency);
+    assert.deepEqual(generated.provider_concurrency_receipt.policy, providerConcurrency);
+    assert.equal(generated.provider_concurrency_receipt.config_section, 'provider.concurrency');
+    const providerText = readFileSync(generated.provider_path, 'utf8');
+    assert.match(providerText, /\[provider\.concurrency\]/);
+    assert.match(providerText, /maxInFlight = 1/);
+    assert.match(providerText, /acquireTimeoutMs = 60000/);
+    assert.match(providerText, /staleLeaseMs = 300000/);
+  } finally {
+    generated.cleanup();
+    rmSync(workRoot, { recursive: true, force: true });
+  }
+});
+
 test('generateRccConfig rejects an unsupported or non-positive attempt_store field', async () => {
   const workRoot = mkdtempSync(join(tmpdir(), 'lifecycle-attempt-store-reject-'));
   try {

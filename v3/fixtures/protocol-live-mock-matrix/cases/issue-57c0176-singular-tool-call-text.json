@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "case_id": "issue-57c0176-singular-tool-call-text",
+  "cell": {
+    "entry_protocol": "responses",
+    "provider_protocol": "openai_chat",
+    "transport": "json",
+    "mode": "relay"
+  },
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {"content-type": "application/json"},
+    "body": {
+      "model": "mock.chat-model",
+      "stream": false,
+      "input": [
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "run pwd"}]},
+        {"type": "custom_tool_call", "call_id": "call_prior", "namespace": "functions", "name": "exec", "input": "pwd"},
+        {"type": "custom_tool_call_output", "call_id": "call_prior", "output": "/workspace"}
+      ],
+      "tools": [{
+        "type": "namespace",
+        "name": "functions",
+        "tools": [{
+          "type": "custom",
+          "name": "exec",
+          "description": "Execute a bounded command.",
+          "format": {"type": "text"}
+        }]
+      }]
+    }
+  },
+  "expected_provider": {
+    "paths": ["/v1/chat/completions"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "model": "chat-model",
+      "messages.1.role": "assistant",
+      "messages.1.tool_calls.0.id": "call_prior",
+      "messages.1.tool_calls.0.function.name": "functions__exec",
+      "messages.1.tool_calls.0.function.arguments": "{\"input\":\"pwd\"}",
+      "messages.2.role": "tool",
+      "messages.2.tool_call_id": "call_prior",
+      "messages.2.content": "/workspace",
+      "tools.0.function.name": "functions__exec",
+      "stream": false
+    },
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "openai_chat",
+    "mode": "json",
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "id": "chatcmpl_singular_tool_call",
+      "object": "chat.completion",
+      "choices": [{
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"tool_call\":[{\"name\":\"functions.exec\",\"arguments\":\"{\\\"input\\\":\\\"pwd\\\"}\"}]}"
+        },
+        "finish_reason": "stop"
+      }],
+      "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    }
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {
+      "status": "completed",
+      "output.length": 1,
+      "output.0.type": "message",
+      "output.0.content.0.text": "{\"tool_call\":[{\"name\":\"functions.exec\",\"arguments\":\"{\\\"input\\\":\\\"pwd\\\"}\"}]}",
+      "output_text": "{\"tool_call\":[{\"name\":\"functions.exec\",\"arguments\":\"{\\\"input\\\":\\\"pwd\\\"}\"}]}"
+    },
+    "body_must_not": ["\"type\":\"custom_tool_call\"", "\"type\":\"function_call\"", "provider_error", "internal_error", "routecodex_internal"],
+    "semantic_terminal_required": true
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "source": {
+    "sha": "918354c39d52bd77caeb70677b6270cc36c474ac",
+    "files": [
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs",
+      "v3/crates/routecodex-v3-runtime/src/tool_markup_parser.rs"
+    ],
+    "tests": []
+  },
+  "contract_differences": [{
+    "source_behavior": "The provider returned singular tool_call JSON as assistant text.",
+    "rcc_requirement": "Preserve that text as text for this fixture and retain the prior typed custom call and matched output in history."
+  }],
+  "turns": [
+    {"turn_id": "singular-text"},
+    {
+      "turn_id": "singular-text-followup",
+      "client_request": {
+        "method": "POST",
+        "path": "/v1/responses",
+        "headers": {"content-type": "application/json"},
+        "body": {
+          "model": "mock.chat-model",
+          "stream": false,
+          "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "run pwd"}]},
+            {"type": "custom_tool_call", "call_id": "call_prior", "namespace": "functions", "name": "exec", "input": "pwd"},
+            {"type": "custom_tool_call_output", "call_id": "call_prior", "output": "/workspace"},
+            {"type": "output_text", "text": "{\"tool_call\":[{\"name\":\"functions.exec\",\"arguments\":\"{\\\"input\\\":\\\"pwd\\\"}\"}]}"},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]}
+          ],
+          "tools": [{
+            "type": "namespace",
+            "name": "functions",
+            "tools": [{
+              "type": "custom",
+              "name": "exec",
+              "description": "Execute a bounded command.",
+              "format": {"type": "text"}
+            }]
+          }]
+        }
+      },
+      "expected_provider_exact": {
+        "model": "chat-model",
+        "messages": [
+          {"role": "user", "content": [{"type": "text", "text": "run pwd"}]},
+          {
+            "role": "assistant",
+            "tool_calls": [{
+              "id": "call_prior",
+              "type": "function",
+              "function": {"name": "functions__exec", "arguments": "{\"input\":\"pwd\"}"}
+            }]
+          },
+          {"role": "tool", "tool_call_id": "call_prior", "content": "/workspace"},
+          {"role": "assistant", "content": "{\"tool_call\":[{\"name\":\"functions.exec\",\"arguments\":\"{\\\"input\\\":\\\"pwd\\\"}\"}]}"},
+          {"role": "user", "content": [{"type": "text", "text": "continue"}]}
+        ],
+        "tools": [{
+          "type": "function",
+          "function": {
+            "name": "functions__exec",
+            "description": "Execute a bounded command.",
+            "parameters": {
+              "type": "object",
+              "properties": {"input": {"type": "string", "description": "Raw free-form tool input."}},
+              "required": ["input"],
+              "additionalProperties": false
+            }
+          }
+        }],
+        "stream": false
+      },
+      "upstream_response": {
+        "protocol": "openai_chat",
+        "mode": "json",
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "id": "chatcmpl_singular_continued",
+          "object": "chat.completion",
+          "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": "continued"},
+            "finish_reason": "stop"
+          }],
+          "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3}
+        }
+      },
+      "expected_client_must": {
+        "status": "completed",
+        "output.0.content.0.text": "continued"
+      }
+    }
+  ]
+}
