@@ -5528,6 +5528,36 @@ chains:
       - v3.error.chain
       side_channel_writes:
       - v3.debug.codex_sample_persist_queue
+  - step_id: v3-responses-direct-error-evidence-01
+    from_node: V3ProviderError
+    to_node: V3RuntimeProviderFailureObservation
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: build_v3_runtime_provider_failed_attempt_evidence_from_error
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.responses_direct_mvp_architecture
+    resource_flow:
+      consumes: [v3.provider.transport_request]
+      produces: [v3.runtime.responses_observability]
+      side_channel_reads: [v3.provider.transport_request]
+      side_channel_writes: [v3.runtime.responses_observability]
+  - step_id: v3-responses-direct-error-evidence-02
+    from_node: V3RuntimeProviderFailureObservation
+    to_node: V3ChatFailedAttemptEvidenceSerialized
+    caller_symbol: take_responses_direct_terminal_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+    callee_symbol: persist_v3_chat_failure_evidence_sources
+    callee_file: v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.error.raw_wire_evidence
+    resource_flow:
+      consumes: [v3.runtime.responses_observability]
+      produces: [v3.debug.codex_sample_persist_queue]
+      side_channel_reads: [v3.runtime.responses_observability]
+      side_channel_writes: [v3.debug.codex_sample_persist_queue]
   - step_id: v3-responses-relay-error-evidence-02
     from_node: V3ErrorEvidencePersistQueued
     to_node: V3ErrorEvidenceFlushOnTerminalFailure
@@ -7084,7 +7114,7 @@ chains:
     - step_id: v3-provider-action-gate-03
       from_node: V3Error05ExecutionDecision
       to_node: V3Error05RecoveryWitness
-      caller_symbol: run_v3_relay_provider_failure_policy
+      caller_symbol: run_v3_relay_provider_failure_policy_with_response_source
       caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_action_failure_in_scope
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -7123,24 +7153,20 @@ chains:
           - v3.error.provider_action_gate
     - step_id: v3-provider-action-gate-05
       from_node: V3Error05ExecutionDecision
-      to_node: V3ProviderActionGateTerminalAdmission
-      caller_symbol: run_v3_relay_provider_failure_policy
+      to_node: V3Error06ClientProjected
+      caller_symbol: run_v3_relay_provider_failure_policy_with_response_source
       caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_terminal_provider_projection_in_scope
+      callee_symbol: terminal_projection_for
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
         consumes:
           - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
         produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
+          - v3.error.client_projection
+        side_channel_reads: []
+        side_channel_writes: []
     - step_id: v3-provider-action-gate-06
       from_node: V3ProviderActionGateTerminalAdmission
       to_node: V3ProviderActionGateTerminalCommitted
@@ -7306,7 +7332,7 @@ chains:
       to_node: V3Error05ExecutionDecision
       caller_symbol: handle_v3_responses_relay_provider_failure
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-      callee_symbol: run_v3_relay_provider_failure_policy
+      callee_symbol: run_v3_relay_provider_failure_policy_with_response_source
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
