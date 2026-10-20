@@ -123,6 +123,14 @@ auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{ISSUE127_AUTH_E
 health = {{ enabled = {health_enabled}, failure_threshold = 1, cooldown_ms = {ISSUE127_COOLDOWN_MS} }}
 [providers.primary.models.main]
 wire_name = "main"
+[providers.spare]
+type = "responses"
+base_url = "{upstream_base}"
+default_model = "main"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{ISSUE127_AUTH_ENV}" }}] }}
+health = {{ enabled = {health_enabled}, failure_threshold = 1, cooldown_ms = {ISSUE127_COOLDOWN_MS} }}
+[providers.spare.models.main]
+wire_name = "main"
 [providers.independent]
 type = "responses"
 base_url = "{upstream_base}"
@@ -138,7 +146,7 @@ codex_samples = false
 dry_run = false
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "primary", model = "main", key = "key", priority = 100 }}]
+targets = [{{ kind = "provider_model", provider = "primary", model = "main", key = "key", priority = 100 }}, {{ kind = "provider_model", provider = "spare", model = "main", key = "key", priority = 1 }}]
 [route_groups.default.pools.independent]
 match = {{ models = ["independent"], precedence = 10 }}
 targets = [{{ kind = "provider_model", provider = "independent", model = "independent", key = "key", priority = 100 }}]
@@ -167,6 +175,12 @@ fn issue127_write_seed(path: &std::path::Path) {
             }
         ]]
     });
+    // The enabled control must use a multi-candidate target: singleton
+    // automatic cooldown is intentionally ignored by the terminal policy.
+    let mut seed = seed;
+    let mut spare = seed["entries"][0].clone();
+    spare[0]["provider_id"] = json!("spare");
+    seed["entries"].as_array_mut().unwrap().push(spare);
     fs::write(path, serde_json::to_vec_pretty(&seed).unwrap()).unwrap();
 }
 
@@ -188,7 +202,7 @@ fn issue127_seed_entries(path: &std::path::Path) -> Vec<Value> {
 fn issue127_has_fresh_automatic_cooldown(path: &std::path::Path) -> bool {
     issue127_seed_entries(path).iter().any(|entry| {
         let key = &entry[0];
-        key["provider_id"] == json!("primary")
+        matches!(key["provider_id"].as_str(), Some("primary" | "spare"))
             && key["model_id"] == json!("main")
             && entry[1]["blocked_until_ms"].as_u64() != Some(ISSUE127_SEEDED_BLOCKED_UNTIL_MS)
     })
@@ -305,8 +319,8 @@ async fn issue127_disabled_health_persistence_direct_public_blackbox() {
         "exhausted real provider failure must close the transport without a fabricated client response"
     );
     assert!(
-        issue127_receipts(&upstream, "issue127-fail-real").await >= 1,
-        "the real failure must reach the controlled upstream"
+        issue127_receipts(&upstream, "issue127-fail-real").await == 2,
+        "both declared candidates must reach the controlled failing upstream once"
     );
 
     // 3) A fresh request still reaches the same identity.
@@ -333,10 +347,10 @@ async fn issue127_disabled_health_persistence_direct_public_blackbox() {
     // 5) The health projection must not expose a cooldown for the identity.
     let entries = issue127_pool(&client, &base).await;
     assert!(
-        entries
-            .iter()
-            .all(|entry| !(entry["provider_id"] == json!("primary")
-                && entry["model_id"] == json!("main"))),
+        entries.iter().all(|entry| !(matches!(
+            entry["provider_id"].as_str(),
+            Some("primary" | "spare")
+        ) && entry["model_id"] == json!("main"))),
         "health-disabled provider must not project a cooldown: {entries:?}"
     );
 
