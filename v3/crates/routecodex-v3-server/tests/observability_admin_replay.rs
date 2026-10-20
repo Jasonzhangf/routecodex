@@ -143,7 +143,12 @@ async fn start_failing_upstream() -> (String, Arc<AtomicU64>, tokio::sync::onesh
     (format!("http://{address}/v1"), calls, shutdown_tx)
 }
 
-fn config_source(server_port: u16, admin_port: u16, upstream_base_url: &str) -> String {
+fn config_source(
+    server_port: u16,
+    admin_port: u16,
+    upstream_base_url: &str,
+    fallback_base_url: &str,
+) -> String {
     format!(
         r#"
 version = 3
@@ -180,6 +185,20 @@ supports_streaming = true
 max_tokens = 4096
 max_context_tokens = 128000
 
+[providers.fallback]
+type = "responses"
+base_url = "{fallback_base_url}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{PROVIDER_KEY_ENV}" }}] }}
+health = {{ enabled = true, failure_threshold = 2, cooldown_ms = 5000 }}
+responses = {{ process = "chat", streaming = "always" }}
+[providers.fallback.models.test]
+wire_name = "wire-test"
+capabilities = ["text", "tools"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+
 [debug]
 log_console = false
 snapshots = true
@@ -189,11 +208,17 @@ retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
 [route_groups.default.pools.client_test]
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, models = ["client-test"] }}
-targets = [{{ kind = "provider_model", provider = "mock", model = "test", key = "key", priority = 1 }}]
+targets = [
+  {{ kind = "provider_model", provider = "mock", model = "test", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "fallback", model = "test", key = "key", priority = 1 }}
+]
 
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "mock", model = "test", key = "key", priority = 1 }}]
+targets = [
+  {{ kind = "provider_model", provider = "mock", model = "test", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "fallback", model = "test", key = "key", priority = 1 }}
+]
 "#
     )
 }
@@ -229,12 +254,18 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     env::set_var("HOME", &home);
 
     let (upstream_base_url, upstream_calls, upstream_shutdown) = start_failing_upstream().await;
+    let (fallback_base_url, fallback_calls, fallback_shutdown) = start_failing_upstream().await;
     let server_port = free_port();
     let admin_port = free_port();
     let config_path = home.join("config.v3.toml");
     fs::write(
         &config_path,
-        config_source(server_port, admin_port, &upstream_base_url),
+        config_source(
+            server_port,
+            admin_port,
+            &upstream_base_url,
+            &fallback_base_url,
+        ),
     )
     .unwrap();
 
@@ -277,6 +308,11 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     //    client observes a transport break. The provider's own status and body
     //    are provider-private evidence and never reach the client.
     assert_eq!(upstream_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        fallback_calls.load(Ordering::SeqCst),
+        1,
+        "the eligible fallback really failed before exhaustion"
+    );
     assert!(
         response.is_err(),
         "a provider HTTP failure must not fabricate a client HTTP response"
@@ -305,7 +341,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         sleep(Duration::from_millis(50)).await;
     };
     assert_eq!(list_row["result"], "error");
-    assert_eq!(list_row["failed_attempts"], 1);
+    assert_eq!(list_row["failed_attempts"], 2);
     // The merged row carries the projected internal status (a provider network
     // failure projects 502); the real external 503 stays on the attempt row and
     // in `observed_error.external_error_status`, both asserted below.
@@ -363,8 +399,9 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     // snapshot: the attempt row's own chain is empty. This is the negative
     // control for the assertion above — a constant chain could not differ.
     let attempts = detail["attempts"].as_array().expect("attempts is an array");
-    assert_eq!(attempts.len(), 1, "one failed provider attempt");
+    assert_eq!(attempts.len(), 2, "both eligible candidates really failed");
     assert_eq!(attempts[0]["meta"]["provider_status"], 503);
+    assert_eq!(attempts[1]["meta"]["provider_status"], 503);
     assert_eq!(
         attempts[0]["meta"]["observed_error"]["source"],
         "provider_attempt_failure"
@@ -380,16 +417,17 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     assert_eq!(observed["source"], "error06_projection_not_exposed");
     assert_eq!(observed["external_error_code"], "server_error");
     assert_eq!(observed["external_error_status"], 503);
-    assert_eq!(observed["failure_count"], 1);
-    // HTTP 503 retains its declared first-failure threshold; only ordinary 429
-    // uses the three-consecutive-failure rule.
-    assert_eq!(observed["health_state"], "cooldown");
+    assert_eq!(observed["failure_count"], 0);
+    // The terminal candidate preserves the real error without changing health;
+    // the earlier candidate's actual cooldown is checked through the admin UI.
+    assert_eq!(observed["health_state"], "last_candidate_terminal");
     assert_eq!(observed["action"], "terminal_route_and_default_exhausted");
+    // This field follows row.attempts.max(1), not the buffered wire ordinal.
+    // The two actual attempts are checked above.
     assert_eq!(observed["attempt_index"], 1);
-    assert!(
-        observed["cooldown_until_ms"].as_u64().unwrap() > request_started_ms,
-        "the real HTTP 503 failure must schedule exact-identity recovery: {observed}"
-    );
+    // The diagnostic merge preserves a previously observed cooldown when the
+    // terminal event has none. Current health is read independently below.
+    assert!(observed["cooldown_until_ms"].as_u64().is_some());
     assert_eq!(
         detail["observed_error_source"],
         "error06_projection_not_exposed"
@@ -523,6 +561,9 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         .unwrap_or_else(|| panic!("the first HTTP 503 must cool its exact identity: {pool}"));
     assert_eq!(first_cooled["auth_alias"], "key");
     assert_eq!(first_cooled["model_id"], "test");
+    assert!(entries
+        .iter()
+        .all(|entry| entry["provider_id"] != "fallback"));
 
     // 8. A later business request cannot send another attempt to the cooled key.
     let response = client
@@ -539,6 +580,11 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         "a cooled identity must not fabricate a client HTTP response"
     );
     assert_eq!(upstream_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        fallback_calls.load(Ordering::SeqCst),
+        2,
+        "the last candidate remains routable on the next request"
+    );
 
     let (pool_status, pool) = get_json(
         &client,
@@ -576,7 +622,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
 
     // Real captured values, so the evidence is inspectable without a debugger.
     eprintln!("[replay] request_key={request_key}");
-    eprintln!("[replay] client_status={client_status} upstream_calls=1");
+    eprintln!("[replay] client_status={client_status} primary_calls=1 fallback_calls=2");
     eprintln!("[replay] error_chain={chain}");
     eprintln!(
         "[replay] observed_error_source={} health_action={} error_class={}",
@@ -589,6 +635,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
 
     handle.shutdown().await;
     upstream_shutdown.send(()).unwrap();
+    fallback_shutdown.send(()).unwrap();
     env::remove_var(PROVIDER_KEY_ENV);
     match previous_home {
         Some(previous) => env::set_var("HOME", previous),

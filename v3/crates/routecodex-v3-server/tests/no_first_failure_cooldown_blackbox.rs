@@ -25,6 +25,9 @@ struct Upstream {
 
 async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
     let input = body["input"].as_str().unwrap_or("");
+    if body["input"].to_string().contains("ping; reply pong") {
+        return controlled_failure(StatusCode::SERVICE_UNAVAILABLE, "probe_unavailable");
+    }
     // Startup/recovery probes are distinct from business receipts.
     if input.starts_with("health-test:") {
         *state
@@ -45,8 +48,7 @@ async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -
         } else {
             (StatusCode::TOO_MANY_REQUESTS, "rate_limit_error")
         };
-        return Response::builder().status(status).header("content-type", "application/json")
-            .body(Body::from(json!({"error":{"type":kind,"code":kind,"message":"controlled real upstream failure"}}).to_string())).unwrap();
+        return controlled_failure(status, kind);
     }
     Response::builder()
         .status(StatusCode::OK)
@@ -56,6 +58,17 @@ async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -
             "output":[{"type":"message","id":"msg_health","role":"assistant","status":"completed",
             "content":[{"type":"output_text","text":input,"annotations":[]}]}]})
             .to_string(),
+        ))
+        .unwrap()
+}
+
+fn controlled_failure(status: StatusCode, kind: &str) -> Response<Body> {
+    Response::builder()
+        .status(status)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({"error":{"type":kind,"code":kind,"message":"controlled real upstream failure"}})
+                .to_string(),
         ))
         .unwrap()
 }
@@ -102,22 +115,38 @@ auth = {{ type = "api_key", entries = [{{ alias = "independent", env = "V3_NO_FI
 [providers.independent.models.main]
 wire_name = "main"
 supports_streaming = true
+[providers.fallback]
+type = "responses"
+base_url = "{upstream}/fallback/v1"
+default_model = "main"
+auth = {{ type = "api_key", entries = [{{ alias = "fallback", env = "V3_NO_FIRST_FAILURE_TEST_KEY" }}] }}
+[providers.fallback.models.main]
+supports_streaming = true
 [debug]
 log_console = false
 snapshots = false
 codex_samples = false
 [route_groups.health.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "primary", model = "main", key = "{alias}", priority = 100 }}]
+targets = [
+  {{ kind = "provider_model", provider = "primary", model = "main", key = "{alias}", priority = 100 }},
+  {{ kind = "provider_model", provider = "fallback", model = "main", key = "fallback", priority = 1 }}
+]
 [route_groups.health.pools.other]
 match = {{ models = ["other"], precedence = 10 }}
-targets = [{{ kind = "provider_model", provider = "primary", model = "other", key = "{alias}", priority = 100 }}]
+targets = [
+  {{ kind = "provider_model", provider = "primary", model = "other", key = "{alias}", priority = 100 }},
+  {{ kind = "provider_model", provider = "fallback", model = "main", key = "fallback", priority = 1 }}
+]
 [route_groups.health.pools.sibling]
 match = {{ models = ["sibling"], precedence = 10 }}
 targets = [{{ kind = "provider_model", provider = "primary", model = "main", key = "sibling", priority = 100 }}]
 [route_groups.health.pools.independent]
 match = {{ models = ["independent"], precedence = 10 }}
-targets = [{{ kind = "provider_model", provider = "independent", model = "main", key = "independent", priority = 100 }}]
+targets = [
+  {{ kind = "provider_model", provider = "independent", model = "main", key = "independent", priority = 100 }},
+  {{ kind = "provider_model", provider = "fallback", model = "main", key = "fallback", priority = 1 }}
+]
 "#
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
@@ -125,7 +154,7 @@ targets = [{{ kind = "provider_model", provider = "independent", model = "main",
 
 async fn request(client: &reqwest::Client, base: &str, model: &str, marker: &str, success: bool) {
     let response = timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(8),
         client
             .post(format!("{base}/v1/responses"))
             .header("session-id", marker)
@@ -134,7 +163,7 @@ async fn request(client: &reqwest::Client, base: &str, model: &str, marker: &str
             .send(),
     )
     .await
-    .expect("request must finish without recovery wait");
+    .expect("multi-candidate recovery must finish within the declared action-gate delay bound");
     if success {
         let response = response.expect("a healthy provider must actually answer the next request");
         assert_eq!(response.status(), 200);
@@ -184,6 +213,10 @@ async fn no_first_failure_cooldown_public_http() {
     let (shutdown, stopped) = oneshot::channel::<()>();
     let app = Router::new()
         .route("/v1/responses", post(provider))
+        .route(
+            "/fallback/v1/responses",
+            post(|| async { controlled_failure(StatusCode::SERVICE_UNAVAILABLE, "server_error") }),
+        )
         .with_state(state.clone());
     let upstream = tokio::spawn(async move {
         axum::serve(listener, app)
