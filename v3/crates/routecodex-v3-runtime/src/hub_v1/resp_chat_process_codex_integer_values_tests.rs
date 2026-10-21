@@ -3,9 +3,18 @@ use serde_json::{json, Value};
 
 #[test]
 fn resp03_restores_registered_codex_integer_argument_values() {
+    for description in [
+        "Runs a command in a PTY, returning output or a session ID.",
+        "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+    ] {
+        assert_registered_codex_integer_argument_values(description);
+    }
+}
+
+fn assert_registered_codex_integer_argument_values(description: &str) {
     let request = json!({"tools": [{
         "type": "function", "name": "exec_command", "strict": false,
-        "description": "Runs a command in a PTY, returning output or a session ID.",
+        "description": description,
         "parameters": {"type": "object", "additionalProperties": false,
             "properties": {
                 "cmd": {"type": "string"}, "justification": {"type": "string"},
