@@ -166,6 +166,13 @@ fn read_v3_openai_chat_tool_identity(item: &Map<String, Value>) -> &str {
 pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
     canonical: &Value,
 ) -> Result<Value, String> {
+    project_v3_openai_chat_client_response_with_source_terminal(canonical, None)
+}
+
+pub(crate) fn project_v3_openai_chat_client_response_with_source_terminal(
+    canonical: &Value,
+    source_terminal_reason: Option<&str>,
+) -> Result<Value, String> {
     let object = canonical
         .as_object()
         .ok_or_else(|| "canonical response must be an object".to_string())?;
@@ -263,7 +270,16 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
         object
             .get("incomplete_details")
             .and_then(|details| details.get("reason"))
-            .and_then(Value::as_str),
+            .and_then(Value::as_str)
+            .or_else(|| {
+                source_terminal_reason.map(|reason| match reason {
+                    "end_turn" => "stop",
+                    "tool_use" => "tool_calls",
+                    "max_tokens" => "length",
+                    "refusal" => "content_filter",
+                    reason => reason,
+                })
+            }),
     );
     let mut message = Map::new();
     message.insert("role".to_string(), Value::String("assistant".to_string()));
@@ -311,12 +327,12 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
     Ok(Value::Object(response))
 }
 
-fn responses_as_chat_finish_reason(has_tool_calls: bool, reason: Option<&str>) -> &'static str {
+fn responses_as_chat_finish_reason(has_tool_calls: bool, reason: Option<&str>) -> Option<&str> {
     match reason {
-        Some("max_output_tokens") => "length",
-        Some("content_filter") => "content_filter",
-        _ if has_tool_calls => "tool_calls",
-        _ => "stop",
+        Some("max_output_tokens") => Some("length"),
+        Some(reason) => Some(reason),
+        None if has_tool_calls => Some("tool_calls"),
+        None => None,
     }
 }
 
@@ -385,7 +401,7 @@ impl V3OpenAiChatAnthropicSseTransducer {
     }
 
     pub(crate) fn finish(&self) -> Result<(), String> {
-        if !self.message_stopped || self.terminal_finish_reason.is_none() {
+        if !self.message_stopped {
             return Err("Anthropic SSE ended without message_stop".to_string());
         }
         Ok(())
@@ -526,26 +542,26 @@ impl V3OpenAiChatAnthropicSseTransducer {
             .and_then(Value::as_str)
         {
             self.terminal_finish_reason = Some(
-                // anthropic stop_reason -> hub -> openai_chat（查表；未命中默认 "stop"，与原 match 兜底一致）
+                // Exact mappings preserve semantics; an unmapped source reason stays opaque.
                 table_map_value(
                     V3TableKind::FinishReason,
                     "anthropic",
                     reason,
                     V3TableDirection::Inbound,
                 )
-                .ok()
-                .flatten()
-                .and_then(|hub| {
+                .map_err(|error| error.to_string())?
+                .map(|hub| {
                     table_map_value(
                         V3TableKind::FinishReason,
                         "openai_chat",
                         hub,
                         V3TableDirection::Outbound,
                     )
-                    .ok()
-                    .flatten()
                 })
-                .unwrap_or("stop")
+                .transpose()
+                .map_err(|error| error.to_string())?
+                .flatten()
+                .unwrap_or(reason)
                 .to_string(),
             );
         }
@@ -580,11 +596,8 @@ impl V3OpenAiChatAnthropicSseTransducer {
             return Err("Anthropic message_stop arrived before content_block_stop".to_string());
         }
         self.message_stopped = true;
-        let finish_reason = self
-            .terminal_finish_reason
-            .clone()
-            .unwrap_or_else(|| "stop".to_string());
-        let mut output = vec![self.chunk(json!({}), Some(&finish_reason), false)];
+        let finish_reason = self.terminal_finish_reason.clone();
+        let mut output = vec![self.chunk(json!({}), finish_reason.as_deref(), false)];
         // 唯一判据：canonical_usage() 同时决定终帧是否携带 usage 与携带什么内容，
         // 避免门禁条件与投影条件分叉（仅缓存字段出现时也必须一致）。
         if self.canonical_usage().is_some() {
@@ -895,10 +908,7 @@ impl V3OpenAiChatResponsesSseTransducer {
                     .and_then(|response| response.get("status"))
                     .and_then(Value::as_str);
                 let finish_reason = if status == Some("completed") {
-                    Some(responses_as_chat_finish_reason(
-                        self.emitted_tool_call,
-                        None,
-                    ))
+                    responses_as_chat_finish_reason(self.emitted_tool_call, None)
                 } else {
                     None
                 };
@@ -910,9 +920,8 @@ impl V3OpenAiChatResponsesSseTransducer {
                 }
                 Ok(chunks)
             }
-            // Preserve the JSON projection's terminal mapping. Chat has no
-            // standard reason for opaque Responses incomplete reasons; `stop`
-            // closes the transport without guessing length or content_filter.
+            // Share JSON terminal mapping. Preserve opaque reasons and absence;
+            // a transport terminal never invents a business stop reason.
             "response.incomplete" => {
                 self.completed = true;
                 let response = object.get("response").and_then(Value::as_object);
@@ -930,7 +939,7 @@ impl V3OpenAiChatResponsesSseTransducer {
                     });
                 let mut chunks = self.terminal_output_chunks(response)?;
                 let finish_reason = responses_as_chat_finish_reason(self.emitted_tool_call, reason);
-                chunks.push(self.chunk(json!({}), Some(finish_reason)));
+                chunks.push(self.chunk(json!({}), finish_reason));
                 if let Some(usage) = response.and_then(|response| response.get("usage")) {
                     if let Some(chunk) = self.usage_chunk(usage) {
                         chunks.push(chunk);

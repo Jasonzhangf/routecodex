@@ -10114,6 +10114,7 @@ chains:
         - OpenAI Chat JSON response closeout in v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
         output: compatible-provider-response Value plus original typed compat failure
       - node: normalize_provider_response
+        terminal_contract: 0e129d0 preserves source_terminal_reason in typed normalized response; inverse projection consumes it, observation cannot infer stop, actual errors leave through the separate Error graph.
         operator: routecodex.v3.operation.normalize_provider_response@1
         caller_symbol: build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id
         caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs

@@ -87,6 +87,7 @@ pub enum V3OpenAiChatSseTerminalState {
     ToolCalls,
     ContentFilter,
     FunctionCall,
+    Opaque,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -680,8 +681,6 @@ pub enum V3OpenAiChatSseTreeError {
     ToolCallNotObject,
     #[error("OpenAI Chat SSE usage must be an object")]
     UsageNotObject,
-    #[error("OpenAI Chat SSE finish reason is unsupported: {finish_reason}")]
-    UnknownFinishReason { finish_reason: String },
     #[error("OpenAI Chat SSE finish reason must be a string or null")]
     FinishReasonNotString,
     #[error("OpenAI Chat SSE content rewrite is incompatible with the delta")]
@@ -1013,9 +1012,7 @@ fn parse_terminal_state(
         "tool_calls" => Ok(V3OpenAiChatSseTerminalState::ToolCalls),
         "content_filter" => Ok(V3OpenAiChatSseTerminalState::ContentFilter),
         "function_call" => Ok(V3OpenAiChatSseTerminalState::FunctionCall),
-        other => Err(V3OpenAiChatSseTreeError::UnknownFinishReason {
-            finish_reason: other.to_owned(),
-        }),
+        _ => Ok(V3OpenAiChatSseTerminalState::Opaque),
     }
 }
 

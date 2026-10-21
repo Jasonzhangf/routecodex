@@ -488,11 +488,14 @@ fn project_json_response(
     if web_search_transition.is_some() {
         return Err(V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected);
     }
+    let source_terminal_reason = resp03.previous.source_terminal_reason.clone();
     let resp05 = try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
         resp03,
         move |payload| {
             if payload.get("output").and_then(Value::as_array).is_some() {
-                project_v3_openai_chat_client_response_from_canonical(&payload)
+                super::openai_chat_codec::project_v3_openai_chat_client_response_with_source_terminal(
+                    &payload, source_terminal_reason.as_deref(),
+                )
             } else {
                 Ok(payload)
             }
