@@ -141,3 +141,54 @@ fn resp03_anthropic_source_witness_preserves_signature_after_canonical_projectio
     );
     assert!(payload.contains("signed thought"));
 }
+
+#[test]
+fn resp03_chat_wire_source_preserves_business_cipher_and_strips_codex_shaped() {
+    let payload = json!({
+        "id": "resp_chat_business",
+        "status": "completed",
+        "output": [
+            {
+                "type": "reasoning",
+                "encrypted_content": "preserved cipher",
+                "summary": [{"type": "summary_text", "text": "chat reasoning"}]
+            },
+            {
+                "type": "reasoning",
+                "encrypted_content": "rsn_CODEX_CIPHER",
+                "summary": [{"type": "summary_text", "text": "codex reasoning"}]
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "encrypted_content": "tool-business-cipher"
+            }
+        ]
+    });
+    let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+        payload,
+        V3ProviderRespInbound01RawContext::new(
+            V3HubEntryProtocol::Responses,
+            V3HubProviderWireProtocol::Responses,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        )
+        .with_source_provider_protocol(V3HubProviderWireProtocol::OpenAiChat),
+    );
+    let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).unwrap();
+    let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat).unwrap();
+    let stripped = strip_v3_resp03_encrypted_reasoning_content(resp02, false);
+    let payload = stripped.previous.previous.payload.0;
+    let output = payload["output"].as_array().unwrap();
+
+    assert_eq!(
+        output[0]["encrypted_content"], "preserved cipher",
+        "OpenAI Chat source business cipher must survive Resp03"
+    );
+    assert!(output[1].get("encrypted_content").is_none());
+    assert_eq!(
+        output[2]["encrypted_content"], "tool-business-cipher",
+        "function_call_output remains business data"
+    );
+}
