@@ -4747,7 +4747,7 @@ async fn b878f6c_compact_responses_reach_real_chat_consumer() {
                         .collect::<String>(),
                     frames
                         .iter()
-                        .any(|frame| frame["choices"][0]["finish_reason"] == "stop"),
+                        .all(|frame| frame["choices"][0]["finish_reason"].is_null()),
                 )
             } else {
                 let payload: Value = serde_json::from_str(&body).unwrap();
@@ -4760,7 +4760,7 @@ async fn b878f6c_compact_responses_reach_real_chat_consumer() {
                         .as_str()
                         .unwrap_or_default()
                         .to_owned(),
-                    payload["choices"][0]["finish_reason"] == "stop",
+                    payload["choices"][0]["finish_reason"].is_null(),
                 )
             };
             assert_eq!(text, expected_text, "stream={streaming}: {body}");
@@ -5377,12 +5377,14 @@ async fn responses_wire_representation_survives_chat_and_anthropic_entries() {
                         "NATIVE_OK"
                     };
                     let expected_finish = match (entry, case) {
-                        ("openai_chat", "content_filter") => "content_filter",
-                        ("openai_chat", "max_output_tokens") => "length",
-                        ("openai_chat", _) => "stop",
-                        (_, "content_filter") => "refusal",
-                        (_, "max_output_tokens") => "max_tokens",
-                        _ => "end_turn",
+                        ("openai_chat", "max_output_tokens") => json!("length"),
+                        ("openai_chat", _) => expected["incomplete_details"]["reason"]
+                            .as_str()
+                            .map(|reason| json!(reason))
+                            .unwrap_or(Value::Null),
+                        (_, "content_filter") => json!("refusal"),
+                        (_, "max_output_tokens") => json!("max_tokens"),
+                        _ => json!("end_turn"),
                     };
                     if content_type.starts_with("application/json") {
                         let payload: Value = serde_json::from_str(&body).unwrap();
@@ -5445,6 +5447,122 @@ async fn responses_wire_representation_survives_chat_and_anthropic_entries() {
                         }
                     }
                 }
+            }
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// 0e129d0: public conversion must not turn provider pause or exhaustion into stop.
+#[tokio::test]
+async fn issue0e129d0_actual_error_uses_error_chain_and_switches_provider() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["direct", "relay"] {
+        let first = sse(
+            "response.failed",
+            &json!({"type":"response.failed","response":{"id":"failed-exact","status":"failed","error":{"code":"EXACT_UPSTREAM_CAUSE_0E129D0","message":"exact upstream failure, preserve me"},"output":[]}}),
+        );
+        let second = response_sse(&text_response("RECOVERED_AFTER_REAL_ERROR_0E129D0"));
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "text/event-stream",
+            first.clone(),
+            EntryOptions {
+                attempt_bodies: vec![first, second],
+                two_provider_route: true,
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let consumed = consume_response(client().post(endpoint).json(&json!({"model":"router-test","input":"recover actual provider error","stream":true})).send().await).await;
+        let attempts: Vec<_> = std::iter::from_fn(|| captures.try_recv().ok()).collect();
+        stop_entry(handle, shutdown).await;
+        assert_eq!(attempts.len(), 2, "{process}: {consumed:?}");
+        assert_eq!(attempts[0]["model"], "wire-test");
+        assert_eq!(attempts[1]["model"], "wire-independent");
+        assert!(consumed.transport_error.is_none(), "{consumed:?}");
+        assert!(
+            consumed.body.contains("RECOVERED_AFTER_REAL_ERROR_0E129D0"),
+            "{consumed:?}"
+        );
+        assert!(
+            !consumed.body.contains("EXACT_UPSTREAM_CAUSE_0E129D0"),
+            "error payload must remain internal"
+        );
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// 0e129d0 non-stop business terminals remain business responses.
+#[tokio::test]
+async fn issue0e129d0_anthropic_nonstop_reason_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for reason in [
+        "pause_turn",
+        "model_context_window_exceeded",
+        "stop_sequence",
+    ] {
+        for streaming in [false, true] {
+            eprintln!("0e129d0 public case reason={reason} streaming={streaming}");
+            let mut response = json!({"id":"terminal-fidelity","type":"message","role":"assistant","model":"wire-test","content":[{"type":"text","text":"NATIVE_OK"}],"stop_reason":reason,"usage":{"input_tokens":3,"output_tokens":2}});
+            if reason == "stop_sequence" {
+                response["stop_sequence"] = json!("END");
+            }
+            let wire = if streaming {
+                sse(
+                    "message_start",
+                    &json!({"type":"message_start","message":{"id":"terminal-fidelity","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":3,"output_tokens":0}}}),
+                ) + &sse(
+                    "content_block_start",
+                    &json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":"NATIVE_OK"}}),
+                ) + &sse(
+                    "content_block_stop",
+                    &json!({"type":"content_block_stop","index":0}),
+                ) + &sse(
+                    "message_delta",
+                    &json!({"type":"message_delta","delta":{"stop_reason":reason,"stop_sequence":response["stop_sequence"]},"usage":{"output_tokens":2}}),
+                ) + &sse("message_stop", &json!({"type":"message_stop"}))
+            } else {
+                response.to_string()
+            };
+            let (endpoint, handle, mut captures, shutdown) = start_entry(
+                "anthropic",
+                "chat",
+                StatusCode::OK,
+                if streaming {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+                wire,
+            )
+            .await;
+            let result = client().post(endpoint.replace("/v1/responses", "/v1/chat/completions"))
+                .json(&json!({"model":"test.test","messages":[{"role":"user","content":"terminal fidelity"}],"stream":streaming})).send().await;
+            let (media, body) = successful_transfer(result).await;
+            stop_entry(handle, shutdown).await;
+            assert_one_attempt(&mut captures, "wire-test").await;
+            if media.starts_with("application/json") {
+                let payload: Value = serde_json::from_str(&body).unwrap();
+                assert_eq!(payload["choices"][0]["finish_reason"], reason, "{body}");
+            } else {
+                assert!(
+                    events(&body)
+                        .iter()
+                        .any(|event| event["choices"][0]["finish_reason"] == reason),
+                    "{reason}: {body}"
+                );
+                assert!(
+                    !events(&body)
+                        .iter()
+                        .any(|event| event["choices"][0]["finish_reason"] == "stop"),
+                    "{body}"
+                );
             }
         }
     }
@@ -7656,7 +7774,11 @@ async fn chat_sse_preserves_each_responses_output_item_without_repetition() {
             frames
                 .iter()
                 .any(|frame| frame["choices"][0]["finish_reason"]
-                    == if has_tool { "tool_calls" } else { "stop" }),
+                    == if has_tool {
+                        json!("tool_calls")
+                    } else {
+                        Value::Null
+                    }),
             "{body}"
         );
         assert!(

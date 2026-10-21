@@ -605,9 +605,7 @@ pub(crate) fn emit_v3_request_complete_console_line(
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .or_else(|| infer_v3_console_finish_reason_from_response_status(Some(response_status)))
-        .ok_or_else(|| {
-            "successful V3 Runtime observability is missing finish_reason".to_string()
-        })?;
+        .unwrap_or_else(|| "unreported".to_string());
     let human_usage = format_v3_console_human_usage_summary(observability.usage.as_ref());
     let debug_usage = format_v3_console_usage_summary(observability.usage.as_ref());
     let route = resolve_v3_console_route_projection(observability);
