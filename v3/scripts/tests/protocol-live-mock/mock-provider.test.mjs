@@ -278,6 +278,8 @@ test('fault attempts advance deterministically and the recovered attempt is deli
   assert.deepEqual(captures.map((capture) => capture.attempt), [0, 1]);
   assert.deepEqual(captures.map((capture) => capture.response_script.mode), ['fault', 'json']);
   assert.equal(captures[1].attempt_repeated, false);
+  assert.equal(captures[0].response_wire.complete, false, 'truncated attempt must be recorded as incomplete');
+  assert.equal(captures[0].response_wire.truncated, true, 'truncated attempt must keep its truncated receipt');
 });
 
 test('reset destroys the transport and hold-open stays open until close()', async (t) => {
