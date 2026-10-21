@@ -64,9 +64,9 @@ function findingsOf(root) {
   return inspectCorpus(root).findings.join('\n');
 }
 
-test('real corpus loads 58 fixtures sorted with exact identities', () => {
+test('real corpus loads 61 fixtures sorted with exact identities', () => {
   const loaded = loadFixtures(realFixtureRoot);
-  assert.equal(loaded.length, 58);
+  assert.equal(loaded.length, 61);
   const ids = loaded.map((entry) => entry.value.case_id);
   assert.equal(ids.length, new Set(ids).size);
   assert.equal(ids[0], 'anthropic-to-anthropic-json');
@@ -74,15 +74,60 @@ test('real corpus loads 58 fixtures sorted with exact identities', () => {
   assert.deepEqual(loaded.map((entry) => entry.relative), [...loaded.map((entry) => entry.relative)].sort());
   const report = inspectCorpus(realFixtureRoot);
   assert.equal(report.ok, true, report.findings.join('\n'));
-  assert.equal(report.case_count, 58);
+  assert.equal(report.case_count, 61);
   assert.deepEqual(report.findings, []);
   assert.equal(report.coverage.base_cells, 16);
   assert.equal(report.coverage.base_cells_covered, 16);
   assert.equal(report.coverage.base_variants_covered, 32);
-  assert.equal(report.extensions.length, 26);
+  assert.equal(report.extensions.length, 29);
   assert.equal(report.source_refs.checked, false);
   assert.deepEqual(report.source_refs.stale_files, []);
   assert.deepEqual(report.source_refs.stale_tests, []);
+});
+
+test('fe1ec4b fixtures bind public JSON/SSE evidence and typed countercases', () => {
+  const loaded = loadFixtures(realFixtureRoot);
+  const byId = new Map(loaded.map((entry) => [entry.value.case_id, entry.value]));
+  const primary = byId.get('fe1ec4b-responses-ciphertext-json-sse-two-turn');
+  assert.ok(primary);
+  assert.equal(primary.public_entry.kind, 'http-listener');
+  assert.deepEqual(primary.public_entry.turn_transports, ['json', 'sse']);
+  assert.deepEqual(primary.runtime_setup.candidate_ids, [
+    'mock-responses-a/mock.responses-model',
+    'mock-responses-b/mock.responses-model',
+  ]);
+  assert.equal(primary.upstream_response.mode, 'json');
+  assert.equal(primary.turns[1].upstream_response.mode, 'sse');
+  assert.equal(primary.turns[1].expected_provider.paths[0], '/v1/responses');
+  assert.ok(primary.expected_client.body_must_not.includes('411bd3dd-47a6-49c0-8eef-6a826f349bf6-0'));
+  assert.ok(primary.expected_client.body_must_not.includes('113833ee-native-cipher'));
+  assert.equal(primary.expected_client.body_must['output.3.output.encrypted_content'], 'tool-business-cipher-json');
+  assert.equal(primary.expected_client.body_must['output.3.output.nested.opaque'], 'keep-json-business-value');
+  assert.ok(primary.turns[1].expected_provider.body_must_not.includes('input.1.encrypted_content'));
+  assert.equal(
+    primary.turns[1].expected_provider.body_must['input.4.output.encrypted_content'],
+    'tool-business-cipher-json',
+  );
+  assert.equal(
+    primary.turns[1].expected_client_must['output_items.3.output.encrypted_content'],
+    'tool-business-cipher-sse',
+  );
+
+  for (const caseId of [
+    'fe1ec4b-responses-anthropic-signature-json',
+    'fe1ec4b-responses-anthropic-signature-sse',
+  ]) {
+    const countercase = byId.get(caseId);
+    assert.ok(countercase);
+    assert.equal(countercase.cell.provider_protocol, 'anthropic');
+    const encryptedPath = countercase.upstream_response.mode === 'json'
+      ? 'output.0.encrypted_content'
+      : 'output_items.0.encrypted_content';
+    assert.equal(countercase.expected_client.body_must[encryptedPath],
+      countercase.upstream_response.mode === 'json'
+        ? 'redacted-anthropic-fe1ec4b-json'
+        : 'redacted-anthropic-fe1ec4b-sse');
+  }
 });
 
 test('manifest identity and source mismatches are rejected', () => {

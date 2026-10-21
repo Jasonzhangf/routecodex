@@ -172,6 +172,8 @@ async function handleRequest(request, response, options, state) {
   capture.attempt = attemptIndex;
   capture.attempt_repeated = repeated;
   capture.response_script = cloneValue(script);
+  const responseWire = createResponseWireCapture(script);
+  capture.response_wire = responseWire.receipt;
   state.captures.push(capture);
 
   if (typeof options.validateRequest === 'function') {
@@ -186,7 +188,7 @@ async function handleRequest(request, response, options, state) {
     }
   }
 
-  await sendScript(script, response);
+  await sendScript(script, response, responseWire);
 }
 
 function scriptsForTurn(fixture, turn) {
@@ -244,70 +246,111 @@ function scriptAt(scripts, index) {
   return { script: scripts[scripts.length - 1], repeated: true };
 }
 
-async function sendScript(script, response) {
+async function sendScript(script, response, wire) {
   if (script.mode === 'json') {
     response.writeHead(script.status, { 'content-type': script.content_type });
-    response.end(JSON.stringify(script.body));
+    writeWire(response, wire, JSON.stringify(script.body));
+    endWire(response, wire);
     return;
   }
   if (script.mode === 'sse') {
     if (script.fault === 'reset') {
+      wire.receipt.reset = true;
       response.socket?.destroy();
       return;
     }
     response.writeHead(script.status, { 'content-type': script.content_type });
     const fragments = sseFragments(script);
     if (script.fault && FAULT_TRUNCATE.has(script.fault)) {
-      writeTruncated(response, fragments, script.close_after_bytes);
+      writeTruncated(response, wire, fragments, script.close_after_bytes);
       return;
     }
     if (script.fault === 'hold-open') {
-      response.write(fragments[0] ?? '');
+      writeWire(response, wire, fragments[0] ?? '');
       return;
     }
-    for (const fragment of fragments) response.write(fragment);
-    response.end();
+    for (const fragment of fragments) writeWire(response, wire, fragment);
+    endWire(response, wire);
     return;
   }
   // fault mode
   if (script.fault === 'reset') {
+    wire.receipt.reset = true;
     response.socket?.destroy();
     return;
   }
   if (FAULT_TRUNCATE.has(script.fault)) {
     response.writeHead(script.status, { 'content-type': script.content_type ?? 'text/event-stream' });
     const fragments = Array.isArray(script.chunks) || Array.isArray(script.sse_events) ? sseFragments(script) : [`data: ${JSON.stringify({ fault: script.fault })}\n\n`];
-    writeTruncated(response, fragments, script.close_after_bytes);
+    writeTruncated(response, wire, fragments, script.close_after_bytes);
     return;
   }
   if (script.fault === 'hold-open') {
     response.writeHead(script.status, { 'content-type': script.content_type ?? 'text/event-stream' });
-    response.write('data: {"status":"holding"}\n\n');
+    writeWire(response, wire, 'data: {"status":"holding"}\n\n');
     return;
   }
   response.writeHead(script.status, { 'content-type': script.content_type ?? 'application/json' });
-  response.end(JSON.stringify(script.body ?? { error: { message: script.fault } }));
+  writeWire(response, wire, JSON.stringify(script.body ?? { error: { message: script.fault } }));
+  endWire(response, wire);
 }
 
-function writeTruncated(response, fragments, closeAfterBytes) {
+function createResponseWireCapture(script) {
+  return {
+    chunks: [],
+    receipt: {
+      mode: script.mode,
+      status: script.status,
+      content_type: script.content_type ?? null,
+      text: '',
+      text_byte_length: 0,
+      bytes_base64: '',
+      complete: false,
+      truncated: false,
+      reset: false,
+    },
+  };
+}
+
+function writeWire(response, wire, value) {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(String(value), 'utf8');
+  wire.chunks.push(bytes);
+  response.write(bytes);
+}
+
+function endWire(response, wire) {
+  const bytes = Buffer.concat(wire.chunks);
+  wire.receipt.text = bytes.toString('utf8');
+  wire.receipt.text_byte_length = bytes.length;
+  wire.receipt.bytes_base64 = bytes.toString('base64');
+  wire.receipt.complete = true;
+  wire.receipt.truncated = false;
+  response.end();
+}
+
+function writeTruncated(response, wire, fragments, closeAfterBytes) {
   let bytes = 0;
   for (const fragment of fragments) {
     if (typeof fragment !== 'string') throw new MockProviderError('mock_invalid_sse_chunk', 'SSE fragments must be raw strings');
     const chunk = Buffer.from(fragment, 'utf8');
     if (closeAfterBytes !== undefined && bytes + chunk.byteLength > closeAfterBytes) {
       const remaining = closeAfterBytes - bytes;
-      if (remaining > 0) response.write(chunk.subarray(0, remaining));
-      response.end();
+      if (remaining > 0) writeWire(response, wire, chunk.subarray(0, remaining));
+      wire.receipt.truncated = true;
+      endWire(response, wire);
+      wire.receipt.complete = false;
       return;
     }
-    response.write(chunk);
+    writeWire(response, wire, chunk);
     bytes += chunk.byteLength;
     if (closeAfterBytes !== undefined && bytes >= closeAfterBytes) {
-      response.end();
+      wire.receipt.truncated = true;
+      endWire(response, wire);
+      wire.receipt.complete = false;
       return;
     }
   }
-  response.end();
+  endWire(response, wire);
 }
 
 function sseFragments(script) {

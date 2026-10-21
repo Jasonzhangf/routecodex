@@ -350,7 +350,7 @@ fn resp03_strips_encrypted_content_from_reasoning_entries_but_keeps_plaintext() 
         ]
     });
 
-    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false);
+    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false, false);
 
     assert!(!payload.to_string().contains("encrypted_content"));
     assert!(!payload.to_string().contains("rsn_CIPHERTEXT"));
@@ -376,7 +376,7 @@ fn resp03_strips_encrypted_content_recursively_anywhere_in_response() {
         }]
     });
 
-    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false);
+    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false, false);
 
     assert!(!payload.to_string().contains("encrypted_content"));
     assert!(payload.to_string().contains("nested plain"));
@@ -390,7 +390,7 @@ fn resp03_noop_when_response_has_no_encrypted_content() {
     });
     let original = payload.clone();
 
-    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false);
+    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false, false);
 
     assert_eq!(payload, original);
 }
@@ -425,7 +425,7 @@ fn resp03_gpt_target_keeps_encrypted_content_but_non_gpt_strips_it() {
     };
     // retain=false（非 gpt / 多 provider）：剥离。
     let mut stripped = build_payload();
-    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut stripped, false);
+    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut stripped, false, false);
     assert!(
         !stripped.to_string().contains("encrypted_content"),
         "retain=false 必须在 resp_chat_process 剥离 encrypted_content"
@@ -445,7 +445,7 @@ fn resp03_gpt_target_keeps_encrypted_content_but_non_gpt_strips_it() {
 }
 
 #[test]
-fn resp03_govern_runtime_path_strips_rsn_cipher_but_keeps_anthropic_signature() {
+fn resp03_govern_runtime_path_strips_all_non_tool_cipher_without_typed_anthropic_source() {
     // 运行时真路径（govern_v3_hub_relay_response，此前剥离从未在该路径执行）：
     // Codex rsn_ 密文默认剥离（retain=false）；anthropic thinking signature
     // 载体（非 rsn_ 前缀）必须保留给客户端签名校验。
@@ -457,6 +457,9 @@ fn resp03_govern_runtime_path_strips_rsn_cipher_but_keeps_anthropic_signature() 
                 "type": "reasoning",
                 "id": "rs_1",
                 "encrypted_content": encrypted,
+                "metadata": {
+                    "encrypted_content": "113833ee-native-cipher"
+                },
                 "summary": [{"type": "summary_text", "text": summary}]
             }]
         })
@@ -479,15 +482,22 @@ fn resp03_govern_runtime_path_strips_rsn_cipher_but_keeps_anthropic_signature() 
             .expect("payload serializable")
     };
 
-    // retain=false（默认）：govern 运行时路径剥离 rsn_ 密文。
-    let resp02 = build_resp02(payload_with("rsn_CODEX_CIPHER", "signed thought"));
+    // retain=false（默认，typed Responses source）：递归剥离非工具结果的密文。
+    let resp02 = build_resp02(payload_with(
+        "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0",
+        "signed thought",
+    ));
     let outcome = govern_v3_hub_relay_response(resp02, &V3HubRelayResponseHookProfile::empty())
         .expect("govern must succeed");
     let (governed, _, _) = outcome.into_parts();
     let payload = payload_str(&governed);
     assert!(
-        !payload.contains("rsn_CODEX_CIPHER"),
-        "govern 运行时路径必须剥离 Codex rsn_ 密文"
+        !payload.contains("411bd3dd-47a6-49c0-8eef-6a826f349bf6-0"),
+        "govern 运行时路径必须剥离 UUID-shaped 密文"
+    );
+    assert!(
+        !payload.contains("113833ee-native-cipher"),
+        "govern 运行时路径必须递归剥离 opaque 密文"
     );
     assert!(payload.contains("signed thought"));
 
@@ -501,16 +511,17 @@ fn resp03_govern_runtime_path_strips_rsn_cipher_but_keeps_anthropic_signature() 
         "gpt 单 provider 必须保留 encrypted_content 透传"
     );
 
-    // anthropic thinking signature 载体（值非 rsn_/gAAAA 前缀）永不清除——
-    // recursive 层只剥离 Codex 密文（rsn_ / gAAAA 开头）。
+    // 未携带 typed Anthropic source witness 时，不能按密文文本形状猜测来源；
+    // 非工具结果的 encrypted_content 一律剥离。typed Anthropic source 的保留路径
+    // 由 resp03_anthropic_source_witness_preserves_signature_after_canonical_projection 覆盖。
     let resp02 = build_resp02(payload_with("resp04-signature", "signed"));
     let outcome = govern_v3_hub_relay_response(resp02, &V3HubRelayResponseHookProfile::empty())
         .expect("govern must succeed");
     let (governed, _, _) = outcome.into_parts();
     let payload = payload_str(&governed);
     assert!(
-        payload.contains("resp04-signature"),
-        "anthropic thinking signature 载体不得被剥离: {payload}"
+        !payload.contains("resp04-signature"),
+        "无 typed Anthropic source 时不得按形状保留密文: {payload}"
     );
     assert!(
         payload.contains("signed"),

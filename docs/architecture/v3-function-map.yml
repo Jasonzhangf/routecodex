@@ -2535,6 +2535,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/tests.rs
   - v3/crates/routecodex-v3-server/src/websocket.rs
   - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
+  - responses_function_call_output_is_preserved_business_data
   required_gates:
   - npm run verify:sse-architecture-boundary
   - npm run verify:v3-provider-action-gate
@@ -2753,6 +2754,9 @@ features:
   - project_openai_chat_provider_tools
   - build_provider_req_compat_06_from_v3_hub_req_outbound_07
   - execute_v3_responses_relay_runtime_inner
+  - apply_v3_response_cipher_policy
+  - strip_v3_resp03_encrypted_reasoning_content
+  - responses_function_call_output_is_preserved_business_data
   - project_v3_responses_relay_runtime_failure
   - build_v3_responses_provider_response_from_openai_chat_payload
   - encode_v3_anthropic_request_as_responses_semantic

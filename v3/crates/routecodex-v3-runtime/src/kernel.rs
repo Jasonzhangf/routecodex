@@ -1356,6 +1356,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &standardized.server_id,
                     ),
                     retain_response_cipher,
+                    response_projection.compat_plan.provider_protocol,
                 );
                 match apply_v3_responses_direct_web_search_json_response_control(
                     server_tool_state.as_deref(),
