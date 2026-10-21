@@ -34,7 +34,7 @@ use routecodex_v3_provider_responses::{
     V3ProviderSseStream, V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
 };
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 enum V3RelayAttemptCollectFailure {
     EmptyProviderAttempt,
@@ -449,8 +449,12 @@ where
     let mut trace = Vec::with_capacity(17);
     // 统一 relay timing：internal = RouteCodex 处理，external = provider 等待；
     // 只写入 typed observability，不进入 payload。
-    let (runtime_timing, mut failed_candidates, mut retry_selected) =
-        relay_handoff_entry_state(initial_handoff.as_ref());
+    let (
+        runtime_timing,
+        mut failed_candidates,
+        mut request_local_busy_candidates,
+        mut retry_selected,
+    ) = relay_handoff_entry_state(initial_handoff.as_ref());
     let transport_intent = if payload.get("stream").and_then(Value::as_bool) == Some(true)
         || (C::ENTRY_PROTOCOL == V3HubEntryProtocol::Gemini
             && endpoint_path.ends_with(":streamGenerateContent"))
@@ -540,6 +544,7 @@ where
             &failure_session_scope,
             &provider_health,
             &failed_candidates,
+            &request_local_busy_candidates,
             v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
             deterministic_sample,
             allow_exhaustion_rescue_probe,
@@ -564,7 +569,29 @@ where
                     std::mem::take(failure_events),
                 ));
             }
-            Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
+            Err(V3PlanExecutionStop::Exhausted {
+                expanded: exhausted_expanded,
+                exhaustion,
+                source,
+                ..
+            }) => {
+                let source = match source {
+                    Some(source) => Some(source),
+                    None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
+                        &exhausted_expanded,
+                        &failed_candidates,
+                        &request_local_busy_candidates,
+                    ) {
+                        Ok(source) => source,
+                        Err(fault) => {
+                            return Ok(C::assemble_failure_output(
+                                super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                                trace,
+                                std::mem::take(failure_events),
+                            ))
+                        }
+                    },
+                };
                 let failure = C::request_failure_builder(
                     "V3Target10ConcreteProviderSelected",
                     "selected_target_exhausted",
@@ -574,7 +601,9 @@ where
                     ),
                 );
                 return Ok(C::assemble_failure_output(
-                    terminalize_provider_failure(failure, None),
+                    super::relay_runtime_shared::terminalize_provider_failure_with_source(
+                        failure, source, None,
+                    ),
                     trace,
                     std::mem::take(failure_events),
                 ));
@@ -583,6 +612,7 @@ where
     req02.previous.payload.0 = std::sync::Arc::new(execution_planned_request);
     let retained_expanded = initial_plan.expanded;
     failed_candidates.extend(initial_plan.request_local_excluded_candidates);
+    request_local_busy_candidates.extend(initial_plan.request_local_busy_candidates);
     let planned_execution_mode = initial_plan.execution_mode;
     let mut initial_admitted = Some((initial_plan.selected, initial_plan.admission));
     let request_outcome = compile_v3_hub_relay_request_hooks()
@@ -628,6 +658,7 @@ where
                 &failure_session_scope,
                 &provider_health,
                 &failed_candidates,
+                &request_local_busy_candidates,
                 v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
                 deterministic_sample,
                 allow_exhaustion_rescue_probe,
@@ -642,6 +673,7 @@ where
                     req05.previous.previous.previous.payload.0 =
                         std::sync::Arc::new(execution_planned_request);
                     failed_candidates.extend(plan.request_local_excluded_candidates);
+                    request_local_busy_candidates.extend(plan.request_local_busy_candidates);
                     (plan.selected, Some(plan.admission))
                 }
                 Err(V3PlanExecutionStop::Failed(source)) => {
@@ -660,7 +692,32 @@ where
                         std::mem::take(failure_events),
                     ));
                 }
-                Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
+                Err(V3PlanExecutionStop::Exhausted {
+                    expanded: exhausted_expanded,
+                    exhaustion,
+                    source,
+                    ..
+                }) => {
+                    let source = match source {
+                        Some(source) => Some(source),
+                        None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
+                            &exhausted_expanded,
+                            &failed_candidates,
+                            &request_local_busy_candidates,
+                        ) {
+                            Ok(source) => source,
+                            Err(fault) => {
+                                return Ok(C::assemble_failure_output(
+                                    terminalize_provider_failure(
+                                        super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                                        last_external_http.clone(),
+                                    ),
+                                    trace,
+                                    std::mem::take(failure_events),
+                                ))
+                            }
+                        },
+                    };
                     let attempted_candidates = exhaustion.attempted_candidates;
                     let failure = C::request_failure_builder(
                         "V3Target10ConcreteProviderSelected",
@@ -668,7 +725,11 @@ where
                         format!("selected target exhausted after {attempted_candidates:?}"),
                     );
                     return Ok(C::assemble_failure_output(
-                        terminalize_provider_failure(failure, last_external_http.clone()),
+                        super::relay_runtime_shared::terminalize_provider_failure_with_source(
+                            failure,
+                            source,
+                            last_external_http.clone(),
+                        ),
                         trace,
                         std::mem::take(failure_events),
                     ));
@@ -883,8 +944,9 @@ where
                             selected_admission = Some(admission)
                         }
                         V3AdmitAfterRecovery::Busy => {
-                            failed_candidates
-                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                            failed_candidates.insert(busy_key.clone());
+                            request_local_busy_candidates.insert(busy_key);
                             drop(provider_action_permit.take());
                             provider_action_permit_target = None;
                             continue;
@@ -958,7 +1020,9 @@ where
                     runtime_timing
                         .finish_external()
                         .map_err(V3RelayCoreError::Target)?;
-                    failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                    let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                    failed_candidates.insert(busy_key.clone());
+                    request_local_busy_candidates.insert(busy_key);
                     drop(provider_action_permit.take());
                     provider_action_permit_target = None;
                     continue;

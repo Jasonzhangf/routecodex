@@ -8182,8 +8182,8 @@ chains:
       side_channel_writes: []
 - chain_id: v3.provider_admission_rescue_entrypoints
   owner_feature_id: v3.provider_global_subscription_probe
-  summary: Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry.
-  exhaustion_contract: a cooldown-only request receives one rescue pass and captured-target reselection, then internal exhaustion when no candidate is available; independent scheduled health recovery does not retain the exhausted request
+  summary: Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry, and pure capacity exhaustion retains its typed cause.
+  exhaustion_contract: a cooldown-only request receives one rescue pass and captured-target reselection, then internal exhaustion when no candidate is available; pure all-busy exhaustion carries TargetPoolExhausted/provider_concurrency_busy, mixed exhaustion remains selected_target_exhausted, and independent scheduled health recovery does not retain the exhausted request
   edges:
   - step_id: v3-rd-target-select-direct-admission-rescue
     from_node: V3Target09CandidateSetExpanded
@@ -8199,11 +8199,12 @@ chains:
       - Direct atomically admits provider+authAlias capacity and immediately selects the next eligible candidate when full.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
       - All-full candidates exhaust immediately without a provider send or health mutation; concurrency never waits or enters Error recovery admission.
+      - Exact candidate keys proven capacity-busy survive sync and async reselection; only full captured-set coverage carries provider_concurrency_busy, while mixed exhaustion stays selected_target_exhausted.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
       side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
+      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission, v3.operation_runner.request_local_exclusions]
   - step_id: v3-rd-target-select-responses-direct-admission-rescue
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
@@ -8217,11 +8218,12 @@ chains:
       - Responses Direct runtime uses the same admission-aware selection wrapper for initial selection and request-local reselection.
       - Responses Direct immediately skips full provider+authAlias candidates and exhausts an all-full target without waiting or mutating health.
       - The acquired provider admission lease is consumed by Provider transport or released by Runtime if selection does not reach transport.
+      - Exact capacity-busy candidate keys survive every direct reselection and are projected through the existing target-exhaustion terminal helper when the captured Target09 set is fully covered.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
       side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
+      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission, v3.operation_runner.request_local_exclusions]
   - step_id: v3-rd-target-select-relay-core-admission-rescue
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
@@ -8235,12 +8237,12 @@ chains:
       - Generic Relay runtime resolves Target09 through the admission-aware relay wrapper before provider transport.
       - Relay uses the same atomic capacity admission, immediately skipping full candidates without waiting or changing health.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - Concurrency state cannot exhaust Relay selection; only an actual typed provider failure such as HTTP 429 enters Error recovery and may select a later candidate.
+      - Full capacity can exhaust the captured Relay pool without entering provider-failure health recovery; pure all-busy exhaustion preserves provider_concurrency_busy and mixed exhaustion remains selected_target_exhausted.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
       side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
+      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission, v3.operation_runner.request_local_exclusions]
   - step_id: v3-rd-target-select-responses-relay-admission-rescue
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
@@ -8254,11 +8256,12 @@ chains:
       - Responses Relay runtime uses the admission-aware relay wrapper for selected Target10 resolution after its route facts are captured.
       - Full candidates are excluded only for this request and immediately reselected inside Target; capacity does not mutate failure policy or cooldown state.
       - The selected admission lease is handed to Relay Provider transport exactly once; otherwise Runtime releases it before terminal projection.
+      - Pure capacity exhaustion carries the existing TargetPoolExhausted/provider_concurrency_busy source through terminal projection, while mixed exhaustion retains selected_target_exhausted.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
       side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
+      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission, v3.operation_runner.request_local_exclusions]
   - step_id: v3-rd-target-select-anthropic-relay-admission-rescue
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
@@ -8272,12 +8275,12 @@ chains:
       - Anthropic Relay resolves Target09 through admission-aware selection before Provider transport.
       - Anthropic Relay uses shared admission to switch immediately from full providers to the next eligible candidate.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - Concurrency state cannot exhaust Anthropic Relay selection; only an actual typed provider failure such as HTTP 429 may enter Error recovery and select a later candidate.
+      - Full capacity can exhaust the captured Anthropic Relay pool without entering provider-failure health recovery; pure all-busy exhaustion preserves provider_concurrency_busy and mixed exhaustion remains selected_target_exhausted.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
       side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
+      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission, v3.operation_runner.request_local_exclusions]
 
 - chain_id: v3-provider-admission-lease-lifecycle
   owner_feature_id: v3.provider_global_subscription_probe
@@ -8286,7 +8289,7 @@ chains:
   - step_id: v3-provider-admission-lease-acquire
     from_node: V3Target10ConcreteProviderSelected
     to_node: V3RuntimeProviderAdmission
-    caller_symbol: select_v3_expanded_target_with_admission_rescue
+    caller_symbol: try_admit_v3_selected_target
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
     callee_symbol: V3AdaptiveConcurrencyController::try_acquire_business
     callee_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
@@ -9944,7 +9947,7 @@ chains:
       consumes: [v3.request.normal_payload, v3.route.opaque_target, v3.config.published_manifest]
       produces: [v3.request.normal_payload, v3.hub.resolved_target, v3.operation_runner.execution_mode]
       side_channel_reads: [v3.provider.availability_projection, v3.operation_runner.request_local_exclusions]
-      side_channel_writes: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
+      side_channel_writes: [v3.hub.resolved_target, v3.operation_runner.execution_mode, v3.operation_runner.request_local_exclusions]
   - step_id: v3-op-runner-req-anthropic-resolve-01
     from_node: V3AnthropicRelayRuntime
     to_node: V3OperationRunnerResolveTarget
@@ -9972,7 +9975,7 @@ chains:
       consumes: [v3.request.normal_payload, v3.route.opaque_target, v3.config.published_manifest]
       produces: [v3.request.normal_payload, v3.hub.resolved_target, v3.operation_runner.execution_mode]
       side_channel_reads: [v3.provider.availability_projection, v3.operation_runner.request_local_exclusions]
-      side_channel_writes: [v3.hub.resolved_target, v3.operation_runner.execution_mode]
+      side_channel_writes: [v3.hub.resolved_target, v3.operation_runner.execution_mode, v3.operation_runner.request_local_exclusions]
   - step_id: v3-op-runner-req-03
     from_node: V3OperationRunnerResolveTarget
     to_node: V3OperationRunnerPlanExecution

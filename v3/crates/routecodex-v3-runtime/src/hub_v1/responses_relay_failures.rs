@@ -336,6 +336,44 @@ pub(crate) fn provider_request_relay_failure(
     })
 }
 
+pub(crate) fn terminalize_v3_responses_relay_provider_failure_with_source(
+    mut failure: V3ResponsesRelayProviderFailure,
+    source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
+) -> V3ResponsesRelayProviderFailure {
+    let Some(source) = source else {
+        return terminalize_v3_responses_relay_provider_failure(failure, last_external_http);
+    };
+    if failure.terminal_projection.is_some() {
+        return failure;
+    }
+    if failure.terminal_disposition.is_none() {
+        failure.terminal_disposition = Some(match last_external_http {
+            Some(witness) => {
+                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)
+            }
+            None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        });
+    }
+    if failure.error_operator_fault.is_some() {
+        return failure;
+    }
+    failure.policy_error_type = source.code.clone();
+    failure.policy_error_message = source.message.clone();
+    match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+        source,
+        routecodex_v3_error::V3ErrorActionScope::ProviderInstance {
+            provider_id: failure.provider_id.clone(),
+        },
+        0,
+        None,
+    ) {
+        Ok(projected) => failure.terminal_projection = Some(projected),
+        Err(fault) => failure.error_operator_fault = Some(fault),
+    }
+    failure
+}
+
 pub(crate) fn terminalize_v3_responses_relay_provider_failure(
     mut failure: V3ResponsesRelayProviderFailure,
     last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,

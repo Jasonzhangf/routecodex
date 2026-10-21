@@ -1191,7 +1191,7 @@ features:
   - Direct provider errors enter the shared Error01-06/provider-health policy; success payload semantics remain provider-owned while client transport projection follows the client stream intent
   - Direct provider raw response decode/projection errors enter the same Error01-06 provider failure policy and reselect before Error06 while alternatives remain
   - Direct target-local reselection uses the full captured Target09 candidate set; if the newly selected Target10 requires Hub Relay and no Direct-owned previous_response_id is active, Direct returns a
-    typed relay handoff side-channel carrying the complete request-local failed-candidate exclusion set so Relay cannot retry an already-failed Direct target
+    typed relay handoff side-channel carrying both the complete request-local failed-candidate exclusion set and the exact request-local capacity-busy candidate set, without inferring busy provenance from exclusions, so Relay cannot retry an already-failed Direct target
   - Direct server execution passes the server-scoped provider health store so cross-request cooldown affects subsequent selection
   - Direct server observability derives JSON finish_reason from parsed response status only for log/usage output; non-stream JSON client bodies are not mutated, while stream requests may project valid provider
     JSON as client SSE without treating provider inbound transport as client protocol truth
@@ -1319,8 +1319,9 @@ features:
   - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
   - 'Adaptive provider concurrency is keyed by providerId plus authAlias: admission is atomic and a full candidate is skipped immediately for this request'
   - 'Configured maxInFlight bounds business admission without queuing; Direct and Relay select the next eligible candidate and all-full pools exhaust immediately'
+  - 'Pure all-busy exhaustion retains TargetPoolExhausted/provider_concurrency_busy only when every captured Target09 candidate key was proven capacity-busy; mixed exhaustion remains selected_target_exhausted'
   - 'Concurrency exclusions remain request-local and never mutate provider failure health or cooldown; scheduled probes remain separately bounded'
-  - 'WebSocketV2 preserves a granted lease for an available session slot, releases it before an actual slot wait, and returns typed ConcurrencyBusy on a losing readmission race for Runtime reselect'
+  - 'WebSocketV2 preserves a granted lease for an available session slot, releases it before an actual slot wait, and returns typed ConcurrencyBusy on a losing readmission race for Runtime reselect; the exact candidate busy provenance survives subsequent request-local exhaustion'
   - 'When a cooled preceding-tier candidate already has a rescue probe in flight, selection skips it without waiting and continues to an eligible later tier; probe success can restore it for subsequent requests'
   - 'Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini preserve the target-specific acquireTimeoutMs; they do not fall back to the builder default when a typed target is available'
   - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
@@ -3386,6 +3387,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_recovery_isolation.rs
@@ -3395,8 +3397,10 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   required_symbols:
-  - select_v3_expanded_target_with_admission_rescue
-  - resolve_v3_relay_target_outcome_with_admission_rescue
+  - run_v3_plan_execution_operator_with_probes
+  - PlanExecutionOperator::execute_plan
+  - step_v3_target_planning_with_admission_sync
+  - try_admit_v3_selected_target
   required_positive:
   - issue231_responses_relay_stale_probe_public_blackbox proves current Responses Relay delivers the real healthy later-tier payload while a preferred probe is held, then both stale completion branches preserve newer failure state and release their owner; exhausted requests close transport without an empty success while a healthy sibling continues
   - issue245_permission_11128_search_continuation_public_blackbox proves genuine HTTP400 permission_error cools the exact identity, preserves paired function-search and executed nonce history through Relay, remains excluded beyond the original deadline after a failed probe, restores only after a matching successful probe, and closes exhausted transport while explicit current-turn native hosted search continues; it does not replay or resolve the historical upstream/channel cause
@@ -3422,6 +3426,10 @@ features:
   - a provider-declared terminal that carries a legal business result is forwarded as-is and never becomes a provider failure even without visible text: Responses incomplete content_filter, Anthropic refusal, and the OpenAI Chat empty-content content_filter finish; a complete attempt with no deliverable business content at all (empty end_turn/stop terminal with no text/tool/refusal/reasoning) is instead classified as an internal typed 502 for the Error chain
   - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
   - Public `/v1/responses` switches to a spare provider while the first provider remains held; all-full pools terminate promptly without an extra upstream request
+  - provider_concurrency_saturated_candidates_exhaust_without_send and provider_concurrency_relay_saturated_candidates_exhaust_without_send prove pure all-busy exhaustion retains TargetPoolExhausted/provider_concurrency_busy
+  - The async admission and WebSocket readmission paths preserve exact capacity-busy keys until the final direct or relay terminal source is built
+  - all_busy_async_admission_preserves_provider_concurrency_busy_source proves async pre-admission rejects every captured candidate as capacity-busy without waiting and returns TargetPoolExhausted/provider_concurrency_busy
+  - mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhausted proves a non-busy request-local exclusion prevents all-busy source relabeling and leaves generic selected_target_exhausted
   - Concurrency exclusions are request-local and health-neutral; reselect stays inside the captured Target09 candidate set without Router reentry
   - A full preferred candidate does not disable the caller-authorized semantic recovery of another eligible cooled candidate in Direct or Relay
   - Business leases remain bounded and release after completion, error, cancellation, or stream drop; due scheduled probes retain their separate bounded admission
@@ -3433,6 +3441,7 @@ features:
   - automatic model-less cooldown state never blocks other complete identities or enters provider/client payload or MetadataCenter; explicit manual administration retains its declared scope
   - Crossing the adaptive budget cannot record provider failure health, auth-key cooldown, model cooldown, MetadataCenter state, or provider/client payload truth
   - Capacity saturation cannot trigger health rescue probes for the full candidate, provider-action waits, oversubscription, or escape from an explicit provider.model pin
+  - Mixed exhaustion with a cooldown, capability exclusion, prior provider failure, or initial request-local exclusion cannot be relabeled provider_concurrency_busy
   - WebSocketV2 session-slot contention cannot retain provider capacity, starve another request that owns the session, or leak its session slot or provider lease on cancellation
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue231_responses_relay_stale_probe_public_blackbox -- --nocapture
@@ -3456,6 +3465,8 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::cooldown_exhaustion::all_busy_async_admission_preserves_provider_concurrency_busy_source -- --exact --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::cooldown_exhaustion::mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhausted -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admission -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
@@ -3466,6 +3477,10 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
+  runtime_evidence:
+    status: pending_same_entry_public_replay
+    required:
+    - Controlled same-entry public /v1/responses replay for Direct and Relay, with pure and mixed subcases, must prove typed source classification, zero extra upstream dispatch, health neutrality, and client transport termination without error payload or fabricated success
   completion_boundary:
     source_controlled: true
     live_cutover: required

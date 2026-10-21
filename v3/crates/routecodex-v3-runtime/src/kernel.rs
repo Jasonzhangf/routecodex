@@ -15,9 +15,8 @@ use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
-    admit_v3_selected_target_after_recovery, select_v3_expanded_target_with_admission_rescue,
-    select_v3_target_with_session_then_global, try_admit_v3_selected_target, V3AdmitAfterRecovery,
-    V3AdmittedTargetSelectionAfterRescue, V3ProviderFailureRuntimeHealth,
+    admit_v3_selected_target_after_recovery, select_v3_target_with_session_then_global,
+    try_admit_v3_selected_target, V3AdmitAfterRecovery, V3ProviderFailureRuntimeHealth,
     V3RuntimeProviderAdmission,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
@@ -122,6 +121,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         initial_selected_target,
         initial_expanded,
         initial_request_local_excluded_candidates,
+        initial_request_local_busy_candidates,
         initial_route_policy_scope,
         initial_route_policy_pending,
         initial_protocol_decision,
@@ -308,6 +308,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         }
     };
     let mut failed_candidates = initial_request_local_excluded_candidates;
+    let mut request_local_busy_candidates = initial_request_local_busy_candidates;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut initial_selected_target = initial_selected_target;
@@ -345,6 +346,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &direct_failure_session_scope,
                     &provider_health,
                     &failed_candidates,
+                    &request_local_busy_candidates,
                     now_epoch_ms,
                     0,
                     allow_exhaustion_rescue_probe,
@@ -359,6 +361,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     Ok((planned_request, plan)) => {
                         standardized.body = planned_request;
                         failed_candidates.extend(plan.request_local_excluded_candidates);
+                        request_local_busy_candidates
+                            .extend(plan.request_local_busy_candidates);
                         expanded = Some(plan.expanded.clone());
                         target_source = Some(crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::Expanded(plan.expanded));
                         if expands_target { trace.extend(["V3Target08KindClassified", "V3Target09CandidateSetExpanded"]); }
@@ -374,7 +378,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             &hook_registry,
                         );
                     }
-                    Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Exhausted { exhaustion: error, .. }) => {
+                    Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Exhausted { expanded: exhausted_expanded, exhaustion: error, source, .. }) => {
                         let detail = if error.attempted_candidates.is_empty() {
                             "no candidates".to_string()
                         } else {
@@ -388,15 +392,37 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             unavailable_candidates: error.attempted_candidates.clone(),
                             ..V3RuntimeObservability::default()
                         };
+                        let source = match source {
+                            Some(source) => Some(source),
+                            None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
+                                &exhausted_expanded,
+                                &failed_candidates,
+                                &request_local_busy_candidates,
+                            ) {
+                                Ok(source) => source,
+                                Err(fault) => {
+                                    return direct_runtime_helpers_stream::operator_fault_output(
+                                        fault,
+                                        trace,
+                                        &hook_registry,
+                                    )
+                                }
+                            },
+                        };
                         return direct_runtime_helpers_stream::target_exhausted_output_with_observability(
-                            crate::shared::direct_plain_error(
-                                V3ErrorSourceKind::TargetPoolExhausted,
-                                "V3Target10ConcreteProviderSelected",
-                                "selected_target_exhausted",
-                                format!(
-                                    "{} candidates unavailable: {detail}",
-                                    error.attempted_candidates.len()
-                                ),
+                            source.map_or_else(
+                                || {
+                                    crate::shared::direct_plain_error(
+                                        V3ErrorSourceKind::TargetPoolExhausted,
+                                        "V3Target10ConcreteProviderSelected",
+                                        "selected_target_exhausted",
+                                        format!(
+                                            "{} candidates unavailable: {detail}",
+                                            error.attempted_candidates.len()
+                                        ),
+                                    )
+                                },
+                                Ok,
                             ),
                             last_external_http,
                             trace,
@@ -476,8 +502,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
                         V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
                         V3AdmitAfterRecovery::Busy => {
-                            failed_candidates
-                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                            failed_candidates.insert(busy_key.clone());
+                            request_local_busy_candidates.insert(busy_key);
                             drop(provider_action_permit.take());
                             provider_action_permit_target = None;
                             continue;
@@ -702,6 +729,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 decision.target,
                 captured_target_09,
                 failed_candidates.clone(),
+                request_local_busy_candidates.clone(),
                 route_policy_pending.clone(),
                 Some(route_policy_scope.clone()),
                 trace,
@@ -906,7 +934,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &hook_registry,
                     );
                 }
-                failed_candidates.insert(v3_relay_provider_candidate_key(&policy.target.candidate));
+                let busy_key = v3_relay_provider_candidate_key(&policy.target.candidate);
+                failed_candidates.insert(busy_key.clone());
+                request_local_busy_candidates.insert(busy_key);
                 drop(provider_action_permit.take());
                 provider_action_permit_target = None;
                 continue;

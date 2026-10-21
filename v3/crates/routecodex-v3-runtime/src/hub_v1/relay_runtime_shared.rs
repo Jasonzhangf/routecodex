@@ -907,6 +907,46 @@ pub fn provider_failure_message(failure: &V3RelayProviderFailure) -> String {
 
 /// Provider failure that consumed the request residence budget must still be
 /// projected through the typed Error01-06 chain before the relay loop exits.
+pub fn terminalize_provider_failure_with_source(
+    mut failure: V3RelayProviderFailure,
+    source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
+) -> V3RelayProviderFailure {
+    let Some(source) = source else {
+        return terminalize_provider_failure(failure, last_external_http);
+    };
+    if failure.terminal_projection.is_some() {
+        return failure;
+    }
+    if failure.terminal_disposition.is_none() {
+        failure.terminal_disposition = Some(match last_external_http {
+            Some(witness) => {
+                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)
+            }
+            None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        });
+    }
+    if failure.error_operator_fault.is_some() {
+        return failure;
+    }
+    failure.client_response = json!({
+        "error": {
+            "code": source.code.clone(),
+            "message": source.message.clone(),
+        }
+    });
+    match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+        source,
+        V3ErrorActionScope::None,
+        0,
+        None,
+    ) {
+        Ok(projected) => failure.terminal_projection = Some(projected),
+        Err(fault) => failure.error_operator_fault = Some(fault),
+    }
+    failure
+}
+
 pub fn terminalize_provider_failure(
     mut failure: V3RelayProviderFailure,
     last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
@@ -1182,16 +1222,19 @@ pub(crate) fn relay_handoff_entry_state(
 ) -> (
     crate::runtime_timing::V3RuntimeTimingState,
     std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
     Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
 ) {
     match handoff {
         Some(handoff) => (
             handoff.observability_accumulator.timing(),
             handoff.request_local_excluded_candidates.clone(),
+            handoff.request_local_busy_candidates.clone(),
             Some(handoff.target.clone()),
         ),
         None => (
             crate::runtime_timing::V3RuntimeTimingState::start(),
+            std::collections::BTreeSet::new(),
             std::collections::BTreeSet::new(),
             None,
         ),
@@ -1211,57 +1254,6 @@ pub(crate) fn relay_request_execution_control(
                     "V3ExecutionAttemptBudget rejected relay request: {error}"
                 ))
             }),
-    }
-}
-
-pub(crate) async fn resolve_v3_relay_entry_target(
-    input: crate::provider_failure_runtime_policy::V3RelayProviderTargetResolutionInput<'_>,
-    allow_exhaustion_rescue_probe: bool,
-    preferred_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    captured_expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
-) -> crate::provider_failure_runtime_policy::V3RelayProviderAdmittedTargetResolution {
-    use crate::provider_failure_runtime_policy::{
-        resolve_v3_relay_target_outcome_with_admission_rescue,
-        select_v3_expanded_target_with_admission_rescue, V3AdmittedTargetSelectionAfterRescue,
-        V3RelayProviderAdmittedTargetResolution,
-    };
-
-    let Some(expanded) = captured_expanded else {
-        return resolve_v3_relay_target_outcome_with_admission_rescue(
-            input,
-            allow_exhaustion_rescue_probe,
-            preferred_selected,
-        )
-        .await;
-    };
-
-    match select_v3_expanded_target_with_admission_rescue(
-        input.manifest,
-        expanded.clone(),
-        input.failure_session_scope,
-        input.provider_health,
-        input.request_local_excluded_candidates,
-        input.now_ms,
-        input.deterministic_sample,
-        allow_exhaustion_rescue_probe,
-        preferred_selected,
-    )
-    .await
-    {
-        V3AdmittedTargetSelectionAfterRescue::Selected(selected) => {
-            V3RelayProviderAdmittedTargetResolution::Selected(selected)
-        }
-        V3AdmittedTargetSelectionAfterRescue::Exhausted(exhausted) => {
-            V3RelayProviderAdmittedTargetResolution::Exhausted {
-                attempted_candidates: exhausted.attempted_candidates,
-            }
-        }
-        V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
-            V3RelayProviderAdmittedTargetResolution::Failed(source)
-        }
-        V3AdmittedTargetSelectionAfterRescue::OperatorFault(fault) => {
-            V3RelayProviderAdmittedTargetResolution::OperatorFault(fault)
-        }
     }
 }
 
