@@ -5317,6 +5317,31 @@ chains:
       side_channel_reads:
       - v3.protocol_conversion.field_parity_contract
       side_channel_writes: []
+  - step_id: v3-protocol-field-parity-responses-history-association-01
+    from_node: V3HubReqOutbound07ProviderSemantic
+    to_node: ProviderReqCompat06ProviderCompat
+    caller_symbol: project_v3_operation_runner_standard_provider_request
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs
+    callee_symbol: NamespaceToolIdentityRegistry::project_responses_history_references
+    callee_file: v3/crates/provider-compat-core/src/namespace_identity.rs
+    status: anchored
+    binding_kind: adjacent_history_association_helper
+    owner_feature_id: v3.protocol_conversion_field_parity
+    semantic_contract:
+      - Apply only when the typed entry protocol is Responses.
+      - Rewrite only response-history call records, never forced choice or native Chat history.
+      - An explicit namespace remains exact. A namespace-less call selects one unique same-kind declaration by full leaf only when no same-kind plain declaration owns that name.
+      - Preserve call ID and complete raw arguments; ambiguity or no declaration leaves the value unchanged.
+    resource_flow:
+      consumes:
+      - v3.request.provider_semantic
+      - v3.hub.entry_protocol
+      - v3.protocol_conversion.attempt_tool_binding
+      produces:
+      - v3.hub.provider_wire_payload
+      side_channel_reads:
+      - v3.protocol_conversion.field_parity_contract
+      side_channel_writes: []
   - step_id: v3-protocol-field-parity-responses-chat-malformed-arguments-project-01
     from_node: ProviderReqCompat06ProviderCompat
     to_node: V3ProviderReqOutbound08WirePayload

@@ -2076,7 +2076,7 @@ features:
   - Legacy OpenAI Chat outbound currently maps exact client_metadata.user_id to public metadata.user_id and consumes registered Codex client-local keys before provider send; unknown client_metadata and reasoning-summary rejection are known transparency defects, not acceptance requirements. Their owner cutover must prove opaque preservation, provider attempt forwarding, and paired client inverse projection.
   - Responses Direct kernel preserves same-protocol Responses input/include/tool history through production Direct provider wire while applying selected provider model binding and never synthesizing Chat
     messages.
-  - Responses function/custom history and forced choice project only through exact declared identities; namespace-less leaf names do not borrow namespace authority from prefixes, separators or source item IDs. Undeclared and ambiguous references remain unchanged.
+  - Forced choice, native Chat history and explicit namespace references project only through exact declared identities. Responses history may associate a namespace-less call only when the current declarations contain one unique same-kind identity with the exact full leaf and no same-kind plain declaration owns that name. Function and custom never cross-bind; prefixes, separators, call IDs, source item IDs and arguments grant no authority; undeclared or ambiguous references remain unchanged.
   - Direct parity test is a verification binding over existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity owner edge for those production
     nodes.
   required_blackbox:
@@ -2158,10 +2158,13 @@ features:
   - fe1ec4b-chat-wire-reasoning-cipher-relay-json
   - fe1ec4b-responses-source-cipher-relay-json
   - responses_function_call_history_keeps_mcp_namespace_on_openai_chat_provider_wire
+  - responses_standard_projection_qualifies_leaf_only_history
+  - responses_history_unique_leaf_association_respects_plain_kind_and_ambiguity
   - native_tool_search_first_discovery_round_trip_through_anthropic
   - non_client_tool_search_controls_preserve_function_call_json_and_sse
   - ordinary_tool_search_function_is_not_promoted_to_native_kind
   - responses_function_call_history_without_namespace_is_qualified_from_provider_tools
+  - responses_namespace_shell_dispatch_roundtrip_json_sse
   - openai_chat_history_does_not_qualify_same_leaf_name_without_responses_origin
   - responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name
   - responses_native_function_does_not_borrow_colliding_mcp_leaf_name
@@ -2189,6 +2192,10 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:function-map-compile-gate
   - npm run verify:v3-cargo-fmt
+  - cargo test --manifest-path v3/Cargo.toml -p provider-compat-core --test namespace_identity_consumer
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib request_outbound_format_extra_tests -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test openai_chat_namespace_names responses_namespace_shell_dispatch_roundtrip_json_sse -- --exact --nocapture --test-threads=1
+  - npm run verify:v3-dagpipe-governance
   - git diff --check
   completion_rule:
     source: Complete when focused parity tests, verifier, red fixtures, architecture/resource/module/Rust-only/function-map gates, fmt, and diff checks pass.

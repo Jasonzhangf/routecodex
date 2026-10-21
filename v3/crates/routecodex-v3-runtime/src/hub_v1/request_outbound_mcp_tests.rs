@@ -722,6 +722,393 @@ fn responses_function_call_history_without_namespace_is_qualified_from_provider_
 }
 
 #[test]
+fn responses_standard_projection_qualifies_leaf_only_history() {
+    let governed = json!({
+        "model": "gpt-test",
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_exec",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": "{ \"cmd\" : \"pwd\" }"
+                    }
+                }]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_exec",
+                "content": "SHELL_MARKER_WRITTEN"
+            }
+        ],
+        "tools": [{
+            "type": "namespace",
+            "name": "functions",
+            "tools": [{
+                "type": "function",
+                "name": "exec_command",
+                "parameters": {"type": "object"}
+            }]
+        }]
+    });
+    let responses = project_namespace_history(
+        governed.clone(),
+        super::V3HubEntryProtocol::Responses,
+    );
+    assert_eq!(
+        responses["messages"][0]["tool_calls"][0]["function"]["name"],
+        "functions__exec_command"
+    );
+    assert_eq!(
+        responses["messages"][0]["tool_calls"][0]["function"]["arguments"],
+        "{ \"cmd\" : \"pwd\" }"
+    );
+    assert_eq!(
+        responses["messages"][1]["tool_call_id"],
+        "call_exec"
+    );
+
+    let native_chat = project_namespace_history(governed, super::V3HubEntryProtocol::OpenAiChat);
+    assert_eq!(
+        native_chat["messages"][0]["tool_calls"][0]["function"]["name"],
+        "exec_command",
+        "native Chat history must remain exact-only"
+    );
+}
+
+#[test]
+fn responses_history_unique_leaf_association_respects_plain_kind_and_ambiguity() {
+    let history = json!([{
+        "role": "assistant",
+        "tool_calls": [{
+            "id": "call_exec",
+            "type": "function",
+            "function": {"name": "exec_command", "arguments": "{}"}
+        }]
+    }]);
+    let plain_collision = project_namespace_history(
+        json!({
+            "model": "gpt-test",
+            "messages": history.clone(),
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "exec_command",
+                    "parameters": {"type": "object"}
+                },
+                {
+                    "type": "namespace",
+                    "name": "functions",
+                    "tools": [{
+                        "type": "function",
+                        "name": "exec_command",
+                        "parameters": {"type": "object"}
+                    }]
+                }
+            ]
+        }),
+        super::V3HubEntryProtocol::Responses,
+    );
+    assert_eq!(
+        plain_collision["messages"][0]["tool_calls"][0]["function"]["name"],
+        "exec_command",
+        "same-kind plain declaration must keep its bare name"
+    );
+
+    let ambiguous = project_namespace_history(
+        json!({
+            "model": "gpt-test",
+            "messages": history.clone(),
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "alpha",
+                    "tools": [{
+                        "type": "function",
+                        "name": "exec_command",
+                        "parameters": {"type": "object"}
+                    }]
+                },
+                {
+                    "type": "namespace",
+                    "name": "beta",
+                    "tools": [{
+                        "type": "function",
+                        "name": "exec_command",
+                        "parameters": {"type": "object"}
+                    }]
+                }
+            ]
+        }),
+        super::V3HubEntryProtocol::Responses,
+    );
+    assert_eq!(
+        ambiguous["messages"][0]["tool_calls"][0]["function"]["name"],
+        "exec_command",
+        "multiple namespace leaves must remain unbound"
+    );
+
+    let wrong_kind = project_namespace_history(
+        json!({
+            "model": "gpt-test",
+            "messages": history,
+            "tools": [{
+                "type": "namespace",
+                "name": "customs",
+                "tools": [{
+                    "type": "custom",
+                    "name": "exec_command",
+                    "format": {"type": "text"}
+                }]
+            }]
+        }),
+        super::V3HubEntryProtocol::Responses,
+    );
+    assert_eq!(
+        wrong_kind["messages"][0]["tool_calls"][0]["function"]["name"],
+        "exec_command",
+        "function history must not borrow a custom identity"
+    );
+}
+
+#[test]
+fn responses_custom_history_keeps_kind_after_chat_projection() {
+    let custom_history = json!([{
+        "role": "assistant",
+        "tool_calls": [{
+            "id": "call_apply_patch",
+            "type": "function",
+            "function": {"name": "apply_patch", "arguments": "{\"input\":\"patch\"}"},
+            "routecodex_chat_extension": {
+                "responses_tool_call_type": "custom_tool_call"
+            }
+        }]
+    }]);
+    let unique_custom = project_namespace_history(
+        json!({
+            "model": "gpt-test",
+            "messages": custom_history.clone(),
+            "tools": [{
+                "type": "namespace",
+                "name": "functions",
+                "tools": [{
+                    "type": "custom",
+                    "name": "apply_patch",
+                    "format": {"type": "text"}
+                }]
+            }]
+        }),
+        super::V3HubEntryProtocol::Responses,
+    );
+    assert_eq!(
+        unique_custom["messages"][0]["tool_calls"][0]["function"]["name"],
+        "functions__apply_patch",
+        "custom history must retain its kind after the Chat extension is consumed"
+    );
+
+    let wrong_kind = project_namespace_history(
+        json!({
+            "model": "gpt-test",
+            "messages": custom_history,
+            "tools": [{
+                "type": "namespace",
+                "name": "functions",
+                "tools": [{
+                    "type": "function",
+                    "name": "apply_patch",
+                    "parameters": {"type": "object"}
+                }]
+            }]
+        }),
+        super::V3HubEntryProtocol::Responses,
+    );
+    assert_eq!(
+        wrong_kind["messages"][0]["tool_calls"][0]["function"]["name"],
+        "apply_patch",
+        "custom history must not borrow a function identity"
+    );
+}
+
+#[test]
+fn responses_history_conflicting_call_kind_does_not_cross_bind() {
+    let projected = project_namespace_history(
+        json!({
+            "model": "gpt-test",
+            "messages": [{
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_conflict",
+                        "type": "function",
+                        "function": {
+                            "name": "exec",
+                            "arguments": "{\"input\":\"pwd\"}"
+                        },
+                        "routecodex_chat_extension": {
+                            "responses_tool_call_type": "custom_tool_call"
+                        }
+                    },
+                    {
+                        "id": "call_conflict",
+                        "type": "function",
+                        "function": {
+                            "name": "exec",
+                            "arguments": "{\"cmd\":\"pwd\"}"
+                        }
+                    }
+                ]
+            }],
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "functions",
+                    "tools": [{
+                        "type": "function",
+                        "name": "exec",
+                        "parameters": {"type": "object"}
+                    }]
+                },
+                {
+                    "type": "namespace",
+                    "name": "functions",
+                    "tools": [{
+                        "type": "custom",
+                        "name": "exec",
+                        "format": {"type": "text"}
+                    }]
+                }
+            ]
+        }),
+        super::V3HubEntryProtocol::Responses,
+    );
+
+    let calls = projected["messages"][0]["tool_calls"].as_array().unwrap();
+    assert_eq!(calls.len(), 2);
+    for call in calls {
+        assert_eq!(call["function"]["name"], "exec");
+        assert_eq!(call["namespace"], json!(null));
+        let name = call["function"]["name"].as_str().unwrap();
+        assert_ne!(name, "functions__exec");
+        assert_ne!(name, "functions__exec_1");
+    }
+    assert_eq!(calls[0]["function"]["arguments"], "{\"input\":\"pwd\"}");
+    assert_eq!(calls[1]["function"]["arguments"], "{\"cmd\":\"pwd\"}");
+}
+
+#[test]
+fn responses_history_explicit_namespace_not_rebound_by_leaf_collision() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model": "gpt-test",
+                "input": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call_exact_exec",
+                        "namespace": "functions",
+                        "name": "exec",
+                        "arguments": "{\"cmd\":\"pwd\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_exact_exec",
+                        "output": "pwd-output"
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "namespace",
+                        "name": "functions",
+                        "tools": [{
+                            "type": "function",
+                            "name": "exec",
+                            "parameters": {"type": "object"}
+                        }]
+                    },
+                    {
+                        "type": "namespace",
+                        "name": "other",
+                        "tools": [{
+                            "type": "function",
+                            "name": "functions__exec",
+                            "parameters": {"type": "object"}
+                        }]
+                    }
+                ]
+            }),
+        )
+        .expect("Responses explicit namespace history must canonicalize");
+    let projected = project_namespace_history(canonical, super::V3HubEntryProtocol::Responses);
+
+    let calls = projected["messages"][0]["tool_calls"].as_array().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["id"], "call_exact_exec");
+    assert_eq!(
+        calls[0]["function"]["name"],
+        "functions__exec",
+        "an exact declared wire name must not be reinterpreted as another declaration's leaf"
+    );
+    assert_eq!(calls[0]["function"]["arguments"], "{\"cmd\":\"pwd\"}");
+    assert_eq!(projected["messages"][1]["tool_call_id"], "call_exact_exec");
+    assert_eq!(projected["messages"][1]["content"], "pwd-output");
+}
+
+fn project_namespace_history(
+    governed: Value,
+    entry_protocol: super::V3HubEntryProtocol,
+) -> Value {
+    let selected = routecodex_v3_target::V3TargetCandidate {
+        provider_id: "namespace-history".into(),
+        provider_type: "openai_chat".into(),
+        interface_id: "default".into(),
+        auth_alias: "primary".into(),
+        model_id: "model".into(),
+        wire_model: "wire-model".into(),
+        visible_model_ids: vec!["model".into()],
+        model_capabilities: vec!["text".into(), "tools".into()],
+        web_search_execution_mode: V3WebSearchExecutionMode::None,
+        max_context_tokens: None,
+        max_tokens: None,
+        context_token_estimate_scale_bps: 10_000,
+        base_url: "http://127.0.0.1:1/v1".into(),
+        responses_process: None,
+        responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
+        websocket_v2_url: None,
+        provider_request_cleanup: Default::default(),
+        reasoning_effort: None,
+        request_timeout_ms: 300_000,
+        priority: 0,
+        weight: 1,
+        sse_first_frame_timeout_ms: None,
+        initial_concurrency_budget: 8,
+        concurrency_acquire_timeout_ms: 60_000,
+        compatibility_profile: None,
+        headers: Default::default(),
+        env_name: Some("V3_NAMESPACE_HISTORY_TEST_KEY".into()),
+        token_file: None,
+        secret_file: None,
+        secret_key: None,
+        api_key: None,
+        oauth_declaration: None,
+        required_capabilities: Vec::new(),
+        pool_ids: vec!["test".into()],
+        default_pool_member: false,
+        path: vec!["provider".into()],
+    };
+    crate::hub_v1::req_outbound_07_provider_semantic::project_v3_operation_runner_standard_provider_request(
+        &governed,
+        entry_protocol,
+        crate::V3HubTransportIntent::Json,
+        crate::V3HubProviderWireProtocol::OpenAiChat,
+        &selected,
+    )
+    .expect("standard Responses-origin history projection must succeed")
+    .payload
+}
+
+#[test]
 fn legacy_mcp_declaration_qualifies_namespace_less_continuation_history() {
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
         "model":"gpt-5.5",
