@@ -442,7 +442,6 @@ function endWire(response, wire) {
   wire.receipt.text_byte_length = bytes.length;
   wire.receipt.bytes_base64 = bytes.toString('base64');
   wire.receipt.complete = true;
-  wire.receipt.truncated = false;
   response.end();
 }
 
