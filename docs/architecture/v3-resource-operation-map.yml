@@ -3634,7 +3634,7 @@ resources:
       staging_only: this resource is a staged candidate produced by the fixed response graph; it is never written directly to a client body
       committer: RuntimeClientCommit alone submits the staged candidate to Server/SSE after all declared rewrites leave deliverable whole-attempt business content and execution_disposition=client_commit
       deliverable_rule: ordinary text, tool-call-only, reasoning, refusal, and content_filter are business results; usage and the last frame alone do not establish deliverability
-      blank_assistant_final: do not commit an explicit whitespace-only assistant final solely because earlier reasoning exists; preserve independent business results and reasoning-only attempts without an assistant final
+      blank_assistant_final: after all filtering and harvesting require visible body, complete tools or independent business results; reasoning alone cannot authorize completion, and unharvestable recognized tool markup fails the whole attempt through internal 502 (e63d2f2)
       empty_attempt_rule: no candidate is committed when the complete attempt is empty after declared non-client envelope removal; ProviderFailure/provider_response_empty enters Error01 as internal 502
       processing_failure_rule: loss or failure of representable business content enters Error01 as RuntimeFailure/internal 599, not as client success or upstream failure
       servertool_rule: RespOutbound and frame staging return an empty candidate for servertool_followup; Runtime discards it and re-enters the request graph

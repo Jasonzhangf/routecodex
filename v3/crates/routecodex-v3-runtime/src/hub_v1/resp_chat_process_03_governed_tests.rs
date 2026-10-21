@@ -155,7 +155,7 @@ fn relay_control_marker_resp03_business_results_prevent_empty_classification() {
     let cases = [
         json!({
             "index":0,
-            "message":{"role":"assistant","content":"","reasoning_content":"plan"},
+            "message":{"role":"assistant","content":"answer","reasoning_content":"plan"},
             "finish_reason":"stop"
         }),
         json!({
@@ -193,7 +193,9 @@ fn relay_control_marker_resp03_business_results_prevent_empty_classification() {
             })),
             &V3HubRelayResponseHookProfile::empty().with_complete_provider_attempt(true),
         )
-        .expect("reasoning, refusal, content_filter and native calls remain business");
+        .expect(
+            "reasoning alongside text, refusal, content_filter and native calls remain business",
+        );
     }
 }
 

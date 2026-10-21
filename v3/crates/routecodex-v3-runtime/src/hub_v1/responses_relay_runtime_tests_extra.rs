@@ -1148,7 +1148,7 @@ fn anthropic_json_relay_keeps_literal_control_text_unchanged() {
         "model":"claude-test",
         "content":[{
             "type":"text",
-            "text":"<thinking>private plan\n<\u{2f}｜DSML｜parameter>\n<\u{2f}｜DSML｜invoke>\n<\u{2f}｜DSML｜tool_calls>"
+            "text":"```text\n<thinking>private plan\n<\u{2f}｜DSML｜parameter>\n<\u{2f}｜DSML｜invoke>\n<\u{2f}｜DSML｜tool_calls>\n```"
         }],
         "stop_reason":"end_turn",
         "usage":{"input_tokens":1,"output_tokens":8}
@@ -1202,7 +1202,7 @@ fn anthropic_sse_thinking_harvest_preserves_quoted_literal() {
         let text = if literal {
             "\"<thinking>private</thinking>\""
         } else {
-            "<thinking>private</thinking>"
+            "Visible answer. <thinking>private</thinking>"
         };
         let provider_response = json!({
             "id":"resp_thinking_literal",
@@ -1242,7 +1242,7 @@ fn anthropic_sse_thinking_harvest_preserves_quoted_literal() {
         },
         &mut trace,
     )
-    .expect("thinking must remain deliverable business content");
+    .expect("thinking alongside visible text must remain deliverable business content");
         let output = response["output"].as_array().unwrap();
         if literal {
             assert!(output.iter().any(|item| item["type"] == "message"

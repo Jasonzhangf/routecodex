@@ -1355,7 +1355,7 @@ features:
   owner_kind: rust_project_v3
   owner_scope: P3 global Debug plus P4 global Error and Provider-owned session-isolated health/availability foundation
   recovery_delta_contract:
-  - Only exact typed Direct V3DirectResp14UnharvestableToolMarkup (500-211) or Relay V3HubRelayResp03UnharvestableToolMarkup (500-231), RuntimeFailure/internal599, gain health-neutral request-local Error02-05 reselection; the actual upstream status remains a separate witness.
+  - Only exact typed Direct V3DirectResp14UnharvestableToolMarkup (500-211) or Relay V3HubRelayResp03UnharvestableToolMarkup (500-231), RuntimeFailure/internal502, gain health-neutral request-local Error02-05 reselection; the actual upstream status remains a separate witness. Other response-processing damage remains internal599.
   - Other RuntimeFailure codes remain terminal. Native model-generated invalid arguments remain business content. Direct never excludes candidates outside the existing Error05-authorized recovery path.
   owner_modules:
   - v3/crates/routecodex-v3-debug
@@ -3476,7 +3476,7 @@ features:
   required_positive:
   - Provider-local full path compiles into the unified provider error action manifest with injected provider scope while legacy action remains compatible.
   - Genuine Chat, Anthropic and Responses errors retain their typed source through recovery and transport termination.
-  - issue0ff6700 public HTTP cases reject a complete reasoning-plus-explicit-blank-assistant-final attempt before commit, recover through the next candidate, and preserve independent business results and reasoning-only output
+  - issue0ff6700 and issuee63d2f2 public HTTP cases reject post-filter empty or reasoning-only attempts before commit, recover through the next candidate, and preserve reasoning alongside independent business results
   - issuec1090f9 public HTTP cases reject reasoning-plus-explicit-final attempts whose final contains only nonrendering U+200B or FEFF code points, recover through the next candidate, and never project the source attempt or internal error
   - Configured backoff is a minimum combined with provider-action-gate delay by max rather than addition.
   - A complete provider attempt with no deliverable business content is classified as an internal typed 502 (provider_response_empty) that enters the existing Error chain retry/reselect and never reaches the client as an empty completion; the judgment reads the whole accumulated attempt, not the last terminal frame or usage.
@@ -3485,8 +3485,8 @@ features:
   - direct_sse_memory_item_part_sequences_never_authorize_completion covers normal output_item/content_part added/done snapshots at both sealing exits, with candidate recovery and request-local exhaustion. Captured memory envelopes are removed by the same memory owner before whole-attempt adjudication; visible business siblings remain deliverable. Run CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox direct_sse_memory_item_part_sequences_never_authorize_completion -- --exact --nocapture --test-threads=1.
   - Successful provider responses reach client commit without content, refusal, incomplete, zero-usage or tool-argument adjudication; the empty-attempt 502 is the single exception and is never projected to the client.
   - Responses incomplete reasons, Chat content_filter and refusal, tool-call-only, reasoning, and Anthropic refusal remain representable provider output on Direct and Relay paths and are not reclassified as empty.
-  - Structured Chat reasoning, reasoning_text and Gemini filtering finishReason or promptFeedback remain business results; candidate-less Gemini prompt filtering is a real JSON/SSE terminal and seals typed control without inventing payload fields.
-  - b878f6c_compact_responses_message_fields_are_business_content preserves compact message text and reasoning-only output exactly for JSON and SSE, makes one business attempt without provider cooldown, and retains true-empty JSON/SSE transport-abort controls.
+  - Structured Chat reasoning and reasoning_text remain preserved alongside deliverable output but do not authorize success alone. Gemini filtering finishReason or promptFeedback remain business results; candidate-less Gemini prompt filtering is a real JSON/SSE terminal and seals typed control without inventing payload fields.
+  - b878f6c_compact_responses_message_fields_are_business_content preserves compact message text with optional reasoning exactly for JSON and SSE, makes one business attempt without provider cooldown, and retains true-empty JSON/SSE transport-abort controls; issuee63d2f2 separately locks reasoning-only failure.
   - b878f6c_compact_responses_reach_real_chat_consumer projects Responses compact text, reasoning_content, reasoning_text and mixed message shapes through the public Chat JSON/SSE consumer on the first attempt without cooldown or duplicate text; compact_chat_message_projection_preserves_text_and_reasoning_once binds the same mapping and unchanged source extensions without loopback.
   required_negative:
   - Id model and metadata strings cannot trigger content matching.
@@ -3496,6 +3496,8 @@ features:
   - Genuine provider HTTP or native SSE errors cannot reach the client as HTTP errors, protocol error events or fabricated successful completion.
   - The internal empty-attempt 502 keeps its real upstream HTTP status separate from the internal classification, never enters client payload or MetadataCenter, and never fabricates a client HTTP error or empty completion.
   required_gates:
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issuee63d2f2_ -- --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test responses_relay_mode_b_web_search_integration -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issue0ff6700_ -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issuec1090f9_ -- --nocapture --test-threads=1
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox -- --nocapture
@@ -4038,7 +4040,7 @@ features:
   - semantic matrix partial/declared statuses are preserved, not relabeled as covered
   - canonical error_err02_classified classifies the typed source before error_err03_target_local_action; retired HostCaptured-era labels are not the executable chain
   - recoverable Error05 decisions skip Error06 and launch a new attempt outside the static DAG after attempt-only cleanup; Error06 accepts terminal decisions only
-  - after all declared response rewrites, the whole attempt must retain text, tools, reasoning, refusal, or content_filter before client commit; deliberate non-client envelope removal leaving no business content enters typed Error01 as provider_response_empty internal 502
+  - after all declared response rewrites, the whole attempt must retain visible text, tools, refusal, content_filter, or another independent business result before client commit; reasoning alone or deliberate non-client envelope removal leaving no deliverable content enters typed Error01 as provider_response_empty internal 502
   - loss or processing failure of representable business content enters typed Error01 as internal 599; servertool_followup remains internal continuation and is not an empty client success or provider failure
   - Direct/Relay, ToolThinking, inverse context, attempt projection, and response binding have one writer and declared readers
   - servertool hop re-enters the same runner before client commit

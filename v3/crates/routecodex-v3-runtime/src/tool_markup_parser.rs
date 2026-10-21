@@ -16,6 +16,7 @@ pub(crate) const PARAM: &str = "<｜｜DSML｜｜ parameter";
 pub(crate) const END_PARAM: &str = "</｜｜DSML｜｜ parameter>";
 pub(crate) const BARE_DSML: &str = "<｜｜DSML｜｜>";
 pub(crate) const ASCII_TOOL_CALLS: &str = "<|DSML|tool_calls>";
+const ORPHAN_TOOL_CLOSE: &str = "</｜DSML｜tool_calls>";
 pub(crate) const ANALYSIS_CLOSINGS: &[&str] = &[
     "<|end_of_analysis|>",
     "<|end▁of▁analysis|>",
@@ -207,9 +208,9 @@ pub(crate) struct ToolMarkupScan<'a> {
     pub(crate) segments: Vec<ToolMarkupSegment<'a>>,
     pub(crate) removed_label: bool,
     pub(crate) opener_label: bool,
-    /// True only for a declared function invocation that started but cannot be
-    /// completed. Unknown, literal and complete-but-unrepresentable text stays
-    /// opaque.
+    /// True for an unfinished declared invocation or the observed orphan tool
+    /// envelope close. Unknown, literal and complete-but-unrepresentable text
+    /// stays opaque.
     pub(crate) incomplete_tool_invocation: bool,
     pub(crate) opaque_invocation: bool,
 }
@@ -224,6 +225,7 @@ fn removable_label(content: &str) -> Option<bool> {
     if content == OPEN || content == ASCII_TOOL_CALLS {
         Some(true)
     } else if content == CLOSE
+        || content == ORPHAN_TOOL_CLOSE
         || content == BARE_DSML
         || ANALYSIS_CLOSINGS.contains(&content)
         || CLOSING_FRAGMENTS.contains(&content)
@@ -662,6 +664,7 @@ pub(crate) fn scan_tool_markup<'a>(
                         cursor = line_end;
                         removed_label = true;
                         opener_label |= tool_intent;
+                        incomplete_tool_invocation |= content == ORPHAN_TOOL_CLOSE;
                         continue;
                     }
                 }
@@ -863,6 +866,20 @@ pub(crate) fn scan_tool_markup<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn issuee63d2f2_orphan_tool_close_preserves_literal_contexts() {
+        for text in [
+            "`</｜DSML｜tool_calls>`",
+            "```text\n</｜DSML｜tool_calls>\n```",
+            "> </｜DSML｜tool_calls>",
+        ] {
+            let scan = scan_tool_markup(text, &declarations());
+            assert!(!scan.incomplete_tool_invocation, "{scan:?}");
+            assert!(!scan.removed_label, "{scan:?}");
+            assert_eq!(scan.segments, vec![ToolMarkupSegment::Text(text)]);
+        }
+    }
 
     #[test]
     fn tool_markup_parser_issue03c2a07_review_prose_tail() {

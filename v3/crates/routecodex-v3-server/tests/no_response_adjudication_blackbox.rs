@@ -41,6 +41,380 @@ fn issue0ff6700_blank_final() -> Value {
     response
 }
 
+fn e63_review_wire(kind: &str, value: &Value, stream: bool) -> String {
+    if !stream {
+        return value.to_string();
+    }
+    match kind {
+        "responses" => response_sse(value),
+        "gemini" => format!("data: {value}\n\n"),
+        "openai_chat" => format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({"id":"review-chat","object":"chat.completion.chunk","model":"wire-test","choices":[{"index":0,"delta":value["choices"][0]["message"],"finish_reason":null}]}),
+            json!({"id":"review-chat","object":"chat.completion.chunk","model":"wire-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]})
+        ),
+        "anthropic" => {
+            let text = &value["content"][0]["text"];
+            let frames = [
+                json!({"type":"message_start","message":{"id":"review-message","type":"message","role":"assistant","model":"wire-test","content":[]}}),
+                json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+                json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}}),
+                json!({"type":"content_block_stop","index":0}),
+                json!({"type":"message_delta","delta":{"stop_reason":"end_turn"}}),
+                json!({"type":"message_stop"}),
+            ];
+            frames
+                .iter()
+                .map(|event| {
+                    format!(
+                        "event: {}\ndata: {event}\n\n",
+                        event["type"].as_str().unwrap()
+                    )
+                })
+                .collect()
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum E63ReviewOutcome {
+    Accept,
+    Recover,
+    Exhaust,
+}
+
+async fn e63_review_attempt(
+    kind: &str,
+    process: &str,
+    native_entry: bool,
+    stream: bool,
+    first: Value,
+    recovered: Value,
+    expected: E63ReviewOutcome,
+) -> String {
+    let recovery = matches!(expected, E63ReviewOutcome::Recover);
+    let mut bodies = vec![e63_review_wire(kind, &first, stream)];
+    if recovery {
+        bodies.push(e63_review_wire(kind, &recovered, stream));
+    }
+    let auth_entries = if recovery {
+        vec![
+            ("first".into(), KEY_ENV.into()),
+            ("second".into(), RECOVERY_KEY_ENV.into()),
+        ]
+    } else {
+        vec![("first".into(), KEY_ENV.into())]
+    };
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        kind,
+        process,
+        StatusCode::OK,
+        if stream {
+            "text/event-stream"
+        } else {
+            "application/json"
+        },
+        String::new(),
+        EntryOptions {
+            attempt_bodies: bodies,
+            auth_entries,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let base = endpoint.trim_end_matches("/v1/responses");
+    let (endpoint, request) = match (native_entry, kind) {
+        (true, "gemini") => (
+            format!("{base}/v1beta/models/test.test/generateContent"),
+            json!({"contents":[{"role":"user","parts":[{"text":"review-contract"}]}],"stream":stream}),
+        ),
+        (true, "anthropic") => (
+            format!("{base}/v1/messages"),
+            json!({"model":"test.test","max_tokens":128,"messages":[{"role":"user","content":"review-contract"}],"stream":stream}),
+        ),
+        (true, "openai_chat") => (
+            format!("{base}/v1/chat/completions"),
+            json!({"model":"test.test","messages":[{"role":"user","content":"review-contract"}],"stream":stream}),
+        ),
+        _ => (
+            endpoint,
+            json!({"model":"test.test","input":"review-contract","stream":stream}),
+        ),
+    };
+    let consumed = consume_response(client().post(endpoint).json(&request).send().await).await;
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        attempts,
+        if recovery { 2 } else { 1 },
+        "{kind}/{process}/{stream}: {consumed:?}"
+    );
+    if matches!(expected, E63ReviewOutcome::Exhaust) {
+        assert!(
+            consumed.transport_error.is_some(),
+            "empty attempt must interrupt transport: {consumed:?}"
+        );
+        assert!(
+            !consumed.body.contains("response.completed"),
+            "{consumed:?}"
+        );
+    } else {
+        assert!(
+            consumed.transport_error.is_none(),
+            "{kind}/{process}/{stream}: {consumed:?}"
+        );
+        assert!(consumed.body.contains("REVIEW_BUSINESS"), "{consumed:?}");
+    }
+    assert_no_error_payload(&consumed.body);
+    consumed.body
+}
+
+#[tokio::test]
+async fn issuee63d2f2_review_orphan_without_tools_recovers_or_exhausts() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret");
+    for stream in [false, true] {
+        for expected in [E63ReviewOutcome::Recover, E63ReviewOutcome::Exhaust] {
+            let body = e63_review_attempt(
+                "responses",
+                "chat",
+                false,
+                stream,
+                text_response("Must not escape.\n</｜DSML｜tool_calls>"),
+                text_response("REVIEW_BUSINESS"),
+                expected,
+            )
+            .await;
+            assert!(
+                !body.contains("Must not escape.") && !body.contains("DSML"),
+                "{body}"
+            );
+        }
+    }
+    std::env::remove_var(RECOVERY_KEY_ENV);
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn issuee63d2f2_review_signed_gemini_thought_is_not_a_result() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret");
+    let thought = json!({"thought":true,"text":"PRIVATE_REVIEW_THOUGHT","thoughtSignature":"REVIEW_SIGNATURE"});
+    let bad = json!({"candidates":[{"content":{"role":"model","parts":[thought]},"finishReason":"STOP"}]});
+    let good = json!({"candidates":[{"content":{"role":"model","parts":[{"text":"REVIEW_BUSINESS"}]},"finishReason":"STOP"}]});
+    for native in [true, false] {
+        for stream in [false, true] {
+            for expected in [E63ReviewOutcome::Recover, E63ReviewOutcome::Exhaust] {
+                let body = e63_review_attempt(
+                    "gemini",
+                    if native { "direct" } else { "chat" },
+                    native,
+                    stream,
+                    bad.clone(),
+                    good.clone(),
+                    expected,
+                )
+                .await;
+                assert!(!body.contains("PRIVATE_REVIEW_THOUGHT"), "{body}");
+            }
+            for result in [
+                json!({"text":"REVIEW_BUSINESS"}),
+                json!({"inlineData":{"mimeType":"application/octet-stream","data":"REVIEW_BUSINESS"}}),
+            ] {
+                let mixed = json!({"candidates":[{"content":{"role":"model","parts":[thought.clone(),result]},"finishReason":"STOP"}]});
+                let body = e63_review_attempt(
+                    "gemini",
+                    if native { "direct" } else { "chat" },
+                    native,
+                    stream,
+                    mixed.clone(),
+                    mixed,
+                    E63ReviewOutcome::Accept,
+                )
+                .await;
+                assert!(
+                    body.contains("PRIVATE_REVIEW_THOUGHT") && body.contains("REVIEW_SIGNATURE"),
+                    "{body}"
+                );
+            }
+        }
+    }
+    std::env::remove_var(RECOVERY_KEY_ENV);
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn issuee63d2f2_review_anthropic_invisible_sse_is_empty() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret");
+    let response = |text: &str| json!({"id":"review-message","type":"message","role":"assistant","model":"wire-test","content":[{"type":"text","text":text}],"stop_reason":"end_turn"});
+    for text in ["   ", "\u{200b}"] {
+        for expected in [E63ReviewOutcome::Recover, E63ReviewOutcome::Exhaust] {
+            e63_review_attempt(
+                "anthropic",
+                "direct",
+                true,
+                true,
+                response(text),
+                response("REVIEW_BUSINESS"),
+                expected,
+            )
+            .await;
+        }
+    }
+    e63_review_attempt(
+        "anthropic",
+        "direct",
+        true,
+        true,
+        response("REVIEW_BUSINESS"),
+        response("REVIEW_BUSINESS"),
+        E63ReviewOutcome::Accept,
+    )
+    .await;
+    std::env::remove_var(RECOVERY_KEY_ENV);
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn issuee63d2f2_review_structured_chat_text_stays_business() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let text = json!({"answer":"REVIEW_BUSINESS","nested":[1,true,{"opaque":"preserved"}]});
+    let value = json!({"id":"review-chat","object":"chat.completion","model":"wire-test","choices":[{"index":0,"message":{"role":"assistant","content":[{"type":"text","text":text}]},"finish_reason":"stop"}]});
+    for stream in [false, true] {
+        let body = e63_review_attempt(
+            "openai_chat",
+            "direct",
+            true,
+            stream,
+            value.clone(),
+            value.clone(),
+            E63ReviewOutcome::Accept,
+        )
+        .await;
+        let frames = if stream {
+            events(&body)
+        } else {
+            vec![serde_json::from_str::<Value>(&body).unwrap()]
+        };
+        assert!(
+            frames.iter().any(|frame| {
+                frame["choices"][0]
+                    .get(if stream { "delta" } else { "message" })
+                    .and_then(|message| message.get("content"))
+                    .and_then(Value::as_array)
+                    .is_some_and(|parts| {
+                        parts.iter().any(|part| {
+                            part["text"] == text
+                                || part["text"]
+                                    .as_str()
+                                    .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                                    .as_ref()
+                                    == Some(&text)
+                        })
+                    })
+            }),
+            "structured value must remain complete: {body}"
+        );
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// e63d2f2: reasoning survives alongside a result, but cannot authorize an
+/// otherwise empty complete attempt after response governance.
+#[tokio::test]
+async fn issuee63d2f2_direct_reasoning_only_recovers_json_and_sse() {
+    for stream in [false, true] {
+        let mut body = issue0ff6700_blank_final();
+        body["output"].as_array_mut().unwrap().pop();
+        let wire = if stream {
+            response_sse(&body)
+        } else {
+            body.to_string()
+        };
+        issue0ff6700_run_body("direct", stream, true, Some(wire)).await;
+    }
+}
+
+#[tokio::test]
+async fn issuee63d2f2_relay_reasoning_only_recovers_json_and_sse() {
+    for stream in [false, true] {
+        let mut body = issue0ff6700_blank_final();
+        body["output"].as_array_mut().unwrap().pop();
+        let wire = if stream {
+            response_sse(&body)
+        } else {
+            body.to_string()
+        };
+        issue0ff6700_run_body("chat", stream, true, Some(wire)).await;
+    }
+}
+
+#[tokio::test]
+async fn issuee63d2f2_reasoning_only_exhaustion_interrupts_transport() {
+    for process in ["direct", "chat"] {
+        for stream in [false, true] {
+            let mut body = issue0ff6700_blank_final();
+            body["output"].as_array_mut().unwrap().pop();
+            let wire = if stream {
+                response_sse(&body)
+            } else {
+                body.to_string()
+            };
+            issue0ff6700_run_body(process, stream, false, Some(wire)).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn issuee63d2f2_chat_provider_reasoning_only_never_completes_empty() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for stream in [false, true] {
+        let upstream = if stream {
+            format!(
+                "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({"id":"chat-e63","object":"chat.completion.chunk","model":"wire-test","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"PRIVATE_REASONING_E63"},"finish_reason":null}]}),
+                json!({"id":"chat-e63","object":"chat.completion.chunk","model":"wire-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]})
+            )
+        } else {
+            json!({"id":"chat-e63","object":"chat.completion","model":"wire-test","choices":[{"index":0,"message":{"role":"assistant","content":null,"reasoning_content":"PRIVATE_REASONING_E63"},"finish_reason":"stop"}]}).to_string()
+        };
+        let (endpoint, handle, mut captures, shutdown) = start_entry(
+            "openai_chat",
+            "chat",
+            StatusCode::OK,
+            if stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+            upstream,
+        )
+        .await;
+        let consumed = consume_response(client().post(&endpoint)
+            .json(&json!({"model":"test.test","input":"reasoning-only provider control","stream":stream}))
+            .send().await).await;
+        stop_entry(handle, shutdown).await;
+        assert!(consumed.transport_error.is_some(), "{consumed:?}");
+        assert!(
+            !consumed.body.contains("response.completed"),
+            "{consumed:?}"
+        );
+        assert!(
+            !consumed.body.contains("PRIVATE_REASONING_E63"),
+            "{consumed:?}"
+        );
+        assert_one_attempt(&mut captures, "wire-test").await;
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 async fn issue0ff6700_run(process: &str, stream: bool, recover: bool) {
     issue0ff6700_run_body(process, stream, recover, None).await;
 }
@@ -410,6 +784,10 @@ async fn issue0ff6700_independent_business_controls_survive() {
     let blank = issue0ff6700_blank_final();
     let mut reasoning = blank.clone();
     reasoning["output"].as_array_mut().unwrap().pop();
+    reasoning["output"]
+        .as_array_mut()
+        .unwrap()
+        .push(text_response("visible answer alongside reasoning")["output"][0].clone());
     let mut tool = blank.clone();
     tool["output"].as_array_mut().unwrap().push(json!({"type":"function_call","id":"tool_0ff","call_id":"call_0ff","name":"lookup","arguments":"{invalid model arguments"}));
     let mut refusal = blank.clone();
@@ -1025,7 +1403,7 @@ async fn direct_sse_memory_rewrite_preserves_business_results() {
         ("filter", None, "content_filter"),
     ];
     for (kind, extra, expected) in cases {
-        let text = if kind == "text" {
+        let text = if kind == "text" || kind == "reasoning" {
             format!("Visible answer. {envelope}")
         } else {
             envelope.into()
@@ -3778,7 +4156,7 @@ fn anthropic_tool_input_partial_json(frames: &[Value], index: u64) -> String {
         .collect()
 }
 
-/// b878f6c review regression: existing reasoning representations remain business.
+/// Reasoning representations remain lossless alongside deliverable body text.
 #[tokio::test]
 async fn b878f6c_chat_reasoning_business_shapes_survive_json_admission() {
     let _guard = TEST_LOCK.lock().await;
@@ -3806,7 +4184,7 @@ async fn b878f6c_chat_reasoning_business_shapes_survive_json_admission() {
         ("openai_chat", "chat"),
     ] {
         for (field, reasoning) in &shapes {
-            let mut upstream = json!({"id":"reasoning-control","object":"chat.completion","model":"wire-test","choices":[{"index":0,"message":{"role":"assistant","content":null},"finish_reason":"stop"}]});
+            let mut upstream = json!({"id":"reasoning-control","object":"chat.completion","model":"wire-test","choices":[{"index":0,"message":{"role":"assistant","content":"visible reasoning control"},"finish_reason":"stop"}]});
             upstream["choices"][0]["message"][field] = reasoning.clone();
             let (endpoint, handle, mut captures, shutdown) = start_entry_with_health(
                 "openai_chat",
@@ -4146,13 +4524,13 @@ async fn b878f6c_compact_responses_message_fields_are_business_content() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     for streaming in [false, true] {
-        for reasoning_only in [false, true] {
+        for with_reasoning in [false, true] {
             eprintln!(
-                "compact message control: stream={streaming} reasoning_only={reasoning_only}"
+                "compact message control: stream={streaming} with_reasoning={with_reasoning}"
             );
-            let item = if reasoning_only {
+            let item = if with_reasoning {
                 json!({"id":"compact-message","type":"message","role":"assistant",
-                    "text":"","reasoning_content":"compact reasoning"})
+                    "text":"compact answer","reasoning_content":"compact reasoning"})
             } else {
                 json!({"id":"compact-message","type":"message","role":"assistant",
                     "text":"compact answer"})
@@ -4278,28 +4656,28 @@ async fn b878f6c_compact_responses_reach_real_chat_consumer() {
                 "",
             ),
             (
-                json!({"type":"message","role":"assistant","reasoning_content":"  compact reasoning\n"}),
-                "",
+                json!({"type":"message","role":"assistant","text":"compact answer","reasoning_content":"  compact reasoning\n"}),
+                "compact answer",
                 "  compact reasoning\n",
             ),
             (
-                json!({"type":"message","role":"assistant","reasoning":"  compact reasoning\n"}),
-                "",
+                json!({"type":"message","role":"assistant","text":"compact answer","reasoning":"  compact reasoning\n"}),
+                "compact answer",
                 "  compact reasoning\n",
             ),
             (
-                json!({"type":"message","role":"assistant","reasoning":{"summary":[{"type":"summary_text","text":"  compact reasoning\n"}]}}),
-                "",
+                json!({"type":"message","role":"assistant","text":"compact answer","reasoning":{"summary":[{"type":"summary_text","text":"  compact reasoning\n"}]}}),
+                "compact answer",
                 "  compact reasoning\n",
             ),
             (
-                json!({"type":"message","role":"assistant","reasoning":{"content":[{"type":"reasoning_text","text":"  compact reasoning\n"}]}}),
-                "",
+                json!({"type":"message","role":"assistant","text":"compact answer","reasoning":{"content":[{"type":"reasoning_text","text":"  compact reasoning\n"}]}}),
+                "compact answer",
                 "  compact reasoning\n",
             ),
             (
-                json!({"type":"message","role":"assistant","reasoning_text":"  compact reasoning\n"}),
-                "",
+                json!({"type":"message","role":"assistant","text":"compact answer","reasoning_text":"  compact reasoning\n"}),
+                "compact answer",
                 "  compact reasoning\n",
             ),
             (
@@ -7296,11 +7674,16 @@ async fn chat_sse_multiple_reasoning_summary_parts_are_returned_once() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     let item = json!({"type":"reasoning","summary":[{"type":"summary_text","text":"A"},{"type":"summary_text","text":"B"}]});
+    let mut completed = text_response("visible summary control");
+    completed["output"]
+        .as_array_mut()
+        .unwrap()
+        .insert(0, item.clone());
     let upstream = [
         sse("response.reasoning_summary_text.delta", &json!({"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"A"})),
         sse("response.reasoning_summary_text.delta", &json!({"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":1,"delta":"B"})),
         sse("response.output_item.done", &json!({"type":"response.output_item.done","output_index":0,"item":item})),
-        response_sse(&json!({"status":"completed","output":[item]})),
+        response_sse(&completed),
     ].concat();
     let (endpoint, handle, mut captures, shutdown) = start_entry(
         "responses",
@@ -7637,6 +8020,16 @@ async fn assert_direct_recovery(
     forbidden: &[&str],
     red_id: &str,
 ) {
+    assert_markup_recovery("direct", first_text, recovered_text, forbidden, red_id).await;
+}
+
+async fn assert_markup_recovery(
+    mode: &str,
+    first_text: &str,
+    recovered_text: &str,
+    forbidden: &[&str],
+    red_id: &str,
+) {
     std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret-b");
     for (content_type, closeout) in [("application/json", false), ("text/event-stream", true)] {
         let options = EntryOptions {
@@ -7653,7 +8046,7 @@ async fn assert_direct_recovery(
         };
         let (endpoint, handle, mut captures, headers, shutdown) = start_entry_configured(
             "responses",
-            "direct",
+            mode,
             StatusCode::OK,
             content_type,
             String::new(),
@@ -7721,6 +8114,25 @@ async fn responses_direct_unharvestable_tool_markup_recovers_json_and_sse() {
         "responses_direct_unharvestable_tool_markup_recovers_json_and_sse",
     )
     .await;
+    std::env::remove_var(KEY_ENV);
+}
+
+/// AppSDK master 4444 sample at 2026-10-20 21:27:27: visible prose followed
+/// by an orphan DSML tool close is not a completed tool execution turn.
+#[tokio::test]
+async fn issuee63d2f2_orphan_dsml_tool_close_recovers_json_and_sse() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for mode in ["direct", "relay"] {
+        assert_markup_recovery(
+            mode,
+            "I will run the baseline tests next.\n\n</｜DSML｜tool_calls>",
+            "faithful recovery answer",
+            &["I will run the baseline tests next.", "DSML"],
+            "issuee63d2f2_orphan_dsml_tool_close_recovers_json_and_sse",
+        )
+        .await;
+    }
     std::env::remove_var(KEY_ENV);
 }
 

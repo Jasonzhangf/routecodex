@@ -1276,20 +1276,14 @@ fn govern_v3_hub_relay_response(
             profile.toolreason_client_projection_enabled(),
         );
     }
-    let before_marker_governance = profile
-        .complete_provider_attempt
-        .then(|| input.provider_payload().clone());
     if profile.serialized_tool_context().identities.is_empty() {
-        govern_v3_relay_control_markers_at_resp03(&mut input);
+        govern_v3_relay_control_markers_at_resp03(&mut input)?;
     } else {
         tool_markup::govern(&mut input, profile.serialized_tool_context())?;
     }
     if profile.complete_provider_attempt {
         tool_markup::govern_thinking(&mut input);
     }
-    let marker_governance_changed = before_marker_governance
-        .as_ref()
-        .is_some_and(|before| input.provider_payload().as_ref() != before.as_ref());
     let _identified_servertool_tool = super::servertool_hooks::inspect_v3_servertool_response_tool(
         input.provider_payload().as_ref(),
     );
@@ -1330,13 +1324,13 @@ fn govern_v3_hub_relay_response(
         V3HubServertoolResponseAction::None
     };
     let typed_servertool_continuation = servertool_tool_call_followup
+        || web_search_center_state.is_some()
         || !matches!(
             web_search_hook_outcome,
             V3WebSearchHookOutcome::NotApplicable
         );
-    // Raw-attempt admission already handles the provider protocol's business
-    // outcomes. Recheck only content changed by this marker governance.
-    if marker_governance_changed
+    // Only the complete post-governance result authorizes client delivery.
+    if profile.complete_provider_attempt
         && !typed_servertool_continuation
         && !super::v3_provider_attempt_has_deliverable_business_content(
             input.semantic_protocol(),
@@ -1901,30 +1895,36 @@ fn harvest_v3_think_blocks_at_resp03(
 /// carriers. This increment does not harvest serialized invocations: a parsed
 /// call segment is restored from its original envelope text so its payload
 /// bytes, order and association remain unchanged.
-fn govern_v3_relay_control_markers_at_resp03(input: &mut V3HubRespInbound02Normalized) {
+fn govern_v3_relay_control_markers_at_resp03(
+    input: &mut V3HubRespInbound02Normalized,
+) -> Result<(), V3HubRelayResponseError> {
     let declarations = ToolMarkupDeclarations::default();
     let mut next = input.provider_payload().as_ref().clone();
     let changed = match input.semantic_protocol() {
         V3HubProviderWireProtocol::Responses => {
-            strip_v3_responses_control_markers(&mut next, &declarations)
+            strip_v3_responses_control_markers(&mut next, &declarations)?
         }
         V3HubProviderWireProtocol::OpenAiChat => {
-            strip_v3_openai_chat_control_markers(&mut next, &declarations)
+            strip_v3_openai_chat_control_markers(&mut next, &declarations)?
         }
         V3HubProviderWireProtocol::Gemini | V3HubProviderWireProtocol::Anthropic => false,
     };
     if changed {
         *input.provider_payload_mut() = Arc::new(next);
     }
+    Ok(())
 }
 
 fn strip_v3_relay_control_marker_text(
     text: &str,
     declarations: &ToolMarkupDeclarations,
-) -> Option<String> {
+) -> Result<Option<String>, V3HubRelayResponseError> {
     let scan = scan_tool_markup(text, declarations);
+    if scan.incomplete_tool_invocation {
+        return Err(V3HubRelayResponseError::UnharvestableToolMarkup);
+    }
     if !scan.removed_label {
-        return None;
+        return Ok(None);
     }
     let mut visible = String::with_capacity(text.len());
     for segment in scan.segments {
@@ -1939,27 +1939,27 @@ fn strip_v3_relay_control_marker_text(
             }
         }
     }
-    Some(visible)
+    Ok(Some(visible))
 }
 
 fn strip_v3_relay_control_marker_string(
     value: &mut Value,
     declarations: &ToolMarkupDeclarations,
-) -> bool {
+) -> Result<bool, V3HubRelayResponseError> {
     let Some(text) = value.as_str() else {
-        return false;
+        return Ok(false);
     };
-    let Some(stripped) = strip_v3_relay_control_marker_text(text, declarations) else {
-        return false;
+    let Some(stripped) = strip_v3_relay_control_marker_text(text, declarations)? else {
+        return Ok(false);
     };
     *value = Value::String(stripped);
-    true
+    Ok(true)
 }
 
 fn strip_v3_relay_control_marker_content(
     value: &mut Value,
     declarations: &ToolMarkupDeclarations,
-) -> bool {
+) -> Result<bool, V3HubRelayResponseError> {
     match value {
         Value::String(_) => strip_v3_relay_control_marker_string(value, declarations),
         Value::Array(parts) => {
@@ -1967,7 +1967,7 @@ fn strip_v3_relay_control_marker_content(
             for part in parts {
                 match part {
                     Value::String(_) => {
-                        changed |= strip_v3_relay_control_marker_string(part, declarations);
+                        changed |= strip_v3_relay_control_marker_string(part, declarations)?;
                     }
                     Value::Object(object) => {
                         let text_part =
@@ -1984,71 +1984,71 @@ fn strip_v3_relay_control_marker_content(
                             continue;
                         }
                         if let Some(text) = object.get_mut("text") {
-                            changed |= strip_v3_relay_control_marker_string(text, declarations);
+                            changed |= strip_v3_relay_control_marker_string(text, declarations)?;
                         }
                         if let Some(refusal) = object.get_mut("refusal") {
-                            changed |= strip_v3_relay_control_marker_string(refusal, declarations);
+                            changed |= strip_v3_relay_control_marker_string(refusal, declarations)?;
                         }
                     }
                     Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) => {}
                 }
             }
-            changed
+            Ok(changed)
         }
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::Object(_) => false,
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::Object(_) => Ok(false),
     }
 }
 
 fn strip_v3_openai_chat_control_markers(
     payload: &mut Value,
     declarations: &ToolMarkupDeclarations,
-) -> bool {
+) -> Result<bool, V3HubRelayResponseError> {
     let mut changed = false;
     let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
-        return false;
+        return Ok(false);
     };
     for choice in choices {
         let Some(message) = choice.get_mut("message").and_then(Value::as_object_mut) else {
             continue;
         };
         if let Some(content) = message.get_mut("content") {
-            changed |= strip_v3_relay_control_marker_content(content, declarations);
+            changed |= strip_v3_relay_control_marker_content(content, declarations)?;
         }
     }
-    changed
+    Ok(changed)
 }
 
 fn strip_v3_responses_control_markers(
     payload: &mut Value,
     declarations: &ToolMarkupDeclarations,
-) -> bool {
+) -> Result<bool, V3HubRelayResponseError> {
     let mut changed = false;
     if let Some(output_text) = payload.get_mut("output_text") {
-        changed |= strip_v3_relay_control_marker_string(output_text, declarations);
+        changed |= strip_v3_relay_control_marker_string(output_text, declarations)?;
     }
     let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
-        return changed;
+        return Ok(changed);
     };
     for item in output {
         match item {
             Value::String(_) => {
-                changed |= strip_v3_relay_control_marker_string(item, declarations);
+                changed |= strip_v3_relay_control_marker_string(item, declarations)?;
             }
             Value::Object(object) => match object.get("type").and_then(Value::as_str) {
                 Some("message") => {
                     if let Some(text) = object.get_mut("text") {
-                        changed |= strip_v3_relay_control_marker_string(text, declarations);
+                        changed |= strip_v3_relay_control_marker_string(text, declarations)?;
                     }
                     if let Some(content) = object.get_mut("content") {
-                        changed |= strip_v3_relay_control_marker_content(content, declarations);
+                        changed |= strip_v3_relay_control_marker_content(content, declarations)?;
                     }
                 }
                 Some("output_text" | "refusal") => {
                     if let Some(text) = object.get_mut("text") {
-                        changed |= strip_v3_relay_control_marker_string(text, declarations);
+                        changed |= strip_v3_relay_control_marker_string(text, declarations)?;
                     }
                     if let Some(refusal) = object.get_mut("refusal") {
-                        changed |= strip_v3_relay_control_marker_string(refusal, declarations);
+                        changed |= strip_v3_relay_control_marker_string(refusal, declarations)?;
                     }
                 }
                 _ => {}
@@ -2056,7 +2056,7 @@ fn strip_v3_responses_control_markers(
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) => {}
         }
     }
-    changed
+    Ok(changed)
 }
 
 #[derive(Default)]

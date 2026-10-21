@@ -39,8 +39,8 @@ provider HTTP / complete SSE attempt
 - Chat text, reasoning, tool calls and refusal survive JSON and SSE conversion, including co-located deltas.
 - Anthropic refusal remains output and maps to the representable Responses incomplete reason.
 - Responses incomplete reasons remain opaque business values.
-- Empty output and zero usage do not make a successful protocol response fail.
-- A reasoning-plus-explicit-final attempt whose final contains only nonrendering code points is empty; visible text mixed with those code points remains complete business content.
+- Zero usage alone does not make a successful protocol response fail. After complete response governance, an attempt without visible text or an independent business result enters the internal 502 recovery chain; reasoning alone does not authorize completion.
+- A final containing only nonrendering code points is empty; visible text mixed with those code points remains complete business content.
 - Content keywords cannot turn successful provider output into a failure.
 
 ### Directive and policy execution

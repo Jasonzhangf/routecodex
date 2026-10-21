@@ -929,7 +929,7 @@ async fn direct_json_response_strips_encrypted_content_for_multi_provider_route(
                     name: "content-type".to_string(),
                     value: b"application/json".to_vec(),
                 }],
-                br#"{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"rsn_MULTI","summary":[{"type":"summary_text","text":"plain"}]}]}"#.to_vec(),
+                br#"{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"rsn_MULTI","summary":[{"type":"summary_text","text":"plain"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Visible answer"}]}]}"#.to_vec(),
             ))
         }
     }
