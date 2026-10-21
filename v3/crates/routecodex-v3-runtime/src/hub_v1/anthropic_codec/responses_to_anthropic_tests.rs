@@ -321,3 +321,98 @@ fn websearch_function_tool_maps_to_anthropic_hosted_web_search_server_tool() {
     assert_eq!(mapped["name"], "web_search");
     assert_eq!(mapped["type"], "web_search_20250305");
 }
+
+fn bug4beffbf_legal_anthropic_alias(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().count() <= 128
+        && !name.contains('.')
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | ':' | ' '))
+}
+
+#[test]
+fn bug4beffbf_anthropic_dotted_custom_declaration_choice_history_share_alias() {
+    let request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"glm-5.3",
+        "tools":[{"type":"custom","name":"functions.exec","format":{"type":"text"}}],
+        "tool_choice":{"type":"custom","name":"functions.exec"},
+        "messages":[
+            {"role":"assistant","tool_calls":[{"id":"call_exec","type":"function","function":{"name":"functions.exec","arguments":"{\"input\":\"pwd\"}"}}]},
+            {"role":"tool","tool_call_id":"call_exec","content":"/tmp"}
+        ]
+    }))
+    .expect("dotted custom declaration must project to Anthropic");
+    let alias = request["tools"][0]["name"].as_str().unwrap();
+    assert!(bug4beffbf_legal_anthropic_alias(alias), "alias={alias}");
+    assert_eq!(request["tool_choice"]["name"], alias);
+    assert_eq!(
+        request["messages"][0]["content"][0]["name"], alias,
+        "history tool_use must use the same declared alias"
+    );
+    assert_eq!(
+        request["messages"][1]["content"][0]["tool_use_id"],
+        "call_exec"
+    );
+
+    let context =
+        super::super::V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "model":"glm-5.3",
+            "tools":[{"type":"custom","name":"functions.exec","format":{"type":"text"}}]
+        }))
+        .unwrap();
+    assert_eq!(
+        context.governed_custom_tool_client_name(alias),
+        Some("functions.exec")
+    );
+    assert!(context.namespaced_custom_tool_identity(alias).is_none());
+}
+
+#[test]
+fn bug4beffbf_anthropic_flat_custom_collision_projects_unique_legal_aliases() {
+    let request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"glm-5.3",
+        "tools":[
+            {"type":"custom","name":"functions.exec","format":{"type":"text"}},
+            {"type":"custom","name":"functions__exec","format":{"type":"text"}}
+        ],
+        "tool_choice":{"type":"custom","name":"functions.exec"},
+        "messages":[{"role":"assistant","tool_calls":[{"id":"call_exec","type":"function","function":{"name":"functions.exec","arguments":"{\"input\":\"pwd\"}"}}]}]
+    }))
+    .expect("colliding flat custom tools must stay distinct on Anthropic");
+    let tools = request["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 2);
+    let names: Vec<&str> = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert!(names
+        .iter()
+        .all(|name| bug4beffbf_legal_anthropic_alias(name)));
+    assert_eq!(
+        names
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        2,
+        "colliding identities must receive unique aliases: {names:?}"
+    );
+    assert!(
+        names.contains(&request["tool_choice"]["name"].as_str().unwrap()),
+        "tool_choice must reference a declared alias: {request}"
+    );
+}
+
+#[test]
+fn bug4beffbf_anthropic_long_custom_name_is_bounded_to_128_chars() {
+    let long_name = format!("{}{}", "a.", "b".repeat(140));
+    let request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"glm-5.3",
+        "tools":[{"type":"custom","name":long_name,"format":{"type":"text"}}],
+        "input":[{"type":"message","role":"user","content":"use tool"}]
+    }))
+    .expect("overlong dotted custom name must be bounded, not rejected");
+    let alias = request["tools"][0]["name"].as_str().unwrap();
+    assert!(bug4beffbf_legal_anthropic_alias(alias), "alias={alias}");
+    assert_eq!(alias.chars().count(), 128);
+}

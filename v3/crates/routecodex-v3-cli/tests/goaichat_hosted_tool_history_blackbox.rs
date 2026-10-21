@@ -2,7 +2,10 @@ use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{ffi::OsString, net::TcpListener, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeSet, ffi::OsString, net::TcpListener, path::PathBuf, sync::Arc,
+    time::Duration,
+};
 use tokio::sync::Mutex;
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -136,6 +139,143 @@ async fn provider(
         (
             json!([{"type":"tool_use","id":"call_next","name":"exec_command",
             "input":{"value":41}}]),
+            "tool_use",
+        )
+    };
+    (
+        StatusCode::OK,
+        Json(
+            json!({"id":"msg_gateway","type":"message","role":"assistant",
+        "model":"glm-5.3","content":content,"stop_reason":stop,
+        "usage":{"input_tokens":20,"output_tokens":8}}),
+        ),
+    )
+}
+
+#[derive(Clone)]
+struct CustomToolGateway {
+    captures: Arc<Mutex<Vec<Value>>>,
+}
+
+fn anthropic_valid_tool_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().count() <= 128
+        && !name.contains('.')
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | ':' | ' '))
+}
+
+// Safe controlled consumer for the received custom-tool input. The receipt is
+// derived from the actual returned input, so a lost or corrupted argument
+// cannot reach the expected provider acceptance.
+fn evaluate_custom_input(input: &str) -> i64 {
+    let trimmed = input.trim();
+    let ops: [(char, fn(i64, i64) -> i64); 4] = [
+        ('+', i64::wrapping_add),
+        ('-', i64::wrapping_sub),
+        ('*', i64::wrapping_mul),
+        ('/', i64::wrapping_div),
+    ];
+    for (needle, op) in ops {
+        if let Some((left, right)) = trimmed.split_once(needle) {
+            let left = left
+                .trim()
+                .parse::<i64>()
+                .unwrap_or_else(|_| panic!("unexpected custom input: {input:?}"));
+            let right = right
+                .trim()
+                .parse::<i64>()
+                .unwrap_or_else(|_| panic!("unexpected custom input: {input:?}"));
+            return op(left, right);
+        }
+    }
+    panic!("unexpected custom input: {input:?}");
+}
+
+fn validate_declared_anthropic_wire(body: &Value) -> Result<BTreeSet<String>, serde_json::Value> {
+    let mut declared = BTreeSet::new();
+    if let Some(tools) = body["tools"].as_array() {
+        for tool in tools
+            .iter()
+            .filter(|tool| tool.get("input_schema").is_some())
+        {
+            let Some(name) = tool["name"].as_str() else {
+                continue;
+            };
+            if !anthropic_valid_tool_name(name) {
+                return Err(json!({
+                    "type":"error",
+                    "error":{"type":"invalid_request_error","message":"invalid function name"}
+                }));
+            }
+            declared.insert(name.to_string());
+        }
+    }
+    if let Some(choice) = body["tool_choice"].as_object() {
+        if let Some(name) = choice["name"].as_str() {
+            if !declared.contains(name) || !anthropic_valid_tool_name(name) {
+                return Err(json!({
+                    "type":"error",
+                    "error":{"type":"invalid_request_error","message":"tool_choice does not match a declared tool"}
+                }));
+            }
+        }
+    }
+    for message in body["messages"].as_array().into_iter().flatten() {
+        for block in message["content"].as_array().into_iter().flatten() {
+            if block["type"] != "tool_use" {
+                continue;
+            }
+            let Some(name) = block["name"].as_str() else {
+                continue;
+            };
+            if !declared.contains(name) || !anthropic_valid_tool_name(name) {
+                return Err(json!({
+                    "type":"error",
+                    "error":{"type":"invalid_request_error","message":"tool_use does not match a declared tool"}
+                }));
+            }
+        }
+    }
+    Ok(declared)
+}
+
+// Anthropic rejects dotted tool names. The Responses custom tool must reach
+// this peer under a provider-valid alias while the client keeps its own name.
+async fn strict_custom_tool_provider(
+    State(state): State<CustomToolGateway>,
+    Json(body): Json<Value>,
+) -> (StatusCode, Json<Value>) {
+    state.captures.lock().await.push(body.clone());
+    if let Err(rejection) = validate_declared_anthropic_wire(&body) {
+        let encoded = serde_json::to_string(&body).unwrap_or_default();
+        eprintln!("strict-custom-tool-provider-rejected; body={encoded}");
+        return (StatusCode::BAD_REQUEST, Json(rejection));
+    }
+    let blocks: Vec<&Value> = body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|message| message["content"].as_array().unwrap())
+        .collect();
+    let receipt = blocks.iter().any(|block| {
+        block["type"] == "tool_result"
+            && block["tool_use_id"] == "call_next"
+            && block["content"].to_string().contains("EXECUTED:42")
+    });
+    let choice_name = body["tool_choice"]["name"]
+        .as_str()
+        .unwrap_or("functions__exec");
+    let (content, stop) = if receipt {
+        (
+            json!([{"type":"text","text":"receipt accepted:42"}]),
+            "end_turn",
+        )
+    } else {
+        (
+            json!([{"type":"tool_use","id":"call_next","name":choice_name,
+            "input":{"input":"21+21"}}]),
             "tool_use",
         )
     };
@@ -491,6 +631,292 @@ async fn run_round_trip(endpoint: &str, stream: bool, profile: &str, strict: boo
 #[tokio::test]
 async fn goaichat_responses_hosted_history_round_trip_blackbox() {
     run_round_trip("/v1/responses", false, "anthropic:goaichat", true).await;
+}
+#[tokio::test]
+async fn goaichat_responses_dotted_custom_tool_name_is_provider_valid_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new();
+    let _counter_environment = CounterEnvironment::new();
+    std::env::set_var("V3_GOAICHAT_BLACKBOX_KEY", "controlled-external-peer");
+    let captures = Arc::new(Mutex::new(Vec::new()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream = format!("http://{}", listener.local_addr().unwrap());
+    let router = Router::new()
+        .route("/v1/messages", post(strict_custom_tool_provider))
+        .with_state(CustomToolGateway {
+            captures: captures.clone(),
+        });
+    let peer = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let handle = spawn_v3_server_aggregate(manifest(free_port(), &upstream, "anthropic:goaichat"))
+        .await
+        .unwrap();
+    let url = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let mut payload = json!({
+        "model":"gateway.glm-5.3",
+        "stream":false,
+        "tool_choice":{"type":"custom","name":"functions.exec"},
+        "tools":[{"type":"custom","name":"functions.exec","format":{"type":"text"}}],
+        "input":[
+            {"type":"message","role":"user","content":"calculate 21 + 21"},
+            {"type":"custom_tool_call","call_id":"call_old","name":"functions.exec","input":"1+1"},
+            {"type":"custom_tool_call_output","call_id":"call_old","output":"EXECUTED:2"}
+        ]
+    });
+    let first = client.post(&url).json(&payload).send().await;
+    if first.is_err() {
+        handle.shutdown().await;
+        peer.abort();
+        panic!(
+            "Responses request must reach the Anthropic provider wire: {first:?}; captures={}",
+            serde_json::to_string(&*captures.lock().await).unwrap_or_default()
+        );
+    }
+    let first = first.unwrap();
+    let first_status = first.status();
+    let first_body = first.text().await.unwrap_or_default();
+    assert_eq!(
+        first_status,
+        StatusCode::OK,
+        "provider-received wire={} response={first_body}",
+        serde_json::to_string(&*captures.lock().await).unwrap_or_default()
+    );
+    let response: Value = serde_json::from_str(&first_body).unwrap();
+    let call = response["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["type"] == "custom_tool_call")
+        .expect("custom tool response must preserve client identity");
+    assert_eq!(call["name"], "functions.exec");
+    assert_eq!(call["call_id"], "call_next");
+    let executed_input = call["input"]
+        .as_str()
+        .unwrap_or_else(|| panic!("custom tool input must be a string: {call}"));
+    let executed_receipt = format!("EXECUTED:{}", evaluate_custom_input(executed_input));
+    assert_eq!(
+        executed_receipt, "EXECUTED:42",
+        "the client must execute the exact input it received: {call}"
+    );
+
+    payload["input"]
+        .as_array_mut()
+        .unwrap()
+        .extend(response["output"].as_array().unwrap().iter().cloned());
+    payload["input"].as_array_mut().unwrap().push(json!({
+        "type":"custom_tool_call_output","call_id":"call_next","output":executed_receipt
+    }));
+    let final_response = client.post(&url).json(&payload).send().await.unwrap();
+    assert_eq!(
+        final_response.status(),
+        StatusCode::OK,
+        "{}",
+        final_response.text().await.unwrap_or_default()
+    );
+    let final_wire = final_response.text().await.unwrap();
+    handle.shutdown().await;
+    peer.abort();
+    assert!(final_wire.contains("receipt accepted:42"), "{final_wire}");
+
+    let captures = captures.lock().await;
+    assert_eq!(
+        captures.len(),
+        2,
+        "one accepted provider attempt per client turn"
+    );
+    for capture in captures.iter() {
+        assert_eq!(capture["tools"][0]["name"], "functions__exec");
+        assert!(!capture["tool_choice"]["name"]
+            .as_str()
+            .unwrap()
+            .contains('.'));
+        for message in capture["messages"].as_array().unwrap() {
+            for block in message["content"].as_array().unwrap() {
+                if block["type"] == "tool_use" || block["type"] == "tool_result" {
+                    let name = format!("{:?}", block["name"]);
+                    assert!(
+                        name.contains("functions__exec")
+                            || !block["type"].as_str().unwrap().eq("tool_use")
+                    );
+                    assert!(!name.contains("functions.exec"));
+                }
+            }
+        }
+    }
+    eprintln!("responses dotted custom tool: attempts=2 execution=EXECUTED:42 followup=accepted");
+}
+
+/// Current strict peer enforces Anthropic's legal tool-name domain and the
+/// declaration/history/choice binding. This real `/v1/responses` round trip
+/// covers flat custom collisions, a long shared-prefix name, and the same alias
+/// on declaration, forced choice, history, and follow-up execution receipt.
+#[tokio::test]
+async fn goaichat_responses_custom_alias_collisions_roundtrip_json_and_sse_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new();
+    let _counter_environment = CounterEnvironment::new();
+    std::env::set_var("V3_GOAICHAT_BLACKBOX_KEY", "controlled-external-peer");
+    let captures = Arc::new(Mutex::new(Vec::new()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream = format!("http://{}", listener.local_addr().unwrap());
+    let router = Router::new()
+        .route("/v1/messages", post(strict_custom_tool_provider))
+        .with_state(CustomToolGateway {
+            captures: captures.clone(),
+        });
+    let peer = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let handle = spawn_v3_server_aggregate(manifest(free_port(), &upstream, "anthropic:goaichat"))
+        .await
+        .unwrap();
+    let url = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let long_leaf = format!("shared.prefix.{}", "x".repeat(60));
+    // Flat custom `functions.exec` and flat custom `functions__exec` both
+    // project into the same Anthropic candidate. The request-local registry
+    // must keep both declarable and uniquely bound without one identity
+    // stealing the inverse of the other.
+    let base_payload = json!({
+        "model":"gateway.glm-5.3",
+        "stream":false,
+        "tool_choice":{"type":"custom","name":"functions.exec"},
+        "tools":[
+            {"type":"custom","name":"functions.exec","format":{"type":"text"}},
+            {"type":"custom","name":"functions__exec","format":{"type":"text"}},
+            {"type":"custom","name":long_leaf,"format":{"type":"text"}}
+        ],
+        "input":[
+            {"type":"message","role":"user","content":"calculate 21 + 21"},
+            {"type":"custom_tool_call","call_id":"call_old","name":"functions.exec","input":"1+1"},
+            {"type":"custom_tool_call_output","call_id":"call_old","output":"EXECUTED:2"}
+        ]
+    });
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+
+    for (_index, stream) in [false, true].into_iter().enumerate() {
+        let mut payload = base_payload.clone();
+        payload["stream"] = json!(stream);
+        let first = client.post(&url).json(&payload).send().await;
+        if first.is_err() {
+            handle.shutdown().await;
+            peer.abort();
+            panic!(
+                "collision request must reach the Anthropic provider wire: {first:?}; captures={}",
+                serde_json::to_string(&*captures.lock().await).unwrap_or_default()
+            );
+        }
+        let first = first.unwrap();
+        let first_status = first.status();
+        let first_body = first.text().await.unwrap_or_default();
+        assert_eq!(
+            first_status,
+            StatusCode::OK,
+            "stream={stream} provider-received wire={} response={first_body}",
+            serde_json::to_string(&*captures.lock().await).unwrap_or_default(),
+        );
+        let response: Value = if stream {
+            first_body
+                .lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+                .find(|event| event["type"] == "response.completed")
+                .expect("real Responses SSE terminal event")["response"]
+                .clone()
+        } else {
+            serde_json::from_str(&first_body).unwrap()
+        };
+        let call = response["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "custom_tool_call")
+            .expect("custom tool response must preserve client identity");
+        assert_eq!(call["name"], "functions.exec");
+        assert_eq!(call["call_id"], "call_next");
+        let executed_input = call["input"]
+            .as_str()
+            .unwrap_or_else(|| panic!("custom tool input must be a string: {call}"));
+        let executed_receipt = format!("EXECUTED:{}", evaluate_custom_input(executed_input));
+        assert_eq!(
+            executed_receipt, "EXECUTED:42",
+            "stream={stream} the client must execute the exact input it received: {call}"
+        );
+
+        payload["input"]
+            .as_array_mut()
+            .unwrap()
+            .extend(response["output"].as_array().unwrap().iter().cloned());
+        payload["input"].as_array_mut().unwrap().push(json!({
+            "type":"custom_tool_call_output","call_id":"call_next","output":executed_receipt
+        }));
+        payload["stream"] = json!(false);
+        let final_response = client.post(&url).json(&payload).send().await.unwrap();
+        assert_eq!(
+            final_response.status(),
+            StatusCode::OK,
+            "stream={stream} final {}",
+            final_response.text().await.unwrap_or_default()
+        );
+        let final_wire = final_response.text().await.unwrap();
+        assert!(final_wire.contains("receipt accepted:42"), "{final_wire}");
+    }
+    handle.shutdown().await;
+    peer.abort();
+
+    let captures = captures.lock().await;
+    assert_eq!(captures.len(), 4, "two provider attempts per client turn");
+    let mut seen = BTreeSet::new();
+    for capture in captures.iter() {
+        let tools = capture["tools"].as_array().unwrap();
+        assert_eq!(
+            tools.len(),
+            3,
+            "all three custom declarations stay declarable"
+        );
+        let names: BTreeSet<&str> = tools
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert_eq!(names.len(), 3, "each custom tool gets a unique wire alias");
+        for name in &names {
+            assert!(anthropic_valid_tool_name(name), "illegal alias {name}");
+            assert!(!name.contains('.'), "dotted alias must never reach wire");
+        }
+        assert!(
+            capture["tool_choice"]["name"]
+                .as_str()
+                .is_some_and(|name| names.contains(name)),
+            "tool_choice must reference a declared alias: {capture}"
+        );
+        for message in capture["messages"].as_array().unwrap() {
+            for block in message["content"].as_array().unwrap() {
+                if block["type"] == "tool_use" {
+                    assert!(
+                        block["name"]
+                            .as_str()
+                            .is_some_and(|name| names.contains(name)),
+                        "history tool_use must reference a declared alias: {capture}"
+                    );
+                    assert!(
+                        !block["name"].as_str().unwrap().contains('.'),
+                        "history tool_use must be a legal Anthropic alias: {capture}"
+                    );
+                }
+            }
+        }
+        seen.extend(names);
+    }
+    assert!(
+        seen.iter().any(|name| name.starts_with("functions_")),
+        "the two functions aliases must appear in the wire set: {seen:?}"
+    );
+    eprintln!(
+        "responses custom alias collisions: attempts=4 json+sse execution=EXECUTED:42 followup=accepted aliases={seen:?}"
+    );
 }
 #[tokio::test]
 async fn goaichat_responses_sse_hosted_history_round_trip_blackbox() {
