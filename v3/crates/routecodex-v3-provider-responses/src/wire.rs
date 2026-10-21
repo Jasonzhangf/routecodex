@@ -386,7 +386,7 @@ fn build_responses_wire_payload_with_registry(
     })
 }
 
-/// 唯一密文剥离 hook（响应侧，direct 与 relay 共用）：
+/// 唯一密文剥离 hook（响应侧，direct 与 relay 共用，仅用于 Responses wire）：
 /// `retain_response_cipher=true`（仅 gpt 模型且路由只有单一 provider 候选时，
 /// 由调用方 VR 路由决策用 `is_v3_retain_response_cipher` 算好传入）原样保留
 /// `encrypted_content`（Codex 客户端需要官方密文重建 reasoning 历史）；
@@ -400,26 +400,45 @@ pub fn apply_v3_response_cipher_policy(
     preserve_anthropic_signature: bool,
 ) {
     if !retain_response_cipher && !preserve_anthropic_signature {
-        strip_v3_response_encrypted_fields_recursive(payload);
+        strip_v3_response_encrypted_fields_recursive(payload, true);
     }
 }
 
-/// 响应侧递归删除所有 provider reasoning 密文字段。密文格式不参与判定；
-/// `function_call_output` 属于业务数据，必须原样保留。
-fn strip_v3_response_encrypted_fields_recursive(value: &mut Value) {
+/// Chat wire（OpenAiChat/Gemini）的 reasoning 业务形状保留：只有 Codex 本地密文
+/// 形状（`rsn_` / `gAAAA` 前缀）会删除，其他 `encrypted_content` 是 provider 业务
+/// 数据，必须原样进入客户端（b878f6c 黑盒契约）。
+pub fn apply_v3_chat_reasoning_cipher_policy(payload: &mut Value, retain_response_cipher: bool) {
+    if !retain_response_cipher {
+        strip_v3_response_encrypted_fields_recursive(payload, false);
+    }
+}
+
+/// 响应侧递归删除 reasoning 密文字段。`strip_all=true`（Responses wire）不按密文
+/// 形状判定，删除所有非工具 `encrypted_content`；`strip_all=false`（Chat wire）
+/// 只删除 Codex 本地密文前缀。`function_call_output` 属于业务数据，必须原样保留。
+fn strip_v3_response_encrypted_fields_recursive(value: &mut Value, strip_all: bool) {
     match value {
         Value::Object(map) => {
             if map.get("type").and_then(Value::as_str) == Some("function_call_output") {
                 return;
             }
-            map.remove("encrypted_content");
+            let remove = match map.get("encrypted_content") {
+                None => false,
+                Some(Value::String(cipher)) => {
+                    strip_all || cipher.starts_with("rsn_") || cipher.starts_with("gAAAA")
+                }
+                Some(_) => strip_all,
+            };
+            if remove {
+                map.remove("encrypted_content");
+            }
             for child in map.values_mut() {
-                strip_v3_response_encrypted_fields_recursive(child);
+                strip_v3_response_encrypted_fields_recursive(child, strip_all);
             }
         }
         Value::Array(items) => {
             for item in items {
-                strip_v3_response_encrypted_fields_recursive(item);
+                strip_v3_response_encrypted_fields_recursive(item, strip_all);
             }
         }
         _ => {}

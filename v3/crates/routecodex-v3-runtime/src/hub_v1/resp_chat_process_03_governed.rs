@@ -748,16 +748,30 @@ fn strip_v3_resp03_encrypted_reasoning_content(
     if !retain_response_cipher {
         // Anthropic signature 是否保留只由 raw provider source witness 决定；
         // 不根据密文文本形状猜测协议来源。
-        let preserve_anthropic_signature =
-            input.provider_raw().source_provider_protocol == V3HubProviderWireProtocol::Anthropic;
         // 唯一密文剥离 hook（provider-responses）：direct 与 relay 响应侧共用，
         // 保证"只有单 gpt provider 才进客户端"的密文策略单一实现。
+        let source_provider_protocol = input.provider_raw().source_provider_protocol;
         let payload = std::sync::Arc::make_mut(&mut input.previous.previous.payload.0);
-        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
-            payload,
-            false,
-            preserve_anthropic_signature,
-        );
+        match source_provider_protocol {
+            // Anthropic signature 由 typed raw source witness 保留。
+            V3HubProviderWireProtocol::Anthropic => {
+                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+                    payload, false, true,
+                );
+            }
+            // Responses wire 全剥非工具密文（fe1ec4b 契约），function_call_output 保留。
+            V3HubProviderWireProtocol::Responses => {
+                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+                    payload, false, false,
+                );
+            }
+            // Chat wire 的 reasoning 业务形状必须存活（b878f6c 契约）。
+            V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Gemini => {
+                routecodex_v3_provider_responses::apply_v3_chat_reasoning_cipher_policy(
+                    payload, false,
+                );
+            }
+        }
     }
     input
 }

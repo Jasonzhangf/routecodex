@@ -2357,6 +2357,39 @@ mod tests {
     }
 
     #[test]
+    fn chat_reasoning_cipher_policy_keeps_business_values_and_strips_codex_shapes() {
+        let mut payload = json!({
+            "output": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "preserved cipher",
+                    "summary": [{"type": "summary_text", "text": "business reasoning"}]
+                },
+                {"type": "reasoning", "encrypted_content": "rsn_CODEX_CIPHER"},
+                {"type": "reasoning", "encrypted_content": "gAAAA_CODEX_CIPHER"},
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "encrypted_content": "tool-business-cipher"
+                }
+            ]
+        });
+
+        apply_v3_chat_reasoning_cipher_policy(&mut payload, false);
+
+        assert_eq!(
+            payload["output"][0]["encrypted_content"], "preserved cipher",
+            "OpenAI Chat reasoning business shape must survive JSON admission"
+        );
+        assert!(payload["output"][1].get("encrypted_content").is_none());
+        assert!(payload["output"][2].get("encrypted_content").is_none());
+        assert_eq!(
+            payload["output"][3]["encrypted_content"], "tool-business-cipher",
+            "function_call_output remains business data on Chat wire"
+        );
+    }
+
+    #[test]
     fn wire_expands_custom_namespace_and_rewrites_call_names() {
         let body = json!({
             "model": "upstream-model",

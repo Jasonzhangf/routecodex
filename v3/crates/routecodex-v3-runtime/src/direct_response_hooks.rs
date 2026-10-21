@@ -51,11 +51,27 @@ pub(crate) fn apply_v3_direct_response_projection_hooks(
     provider_protocol: V3HubProviderWireProtocol,
 ) {
     if !retain_response_cipher {
-        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
-            payload,
-            false,
-            provider_protocol == V3HubProviderWireProtocol::Anthropic,
-        );
+        match provider_protocol {
+            // Anthropic signature 由 typed wire witness 保留，不按密文形状猜测来源。
+            V3HubProviderWireProtocol::Anthropic => {
+                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+                    payload, false, true,
+                );
+            }
+            // Responses wire 全剥非工具密文（fe1ec4b 契约），function_call_output 保留。
+            V3HubProviderWireProtocol::Responses => {
+                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+                    payload, false, false,
+                );
+            }
+            // Chat wire 的 reasoning 业务形状必须存活（b878f6c 契约）；只清理
+            // Codex 本地密文前缀，其余 opaque 值原样进入客户端。
+            V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Gemini => {
+                routecodex_v3_provider_responses::apply_v3_chat_reasoning_cipher_policy(
+                    payload, false,
+                );
+            }
+        }
     }
     if strip_client_response_id {
         crate::shared::strip_v3_response_id_from_json_body(payload);
@@ -480,5 +496,33 @@ mod tests {
             "typed-anthropic-signature"
         );
         assert_eq!(payload["output"][0]["summary"][0]["text"], "signed thought");
+    }
+
+    #[test]
+    fn direct_response_projection_preserves_chat_wire_business_cipher() {
+        let mut payload = json!({
+            "output": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "preserved cipher",
+                    "summary": [{"type": "summary_text", "text": "chat reasoning"}]
+                },
+                {"type": "reasoning", "encrypted_content": "rsn_CODEX_CIPHER"}
+            ]
+        });
+
+        apply_v3_direct_response_projection_hooks(
+            &mut payload,
+            false,
+            false,
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+
+        assert_eq!(
+            payload["output"][0]["encrypted_content"],
+            "preserved cipher"
+        );
+        assert_eq!(payload["output"][0]["summary"][0]["text"], "chat reasoning");
+        assert!(payload["output"][1].get("encrypted_content").is_none());
     }
 }
