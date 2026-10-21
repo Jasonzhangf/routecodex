@@ -267,6 +267,12 @@ async fn direct_to_relay_handoff_preserves_capacity_busy_exhaustion_source() {
         source.code, "provider_concurrency_busy",
         "busy provenance from Direct must remain exact across Relay handoff"
     );
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("all-busy handoff exhaustion must retain typed observability");
+    assert_eq!(observability.entry_protocol, "responses");
+    assert_eq!(observability.execution_mode, "relay");
 
     let held_first = saturate_capacity_key(&first_capacity_key);
     let mut handoff =
@@ -310,6 +316,12 @@ async fn direct_to_relay_handoff_preserves_capacity_busy_exhaustion_source() {
         source.code, "selected_target_exhausted",
         "non-capacity exclusion must not be relabeled as provider_concurrency_busy"
     );
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("mixed handoff exhaustion must retain typed observability");
+    assert_eq!(observability.entry_protocol, "responses");
+    assert_eq!(observability.execution_mode, "relay");
 }
 
 #[tokio::test]
