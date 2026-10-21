@@ -1,6 +1,7 @@
 {
   "id": "v3.operation_runner.response",
   "version": "1",
+  "description": "0e129d0: normalize and inverse-project actual terminal reasons losslessly; explicit non-stop and unknown reasons never become stop; missing reason stays missing. Lifecycle completed is independent of reason. Actual failures preserve source/cause/status and exit through the separate typed Error chain for candidate recovery, never client success. Observation is read-only and must not overwrite actual reasons.",
   "inputs": [
     { "id": "provider-raw", "schema": "Object", "schema_ref": "v3.operation_runner.arc.provider_raw" }
   ],

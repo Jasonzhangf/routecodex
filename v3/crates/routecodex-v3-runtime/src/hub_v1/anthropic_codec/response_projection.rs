@@ -83,6 +83,7 @@ pub(super) enum V3AnthropicTerminalKind {
     StopSequence,
     PauseTurn,
     Refusal,
+    ContextWindowExceeded,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,11 +133,7 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
         "stop_sequence" => V3AnthropicTerminalKind::StopSequence,
         "pause_turn" => V3AnthropicTerminalKind::PauseTurn,
         "content_filter" => V3AnthropicTerminalKind::Refusal,
-        "context_window_exceeded" => {
-            return Err(V3AnthropicCodecError::UnsupportedStopReason {
-                stop_reason: stop_reason.to_string(),
-            })
-        }
+        "context_window_exceeded" => V3AnthropicTerminalKind::ContextWindowExceeded,
         other => {
             return Err(V3AnthropicCodecError::InvalidTerminalField {
                 field: "stop_reason",
@@ -180,6 +177,7 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
         V3AnthropicTerminalKind::MaxTokens => ("incomplete", Some("max_output_tokens")),
         V3AnthropicTerminalKind::PauseTurn => ("in_progress", None),
         V3AnthropicTerminalKind::Refusal => ("incomplete", Some("content_filter")),
+        V3AnthropicTerminalKind::ContextWindowExceeded => ("incomplete", None),
     };
 
     Ok(V3AnthropicResponsesTerminalProjection {

@@ -17,6 +17,28 @@ use routecodex_v3_runtime::{
     V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
+
+#[test]
+fn issue0e129d0_source_terminal_survives_completed_observation() {
+    let observation = routecodex_v3_runtime::V3RuntimeStreamObservation::default();
+    observation
+        .record_provider_event_json(
+            &json!({"type":"message_delta","delta":{"stop_reason":"tool_use"}}),
+        )
+        .unwrap();
+    observation.record_provider_event_json(&json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","call_id":"call_exact","name":"lookup","arguments":"{}"}]}})).unwrap();
+    assert_eq!(
+        observation.snapshot().unwrap().finish_reason.as_deref(),
+        Some("tool_use")
+    );
+    let absent = routecodex_v3_runtime::V3RuntimeStreamObservation::default();
+    absent
+        .record_provider_event_json(
+            &json!({"type":"response.completed","response":{"status":"completed"}}),
+        )
+        .unwrap();
+    assert_eq!(absent.snapshot().unwrap().finish_reason, None);
+}
 use std::{
     collections::VecDeque,
     sync::{
@@ -322,8 +344,8 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     );
     assert_eq!(
         json_observability.finish_reason.as_deref(),
-        Some("stop"),
-        "ordinary completed Responses Relay JSON without provider finish_reason must infer stop for console observability"
+        None,
+        "completed lifecycle must not fabricate an unreported finish reason"
     );
     let json_timing = json_observability
         .timing
@@ -1022,7 +1044,7 @@ async fn responses_relay_continuous_non_terminal_sse_returns_typed_failure() {
 }
 
 #[tokio::test]
-async fn responses_relay_sse_completed_without_provider_finish_reason_infers_stop_observability() {
+async fn responses_relay_sse_completed_without_provider_finish_reason_keeps_absence() {
     let output = execute_v3_responses_relay_runtime(
         &manifest(),
         V3ResponsesRelayRuntimeInput {
@@ -1049,7 +1071,7 @@ async fn responses_relay_sse_completed_without_provider_finish_reason_infers_sto
         .as_ref()
         .expect("Responses Relay SSE text output must carry console observability");
     assert_eq!(observability.response_status.as_deref(), Some("completed"));
-    assert_eq!(observability.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(observability.finish_reason.as_deref(), None);
     assert_eq!(
         observability
             .usage
@@ -1084,7 +1106,7 @@ async fn responses_relay_sse_completed_without_provider_finish_reason_infers_sto
         .snapshot()
         .expect("SSE text observation state must stay readable");
     assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
-    assert_eq!(snapshot.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(snapshot.finish_reason.as_deref(), None);
     assert_eq!(
         snapshot.usage.as_ref().and_then(|usage| usage.total_tokens),
         Some(20)

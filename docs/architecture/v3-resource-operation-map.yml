@@ -3534,6 +3534,7 @@ resources:
     semantic_contract:
       writer: normalize_v3_operation_runner_provider_response
       content: successful_attempt_source_and_provider_response_field_origin
+      terminal_reason_binding: V3HubRespInbound02Normalized.source_terminal_reason preserves the successful attempt source reason for adjacent Chat Outbound projection; absence stays absent and the witness never enters client or provider payload.
       consumer_rule: Chat Process Resp03 and inverse projection may consume provenance only for the successful attempt
       payload_rule: provenance is typed control metadata; it is not reconstructed from response payload fields
     allowed_writers: [normalize_v3_operation_runner_provider_response]

@@ -501,6 +501,8 @@ pub(crate) fn read_v3_runtime_finish_reason(value: &Value) -> Option<String> {
         .or_else(|| read_v3_runtime_string_path(value, &["finishReason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["stop_reason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["stopReason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["delta", "stop_reason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["message", "stop_reason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["response", "finish_reason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["response", "finishReason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["response", "stop_reason"]))
@@ -524,18 +526,12 @@ fn infer_v3_runtime_response_status_from_provider_event_type(
 }
 
 fn infer_v3_runtime_finish_reason_from_provider_event_json(
-    event_type: Option<&str>,
+    _event_type: Option<&str>,
     response_status: Option<&str>,
 ) -> Option<String> {
     match response_status.map(str::trim) {
         Some(status) if status.eq_ignore_ascii_case("requires_action") => {
             Some("tool_calls".to_string())
-        }
-        Some(status)
-            if status.eq_ignore_ascii_case("completed")
-                && matches!(event_type, Some("response.completed")) =>
-        {
-            Some("stop".to_string())
         }
         _ => None,
     }

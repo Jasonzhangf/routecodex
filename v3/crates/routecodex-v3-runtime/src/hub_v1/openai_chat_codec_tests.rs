@@ -90,7 +90,7 @@ fn compact_chat_message_projection_preserves_text_and_reasoning_once() {
             reasoning,
             "{canonical}"
         );
-        assert_eq!(projected["choices"][0]["finish_reason"], "stop");
+        assert_eq!(projected["choices"][0]["finish_reason"], Value::Null);
         assert_eq!(
             canonical, original,
             "projection must retain source extensions"
@@ -243,7 +243,7 @@ fn responses_usage_is_a_separate_chat_sse_chunk_without_choices() {
         2,
         "finish and usage need distinct Chat chunks"
     );
-    assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
+    assert_eq!(chunks[0]["choices"][0]["finish_reason"], Value::Null);
     assert!(chunks[0].get("usage").is_none());
     assert_eq!(chunks[1]["choices"], json!([]));
     assert_eq!(
@@ -287,7 +287,7 @@ fn responses_usage_is_not_sent_when_chat_client_opts_out() {
         .push_event(json!({"type": "response.completed", "response": {"status": "completed", "usage": {"input_tokens": 3, "output_tokens": 1}}}))
         .expect("completed");
     assert_eq!(chunks.len(), 1);
-    assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
+    assert_eq!(chunks[0]["choices"][0]["finish_reason"], Value::Null);
     assert!(chunks[0].get("usage").is_none());
 }
 
@@ -373,10 +373,15 @@ fn transducer_preserves_incomplete_with_optional_or_opaque_details() {
         if let Some(details) = details {
             response["incomplete_details"] = details;
         }
+        let expected_reason = response
+            .pointer("/incomplete_details/reason")
+            .and_then(Value::as_str)
+            .map(|reason| json!(reason))
+            .unwrap_or(Value::Null);
         let chunks = transducer
             .push_event(json!({"type":"response.incomplete", "response":response}))
             .expect("optional business details must not reject a terminal");
-        assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
+        assert_eq!(chunks[0]["choices"][0]["finish_reason"], expected_reason);
         transducer.finish().expect("complete transport");
     }
 }
@@ -548,7 +553,11 @@ fn non_stream_projection_preserves_responses_refusal_with_text_usage_and_tools()
         assert_eq!(projected["usage"]["total_tokens"], 5);
         assert_eq!(
             choice["finish_reason"],
-            if with_tools { "tool_calls" } else { "stop" }
+            if with_tools {
+                json!("tool_calls")
+            } else {
+                Value::Null
+            }
         );
         if with_tools {
             assert_eq!(choice["message"]["tool_calls"][0]["id"], "call_native");
@@ -579,19 +588,19 @@ fn transducer_preserves_terminal_only_responses_text_refusal_and_incomplete() {
             "response.completed",
             "completed",
             json!({"type":"output_text","text":"NATIVE_OK"}),
-            "stop",
+            Value::Null,
         ),
         (
             "response.completed",
             "completed",
             json!({"type":"refusal","refusal":"NATIVE_REFUSAL"}),
-            "stop",
+            Value::Null,
         ),
         (
             "response.incomplete",
             "incomplete",
             json!({"type":"output_text","text":"NATIVE_OK"}),
-            "content_filter",
+            json!("content_filter"),
         ),
     ] {
         let mut response = json!({
@@ -664,10 +673,9 @@ fn transducer_preserves_refusal_deltas_alongside_text_without_terminal_duplicati
     transducer.finish().unwrap();
 }
 
-// canonical `status:"in_progress"` 是 Responses 语义；投影到 Chat 时不得产出
-// Chat 协议之外的 `finish_reason:null`，按普通结束收口。
+// Lifecycle status cannot establish an absent business terminal reason.
 #[test]
-fn non_stream_projection_never_emits_null_chat_finish_reason_for_in_progress_canonical() {
+fn non_stream_projection_preserves_missing_reason_for_any_canonical_status() {
     for status in ["in_progress", "queued", "completed"] {
         let projected = project_v3_openai_chat_client_response_from_canonical(&json!({
             "status": status,
@@ -676,10 +684,9 @@ fn non_stream_projection_never_emits_null_chat_finish_reason_for_in_progress_can
         .expect("text output must project");
         let finish_reason = &projected["choices"][0]["finish_reason"];
         assert!(
-            !finish_reason.is_null(),
-            "status={status} must not project a null Chat finish_reason: {projected}"
+            finish_reason.is_null(),
+            "status={status} must not fabricate a Chat finish_reason: {projected}"
         );
-        assert_eq!(finish_reason.as_str(), Some("stop"), "{projected}");
     }
 }
 

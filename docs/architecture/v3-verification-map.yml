@@ -900,6 +900,16 @@ features:
     forbidden_claim: Do not claim H6 hook registration, Hub v1 runtime integration, Server exposure, Provider transport, Gemini/OpenAI Chat, live Anthropic compatibility, global install, restart, or production
       replacement.
 - feature_id: v3.protocol_openai_chat_codec_characterization
+  terminal_fidelity_gate:
+    issue_id: 0e129d0
+    public_test: responses_wire_representation_survives_chat_and_anthropic_entries
+    additional_public_test: issue0e129d0_anthropic_nonstop_reason_public
+    additional_command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox issue0e129d0_ -- --nocapture --test-threads=1
+    command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox responses_wire_representation_survives_chat_and_anthropic_entries -- --nocapture --test-threads=1
+    assertions:
+    - explicit non-stop and opaque terminal reasons never become stop
+    - absent terminal reason is not inferred from completed lifecycle
+    - actual errors retain source cause and status in typed Error recovery and candidate reselection
   status: characterization_source_verified
   change_risk: high
   owner_kind: rust_project_v3_protocol_codec_characterization
@@ -2078,6 +2088,10 @@ features:
   - responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect
   - responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect
   - responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input
+  - issue0e129d0_anthropic_nonstop_reason_public
+  - issue0e129d0_actual_error_uses_error_chain_and_switches_provider
+  - responses_wire_representation_survives_chat_and_anthropic_entries
+  - genuine_http_and_native_sse_errors_break_transport_without_client_error
   - chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input
   - anthropic_malformed_function_wrapper_restores_exact_raw_arguments
   - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
