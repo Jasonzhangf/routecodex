@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "case_id": "issue-745f6e9-provider-concurrency-all-busy-relay",
+  "cell": {
+    "entry_protocol": "responses",
+    "provider_protocol": "openai_chat",
+    "transport": "sse",
+    "mode": "relay"
+  },
+  "runtime_setup": {
+    "provider_id": "mock-chat",
+    "model": "mock.chat-model",
+    "wire_model": "chat-model",
+    "candidate_ids": [
+      "mock-chat/mock.chat-model"
+    ],
+    "provider_concurrency": {
+      "maxInFlight": 1,
+      "acquireTimeoutMs": 60000,
+      "staleLeaseMs": 300000
+    }
+  },
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {
+      "content-type": "application/json",
+      "session-id": "concurrency-held-relay",
+      "thread-id": "concurrency-held-relay"
+    },
+    "body": {
+      "model": "mock.chat-model",
+      "input": "hold the only relay provider capacity",
+      "stream": true
+    }
+  },
+  "expected_provider": {
+    "paths": [
+      "/v1/chat/completions"
+    ],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "model": "chat-model",
+      "stream": true
+    },
+    "body_must_not": [
+      "routecodex_internal",
+      "metadata_center",
+      "debug_snapshot"
+    ],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "openai_chat",
+    "mode": "fault",
+    "status": 200,
+    "content_type": "text/event-stream",
+    "fault": "hold-open-controlled",
+    "attempts": [
+      {
+        "kind": "fault",
+        "fault": "hold-open-controlled",
+        "sse_events": [
+          {
+            "data": {
+              "id": "chatcmpl_concurrency_relay",
+              "object": "chat.completion.chunk",
+              "choices": [
+                {
+                  "index": 0,
+                  "delta": {
+                    "role": "assistant",
+                    "content": "held response released"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "data": {
+              "id": "chatcmpl_concurrency_relay",
+              "object": "chat.completion.chunk",
+              "choices": [
+                {
+                  "index": 0,
+                  "delta": {},
+                  "finish_reason": "stop"
+                }
+              ]
+            }
+          },
+          {
+            "data": "[DONE]"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {
+      "text": "held response released",
+      "status": "completed",
+      "output_items.0.type": "message",
+      "output_items.0.role": "assistant",
+      "output_items.0.content.0.type": "output_text",
+      "output_items.0.content.0.text": "held response released"
+    },
+    "body_must_not": [
+      "provider_error",
+      "internal_error",
+      "routecodex_internal",
+      "metadata_center"
+    ],
+    "semantic_terminal_required": true
+  },
+  "concurrency_replay": {
+    "kind": "provider_concurrency_all_busy",
+    "exhaustion_client_request": {
+      "method": "POST",
+      "path": "/v1/responses",
+      "headers": {
+        "content-type": "application/json",
+        "session-id": "concurrency-exhausted-relay",
+        "thread-id": "concurrency-exhausted-relay"
+      },
+      "body": {
+        "model": "mock.chat-model",
+        "input": "must not reach the held relay provider",
+        "stream": true
+      }
+    },
+    "expected_exhaustion_client": {
+      "transport": "closed",
+      "deadline_ms": 1500,
+      "error_codes_must_not": [
+        "ETIMEDOUT"
+      ]
+    },
+    "typed_error_codes": [
+      "provider_concurrency_busy"
+    ],
+    "upstream_business_sends": 1
+  },
+  "assertions": {
+    "provider_attempt_count": 1,
+    "probe_attempts_may_occur": true,
+    "no_control_leakage": true
+  },
+  "source": {
+    "sha": "25c366feb",
+    "files": [
+      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs"
+    ],
+    "tests": [
+      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_provider_concurrency_all_full_exhausts_without_queueing"
+    ]
+  },
+  "contract_differences": []
+}

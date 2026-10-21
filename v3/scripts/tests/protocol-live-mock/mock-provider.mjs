@@ -42,8 +42,11 @@ export async function startMockProvider(options = {}) {
     phase: 'startup',
     fixture: null,
     turn: 0,
+    turnTransition: null,
     attemptByTurn: new Map(),
     captures: [],
+    heldByCase: new Map(),
+    heldWaiters: new Map(),
   };
   const sockets = new Set();
   const server = createServer((request, response) => {
@@ -74,6 +77,7 @@ export async function startMockProvider(options = {}) {
       }
       state.fixture = fixture;
       state.turn = nonNegativeInteger(turnIndex, 'turnIndex');
+      state.turnTransition = null;
       state.attemptByTurn.clear();
       state.phase = 'case';
       return { case_id: fixture.case_id, turn: state.turn, phase: 'case' };
@@ -82,12 +86,70 @@ export async function startMockProvider(options = {}) {
       state.turn = nonNegativeInteger(turnIndex, 'turnIndex');
       return { turn: state.turn, phase: state.phase };
     },
+    advanceTurnAfterResponse(caseId, fromTurn, toTurn) {
+      if (typeof caseId !== 'string' || caseId.length === 0) {
+        throw new MockProviderError('mock_invalid_transition', 'advanceTurnAfterResponse requires a case id');
+      }
+      state.turnTransition = {
+        caseId,
+        fromTurn: nonNegativeInteger(fromTurn, 'fromTurn'),
+        toTurn: nonNegativeInteger(toTurn, 'toTurn'),
+      };
+      return { ...state.turnTransition };
+    },
     getCaptures(caseId) {
       const all = state.captures.map(cloneValue);
       if (caseId === undefined) return all;
       return all.filter((capture) => capture.case_id === caseId);
     },
+    waitForHeld(caseId, timeoutMs = 2000) {
+      requireCaseId(caseId, 'waitForHeld');
+      if (state.heldByCase.has(caseId)) return Promise.resolve(heldReceipt(caseId));
+      return new Promise((resolve, reject) => {
+        const waiter = {
+          resolve: () => {
+            clearTimeout(timer);
+            resolve(heldReceipt(caseId));
+          },
+          reject: (error) => {
+            clearTimeout(timer);
+            reject(error);
+          },
+        };
+        const timer = setTimeout(() => {
+          const waiters = state.heldWaiters.get(caseId);
+          waiters?.delete(waiter);
+          if (waiters?.size === 0) state.heldWaiters.delete(caseId);
+          reject(new MockProviderError(
+            'mock_hold_timeout',
+            `controlled hold did not arrive for ${caseId} within ${timeoutMs}ms`,
+            504,
+          ));
+        }, positiveInteger(timeoutMs, 'timeoutMs'));
+        const waiters = state.heldWaiters.get(caseId) ?? new Set();
+        waiters.add(waiter);
+        state.heldWaiters.set(caseId, waiters);
+      });
+    },
+    releaseHeld(caseId) {
+      requireCaseId(caseId, 'releaseHeld');
+      const held = state.heldByCase.get(caseId) ?? null;
+      if (!held) return 0;
+      state.heldByCase.delete(caseId);
+      applyTurnTransition(held.capture, state);
+      for (const fragment of held.remaining) writeWire(held.response, held.wire, fragment);
+      endWire(held.response, held.wire);
+      return 1;
+    },
     async close() {
+      for (const held of state.heldByCase.values()) {
+        try {
+          held.response.end();
+        } catch {
+          // The tracked socket teardown below remains the primary close owner.
+        }
+      }
+      state.heldByCase.clear();
       for (const socket of sockets) socket.destroy();
       sockets.clear();
       server.closeAllConnections?.();
@@ -188,7 +250,22 @@ async function handleRequest(request, response, options, state) {
     }
   }
 
-  await sendScript(script, response, responseWire);
+  const sendReceipt = await sendScript(script, response, responseWire);
+  if (sendReceipt.held) {
+    state.heldByCase.set(capture.case_id, {
+      response,
+      remaining: sendReceipt.remaining,
+      capture,
+      wire: responseWire,
+    });
+    const waiters = state.heldWaiters.get(capture.case_id);
+    if (waiters) {
+      state.heldWaiters.delete(capture.case_id);
+      for (const waiter of waiters) waiter.resolve();
+    }
+    return;
+  }
+  applyTurnTransition(capture, state);
 }
 
 function scriptsForTurn(fixture, turn) {
@@ -251,48 +328,89 @@ async function sendScript(script, response, wire) {
     response.writeHead(script.status, { 'content-type': script.content_type });
     writeWire(response, wire, JSON.stringify(script.body));
     endWire(response, wire);
-    return;
+    return { held: false };
   }
   if (script.mode === 'sse') {
     if (script.fault === 'reset') {
       wire.receipt.reset = true;
       response.socket?.destroy();
-      return;
+      return { held: false };
     }
     response.writeHead(script.status, { 'content-type': script.content_type });
     const fragments = sseFragments(script);
     if (script.fault && FAULT_TRUNCATE.has(script.fault)) {
       writeTruncated(response, wire, fragments, script.close_after_bytes);
-      return;
+      return { held: false };
     }
     if (script.fault === 'hold-open') {
       writeWire(response, wire, fragments[0] ?? '');
-      return;
+      return { held: false };
+    }
+    if (script.fault === 'hold-open-controlled') {
+      writeWire(response, wire, fragments[0] ?? '');
+      return { held: true, remaining: fragments.slice(1) };
     }
     for (const fragment of fragments) writeWire(response, wire, fragment);
     endWire(response, wire);
-    return;
+    return { held: false };
   }
   // fault mode
   if (script.fault === 'reset') {
     wire.receipt.reset = true;
     response.socket?.destroy();
-    return;
+    return { held: false };
   }
   if (FAULT_TRUNCATE.has(script.fault)) {
     response.writeHead(script.status, { 'content-type': script.content_type ?? 'text/event-stream' });
     const fragments = Array.isArray(script.chunks) || Array.isArray(script.sse_events) ? sseFragments(script) : [`data: ${JSON.stringify({ fault: script.fault })}\n\n`];
     writeTruncated(response, wire, fragments, script.close_after_bytes);
-    return;
+    return { held: false };
   }
   if (script.fault === 'hold-open') {
     response.writeHead(script.status, { 'content-type': script.content_type ?? 'text/event-stream' });
     writeWire(response, wire, 'data: {"status":"holding"}\n\n');
-    return;
+    return { held: false };
+  }
+  if (script.fault === 'hold-open-controlled') {
+    response.writeHead(script.status, { 'content-type': script.content_type ?? 'text/event-stream' });
+    const fragments = Array.isArray(script.chunks) || Array.isArray(script.sse_events)
+      ? sseFragments(script)
+      : ['data: {"status":"holding"}\n\n'];
+    writeWire(response, wire, fragments[0] ?? '');
+    return { held: true, remaining: fragments.slice(1) };
   }
   response.writeHead(script.status, { 'content-type': script.content_type ?? 'application/json' });
   writeWire(response, wire, JSON.stringify(script.body ?? { error: { message: script.fault } }));
   endWire(response, wire);
+  return { held: false };
+}
+
+function applyTurnTransition(capture, state) {
+  const transition = state.turnTransition;
+  if (transition
+    && transition.caseId === capture.case_id
+    && transition.fromTurn === capture.turn
+    && capture.attempt_kind === 'business') {
+    state.turn = transition.toTurn;
+    state.turnTransition = null;
+  }
+}
+
+function heldReceipt(caseId) {
+  return { case_id: caseId, held: true };
+}
+
+function requireCaseId(caseId, operation) {
+  if (typeof caseId !== 'string' || caseId.length === 0) {
+    throw new MockProviderError('mock_invalid_case_id', `${operation} requires a case id`);
+  }
+}
+
+function positiveInteger(value, label) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new MockProviderError('mock_invalid_duration', `${label} must be a positive integer`);
+  }
+  return value;
 }
 
 function createResponseWireCapture(script) {

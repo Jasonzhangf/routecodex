@@ -7,6 +7,7 @@ import {
   SCRIPT_MODES,
   SCHEMA_VERSION,
 } from './corpus-contract.mjs';
+import { CURRENT_CODEX_EXEC_COMMAND_DESCRIPTION } from './codex-exec-consumer.mjs';
 
 const PROTOCOL_SET = new Set(PROTOCOLS);
 const TRANSPORT_SET = new Set(CELL_TRANSPORTS);
@@ -15,7 +16,76 @@ const SCRIPT_SET = new Set(SCRIPT_MODES);
 const CLIENT_TRANSPORT_SET = new Set(CLIENT_TRANSPORTS);
 const ID_PATTERN = /^[a-z0-9-]+$/;
 const PROVIDER_ID_PATTERN = /^[A-Za-z0-9_.-]+$/;
-const RUNTIME_SETUP_KEYS = new Set(['provider_id', 'model', 'wire_model', 'candidate_ids', 'all_candidates_fail', 'attempt_store']);
+const RUNTIME_SETUP_KEYS = new Set([
+  'provider_id',
+  'model',
+  'wire_model',
+  'candidate_ids',
+  'all_candidates_fail',
+  'attempt_store',
+  'provider_concurrency',
+]);
+const PROVIDER_CONCURRENCY_KEYS = new Set(['maxInFlight', 'acquireTimeoutMs', 'staleLeaseMs']);
+const CODEX_INTEGER_REPLAY_CASES = new Set([
+  'issue-3192e71-codex-integer-positive',
+  'issue-3192e71-fractional-negative',
+  'issue-3192e71-user-schema-negative',
+  'issue-3192e71-duplicate-keys-negative',
+  'issue-3192e71-over-safe-int-negative',
+  'issue-3192e71-nested-extra-negative',
+  'issue-3192e71-missing-optional-preserved',
+]);
+const CODEX_NEGATIVE_CASES = new Set([
+  'issue-3192e71-fractional-negative',
+  'issue-3192e71-user-schema-negative',
+  'issue-3192e71-duplicate-keys-negative',
+  'issue-3192e71-over-safe-int-negative',
+  'issue-3192e71-nested-extra-negative',
+  'issue-3192e71-missing-optional-preserved',
+]);
+const CODEX_REAL_EXEC_CASES = new Set([
+  'issue-57c0176-singular-tool-call-text',
+  ...CODEX_INTEGER_REPLAY_CASES,
+]);
+const CODEX_INTEGER_ARGUMENT_CASES = new Map([
+  ['issue-3192e71-codex-integer-positive', {
+    call_id: 'call_int_1',
+    upstream_arguments: '{"cmd":"pwd","max_output_tokens":8000.0,"yield_time_ms":20000.0}',
+    client_arguments: '{"cmd":"pwd","max_output_tokens":8000,"yield_time_ms":20000}',
+  }],
+  ['issue-3192e71-fractional-negative', {
+    call_id: 'call_frac_1',
+    upstream_arguments: '{"cmd":"pwd","max_output_tokens":8000.5,"yield_time_ms":20000.0}',
+    client_arguments: '{"cmd":"pwd","max_output_tokens":8000.5,"yield_time_ms":20000.0}',
+  }],
+  ['issue-3192e71-user-schema-negative', {
+    call_id: 'call_user_schema_1',
+    upstream_arguments: '{"cmd":"pwd","max_output_tokens":8000.0,"yield_time_ms":20000.0}',
+    client_arguments: '{"cmd":"pwd","max_output_tokens":8000.0,"yield_time_ms":20000.0}',
+  }],
+  ['issue-3192e71-duplicate-keys-negative', {
+    call_id: 'call_duplicate_1',
+    upstream_arguments: '{"cmd":"pwd","max_output_tokens":8000.0,"max_output_tokens":9000.0,"yield_time_ms":20000.0}',
+    client_arguments: '{"cmd":"pwd","max_output_tokens":8000.0,"max_output_tokens":9000.0,"yield_time_ms":20000.0}',
+  }],
+  ['issue-3192e71-over-safe-int-negative', {
+    call_id: 'call_over_safe_1',
+    upstream_arguments: '{"cmd":"pwd","max_output_tokens":9007199254740993.0,"yield_time_ms":20000.0}',
+    client_arguments: '{"cmd":"pwd","max_output_tokens":9007199254740993.0,"yield_time_ms":20000.0}',
+  }],
+  ['issue-3192e71-nested-extra-negative', {
+    call_id: 'call_nested_extra_1',
+    upstream_arguments: '{"cmd":"pwd","max_output_tokens":8000.0,"extra":{"nested":9007199254740993.0,"key":1,"key":2}}',
+    client_arguments: '{"cmd":"pwd","max_output_tokens":8000.0,"extra":{"nested":9007199254740993.0,"key":1,"key":2}}',
+  }],
+  ['issue-3192e71-missing-optional-preserved', {
+    call_id: 'call_missing_optional_1',
+    upstream_arguments: '{"cmd":"pwd"}',
+    client_arguments: '{"cmd":"pwd"}',
+  }],
+]);
+const SINGULAR_TOOL_CALL_TEXT =
+  '{"tool_call":[{"name":"functions.exec","arguments":"{\\"input\\":\\"pwd\\"}"}]}';
 
 export function validateCase(relative, value) {
   const findings = [];
@@ -47,6 +117,8 @@ export function validateCase(relative, value) {
   validateTurns(relative, value, findings);
   validateSource(relative, value.source, findings);
   validateToolFollowup(relative, value, findings);
+  validateCodexReplayCase(relative, value, findings);
+  validateConcurrencyReplay(relative, value, findings);
   return findings;
 }
 
@@ -242,6 +314,87 @@ function validateRuntimeSetup(relative, setup, findings) {
       }
     }
   }
+  if (setup.provider_concurrency !== undefined) {
+    const concurrency = setup.provider_concurrency;
+    if (!isObject(concurrency)) {
+      fail('runtime_setup.provider_concurrency must be an object');
+      return;
+    }
+    const keys = Object.keys(concurrency);
+    if (keys.length === 0) {
+      fail('runtime_setup.provider_concurrency must declare at least one field');
+    }
+    for (const [key, value] of Object.entries(concurrency)) {
+      if (!PROVIDER_CONCURRENCY_KEYS.has(key)) {
+        fail(`runtime_setup.provider_concurrency.${key} is not a supported field`);
+      }
+      if (!Number.isInteger(value) || value < 1) {
+        fail(`runtime_setup.provider_concurrency.${key} must be a positive integer`);
+      }
+    }
+  }
+}
+
+function validateConcurrencyReplay(relative, value, findings) {
+  const replay = value.concurrency_replay;
+  if (replay === undefined) return;
+  const fail = (message) => findings.push(`${relative}: ${message}`);
+  if (!isObject(replay)) {
+    fail('concurrency_replay must be an object when present');
+    return;
+  }
+  if (replay.kind !== 'provider_concurrency_all_busy') {
+    fail(`concurrency_replay.kind must be provider_concurrency_all_busy: ${replay.kind ?? 'null'}`);
+  }
+  if (!Array.isArray(replay.typed_error_codes)
+    || replay.typed_error_codes.length === 0
+    || replay.typed_error_codes.some((code) => typeof code !== 'string' || code.length === 0)) {
+    fail('concurrency_replay.typed_error_codes must be a non-empty string array');
+  }
+  if (replay.upstream_business_sends !== 1) {
+    fail('concurrency_replay.upstream_business_sends must be 1');
+  }
+  const exhausted = replay.exhaustion_client_request;
+  validateClientRequest(`${relative}: concurrency_replay.exhaustion_client_request`, exhausted, findings);
+  if (isObject(exhausted)) {
+    if (exhausted.path !== value.client_request?.path) {
+      fail('concurrency_replay.exhaustion_client_request.path must equal client_request.path');
+    }
+    const holderSession = value.client_request?.headers?.['session-id'];
+    const exhaustedSession = exhausted.headers?.['session-id'];
+    if (typeof holderSession !== 'string' || holderSession.length === 0) {
+      fail('client_request.headers.session-id must be a non-empty string');
+    }
+    if (typeof exhaustedSession !== 'string' || exhaustedSession.length === 0) {
+      fail('concurrency_replay.exhaustion_client_request.headers.session-id must be a non-empty string');
+    } else if (exhaustedSession === holderSession) {
+      fail('concurrency_replay exhaustion request must use a distinct session-id');
+    }
+  }
+  const expected = replay.expected_exhaustion_client;
+  if (!isObject(expected)) {
+    fail('concurrency_replay.expected_exhaustion_client must be an object');
+    return;
+  }
+  if (expected.transport !== 'closed') {
+    fail('concurrency_replay.expected_exhaustion_client.transport must be closed');
+  }
+  if (!Number.isInteger(expected.deadline_ms) || expected.deadline_ms < 1 || expected.deadline_ms > 10_000) {
+    fail('concurrency_replay.expected_exhaustion_client.deadline_ms must be an integer from 1 to 10000');
+  }
+  if (!Array.isArray(expected.error_codes_must_not)
+    || expected.error_codes_must_not.some((code) => typeof code !== 'string' || code.length === 0)) {
+    fail('concurrency_replay.expected_exhaustion_client.error_codes_must_not must be a string array');
+  } else if (!expected.error_codes_must_not.includes('ETIMEDOUT')) {
+    fail('concurrency_replay.expected_exhaustion_client.error_codes_must_not must include ETIMEDOUT');
+  }
+  if (!isObject(value.runtime_setup?.provider_concurrency)
+    || value.runtime_setup.provider_concurrency.maxInFlight !== 1) {
+    fail('concurrency_replay requires runtime_setup.provider_concurrency.maxInFlight = 1');
+  }
+  if (value.upstream_response?.attempts?.[0]?.fault !== 'hold-open-controlled') {
+    fail('concurrency_replay requires first upstream attempt fault hold-open-controlled');
+  }
 }
 
 function validateTurns(relative, value, findings) {
@@ -313,7 +466,7 @@ function validateToolFollowup(relative, value, findings) {
     || followup.assert_declared_tool_binding_only === true
     || followup.assert_tool_executed_once === true;
   if (!hasToolFlag) fail('tool_followup must declare at least one tool assertion flag');
-  const executingConsumers = new Set(['echo', 'echo-line-result', 'local-namespace-mock', 'unknown-tool-correction']);
+  const executingConsumers = new Set(['echo', 'echo-line-result', 'local-namespace-mock', 'unknown-tool-correction', 'codex-real-exec']);
   if (followup.assert_tool_executed_once === true && !executingConsumers.has(followup.consumer)) {
     fail('tool_followup.assert_tool_executed_once requires an executing consumer (echo, echo-line-result, local-namespace-mock or unknown-tool-correction)');
   }
@@ -342,6 +495,10 @@ function validateToolFollowup(relative, value, findings) {
     validateEchoLineResultFollowup(relative, value, followup, findings);
     return;
   }
+  if (followup.consumer === 'codex-real-exec') {
+    validateCodexRealExecFollowup(relative, value, followup, findings);
+    return;
+  }
   // Search only the scripted request/turn history. Including tool_followup
   // would make its own input/expected_output trivially self-match.
   const corpus = `${JSON.stringify(value.client_request)}\n${JSON.stringify(value.turns)}`;
@@ -360,6 +517,182 @@ function validateToolFollowup(relative, value, findings) {
   const followupTurn = value.turns[value.turns.length - 1];
   if (!isObject(followupTurn) || !isObject(followupTurn.client_request)) {
     fail('tool_followup requires a final follow-up turn with client_request');
+  }
+}
+
+function validateCodexRealExecFollowup(relative, value, followup, findings) {
+  const fail = (message) => findings.push(`${relative}: ${message}`);
+  if (value.case_id !== 'issue-3192e71-codex-integer-positive') {
+    fail('tool_followup.consumer codex-real-exec is reserved for issue-3192e71-codex-integer-positive');
+  }
+  if (followup.side_effect !== 'read-only-command') {
+    fail('tool_followup.consumer codex-real-exec requires side_effect read-only-command');
+  }
+  if (!Array.isArray(followup.authorized_commands)
+    || followup.authorized_commands.length !== 1
+    || followup.authorized_commands[0] !== 'pwd') {
+    fail('tool_followup.consumer codex-real-exec requires authorized_commands ["pwd"]');
+  }
+  if (followup.expected_call_id !== 'call_int_1') {
+    fail('tool_followup.consumer codex-real-exec requires expected_call_id call_int_1');
+  }
+  if (followup.expected_arguments !== '{"cmd":"pwd","max_output_tokens":8000,"yield_time_ms":20000}') {
+    fail('tool_followup.consumer codex-real-exec requires the exact normalized expected_arguments');
+  }
+  if (followup.expected_output !== undefined) {
+    fail('tool_followup.consumer codex-real-exec must derive output from the execution receipt');
+  }
+  if (followup.assert_no_synthesized_tool_result !== true
+    || followup.assert_declared_tool_binding_only !== true
+    || followup.assert_tool_executed_once !== true) {
+    fail('tool_followup.consumer codex-real-exec requires all three tool assertion flags');
+  }
+}
+
+function validateCodexReplayCase(relative, value, findings) {
+  if (!CODEX_REAL_EXEC_CASES.has(value.case_id)) return;
+  const fail = (message) => findings.push(`${relative}: ${message}`);
+  const realClient = value.case_id === 'issue-3192e71-codex-integer-positive';
+  const cell = value.cell;
+  if (cell?.entry_protocol !== 'responses'
+    || cell?.provider_protocol !== 'openai_chat'
+    || cell?.transport !== (realClient ? 'sse' : 'json')
+    || cell?.mode !== 'relay') {
+    fail(`Codex replay cases require the exact responses->openai_chat ${realClient ? 'sse' : 'json'} relay cell`);
+  }
+  if (value.client_request?.path !== '/v1/responses') {
+    fail('Codex replay client_request.path must be /v1/responses');
+  }
+  if (value.client_request?.body?.model !== 'mock.chat-model') {
+    fail('Codex replay client_request.body.model must be mock.chat-model');
+  }
+  const expectedStream = realClient;
+  if (value.client_request?.body?.stream !== expectedStream) {
+    fail(`Codex replay client_request.body.stream must be ${expectedStream}`);
+  }
+  if (value.expected_provider?.body_must?.stream !== expectedStream) {
+    fail(`Codex replay expected_provider.body_must.stream must be ${expectedStream}`);
+  }
+  if (value.upstream_response?.mode !== (realClient ? 'sse' : 'json')) {
+    fail(`Codex replay upstream_response.mode must be ${realClient ? 'sse' : 'json'}`);
+  }
+
+  if (value.case_id === 'issue-57c0176-singular-tool-call-text') {
+    validateSingularTextCase(relative, value, findings);
+    return;
+  }
+
+  const tools = value.client_request?.body?.tools;
+  const execTools = Array.isArray(tools)
+    ? tools.filter((tool) => tool?.type === 'function' && tool?.name === 'exec_command')
+    : [];
+  if (execTools.length !== 1) {
+    fail(`Codex integer replay requires exactly one exec_command declaration, observed ${execTools.length}`);
+    return;
+  }
+  const tool = execTools[0];
+  if (tool.strict !== false) fail('Codex exec_command.strict must be false');
+  if (tool.parameters?.type !== 'object' || tool.parameters?.additionalProperties !== false) {
+    fail('Codex exec_command.parameters must be a closed object');
+  }
+  if (JSON.stringify(tool.parameters?.required) !== JSON.stringify(['cmd'])) {
+    fail('Codex exec_command.parameters.required must be ["cmd"]');
+  }
+  const integerFields = ['max_output_tokens', 'yield_time_ms'];
+  if (value.case_id === 'issue-3192e71-user-schema-negative') {
+    if (tool.description !== 'User-defined command tool') {
+      fail('user-schema-negative must use description User-defined command tool');
+    }
+    if (tool.parameters?.properties?.max_output_tokens?.minimum !== 1) {
+      fail('user-schema-negative must preserve max_output_tokens.minimum 1');
+    }
+  } else if (tool.description !== CURRENT_CODEX_EXEC_COMMAND_DESCRIPTION) {
+    fail(`registered exec_command description must be ${JSON.stringify(CURRENT_CODEX_EXEC_COMMAND_DESCRIPTION)}`);
+  }
+  for (const field of integerFields) {
+    if (tool.parameters?.properties?.[field]?.type !== 'number') {
+      fail(`client exec_command.${field}.type must be number so inbound conversion is exercised`);
+    }
+  }
+  const expectedType = value.case_id === 'issue-3192e71-user-schema-negative' ? 'number' : 'integer';
+  for (const field of integerFields) {
+    const path = `tools.0.function.parameters.properties.${field}.type`;
+    if (value.expected_provider?.body_must?.[path] !== expectedType) {
+      fail(`expected_provider.body_must.${path} must be ${expectedType}`);
+    }
+  }
+  const expectedCall = CODEX_INTEGER_ARGUMENT_CASES.get(value.case_id);
+  const providerCall = upstreamProviderToolCall(value.upstream_response);
+  if (!expectedCall
+    || providerCall?.id !== expectedCall.call_id
+    || providerCall?.type !== 'function'
+    || providerCall?.function?.name !== 'exec_command'
+    || providerCall?.function?.arguments !== expectedCall.upstream_arguments) {
+    fail('upstream exec_command call must preserve the exact declared call id, name, and raw arguments');
+  }
+  if (!expectedCall
+    || value.expected_client?.body_must?.['output.length'] !== 1
+    || value.expected_client?.body_must?.['output.0.type'] !== 'function_call'
+    || value.expected_client?.body_must?.['output.0.call_id'] !== expectedCall.call_id
+    || value.expected_client?.body_must?.['output.0.name'] !== 'exec_command'
+    || value.expected_client?.body_must?.['output.0.arguments'] !== expectedCall.client_arguments) {
+    fail('client exec_command call must preserve the declared call id, name, and exact raw arguments');
+  }
+  if (CODEX_NEGATIVE_CASES.has(value.case_id)) {
+    if (value.tool_followup !== undefined) fail('Codex integer negative cases may not declare tool_followup');
+    if (value.turns !== undefined) fail('Codex integer negative cases must be one-turn assertion-only fixtures');
+  }
+  if (value.case_id === 'issue-3192e71-codex-integer-positive') {
+    if (value.tool_followup === undefined) {
+      fail('codex-integer-positive must declare the real codex-real-exec tool_followup');
+    }
+    if (!Array.isArray(value.turns) || value.turns.length !== 2) {
+      fail('codex-integer-positive requires exactly two turns');
+    }
+  }
+}
+
+function upstreamProviderToolCall(upstream) {
+  const direct = upstream?.body?.choices?.[0]?.message?.tool_calls?.[0];
+  if (direct) return direct;
+  const events = Array.isArray(upstream?.sse_events) ? upstream.sse_events : [];
+  for (const event of events) {
+    const call = event?.data?.choices?.[0]?.delta?.tool_calls?.[0];
+    if (call?.function?.arguments) return call;
+  }
+  return null;
+}
+
+function validateSingularTextCase(relative, value, findings) {
+  const fail = (message) => findings.push(`${relative}: ${message}`);
+  const namespace = value.client_request?.body?.tools?.[0];
+  if (namespace?.type !== 'namespace'
+    || namespace?.name !== 'functions'
+    || namespace?.tools?.length !== 1
+    || namespace.tools[0]?.type !== 'custom'
+    || namespace.tools[0]?.name !== 'exec') {
+    fail('singular-text case requires the exact functions.exec custom namespace declaration');
+  }
+  if (value.tool_followup !== undefined) {
+    fail('singular-text case is assertion-only and must not declare tool_followup');
+  }
+  if (!Array.isArray(value.turns) || value.turns.length !== 2) {
+    fail('singular-text case requires exactly two assertion-only turns');
+  }
+  if (value.upstream_response?.body?.choices?.[0]?.message?.content !== SINGULAR_TOOL_CALL_TEXT
+    || value.upstream_response?.body?.choices?.[0]?.message?.tool_calls !== undefined) {
+    fail('singular-text upstream response must contain only the exact assistant text and no typed call');
+  }
+  if (value.expected_client?.body_must?.['output.0.content.0.text'] !== SINGULAR_TOOL_CALL_TEXT
+    || value.expected_client?.body_must?.output_text !== SINGULAR_TOOL_CALL_TEXT) {
+    fail('singular-text client response must preserve the exact assistant text');
+  }
+  if (value.expected_provider?.body_must?.['tools.0.function.name'] !== 'functions__exec') {
+    fail('singular-text expected provider tool name must be functions__exec');
+  }
+  if (value.expected_client?.body_must?.['output.length'] !== 1
+    || value.expected_client?.body_must?.['output.0.type'] !== 'message') {
+    fail('singular-text client response must assert one assistant message');
   }
 }
 

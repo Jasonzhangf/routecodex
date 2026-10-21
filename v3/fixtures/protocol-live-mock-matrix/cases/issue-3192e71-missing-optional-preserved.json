@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "case_id": "issue-3192e71-missing-optional-preserved",
+  "cell": {"entry_protocol": "responses", "provider_protocol": "openai_chat", "transport": "json", "mode": "relay"},
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {"content-type": "application/json"},
+    "body": {
+      "model": "mock.chat-model",
+      "stream": false,
+      "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "run pwd"}]}],
+      "tools": [{
+        "type": "function",
+        "name": "exec_command",
+        "description": "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+        "strict": false,
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cmd": {"type": "string"},
+            "max_output_tokens": {"type": "number"},
+            "yield_time_ms": {"type": "number"},
+            "justification": {"type": "string"},
+            "login": {"type": "boolean"},
+            "prefix_rule": {"type": "array", "items": {"type": "string"}},
+            "sandbox_permissions": {"type": "string", "enum": ["use_default", "require_escalated"]},
+            "shell": {"type": "string"},
+            "tty": {"type": "boolean"},
+            "workdir": {"type": "string"}
+          },
+          "required": ["cmd"]
+        }
+      }]
+    }
+  },
+  "expected_provider": {
+    "paths": ["/v1/chat/completions"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "model": "chat-model",
+      "tools.0.function.name": "exec_command",
+      "tools.0.function.parameters.properties.max_output_tokens.type": "integer",
+      "tools.0.function.parameters.properties.yield_time_ms.type": "integer",
+      "stream": false
+    },
+    "body_must_not": ["routecodex_internal", "metadata_center"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "openai_chat",
+    "mode": "json",
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "id": "chatcmpl_missing_optional",
+      "object": "chat.completion",
+      "choices": [{
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [{
+            "index": 0,
+            "id": "call_missing_optional_1",
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"pwd\"}"
+            }
+          }]
+        },
+        "finish_reason": "tool_calls"
+      }],
+      "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    }
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {
+      "status": "completed",
+      "output.length": 1,
+      "output.0.type": "function_call",
+      "output.0.call_id": "call_missing_optional_1",
+      "output.0.name": "exec_command",
+      "output.0.arguments": "{\"cmd\":\"pwd\"}"
+    },
+    "body_must_not": ["provider_error", "internal_error", "routecodex_internal"],
+    "semantic_terminal_required": true
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "source": {
+    "sha": "918354c39d52bd77caeb70677b6270cc36c474ac",
+    "files": ["v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values.rs"],
+    "tests": ["v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values_tests.rs::resp03_restores_registered_codex_integer_argument_values"]
+  },
+  "contract_differences": [{"source_behavior": "The two integer fields are optional.", "rcc_requirement": "Do not inject either optional field and do not execute the command in this assertion-only case."}]
+}

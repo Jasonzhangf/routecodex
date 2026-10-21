@@ -21,6 +21,10 @@ import {
   findSemanticTerminal,
   parseClientBody,
 } from './protocol-semantics.mjs';
+import {
+  CODEX_REAL_EXEC_CONSUMER,
+  runCodexRealExec,
+} from './codex-exec-consumer.mjs';
 import { runToolFollowup } from './tool-consumer.mjs';
 import {
   bodyTextOf,
@@ -59,13 +63,24 @@ export const REQUIRED_EXECUTION_MODES = Object.freeze({
   'same-protocol-relay-chat-to-chat-json': 'relay',
   'anthropic-to-chat-json': 'relay',
   'gemini-to-chat-json': 'relay',
+  'issue-57c0176-singular-tool-call-text': 'relay',
+  'issue-3192e71-codex-integer-positive': 'relay',
+  'issue-3192e71-fractional-negative': 'relay',
+  'issue-3192e71-user-schema-negative': 'relay',
+  'issue-3192e71-duplicate-keys-negative': 'relay',
+  'issue-3192e71-over-safe-int-negative': 'relay',
+  'issue-3192e71-nested-extra-negative': 'relay',
+  'issue-3192e71-missing-optional-preserved': 'relay',
+  'issue-745f6e9-provider-concurrency-all-busy-direct': 'direct',
+  'issue-745f6e9-provider-concurrency-all-busy-relay': 'relay',
 });
 
 /**
  * Run one fixture case through `rccUrl` using `sendHttp`.
  *
  * @param {{fixture: object, mock: object, rccUrl: string, sendHttp: Function,
- *   evidenceRoot: string, timeoutMs?: number}} input The mock handle follows
+ *   evidenceRoot: string, timeoutMs?: number, codexExecutor?: Function,
+ *   sampleRoot?: string, listenerPort?: number}} input The mock handle follows
  *   the published API: `setActiveCase(fixture, turnIndex)`, `setTurn(turnIndex)`,
  *   `getCaptures(caseId)`, `close()`.
  * @returns {Promise<object>} per-case report compatible with the main runner
@@ -79,6 +94,9 @@ export async function runCase({
   sendHttp,
   evidenceRoot,
   timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  codexExecutor,
+  sampleRoot,
+  listenerPort,
 } = {}) {
   const cell = isPlainObject(fixture?.cell) ? fixture.cell : {};
   const entryProtocol = text(cell.entry_protocol ?? fixture?.entry_protocol);
@@ -99,7 +117,12 @@ export async function runCase({
     classification: null,
   };
 
+  const codexRealExec = fixture?.tool_followup?.consumer === CODEX_REAL_EXEC_CONSUMER;
   const gaps = capabilityGaps({ fixture, mock, rccUrl, sendHttp, evidenceRoot, entryProtocol });
+  if (codexRealExec) {
+    const sendHttpIndex = gaps.indexOf('capability_missing: caller sendHttp adapter required');
+    if (sendHttpIndex >= 0) gaps.splice(sendHttpIndex, 1);
+  }
   if (gaps.length > 0) {
     return finalizeReport(report, {
       productDiagnostics: [],
@@ -137,6 +160,42 @@ export async function runCase({
   let lastSent = null;
 
   try {
+    if (codexRealExec) {
+      const codexRun = await runCodexRealExec({
+        fixture,
+        mock,
+        rccUrl,
+        evidenceRoot,
+        timeoutMs,
+        sampleRoot,
+        listenerPort,
+        executeClient: codexExecutor,
+      });
+      for (const turn of turns) {
+        recordCodexAttempt(turn, codexRun.provider_windows?.[turn.index] ?? []);
+        processProviderTurn(turn, codexRun.provider_windows?.[turn.index] ?? []);
+      }
+      productDiagnostics.push(...(codexRun.productDiagnostics ?? []));
+      runnerDiagnostics.push(...(codexRun.runnerDiagnostics ?? []));
+      evidenceRefs.push(...(codexRun.evidenceRefs ?? []));
+      live.push({
+        kind: 'codex_real_execution',
+        consumer: CODEX_REAL_EXEC_CONSUMER,
+        ok: codexRun.ok,
+        executions: codexRun.executions ?? [],
+        final_client: codexRun.finalClient ?? null,
+        receipt: codexRun.receiptPath ?? null,
+      });
+      return finalizeReport(report, {
+        productDiagnostics,
+        runnerDiagnostics,
+        capabilityDiagnostics: [],
+        live,
+        turnResults,
+        evidenceRefs,
+      });
+    }
+
     lastSent = await sendTurn(turns[0], turns[0].request, 'fixture');
     const firstTurnPassed = processTurn(turns[0], lastSent);
 
@@ -405,6 +464,91 @@ export async function runCase({
       diagnostics,
     });
     return diagnostics.length === 0;
+  }
+
+  function recordCodexAttempt(turn, window) {
+    const business = window.filter((capture) => !EXCLUDED_ATTEMPT_KINDS.has(capture?.attempt_kind));
+    if (business.length === 0) return;
+    const times = business
+      .map((capture) => capture.captured_at_epoch_ms)
+      .filter((value) => Number.isSafeInteger(value));
+    const started = times.length ? Math.min(...times) : null;
+    const settled = times.length ? Math.max(...times) : null;
+    turnAttempts.push({
+      attempt_index: turnAttempts.length,
+      turn: turn.index + 1,
+      turn_index: turn.index,
+      turn_id: turn.turn_id ?? null,
+      source: CODEX_REAL_EXEC_CONSUMER,
+      endpoint: turn.request?.path ?? null,
+      method: turn.request?.method ?? 'POST',
+      entry_protocol: entryProtocol,
+      send_started_epoch_ms: started,
+      send_settled_epoch_ms: settled,
+      outcome: 'settled',
+      failure_code: null,
+      failure_message: null,
+    });
+  }
+
+  function processProviderTurn(turn, window) {
+    const diagnostics = [];
+    const business = window.filter((capture) => !EXCLUDED_ATTEMPT_KINDS.has(capture?.attempt_kind));
+    const probes = window.filter((capture) => EXCLUDED_ATTEMPT_KINDS.has(capture?.attempt_kind));
+    const scripted = scriptedAttemptCount(turn.upstream);
+    if (business.length !== scripted) {
+      diagnostics.push(`provider attempt count ${business.length} != scripted ${scripted} for turn ${turn.index + 1}`);
+    }
+    if (turn.declaredAttemptCount !== null && business.length !== turn.declaredAttemptCount) {
+      diagnostics.push(`provider attempt count ${business.length} != asserted ${turn.declaredAttemptCount} for turn ${turn.index + 1}`);
+    }
+    if (turn.providerExpected) {
+      const providerResult = turn.providerExpected.auth_orders
+        ? assertProviderAttemptSequence(window, turn.providerExpected, {
+            providerProtocol,
+            noControlLeakage,
+          })
+        : assertProviderCaptures(window, 0, turn.providerExpected, {
+            providerProtocol,
+            noControlLeakage,
+          });
+      diagnostics.push(...providerResult.diagnostics);
+    }
+    productDiagnostics.push(...diagnostics);
+    const providerEvidence = writeEvidence(`${caseId}-turn-${turn.index + 1}-provider.json`, {
+      case_id: caseId,
+      turn: turn.index + 1,
+      turn_id: turn.turn_id ?? null,
+      request_source: CODEX_REAL_EXEC_CONSUMER,
+      provider_captures: window,
+      business_attempts: business.length,
+      scripted_attempts: scripted,
+      probe_attempts: probes.length,
+      diagnostics,
+    });
+    live.push({
+      kind: 'turn',
+      turn: turn.index + 1,
+      turn_id: turn.turn_id ?? null,
+      request_source: CODEX_REAL_EXEC_CONSUMER,
+      provider_attempts: business.length,
+      scripted_attempts: scripted,
+      probe_attempts: probes.length,
+      diagnostics,
+      evidence: [providerEvidence],
+    });
+    turnResults.push({
+      turn: turn.index + 1,
+      turn_id: turn.turn_id ?? null,
+      status: diagnostics.length ? 'failed' : 'passed',
+      request_source: CODEX_REAL_EXEC_CONSUMER,
+      provider_attempts: business.length,
+      scripted_attempts: scripted,
+      probe_attempts: probes.length,
+      client_status: null,
+      client_closed: false,
+      diagnostics,
+    });
   }
 
   function captureCount() {

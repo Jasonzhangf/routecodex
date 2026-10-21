@@ -64,9 +64,20 @@ function findingsOf(root) {
   return inspectCorpus(root).findings.join('\n');
 }
 
-test('real corpus loads 61 fixtures sorted with exact identities', () => {
+function realCase(caseId) {
+  return JSON.parse(readFileSync(join(realFixtureRoot, 'cases', `${caseId}.json`), 'utf8'));
+}
+
+function upstreamToolCall(upstream) {
+  return upstream?.body?.choices?.[0]?.message?.tool_calls?.[0]
+    ?? upstream?.sse_events
+      ?.map((event) => event?.data?.choices?.[0]?.delta?.tool_calls?.[0])
+      .find((call) => call?.function?.arguments);
+}
+
+test('real corpus loads 71 fixtures sorted with exact identities', () => {
   const loaded = loadFixtures(realFixtureRoot);
-  assert.equal(loaded.length, 61);
+  assert.equal(loaded.length, 71);
   const ids = loaded.map((entry) => entry.value.case_id);
   assert.equal(ids.length, new Set(ids).size);
   assert.equal(ids[0], 'anthropic-to-anthropic-json');
@@ -74,12 +85,12 @@ test('real corpus loads 61 fixtures sorted with exact identities', () => {
   assert.deepEqual(loaded.map((entry) => entry.relative), [...loaded.map((entry) => entry.relative)].sort());
   const report = inspectCorpus(realFixtureRoot);
   assert.equal(report.ok, true, report.findings.join('\n'));
-  assert.equal(report.case_count, 61);
+  assert.equal(report.case_count, 71);
   assert.deepEqual(report.findings, []);
   assert.equal(report.coverage.base_cells, 16);
   assert.equal(report.coverage.base_cells_covered, 16);
   assert.equal(report.coverage.base_variants_covered, 32);
-  assert.equal(report.extensions.length, 29);
+  assert.equal(report.extensions.length, 39);
   assert.equal(report.source_refs.checked, false);
   assert.deepEqual(report.source_refs.stale_files, []);
   assert.deepEqual(report.source_refs.stale_tests, []);
@@ -127,6 +138,200 @@ test('fe1ec4b fixtures bind public JSON/SSE evidence and typed countercases', ()
       countercase.upstream_response.mode === 'json'
         ? 'redacted-anthropic-fe1ec4b-json'
         : 'redacted-anthropic-fe1ec4b-sse');
+  }
+});
+
+test('provider concurrency replay fixtures bind both execution modes and exact all-busy evidence', () => {
+  const loaded = loadFixtures(realFixtureRoot);
+  const byId = new Map(loaded.map(({ value }) => [value.case_id, value]));
+  for (const [caseId, mode] of [
+    ['issue-745f6e9-provider-concurrency-all-busy-direct', 'direct'],
+    ['issue-745f6e9-provider-concurrency-all-busy-relay', 'relay'],
+  ]) {
+    const value = byId.get(caseId);
+    assert.ok(value, caseId);
+    assert.equal(value.cell.mode, mode);
+    assert.equal(value.runtime_setup.provider_concurrency.maxInFlight, 1);
+    assert.equal(value.concurrency_replay.kind, 'provider_concurrency_all_busy');
+    assert.equal(value.concurrency_replay.upstream_business_sends, 1);
+    assert.deepEqual(value.concurrency_replay.typed_error_codes, ['provider_concurrency_busy']);
+    assert.equal(value.concurrency_replay.expected_exhaustion_client.error_codes_must_not[0], 'ETIMEDOUT');
+    const holderSession = value.client_request.headers['session-id'];
+    const exhaustedSession = value.concurrency_replay.exhaustion_client_request.headers['session-id'];
+    assert.notEqual(holderSession, exhaustedSession);
+  }
+});
+
+test('provider concurrency replay mutations cannot weaken transport or typed-evidence contracts', () => {
+  const caseId = 'issue-745f6e9-provider-concurrency-all-busy-direct';
+  const mutations = [
+    {
+      name: 'missing typed code',
+      mutate(value) { value.concurrency_replay.typed_error_codes = []; },
+      expected: /typed_error_codes must be a non-empty string array/,
+    },
+    {
+      name: 'timeout accepted',
+      mutate(value) { value.concurrency_replay.expected_exhaustion_client.error_codes_must_not = []; },
+      expected: /error_codes_must_not must include ETIMEDOUT/,
+    },
+    {
+      name: 'second send allowed',
+      mutate(value) { value.concurrency_replay.upstream_business_sends = 2; },
+      expected: /upstream_business_sends must be 1/,
+    },
+    {
+      name: 'same session',
+      mutate(value) {
+        value.concurrency_replay.exhaustion_client_request.headers['session-id'] =
+          value.client_request.headers['session-id'];
+      },
+      expected: /exhaustion request must use a distinct session-id/,
+    },
+  ];
+  for (const mutation of mutations) {
+    const value = realCase(caseId);
+    mutation.mutate(value);
+    withFixture(
+      { [caseId]: value },
+      validManifest([caseId]),
+      (root) => assert.match(findingsOf(root), mutation.expected, mutation.name),
+    );
+  }
+});
+
+test('Codex replay fixtures preserve exact raw arguments and assertion-only negatives', () => {
+  const loaded = loadFixtures(realFixtureRoot);
+  const byId = new Map(loaded.map(({ value }) => [value.case_id, value]));
+  const expected = new Map([
+    ['issue-3192e71-codex-integer-positive', '{"cmd":"pwd","max_output_tokens":8000,"yield_time_ms":20000}'],
+    ['issue-3192e71-fractional-negative', '{"cmd":"pwd","max_output_tokens":8000.5,"yield_time_ms":20000.0}'],
+    ['issue-3192e71-user-schema-negative', '{"cmd":"pwd","max_output_tokens":8000.0,"yield_time_ms":20000.0}'],
+    ['issue-3192e71-duplicate-keys-negative', '{"cmd":"pwd","max_output_tokens":8000.0,"max_output_tokens":9000.0,"yield_time_ms":20000.0}'],
+    ['issue-3192e71-over-safe-int-negative', '{"cmd":"pwd","max_output_tokens":9007199254740993.0,"yield_time_ms":20000.0}'],
+    ['issue-3192e71-nested-extra-negative', '{"cmd":"pwd","max_output_tokens":8000.0,"extra":{"nested":9007199254740993.0,"key":1,"key":2}}'],
+    ['issue-3192e71-missing-optional-preserved', '{"cmd":"pwd"}'],
+  ]);
+  for (const [caseId, argumentsText] of expected) {
+    const value = byId.get(caseId);
+    assert.ok(value, caseId);
+    assert.equal(value.cell.mode, 'relay');
+    assert.equal(value.expected_client.body_must['output.0.arguments'], argumentsText);
+    assert.equal(value.expected_client.body_must['output.0.type'], 'function_call');
+    if (caseId !== 'issue-3192e71-codex-integer-positive') {
+      assert.equal(value.tool_followup, undefined);
+      assert.equal(value.turns, undefined);
+    }
+  }
+  const positive = byId.get('issue-3192e71-codex-integer-positive');
+  assert.equal(positive.tool_followup.consumer, 'codex-real-exec');
+  assert.deepEqual(positive.tool_followup.authorized_commands, ['pwd']);
+  assert.equal(positive.cell.transport, 'sse');
+  assert.equal(positive.client_request.body.stream, true);
+  assert.equal(positive.expected_provider.body_must.stream, true);
+  assert.equal(positive.upstream_response.mode, 'sse');
+  assert.equal(positive.turns[1].client_request.body.stream, true);
+  assert.equal(positive.turns[1].upstream_response.mode, 'sse');
+  const singular = byId.get('issue-57c0176-singular-tool-call-text');
+  assert.equal(singular.cell.mode, 'relay');
+  assert.equal(singular.tool_followup, undefined);
+  assert.equal(singular.expected_client.body_must['output.0.type'], 'message');
+  assert.equal(singular.expected_client.body_must['output.length'], 1);
+});
+
+test('Codex replay mutations cannot weaken raw argument or execution authority contracts', () => {
+  const mutations = [
+    {
+      name: 'fractional positive',
+      caseId: 'issue-3192e71-codex-integer-positive',
+      mutate(value) {
+        upstreamToolCall(value.upstream_response).function.arguments =
+          '{"cmd":"pwd","max_output_tokens":8000.5,"yield_time_ms":20000.0}';
+      },
+      expected: /upstream exec_command call must preserve/u,
+    },
+    {
+      name: 'duplicate key removed',
+      caseId: 'issue-3192e71-duplicate-keys-negative',
+      mutate(value) {
+        value.upstream_response.body.choices[0].message.tool_calls[0].function.arguments =
+          '{"cmd":"pwd","max_output_tokens":9000.0,"yield_time_ms":20000.0}';
+      },
+      expected: /upstream exec_command call must preserve/u,
+    },
+    {
+      name: 'oversized value made safe',
+      caseId: 'issue-3192e71-over-safe-int-negative',
+      mutate(value) {
+        value.upstream_response.body.choices[0].message.tool_calls[0].function.arguments =
+          '{"cmd":"pwd","max_output_tokens":8000.0,"yield_time_ms":20000.0}';
+      },
+      expected: /upstream exec_command call must preserve/u,
+    },
+    {
+      name: 'nested extras removed',
+      caseId: 'issue-3192e71-nested-extra-negative',
+      mutate(value) {
+        value.upstream_response.body.choices[0].message.tool_calls[0].function.arguments =
+          '{"cmd":"pwd","max_output_tokens":8000.0}';
+      },
+      expected: /upstream exec_command call must preserve/u,
+    },
+    {
+      name: 'missing option injected',
+      caseId: 'issue-3192e71-missing-optional-preserved',
+      mutate(value) {
+        value.upstream_response.body.choices[0].message.tool_calls[0].function.arguments =
+          '{"cmd":"pwd","max_output_tokens":8000.0}';
+      },
+      expected: /upstream exec_command call must preserve/u,
+    },
+    {
+      name: 'user schema canonicalized',
+      caseId: 'issue-3192e71-user-schema-negative',
+      mutate(value) {
+        value.client_request.body.tools[0].description =
+          'Runs a command in a PTY, returning output or a session ID for ongoing interaction.';
+      },
+      expected: /user-schema-negative must use description/u,
+    },
+    {
+      name: 'negative followup added',
+      caseId: 'issue-3192e71-fractional-negative',
+      mutate(value) {
+        value.tool_followup = {
+          consumer: 'codex-real-exec',
+          side_effect: 'read-only-command',
+          authorized_commands: ['pwd'],
+          expected_call_id: 'call_frac_1',
+          assert_no_synthesized_tool_result: true,
+          assert_declared_tool_binding_only: true,
+          assert_tool_executed_once: true,
+        };
+      },
+      expected: /negative cases may not declare tool_followup/u,
+    },
+    {
+      name: 'singular text promoted',
+      caseId: 'issue-57c0176-singular-tool-call-text',
+      mutate(value) {
+        value.upstream_response.body.choices[0].message.tool_calls = [{
+          id: 'call_synthetic',
+          type: 'function',
+          function: { name: 'exec', arguments: '{"input":"pwd"}' },
+        }];
+      },
+      expected: /singular-text upstream response must contain only/u,
+    },
+  ];
+  for (const mutation of mutations) {
+    const value = realCase(mutation.caseId);
+    mutation.mutate(value);
+    withFixture(
+      { [mutation.caseId]: value },
+      validManifest([mutation.caseId]),
+      (root) => assert.match(findingsOf(root), mutation.expected, mutation.name),
+    );
   }
 });
 
