@@ -152,7 +152,19 @@ jobs:
       - name: Install built V3 CLI shim
         if: needs.scope.outputs.v3_build == 'true'
         run: npm run fix:cli-shim
+      - name: Prepare pinned Codex consumer
+        if: needs.scope.outputs.v3_build == 'true'
+        run: |
+          npm install --prefix "$RUNNER_TEMP/rcc-codex-consumer" \
+            --no-save --no-package-lock --no-audit --no-fund \
+            "@openai/codex@0.163.0-alpha.10.2"
+          echo "CODEX_CLI_PATH=$RUNNER_TEMP/rcc-codex-consumer/node_modules/.bin/codex" >> "$GITHUB_ENV"
+      - name: Verify pinned Codex consumer prerequisite
+        if: needs.scope.outputs.v3_build == 'true'
+        run: |
+          "$CODEX_CLI_PATH" --version
       - name: Installed V3 protocol live-mock matrix
+        id: v3_protocol_matrix
         if: needs.scope.outputs.v3_build == 'true'
         run: |
           node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs \
@@ -160,6 +172,13 @@ jobs:
             --binary-kind installed \
             --evidence "$RUNNER_TEMP/v3-installed-protocol-matrix" \
             --allow-capability-skips
+      - name: Upload V3 protocol matrix evidence
+        if: ${{ !cancelled() && (steps.v3_protocol_matrix.outcome == 'success' || steps.v3_protocol_matrix.outcome == 'failure') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: v3-installed-protocol-matrix
+          path: ${{ runner.temp }}/v3-installed-protocol-matrix
+          if-no-files-found: warn
       - name: Run host tests after install
         if: needs.scope.outputs.v3_build == 'true'
         run: |
