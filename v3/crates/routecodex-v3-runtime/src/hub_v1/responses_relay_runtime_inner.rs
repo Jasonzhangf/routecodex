@@ -49,6 +49,25 @@ fn construct_responses_relay_transport_request(
         .map_err(V3ResponsesRelayRuntimeError::Target)
 }
 
+fn build_v3_responses_relay_exhaustion_observability(
+    exhaustion: &routecodex_v3_target::V3TargetExhaustion,
+    transport_intent: V3HubTransportIntent,
+    attempts: usize,
+) -> V3RuntimeObservability {
+    V3RuntimeObservability {
+        entry_protocol: "responses".to_string(),
+        execution_mode: "relay".to_string(),
+        transport: v3_transport_intent_label(transport_intent).to_string(),
+        routing_group_id: Some(exhaustion.route.routing_group_id.clone()),
+        route_classification_reason: Some(exhaustion.route.route_classification_reason.clone()),
+        pool_id: Some(exhaustion.route.pool_id.clone()),
+        response_status: Some("error".to_string()),
+        attempts: Some(attempts),
+        unavailable_candidates: exhaustion.attempted_candidates.clone(),
+        ..V3RuntimeObservability::default()
+    }
+}
+
 // Construct the large Relay state machine outside the caller's poll frame.
 // The owner returns only the heap pointer to every caller, including dry-run.
 #[inline(never)]
@@ -286,7 +305,11 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                         ),
                         provider_id: "none".to_string(),
                         source_stage: "V3Target10ConcreteProviderSelected",
-                        observability: None,
+                        observability: Some(build_v3_responses_relay_exhaustion_observability(
+                            &exhaustion,
+                            client_response_transport_intent,
+                            observability_accumulator.attempts(),
+                        )),
                         terminal_projection: None,
                         terminal_disposition: None,
                         error_operator_fault: None,
@@ -457,7 +480,11 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
                             ),
                             provider_id: "none".to_string(),
                             source_stage: "V3Target10ConcreteProviderSelected",
-                            observability: None,
+                            observability: Some(build_v3_responses_relay_exhaustion_observability(
+                                &exhaustion,
+                                client_response_transport_intent,
+                                attempt_budget.transport_attempts(),
+                            )),
                             terminal_projection: None,
                             terminal_disposition: None,
                             error_operator_fault: None,
