@@ -344,6 +344,13 @@ impl NamespaceToolIdentityRegistry {
     /// Plain names reserve their addresses. Colliding namespace identities get
     /// unique names; every projection uses this same deterministic binding.
     pub fn bind_wire_names(&mut self, protocol: &str) {
+        // Target name domain: OpenAI Chat hashes to 64 characters; Anthropic
+        // rejects dotted names and allows at most 128 characters.
+        let limit = match protocol {
+            "openai-chat" => 64,
+            "anthropic" => 128,
+            _ => usize::MAX,
+        };
         let candidate = |identity: &NamespaceToolIdentity| {
             let name = if identity.is_namespaced() {
                 namespace_wire_name(&identity.namespace_segments, &identity.leaf_name)
@@ -352,6 +359,8 @@ impl NamespaceToolIdentityRegistry {
             };
             if protocol == "openai-chat" {
                 openai_chat_namespace_wire_name(&name)
+            } else if protocol == "anthropic" {
+                truncate_wire_name(&anthropic_wire_name(&name), limit)
             } else {
                 name
             }
@@ -367,13 +376,17 @@ impl NamespaceToolIdentityRegistry {
             let name = if assigned.insert(base.clone()) {
                 base
             } else {
-                let head = openai_chat_namespace_wire_name(&base);
+                let head = match protocol {
+                    "openai-chat" => openai_chat_namespace_wire_name(&base),
+                    "anthropic" => truncate_wire_name(&anthropic_wire_name(&base), limit),
+                    _ => base.clone(),
+                };
                 let mut index = 1;
                 loop {
                     let suffix = format!("_{index}");
                     let prefix: String = head
                         .chars()
-                        .take(64usize.saturating_sub(suffix.len()))
+                        .take(limit.saturating_sub(suffix.len()))
                         .collect();
                     let name = format!("{prefix}{suffix}");
                     if used.insert(name.clone()) {
@@ -670,6 +683,17 @@ fn set_wire_name(tool: &mut Value, name: &str) {
 fn namespace_wire_name(namespace_segments: &[String], leaf_name: &str) -> String {
     let qualified_namespace = namespace_segments.join("__");
     format!("{qualified_namespace}__{leaf_name}")
+}
+
+/// Anthropic tool names reject dots; the protected underscore form keeps the
+/// original client path visually readable and stays inside the provider
+/// name domain whenever the source name is otherwise legal.
+fn anthropic_wire_name(name: &str) -> String {
+    name.replace('.', "__")
+}
+
+fn truncate_wire_name(name: &str, limit: usize) -> String {
+    name.chars().take(limit).collect()
 }
 
 #[cfg(test)]
@@ -983,6 +1007,110 @@ mod tests {
                 .filter(|candidate| candidate["type"] == "tool_search")
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn bug4beffbf_anthropic_dotted_flat_custom_is_rewritten_and_restored() {
+        let registry = NamespaceToolIdentityRegistry::from_request(
+            &json!({
+                "tools":[{"type":"custom","name":"functions.exec","format":{"type":"text"}}],
+                "input":[
+                    {"type":"message","role":"user","content":"calculate"},
+                    {"type":"custom_tool_call","call_id":"call_dotted","name":"functions.exec","input":"1+1"},
+                    {"type":"custom_tool_call_output","call_id":"call_dotted","output":"2"}
+                ]
+            }),
+            "anthropic",
+        )
+        .unwrap();
+        let identity = registry.identities().next().unwrap();
+        assert_eq!(identity.actual_wire_name, "functions__exec");
+        assert_eq!(identity.client_path(), "functions.exec");
+        assert_eq!(
+            registry.restore_identities().get("functions__exec"),
+            Some(&("".to_string(), "functions.exec".to_string()))
+        );
+        assert_eq!(
+            registry.wire_name_for_client(None, "functions.exec", ToolKind::Custom),
+            Some("functions__exec")
+        );
+    }
+
+    #[test]
+    fn bug4beffbf_anthropic_flat_collision_gets_deterministic_unique_aliases() {
+        let registry = NamespaceToolIdentityRegistry::from_request(
+            &json!({
+                "tools":[
+                    {"type":"custom","name":"functions.exec","format":{"type":"text"}},
+                    {"type":"custom","name":"functions__exec","format":{"type":"text"}}
+                ]
+            }),
+            "anthropic",
+        )
+        .unwrap();
+        let names: Vec<_> = registry
+            .identities()
+            .map(|identity| identity.actual_wire_name.clone())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["functions__exec".to_string(), "functions__exec_1".to_string()],
+            "declaration order must choose the unchanged candidate first, then a deterministic suffix"
+        );
+        assert_eq!(registry.restore_identities().len(), 2);
+    }
+
+    #[test]
+    fn bug4beffbf_anthropic_long_shared_prefix_stays_under_provider_limit() {
+        let long_name = format!("{}{}", "shared.prefix.", "x".repeat(60));
+        let underscore_twin = format!("{}{}", "shared__prefix__", "x".repeat(60));
+        let registry = NamespaceToolIdentityRegistry::from_request(
+            &json!({"tools":[
+                {"type":"custom","name":long_name,"format":{"type":"text"}},
+                {"type":"custom","name":underscore_twin,"format":{"type":"text"}}
+            ]}),
+            "anthropic",
+        )
+        .unwrap();
+        let names: Vec<_> = registry
+            .identities()
+            .map(|identity| identity.actual_wire_name.clone())
+            .collect();
+        assert!(names.iter().all(|name| name.chars().count() <= 128));
+        assert_eq!(
+            names
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            2,
+            "long shared-prefix tools must stay distinct"
+        );
+        assert!(names.iter().any(|name| name.contains("shared__prefix__")));
+        assert!(names.iter().any(|name| name.ends_with("_1")));
+    }
+
+    #[test]
+    fn bug4beffbf_anthropic_repeated_binding_is_deterministic() {
+        let tools = [
+            json!({"type":"custom","name":"functions.exec","format":{"type":"text"}}),
+            json!({"type":"custom","name":"functions__exec","format":{"type":"text"}}),
+        ];
+        let first = NamespaceToolIdentityRegistry::from_tools(&tools).unwrap();
+        let mut first = first;
+        first.bind_wire_names("anthropic");
+        let second = NamespaceToolIdentityRegistry::from_tools(&tools).unwrap();
+        let mut second = second;
+        second.bind_wire_names("anthropic");
+        assert_eq!(
+            first
+                .identities()
+                .map(|identity| identity.actual_wire_name.clone())
+                .collect::<Vec<_>>(),
+            second
+                .identities()
+                .map(|identity| identity.actual_wire_name.clone())
+                .collect::<Vec<_>>()
         );
     }
 }
