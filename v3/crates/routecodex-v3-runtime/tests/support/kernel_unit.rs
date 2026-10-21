@@ -735,7 +735,7 @@ async fn direct_sse_strips_encrypted_content_when_retain_false() {
     let observation = V3RuntimeStreamObservation::default();
     let runtime_timing = V3RuntimeTimingState::start();
     let source = Box::pin(stream::iter(vec![Ok(
-        b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"rsn_CIPHER\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"plain\"}]}}\n\n".to_vec(),
+        b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"411bd3dd-47a6-49c0-8eef-6a826f349bf6-0\",\"metadata\":{\"encrypted_content\":\"113833ee-native-cipher\"},\"summary\":[{\"type\":\"summary_text\",\"text\":\"plain\"}]}}\n\n".to_vec(),
     )]));
     let mut observed = wrap_direct_sse_provider_event_json_observation_stream(
         V3ProviderAttemptSseStream::new(source),
@@ -748,8 +748,12 @@ async fn direct_sse_strips_encrypted_content_when_retain_false() {
     let first = observed.next().await.unwrap().unwrap();
     let text = String::from_utf8_lossy(&first);
     assert!(
-        !text.contains("rsn_CIPHER"),
-        "retain=false 必须剥离密文: {text}"
+        !text.contains("411bd3dd-47a6-49c0-8eef-6a826f349bf6-0"),
+        "retain=false 必须剥离 UUID-shaped 密文: {text}"
+    );
+    assert!(
+        !text.contains("113833ee-native-cipher"),
+        "retain=false 必须递归剥离 opaque 密文: {text}"
     );
     assert!(text.contains("plain"), "明文 summary 必须保留: {text}");
     assert!(
@@ -929,7 +933,7 @@ async fn direct_json_response_strips_encrypted_content_for_multi_provider_route(
                     name: "content-type".to_string(),
                     value: b"application/json".to_vec(),
                 }],
-                br#"{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"rsn_MULTI","summary":[{"type":"summary_text","text":"plain"}]}]}"#.to_vec(),
+                br#"{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"411bd3dd-47a6-49c0-8eef-6a826f349bf6-0","metadata":{"encrypted_content":"113833ee-native-cipher"},"summary":[{"type":"summary_text","text":"plain"}]}]}"#.to_vec(),
             ))
         }
     }
@@ -957,8 +961,14 @@ async fn direct_json_response_strips_encrypted_content_for_multi_provider_route(
     match output.client_payload.body {
         V3ClientBody::Json(body) => {
             assert!(
-                !body.to_string().contains("rsn_MULTI"),
-                "多 provider 场景响应密文必须剥离: {body}"
+                !body
+                    .to_string()
+                    .contains("411bd3dd-47a6-49c0-8eef-6a826f349bf6-0"),
+                "多 provider 场景 UUID-shaped 密文必须剥离: {body}"
+            );
+            assert!(
+                !body.to_string().contains("113833ee-native-cipher"),
+                "多 provider 场景 opaque 密文必须递归剥离: {body}"
             );
             assert_eq!(body["output"][0]["summary"][0]["text"], "plain");
         }

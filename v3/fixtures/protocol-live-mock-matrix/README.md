@@ -19,6 +19,34 @@ fixture, and independently written expected values.
   signatures, usage/terminal state, provider error exhaustion, and unregistered
   field continuation/no control leakage.
 
+## Issue regressions
+
+Issue `fe1ec4b` has three public-listener cases:
+
+```text
+fe1ec4b-responses-ciphertext-json-sse-two-turn
+fe1ec4b-responses-anthropic-signature-json
+fe1ec4b-responses-anthropic-signature-sse
+```
+
+The first case starts a task-owned loopback listener with a two-provider
+Responses pool. Turn one verifies JSON output does not expose UUID-shaped or
+opaque reasoning ciphertext. Turn two replays that history over SSE and checks
+both provider history stripping and the client stream. The two Anthropic cases
+are typed-source counterexamples: their JSON and SSE reasoning signatures must
+survive Responses projection.
+
+Run one case without installing or restarting the user runtime:
+
+```bash
+node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs \
+  --case fe1ec4b-responses-ciphertext-json-sse-two-turn \
+  --evidence /tmp/fe1ec4b-public-entry
+```
+
+The harness writes the complete client request/response and the mock provider
+request plus exact response bytes under the evidence directory.
+
 ## Expected-value policy
 
 Expected values are written from current RCC requirements v6, the current

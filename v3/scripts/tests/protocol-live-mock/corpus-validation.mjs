@@ -419,6 +419,7 @@ function validateTurns(relative, value, findings) {
       seenIds.add(turn.turn_id);
     }
     const hasRequest = isObject(turn.client_request);
+    const hasProvider = isObject(turn.expected_provider);
     const hasProviderExact = isObject(turn.expected_provider_exact);
     const hasClientMust = isObject(turn.expected_client_must);
     if (index === 0 && hasProviderExact && typeof turn.expected_provider_exact === 'object') {
@@ -428,10 +429,14 @@ function validateTurns(relative, value, findings) {
       fail('turns[0].upstream_response must not redefine the top-level first upstream script');
     }
     if (index > 0 && !hasRequest) fail(`turns[${index}] must declare client_request`);
-    if (index > 0 && !hasRequest && !hasProviderExact && !hasClientMust) {
+    if (index > 0 && !hasRequest && !hasProvider && !hasProviderExact && !hasClientMust) {
       fail(`turns[${index}] must assert a follow-up provider shape or client output`);
     }
+    if (index > 0 && hasProvider && hasProviderExact) {
+      fail(`turns[${index}] must not declare both expected_provider and expected_provider_exact`);
+    }
     if (hasRequest) validateClientRequest(`${relative}: turns[${index}].client_request`, turn.client_request, findings);
+    if (hasProvider) validateExpectedProvider(`${relative}: turns[${index}].expected_provider`, turn.expected_provider, findings);
     if (isObject(turn.upstream_response)) validateUpstream(relative, turn.upstream_response, findings, `turns[${index}].upstream_response`);
   }
 }

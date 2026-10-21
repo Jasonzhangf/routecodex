@@ -1,0 +1,468 @@
+{
+  "schema_version": 1,
+  "case_id": "fe1ec4b-responses-ciphertext-json-sse-two-turn",
+  "cell": {
+    "entry_protocol": "responses",
+    "provider_protocol": "responses",
+    "transport": "json",
+    "mode": "direct"
+  },
+  "public_entry": {
+    "kind": "http-listener",
+    "consumer": "node-http",
+    "endpoint": "/v1/responses",
+    "isolation": "task-owned-loopback-listener",
+    "turn_transports": ["json", "sse"]
+  },
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "model": "mock.responses-model",
+      "input": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "start fe1ec4b ciphertext replay"
+            }
+          ]
+        }
+      ],
+      "include": ["reasoning.encrypted_content"],
+      "stream": false
+    }
+  },
+  "runtime_setup": {
+    "provider_id": "mock-responses-a",
+    "model": "mock.responses-model",
+    "wire_model": "responses-model",
+    "candidate_ids": [
+      "mock-responses-a/mock.responses-model",
+      "mock-responses-b/mock.responses-model"
+    ]
+  },
+  "expected_provider": {
+    "paths": ["/v1/responses"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "model": "responses-model",
+      "input.0.content.0.text": "start fe1ec4b ciphertext replay",
+      "include.0": "reasoning.encrypted_content",
+      "stream": false
+    },
+    "body_must_not": [
+      "routecodex_internal",
+      "metadata_center",
+      "debug_snapshot"
+    ],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "responses",
+    "mode": "json",
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "id": "resp_fe1ec4b_json",
+      "object": "response",
+      "status": "completed",
+      "model": "responses-model",
+      "output": [
+        {
+          "id": "rs_fe1ec4b_uuid",
+          "type": "reasoning",
+          "summary": [
+            {
+              "type": "summary_text",
+              "text": "private uuid plan"
+            }
+          ],
+          "encrypted_content": "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0"
+        },
+        {
+          "id": "rs_fe1ec4b_opaque",
+          "type": "reasoning",
+          "summary": [
+            {
+              "type": "summary_text",
+              "text": "private opaque plan"
+            }
+          ],
+          "encrypted_content": "113833ee-native-cipher"
+        },
+        {
+          "id": "msg_fe1ec4b_json",
+          "type": "message",
+          "role": "assistant",
+          "status": "completed",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "json answer",
+              "annotations": []
+            }
+          ]
+        },
+        {
+          "type": "function_call_output",
+          "call_id": "call_fe1ec4b_json",
+          "output": {
+            "receipt": "business tool output preserved",
+            "encrypted_content": "tool-business-cipher-json",
+            "nested": {
+              "opaque": "keep-json-business-value"
+            }
+          }
+        }
+      ],
+      "usage": {
+        "input_tokens": 11,
+        "output_tokens": 4,
+        "total_tokens": 15
+      }
+    }
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {
+      "status": "completed",
+      "output.0.type": "reasoning",
+      "output.0.summary.0.text": "private uuid plan",
+      "output.1.type": "reasoning",
+      "output.1.summary.0.text": "private opaque plan",
+      "output.2.content.0.text": "json answer",
+      "output.3.type": "function_call_output",
+      "output.3.call_id": "call_fe1ec4b_json",
+      "output.3.output.receipt": "business tool output preserved",
+      "output.3.output.encrypted_content": "tool-business-cipher-json",
+      "output.3.output.nested.opaque": "keep-json-business-value"
+    },
+    "body_must_not": [
+      "output.0.encrypted_content",
+      "output.1.encrypted_content",
+      "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0",
+      "113833ee-native-cipher",
+      "provider_error",
+      "internal_error",
+      "routecodex_internal",
+      "metadata_center"
+    ],
+    "semantic_terminal_required": true
+  },
+  "turns": [
+    {
+      "turn_id": "fe1ec4b-json-response",
+      "expected_client_must": {
+        "status": "completed",
+        "output.2.content.0.text": "json answer"
+      }
+    },
+    {
+      "turn_id": "fe1ec4b-sse-history-replay",
+      "client_request": {
+        "method": "POST",
+        "path": "/v1/responses",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": "mock.responses-model",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "start fe1ec4b ciphertext replay"
+                }
+              ]
+            },
+            {
+              "id": "rs_fe1ec4b_uuid",
+              "type": "reasoning",
+              "summary": [
+                {
+                  "type": "summary_text",
+                  "text": "private uuid plan"
+                }
+              ],
+              "encrypted_content": "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0"
+            },
+            {
+              "id": "rs_fe1ec4b_opaque",
+              "type": "reasoning",
+              "summary": [
+                {
+                  "type": "summary_text",
+                  "text": "private opaque plan"
+                }
+              ],
+              "encrypted_content": "113833ee-native-cipher"
+            },
+            {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "json answer"
+                }
+              ]
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_fe1ec4b_json",
+              "output": {
+                "receipt": "business tool output preserved",
+                "encrypted_content": "tool-business-cipher-json",
+                "nested": {
+                  "opaque": "keep-json-business-value"
+                }
+              }
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "continue fe1ec4b over SSE"
+                }
+              ]
+            }
+          ],
+          "include": ["reasoning.encrypted_content"],
+          "stream": true
+        }
+      },
+      "expected_provider": {
+        "paths": ["/v1/responses"],
+        "method": "POST",
+        "auth_required": true,
+        "body_must": {
+          "model": "responses-model",
+          "input.0.content.0.text": "start fe1ec4b ciphertext replay",
+          "input.1.type": "reasoning",
+          "input.1.summary.0.text": "private uuid plan",
+          "input.2.type": "reasoning",
+          "input.2.summary.0.text": "private opaque plan",
+          "input.3.role": "assistant",
+          "input.4.type": "function_call_output",
+          "input.4.call_id": "call_fe1ec4b_json",
+          "input.4.output.receipt": "business tool output preserved",
+          "input.4.output.encrypted_content": "tool-business-cipher-json",
+          "input.4.output.nested.opaque": "keep-json-business-value",
+          "input.5.content.0.text": "continue fe1ec4b over SSE",
+          "stream": true
+        },
+        "body_must_not": [
+          "input.1.encrypted_content",
+          "input.2.encrypted_content",
+          "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0",
+          "113833ee-native-cipher",
+          "routecodex_internal",
+          "metadata_center",
+          "debug_snapshot"
+        ],
+        "exact": null
+      },
+      "upstream_response": {
+        "protocol": "responses",
+        "mode": "sse",
+        "status": 200,
+        "content_type": "text/event-stream",
+        "sse_events": [
+          {
+            "event": "response.created",
+            "data": {
+              "type": "response.created",
+              "response": {
+                "id": "resp_fe1ec4b_sse",
+                "status": "in_progress",
+                "output": []
+              }
+            }
+          },
+          {
+            "event": "response.output_item.done",
+            "data": {
+              "type": "response.output_item.done",
+              "output_index": 0,
+              "item": {
+                "id": "rs_fe1ec4b_sse_uuid",
+                "type": "reasoning",
+                "summary": [
+                  {
+                    "type": "summary_text",
+                    "text": "sse uuid plan"
+                  }
+                ],
+                "encrypted_content": "4228e7a1-8e3e-47f0-b32e-866459cdfb28-0"
+              }
+            }
+          },
+          {
+            "event": "response.output_item.done",
+            "data": {
+              "type": "response.output_item.done",
+              "output_index": 1,
+              "item": {
+                "id": "rs_fe1ec4b_sse_opaque",
+                "type": "reasoning",
+                "summary": [
+                  {
+                    "type": "summary_text",
+                    "text": "sse opaque plan"
+                  }
+                ],
+                "encrypted_content": "opaque-sse-fe1ec4b-cipher"
+              }
+            }
+          },
+          {
+            "event": "response.output_item.done",
+            "data": {
+              "type": "response.output_item.done",
+              "output_index": 3,
+              "item": {
+                "type": "function_call_output",
+                "call_id": "call_fe1ec4b_sse",
+                "output": {
+                  "receipt": "business tool output preserved over SSE",
+                  "encrypted_content": "tool-business-cipher-sse",
+                  "nested": {
+                    "opaque": "keep-sse-business-value"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "event": "response.output_text.delta",
+            "data": {
+              "type": "response.output_text.delta",
+              "output_index": 2,
+              "content_index": 0,
+              "item_id": "msg_fe1ec4b_sse",
+              "delta": "sse answer"
+            }
+          },
+          {
+            "event": "response.completed",
+            "data": {
+              "type": "response.completed",
+              "response": {
+                "id": "resp_fe1ec4b_sse",
+                "status": "completed",
+                "output": [
+                  {
+                    "id": "rs_fe1ec4b_sse_uuid",
+                    "type": "reasoning",
+                    "summary": [
+                      {
+                        "type": "summary_text",
+                        "text": "sse uuid plan"
+                      }
+                    ],
+                    "encrypted_content": "4228e7a1-8e3e-47f0-b32e-866459cdfb28-0"
+                  },
+                  {
+                    "id": "rs_fe1ec4b_sse_opaque",
+                    "type": "reasoning",
+                    "summary": [
+                      {
+                        "type": "summary_text",
+                        "text": "sse opaque plan"
+                      }
+                    ],
+                    "encrypted_content": "opaque-sse-fe1ec4b-cipher"
+                  },
+                  {
+                    "id": "msg_fe1ec4b_sse",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [
+                      {
+                        "type": "output_text",
+                        "text": "sse answer",
+                        "annotations": []
+                      }
+                    ]
+                  },
+                  {
+                    "type": "function_call_output",
+                    "call_id": "call_fe1ec4b_sse",
+                    "output": {
+                      "receipt": "business tool output preserved over SSE",
+                      "encrypted_content": "tool-business-cipher-sse",
+                      "nested": {
+                        "opaque": "keep-sse-business-value"
+                      }
+                    }
+                  }
+                ],
+                "usage": {
+                  "input_tokens": 21,
+                  "output_tokens": 5,
+                  "total_tokens": 26
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expected_client_contract": {
+        "transport": "complete",
+        "status": 200,
+        "body_must_not": [
+          "output_items.0.encrypted_content",
+          "output_items.1.encrypted_content",
+          "4228e7a1-8e3e-47f0-b32e-866459cdfb28-0",
+          "opaque-sse-fe1ec4b-cipher",
+          "provider_error",
+          "internal_error",
+          "routecodex_internal",
+          "metadata_center"
+        ],
+        "semantic_terminal_required": true
+      },
+      "expected_client_must": {
+        "status": "completed",
+        "text": "sse answer",
+        "output_items.0.type": "reasoning",
+        "output_items.0.summary.0.text": "sse uuid plan",
+        "output_items.1.type": "reasoning",
+        "output_items.1.summary.0.text": "sse opaque plan",
+        "output_items.2.type": "message",
+        "output_items.3.type": "function_call_output",
+        "output_items.3.call_id": "call_fe1ec4b_sse",
+        "output_items.3.output.receipt": "business tool output preserved over SSE",
+        "output_items.3.output.encrypted_content": "tool-business-cipher-sse",
+        "output_items.3.output.nested.opaque": "keep-sse-business-value"
+      }
+    }
+  ],
+  "assertions": {
+    "provider_attempt_count": 1,
+    "probe_attempts_may_occur": true,
+    "no_control_leakage": true
+  },
+  "source": {
+    "files": [
+      "v3/crates/routecodex-v3-provider-responses/src/wire.rs",
+      "v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs"
+    ],
+    "tests": [
+      "v3/scripts/tests/v3-protocol-live-mock-matrix.mjs::--case fe1ec4b-responses-ciphertext-json-sse-two-turn"
+    ],
+    "adaptation": "Issue-derived controlled payload. A public HTTP Responses client sends a non-official ciphertext-bearing reasoning history; the multi-provider pool must not expose fresh UUID or opaque reasoning ciphertext to the client or forward the replay ciphertext to the next provider request. Turn one is JSON and turn two is SSE."
+  },
+  "contract_differences": []
+}

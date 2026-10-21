@@ -2258,7 +2258,7 @@ mod tests {
     }
 
     #[test]
-    fn response_cipher_policy_strips_codex_cipher_but_keeps_anthropic_signature() {
+    fn response_cipher_policy_strips_all_non_tool_cipher_without_typed_anthropic_source() {
         let mut payload = json!({
             "status": "completed",
             "output": [
@@ -2276,13 +2276,33 @@ mod tests {
                 },
                 {
                     "type": "reasoning",
+                    "id": "rs_uuid",
+                    "encrypted_content": "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0",
+                    "summary": [{"type": "summary_text", "text": "uuid visible"}]
+                },
+                {
+                    "type": "reasoning",
+                    "id": "rs_opaque",
+                    "encrypted_content": "113833ee-native-cipher",
+                    "summary": [{"type": "summary_text", "text": "opaque visible"}]
+                },
+                {
+                    "type": "reasoning",
                     "id": "rs_sig",
                     "encrypted_content": "anthropic-signature-value",
                     "summary": [{"type": "summary_text", "text": "signed"}]
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "encrypted_content": "tool-output-business-value",
+                    "output": [{
+                        "encrypted_content": "nested-tool-output-business-value"
+                    }]
                 }
             ]
         });
-        apply_v3_response_cipher_policy(&mut payload, false);
+        apply_v3_response_cipher_policy(&mut payload, false, false);
         assert!(
             !payload.to_string().contains("rsn_CIPHERTEXT"),
             "rsn_ cipher must be stripped"
@@ -2291,19 +2311,48 @@ mod tests {
             !payload.to_string().contains("gAAAA_cipher"),
             "gAAAA cipher must be stripped"
         );
-        assert_eq!(
-            payload["output"][2]["encrypted_content"], "anthropic-signature-value",
-            "non-rsn_/gAAAA signature carrier is not Codex cipher and must be kept"
+        assert!(
+            !payload
+                .to_string()
+                .contains("411bd3dd-47a6-49c0-8eef-6a826f349bf6-0"),
+            "UUID-shaped cipher must be stripped"
+        );
+        assert!(
+            !payload.to_string().contains("113833ee-native-cipher"),
+            "opaque cipher must be stripped"
+        );
+        assert!(
+            !payload.to_string().contains("anthropic-signature-value"),
+            "cipher shape must not infer an Anthropic source"
         );
         assert_eq!(payload["output"][0]["summary"][0]["text"], "plain");
         assert_eq!(payload["output"][1]["content"][0]["text"], "visible");
+        assert_eq!(payload["output"][2]["summary"][0]["text"], "uuid visible");
+        assert_eq!(payload["output"][3]["summary"][0]["text"], "opaque visible");
+        assert_eq!(
+            payload["output"][5]["encrypted_content"], "tool-output-business-value",
+            "function_call_output is business data and must be preserved"
+        );
+        assert_eq!(
+            payload["output"][5]["output"][0]["encrypted_content"],
+            "nested-tool-output-business-value",
+            "the complete function_call_output business subtree must be preserved"
+        );
 
         let mut retained =
             json!({"output": [{"type": "reasoning", "encrypted_content": "rsn_KEEP"}]});
-        apply_v3_response_cipher_policy(&mut retained, true);
+        apply_v3_response_cipher_policy(&mut retained, true, false);
         assert_eq!(
             retained["output"][0]["encrypted_content"], "rsn_KEEP",
             "retain=true must keep cipher verbatim"
+        );
+
+        let mut anthropic =
+            json!({"output": [{"type": "reasoning", "encrypted_content": "typed-signature"}]});
+        apply_v3_response_cipher_policy(&mut anthropic, false, true);
+        assert_eq!(
+            anthropic["output"][0]["encrypted_content"], "typed-signature",
+            "typed Anthropic source must keep its signature verbatim"
         );
     }
 

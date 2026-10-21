@@ -2024,6 +2024,9 @@ features:
   - Structured Anthropic system blocks normalize into request.anthropic_system_blocks; Anthropic outbound alone may reconstruct system, while Responses/OpenAI Chat/Gemini fail explicitly instead of flattening
     block-local cache semantics.
   - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before response governance.
+  - Responses response ciphertext policy removes encrypted_content from every non-tool business item when the client must not retain provider cipher, while preserving plain reasoning content and the complete function_call_output business subtree.
+  - Anthropic signature preservation is driven only by the typed sourceProviderProtocol witness from the actual provider wire; ciphertext text shape never establishes provider provenance.
+  - A legal Responses function_call_output output item in provider JSON or SSE remains business data and does not become a malformed provider event or candidate-switch trigger.
   - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
   - Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect.
   - Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire.
@@ -2098,6 +2101,9 @@ features:
   - responses_inbound_does_not_rewrite_string_session_id_schema
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
+  - fe1ec4b-responses-ciphertext-json-sse-two-turn
+  - fe1ec4b-responses-anthropic-signature-json
+  - fe1ec4b-responses-anthropic-signature-sse
   - responses_function_call_history_keeps_mcp_namespace_on_openai_chat_provider_wire
   - native_tool_search_first_discovery_round_trip_through_anthropic
   - non_client_tool_search_controls_preserve_function_call_json_and_sse
@@ -2112,6 +2118,8 @@ features:
   required_gates:
   - npm run render:v3-protocol-semantic-field-matrix
   - npm run test:v3-protocol-conversion-field-parity
+  - npm run test:v3-response-cipher-source-provenance
+  - npm run test:v3-fe1ec4b-response-cipher-public
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_relay_json_projects_legacy_output_text_items_without_losing_fields
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_cross_protocol_public -- --nocapture
   - CARGO_NET_OFFLINE=true cargo test --locked --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox is_error -- --nocapture

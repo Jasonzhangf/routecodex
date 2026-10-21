@@ -16,6 +16,7 @@ import {
   tempEvidenceRoot,
   TEST_PROVIDER_AUTH,
 } from './case-runner-test-support.mjs';
+import { describeTurns } from './case-contract.mjs';
 
 const caseRoot = new URL('../../../fixtures/protocol-live-mock-matrix/cases/', import.meta.url);
 test('required mode collector exception fails acceptance and preserves prior business failure', () => {
@@ -254,6 +255,52 @@ test('runCase passes a single-turn case through the supplied real HTTP adapter a
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('describeTurns accepts a later turn provider body contract', () => {
+  const fixture = {
+    client_request: { method: 'POST', path: '/v1/responses', body: {} },
+    expected_provider: {
+      paths: ['/v1/responses'],
+      method: 'POST',
+      auth_required: true,
+      body_must: { stream: false },
+      exact: null,
+    },
+    upstream_response: {
+      protocol: 'responses',
+      mode: 'json',
+      body: { status: 'completed' },
+    },
+    turns: [
+      { turn_id: 'first' },
+      {
+        turn_id: 'second',
+        client_request: { method: 'POST', path: '/v1/responses', body: { stream: true } },
+        expected_provider: {
+          paths: ['/v1/responses'],
+          method: 'POST',
+          auth_required: true,
+          body_must: { 'input.1.type': 'reasoning', stream: true },
+          body_must_not: ['input.1.encrypted_content'],
+          exact: null,
+        },
+        upstream_response: {
+          protocol: 'responses',
+          mode: 'sse',
+          sse_events: [{ event: 'response.completed', data: { type: 'response.completed', response: { status: 'completed' } } }],
+        },
+      },
+    ],
+  };
+  const turns = describeTurns(fixture);
+  assert.equal(turns[0].providerExpected.body_must.stream, false);
+  assert.deepEqual(turns[1].providerExpected.body_must, {
+    'input.1.type': 'reasoning',
+    stream: true,
+  });
+  assert.deepEqual(turns[1].providerExpected.body_must_not, ['input.1.encrypted_content']);
+  assert.equal(turns[1].upstream.mode, 'sse');
 });
 
 // ---- persisted execution-mode collector (real schema-v1 files) ----

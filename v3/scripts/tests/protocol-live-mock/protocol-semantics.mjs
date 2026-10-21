@@ -273,7 +273,19 @@ function responsesItemFromEvent(data) {
 
 function mergeResponsesItem(target, item, options = {}) {
   if (!isObject(item)) return;
-  for (const key of ['type', 'id', 'call_id', 'name', 'namespace', 'role', 'status', 'input']) {
+  for (const key of [
+    'type',
+    'id',
+    'call_id',
+    'name',
+    'namespace',
+    'role',
+    'status',
+    'input',
+    'output',
+    'encrypted_content',
+    'summary',
+  ]) {
     if (item[key] !== undefined) target[key] = item[key];
   }
   if (options.complete && item.arguments !== undefined) {
