@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync,
 } from 'node:fs';
@@ -146,6 +146,31 @@ function resolveCodexBinary(explicit) {
   const localBinary = join(homedir(), '.local/bin/codex');
   if (existsSync(localBinary)) return localBinary;
   return 'codex';
+}
+
+export const DEFAULT_CODEX_CLI_PROBE_TIMEOUT_MS = 15000;
+
+export function codexCliAvailability(explicit, { timeoutMs = DEFAULT_CODEX_CLI_PROBE_TIMEOUT_MS } = {}) {
+  const binary = resolveCodexBinary(explicit);
+  let probe;
+  try {
+    probe = spawnSync(binary, ['--version'], { encoding: 'utf8', timeout: timeoutMs });
+  } catch (error) {
+    return { available: false, binary, kind: 'probe_failed', reason: error?.message ?? String(error) };
+  }
+  if (probe.error) {
+    return {
+      available: false,
+      binary,
+      kind: probe.error.code === 'ENOENT' ? 'not_found' : 'probe_failed',
+      reason: probe.error.message ?? String(probe.error),
+    };
+  }
+  if (probe.status !== 0) {
+    const reason = probe.signal ? `signal ${probe.signal}` : `exit ${probe.status}`;
+    return { available: false, binary, kind: 'probe_failed', reason };
+  }
+  return { available: true, binary, kind: 'available' };
 }
 
 function isolatedEnvironment(codexHome) {
