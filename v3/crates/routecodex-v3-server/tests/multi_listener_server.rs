@@ -4562,7 +4562,7 @@ const DSML_ANTHROPIC_SSE: &str = concat!(
         "event: content_block_start\n",
         "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
         "event: content_block_delta\n",
-        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<thinking>internal plan\\n</｜DSML｜parameter>\\n</｜DSML｜invoke>\\n</｜DSML｜tool_calls>\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<thinking>internal plan</thinking>Visible answer.\\n\\\"</｜DSML｜parameter>\\\"\\n\\\"</｜DSML｜invoke>\\\"\\n\\\"</｜DSML｜tool_calls>\\\"\"}}\n\n",
         "event: content_block_stop\n",
         "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
         "event: message_delta\n",
@@ -5804,8 +5804,7 @@ async fn responses_relay_anthropic_dsml_complete_text_is_faithfully_returned() {
         .await
         .expect("Anthropic mock must receive provider request")
         .unwrap();
-    // The recognized thinking opener is governed under the current user policy;
-    // retain the complete body, including unrecognized DSML-like trailing text.
+    // Harvest thinking while preserving explicitly quoted marker examples.
     let response = send_result.expect("complete Anthropic text must reach the client");
     let status = response.status();
     assert_eq!(
@@ -5840,7 +5839,7 @@ async fn responses_relay_anthropic_dsml_complete_text_is_faithfully_returned() {
     );
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        text, "",
+        text, "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
         "known leading thinking content must leave visible prose: {body}"
     );
     let terminal = events
@@ -5848,7 +5847,16 @@ async fn responses_relay_anthropic_dsml_complete_text_is_faithfully_returned() {
         .find(|event| event["type"] == "response.completed")
         .expect("complete Anthropic text must project a completed business response");
     assert_eq!(terminal["response"]["status"], "completed", "{body}");
-    assert!(terminal["response"]["output"].as_array().unwrap().iter().any(|item| item["type"] == "reasoning" && item["summary"][0]["text"] == "internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>"), "{body}");
+    assert!(
+        terminal["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |item| item["type"] == "reasoning" && item["summary"][0]["text"] == "internal plan"
+            ),
+        "{body}"
+    );
 }
 
 #[tokio::test]
@@ -5919,7 +5927,7 @@ async fn responses_relay_anthropic_dsml_complete_text_does_not_attempt_fallback(
     );
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        text, "",
+        text, "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
         "known leading thinking content must leave visible prose: {body}"
     );
     let terminal = events
@@ -5927,7 +5935,16 @@ async fn responses_relay_anthropic_dsml_complete_text_does_not_attempt_fallback(
         .find(|event| event["type"] == "response.completed")
         .expect("complete Anthropic text must project a completed business response");
     assert_eq!(terminal["response"]["status"], "completed", "{body}");
-    assert!(terminal["response"]["output"].as_array().unwrap().iter().any(|item| item["type"] == "reasoning" && item["summary"][0]["text"] == "internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>"), "{body}");
+    assert!(
+        terminal["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |item| item["type"] == "reasoning" && item["summary"][0]["text"] == "internal plan"
+            ),
+        "{body}"
+    );
 }
 
 #[tokio::test]
@@ -5936,22 +5953,22 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
     std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
     let cases = [
         (
-            "<thinking>internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
+            "<thinking>internal plan\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
             true,
-            "internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
+            "internal plan\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
             "",
         ),
         ("<thinking>private</thinking>Visible answer", false, "Visible answer", "private"),
         (
-            "<thinking>private<\u{2f}thinking>Visible answer\n<\u{2f}｜DSML｜parameter>\n<\u{2f}｜DSML｜invoke>\n<\u{2f}｜DSML｜tool_calls>",
+            "<thinking>private<\u{2f}thinking>Visible answer\n\"<\u{2f}｜DSML｜parameter>\"\n\"<\u{2f}｜DSML｜invoke>\"\n\"<\u{2f}｜DSML｜tool_calls>\"",
             false,
-            "Visible answer\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
+            "Visible answer\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
             "private",
         ),
         ("Quoted \"<thinking>literal</thinking>\" text", false, "Quoted \"<thinking>literal</thinking>\" text", ""),
         ("```\n<thinking>literal</thinking>\n```", false, "```\n<thinking>literal</thinking>\n```", ""),
         ("Prefix <thinking>literal</thinking>", false, "Prefix ", "literal"),
-        ("<thinking>literal unfinished example", false, "", "literal unfinished example"),
+        ("Answer. <thinking>literal unfinished example", false, "Answer. literal unfinished example", ""),
     ];
     for (text, native_tool, expected_text, expected_reasoning) in cases {
         let (provider_base_url, mut captures, shutdown) =
@@ -6035,7 +6052,7 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
 #[tokio::test]
 async fn responses_relay_suspect_anthropic_text_is_preserved_without_reselection() {
     let _test_guard = TEST_LOCK.lock().await;
-    let literal = "<thinking>unfinished ｜DSML｜invoke";
+    let literal = "\"<thinking>unfinished ｜DSML｜invoke\"";
     let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
         StatusCode::OK,
         "text/event-stream",
@@ -6478,7 +6495,7 @@ async fn responses_relay_native_responses_null_reasoning_content_preserves_busin
                 "event: response.output_item.done\n",
                 "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"reasoning\",\"id\":\"rs_native_null_sse\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"native reasoning summary\"}],\"content\":null}}\n\n",
                 "event: response.completed\n",
-                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_native_null_sse\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_native_null_sse\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"native reasoning summary\"}],\"content\":null}]}}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_native_null_sse\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_native_null_sse\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"native reasoning summary\"}],\"content\":null},{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"native sse answer\"}]}]}}\n\n",
                 "data: [DONE]\n\n"
             )
             .as_bytes()

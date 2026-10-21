@@ -475,7 +475,7 @@ pub(crate) fn provider_response_hook_failure(
                 .as_ref()
                 .and_then(|value| value.provider_status);
             V3ResponsesRelayProviderFailure {
-                status: 599,
+                status: 502,
                 provider_status,
                 policy_error_type: "relay_unharvestable_tool_markup".into(),
                 policy_error_message: "recognized incomplete tool invocation cannot be delivered".into(),
@@ -552,7 +552,7 @@ mod relay_markup_source_tests {
                 ..Default::default()
             }),
         );
-        assert_eq!(failure.status, 599);
+        assert_eq!(failure.status, 502);
         assert_eq!(failure.provider_status, Some(201));
         assert_eq!(failure.source_stage, "V3HubRespChatProcess03Governed");
         assert_eq!(

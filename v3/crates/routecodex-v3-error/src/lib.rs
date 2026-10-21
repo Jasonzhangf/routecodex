@@ -695,6 +695,9 @@ pub struct V3Error06ClientProjected {
 }
 
 fn internal_client_status(source: &V3Error01SourceRaised) -> u16 {
+    if is_v3_recoverable_response_processing_source(source) {
+        return 502;
+    }
     match source.internal_error.as_ref().map(|error| error.lane) {
         Some(V3InternalErrorLane::Response) => 599,
         Some(V3InternalErrorLane::Request | V3InternalErrorLane::Other) => 598,
@@ -705,6 +708,32 @@ fn internal_client_status(source: &V3Error01SourceRaised) -> u16 {
         }
         None => 598,
     }
+}
+
+#[cfg(test)]
+#[test]
+fn issuee63d2f2_unharvestable_tool_is_502_while_processing_damage_stays_599() {
+    for code in [
+        V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup,
+        V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup,
+    ] {
+        let source = build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            code.registry_entry().node_id,
+            "unharvestable",
+            "recognized incomplete tool invocation",
+            code,
+        );
+        assert_eq!(internal_client_status(&source), 502);
+    }
+    let damage = build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3DirectResp14ProviderProjectionPrepared",
+        "projection_damage",
+        "genuine projection failure",
+        V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
+    );
+    assert_eq!(internal_client_status(&damage), 599);
 }
 
 fn client_error_message(source: &V3Error01SourceRaised) -> String {
