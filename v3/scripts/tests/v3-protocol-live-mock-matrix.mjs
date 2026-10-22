@@ -42,6 +42,7 @@ export function parseArgs(argv) {
     const flag = argv[index];
     if (flag === '--help' || flag === '-h') { options.help = true; continue; }
     if (flag === '--selftest') { options.selftest = true; continue; }
+    if (flag === '--allow-capability-skips') { options.allowCapabilitySkips = true; continue; }
     const name = names[flag];
     if (!name) throw new Error('unknown argument: ' + flag);
     const value = argv[++index];
@@ -60,6 +61,37 @@ export function parseArgs(argv) {
   return options;
 }
 
+const CAPABILITY_SKIP_RAW_STATUSES = new Set(['not_run', 'skipped', 'pending']);
+
+export function matrixExitCode(result, { allowCapabilitySkips = false } = {}) {
+  const summary = result?.summary ?? {};
+  const halted = result?.halt_reason !== null && result?.halt_reason !== undefined;
+  const status = halted ? 'halted' : result?.status;
+  const cleanupComplete = result?.cleanup?.complete === true;
+  if (halted) return 1;
+  if (summary.failed > 0) return 1;
+  if (summary.infra_failure > 0) return 1;
+  if (summary.runner_failures > 0) return 1;
+  if (!cleanupComplete) return 1;
+  if (!(summary.passed > 0)) return 1;
+  if (status === 'passed') return 0;
+  if (!allowCapabilitySkips) return 1;
+  let entries;
+  if (Array.isArray(result?.entries)) {
+    entries = result.entries;
+  } else {
+    if ((summary.duplicate_entries ?? 0) > 0) return 1;
+    entries = Array.isArray(result?.cases) ? result.cases : [];
+  }
+  if (entries.length === 0) return 1;
+  const isCapabilitySkip = (entry) => {
+    const rawStatus = entry?.raw_status ?? entry?.status;
+    return entry?.classification === 'capability' && CAPABILITY_SKIP_RAW_STATUSES.has(rawStatus);
+  };
+  if (!entries.some(isCapabilitySkip)) return 1;
+  return entries.every((entry) => entry?.status === 'passed' || isCapabilitySkip(entry)) ? 0 : 1;
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
   if (options.help) {
@@ -70,6 +102,7 @@ export async function main(argv = process.argv.slice(2)) {
   --binary-kind KIND          installed or candidate; override identity label for an explicit path
   --evidence PATH             Retained evidence directory; default is a new temporary directory
   --report-path PATH          Markdown report; default is evidence/baseline-report.md
+  --allow-capability-skips    Exit 0 when the only non-passed cases are capability-classified not_run
   --startup-timeout-ms N      RCC readiness deadline (default 20000)
   --request-timeout-ms N      Client request deadline (default 30000)
   --shutdown-timeout-ms N     Owned child shutdown deadline (default 8000)
@@ -335,7 +368,7 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
   writeFileSync(reportPath, renderMarkdown(result));
   console.log(JSON.stringify({ harness_id: HARNESS_ID, status: result.status,
     json_path: jsonPath, markdown_path: reportPath, summary: result.summary }, null, 2));
-  return result.status === 'passed' && result.cleanup.complete ? 0 : 1;
+  return matrixExitCode(result, { allowCapabilitySkips: options.allowCapabilitySkips });
 }
 
 // Required-case mode evidence is an acceptance gate. A mismatch or a collection
