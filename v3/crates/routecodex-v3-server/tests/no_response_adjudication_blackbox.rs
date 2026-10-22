@@ -12,10 +12,11 @@ use axum::{
     routing::post,
     Router,
 };
+use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
-use std::{sync::Arc, time::Duration};
+use std::{convert::Infallible, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -2166,6 +2167,7 @@ struct ProviderState {
     attempt_statuses: Vec<StatusCode>,
     header_captures: Option<mpsc::UnboundedSender<String>>,
     live_forward: Option<LiveForward>,
+    hold_attempt_open: bool,
 }
 
 struct LiveForward {
@@ -4852,6 +4854,15 @@ async fn controlled_upstream(
             .get(attempt)
             .copied()
             .unwrap_or_else(|| state.status_override.unwrap_or(state.status));
+        if state.hold_attempt_open {
+            let stream =
+                stream::once(async move { Ok::<_, Infallible>(wire) }).chain(stream::pending());
+            return Response::builder()
+                .status(status)
+                .header("content-type", state.content_type)
+                .body(Body::from_stream(stream))
+                .unwrap();
+        }
         return Response::builder()
             .status(status)
             .header("content-type", state.content_type)
@@ -5133,11 +5144,13 @@ struct EntryOptions {
     attempt_statuses: Vec<StatusCode>,
     auth_entries: Vec<(String, String)>,
     pin_key: Option<String>,
+    execution_mode: Option<String>,
     capture_headers: bool,
     model_key: Option<String>,
     wire_model: Option<String>,
     live_forward: Option<LiveForward>,
     two_provider_route: bool,
+    hold_attempt_open: bool,
     /// Test-only injection of the typed Chat Process refill limit.
     ///
     /// The harness default pins `Some(0)` so a test whose subject is not
@@ -5158,11 +5171,13 @@ impl Default for EntryOptions {
             attempt_statuses: Vec::new(),
             auth_entries: Vec::new(),
             pin_key: None,
+            execution_mode: None,
             capture_headers: false,
             model_key: None,
             wire_model: None,
             live_forward: None,
             two_provider_route: false,
+            hold_attempt_open: false,
             refill_max: Some(0),
         }
     }
@@ -5272,12 +5287,14 @@ async fn start_entry_configured(
         attempt_statuses,
         auth_entries,
         pin_key,
+        execution_mode,
         capture_headers,
         mixed,
         model_key,
         wire_model,
         live_forward,
         two_provider_route,
+        hold_attempt_open,
         refill_max,
     } = options;
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -5306,6 +5323,7 @@ async fn start_entry_configured(
             header_captures: capture_headers.then_some(header_tx),
             mixed,
             live_forward,
+            hold_attempt_open,
         }));
     tokio::spawn(async move {
         axum::serve(upstream, app)
@@ -5315,7 +5333,14 @@ async fn start_entry_configured(
             .await
             .unwrap();
     });
-    let declaration = hub_v1_fixture::hub_v1_test_declaration();
+    let declaration = match execution_mode.as_deref() {
+        Some("relay") => {
+            let direct_binding = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_direct_server_outcome", runtime_owner_path = "v3/crates/routecodex-v3-server/src/executors.rs" }"#;
+            let relay_binding = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" }"#;
+            hub_v1_fixture::hub_v1_test_declaration().replace(direct_binding, relay_binding)
+        }
+        _ => hub_v1_fixture::hub_v1_test_declaration(),
+    };
     let execution = hub_v1_fixture::hub_v1_server_execution("a");
     // Apply the typed refill policy for this entry after the shared fixture has
     // prepared the process. `None` clears the injection so the compiled
@@ -11232,8 +11257,38 @@ async fn refill_concurrent_cancel_public() {
 /// transport failure. The last eligible exact identity must stay health-neutral,
 /// and the client must see only a detectable termination with no provider error
 /// payload or fabricated success.
-#[tokio::test]
-async fn db1f482_truncated_openai_chat_sse_keeps_last_candidate_health_neutral_at_public_entry() {
+async fn assert_public_execution_mode(base: &str, expected_mode: &str) {
+    let logs: Value = client()
+        .get(format!("{base}/_routecodex/debug/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events: Vec<&Value> = logs["logs"]
+        .as_array()
+        .unwrap_or_else(|| panic!("debug logs must return events: {logs}"))
+        .iter()
+        .filter(|event| {
+            event["node_id"] == "V3Server03HttpRequestRaw"
+                && event["event"] == "received"
+                && event["details"]["path"] == "/v1/chat/completions"
+        })
+        .collect();
+    assert_eq!(
+        events.len(),
+        1,
+        "public request must enter exactly once with its actual mode: {logs}"
+    );
+    assert_eq!(
+        events[0]["details"]["execution_mode"], expected_mode,
+        "public request executed outside the selected mode: {}",
+        events[0]
+    );
+}
+
+async fn db1f482_truncated_openai_chat_sse_public_case(execution_mode: &str, content: &str) {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     let partial = format!(
@@ -11261,6 +11316,7 @@ async fn db1f482_truncated_openai_chat_sse_keeps_last_candidate_health_neutral_a
             attempt_bodies: vec![partial],
             auth_entries: vec![("key1".into(), KEY_ENV.into())],
             pin_key: Some("key1".into()),
+            execution_mode: Some(execution_mode.to_string()),
             ..EntryOptions::default()
         },
     )
@@ -11271,7 +11327,7 @@ async fn db1f482_truncated_openai_chat_sse_keeps_last_candidate_health_neutral_a
             .post(format!("{base}/v1/chat/completions"))
             .json(&json!({
                 "model": "test.test",
-                "messages": [{"role": "user", "content": "db1f482 truncated 200"}],
+                "messages": [{"role": "user", "content": content}],
                 "stream": true
             }))
             .send()
@@ -11280,21 +11336,22 @@ async fn db1f482_truncated_openai_chat_sse_keeps_last_candidate_health_neutral_a
     .await;
     assert!(
         consumed.transport_error.is_some(),
-        "truncated stream must terminate detectably: {consumed:?}"
+        "{execution_mode}: truncated stream must terminate detectably: {consumed:?}"
     );
     assert!(
         consumed.status.is_none() || consumed.status == Some(StatusCode::OK),
-        "no client HTTP error number: {consumed:?}"
+        "{execution_mode}: no client HTTP error number: {consumed:?}"
     );
     assert!(
         !consumed.body.contains("[DONE]"),
-        "no fabricated terminal: {consumed:?}"
+        "{execution_mode}: no fabricated terminal: {consumed:?}"
     );
     assert!(
         !consumed.body.contains("\"finish_reason\":\"stop\""),
-        "no fabricated success: {consumed:?}"
+        "{execution_mode}: no fabricated success: {consumed:?}"
     );
     assert_no_error_payload(&consumed.body);
+    assert_public_execution_mode(base, execution_mode).await;
 
     let health: Value = client()
         .get(format!("{base}/_routecodex/health/cooldown-pool"))
@@ -11309,18 +11366,119 @@ async fn db1f482_truncated_openai_chat_sse_keeps_last_candidate_health_neutral_a
         !entries.iter().any(|row| {
             row["provider_id"] == "test" && row["auth_alias"] == "key1" && row["model_id"] == "test"
         }),
-        "last-candidate truncated HTTP 200 must stay health-neutral: {health}"
+        "{execution_mode}: last-candidate truncated HTTP 200 must stay health-neutral: {health}"
     );
     stop_entry(handle, shutdown).await;
     let mut attempts = 0;
     while let Some(capture) = captures.recv().await {
-        if capture.to_string().contains("db1f482 truncated 200") {
+        if capture.to_string().contains(content) {
             attempts += 1;
         }
     }
     assert_eq!(
         attempts, 1,
-        "the single candidate must be attempted exactly once before terminal"
+        "{execution_mode}: the single candidate must be attempted exactly once before terminal"
     );
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn db1f482_truncated_openai_chat_sse_keeps_last_candidate_health_neutral_at_public_entry() {
+    db1f482_truncated_openai_chat_sse_public_case("direct", "db1f482 truncated 200 direct").await;
+}
+
+#[tokio::test]
+async fn db1f482_truncated_openai_chat_sse_relay_keeps_last_candidate_health_neutral_at_public_entry(
+) {
+    db1f482_truncated_openai_chat_sse_public_case("relay", "db1f482 truncated 200 relay").await;
+}
+
+#[tokio::test]
+async fn db1f482_relay_client_disconnect_keeps_candidate_health_neutral_at_public_entry() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let partial = format!(
+        "data: {}\n\n",
+        json!({
+            "id": "chatcmpl_client_disconnect",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "wire-test",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "partial before disconnect"},
+                "finish_reason": null
+            }]
+        })
+    );
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "openai_chat",
+        "chat",
+        StatusCode::OK,
+        "text/event-stream",
+        partial.clone(),
+        EntryOptions {
+            health_enabled: true,
+            attempt_bodies: vec![partial],
+            auth_entries: vec![("key1".into(), KEY_ENV.into())],
+            pin_key: Some("key1".into()),
+            execution_mode: Some("relay".into()),
+            hold_attempt_open: true,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let base = endpoint.trim_end_matches("/v1/responses");
+    let response = client()
+        .post(format!("{base}/v1/chat/completions"))
+        .json(&json!({
+            "model": "test.test",
+            "messages": [{"role": "user", "content": "db1f482 relay client disconnect"}],
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let first = tokio::time::timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("provider request must start before the client disconnects")
+        .expect("provider capture channel must remain open");
+    assert!(
+        first
+            .to_string()
+            .contains("db1f482 relay client disconnect"),
+        "unexpected provider request: {first}"
+    );
+
+    drop(response);
+    let preparation = tokio::time::timeout(Duration::from_secs(5), handle.prepare_exec_attempt())
+        .await
+        .expect("client cancellation leaked active runtime work")
+        .unwrap();
+    drop(preparation);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), captures.recv())
+            .await
+            .is_err(),
+        "client disconnect must not start another provider attempt"
+    );
+    assert_public_execution_mode(base, "relay").await;
+    let health: Value = client()
+        .get(format!("{base}/_routecodex/health/cooldown-pool"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let entries = health["entries"].as_array().unwrap();
+    assert!(
+        !entries.iter().any(|row| {
+            row["provider_id"] == "test" && row["auth_alias"] == "key1" && row["model_id"] == "test"
+        }),
+        "client disconnect must stay health-neutral: {health}"
+    );
+    stop_entry(handle, shutdown).await;
     std::env::remove_var(KEY_ENV);
 }
