@@ -3078,17 +3078,42 @@ resources:
     forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload, session.cache]
     must_pass_through: [V3ProviderResp14Raw, V3DirectResp14ProviderProjectionPrepared, Error01, Error03, Error04, Error05]
     semantic_contract:
-      whole_attempt_admission: deliverability is checked across the complete buffered Direct SSE attempt after every registered response rewrite, including memory envelope stripping, and before terminal seal or client commit
-      blank_assistant_final: explicit assistant text that remains entirely whitespace across the complete attempt is internal 502 even with preceding reasoning; independent tools, refusal, content_filter and opaque business remain deliverable, and reasoning without an assistant final remains deliverable
+      pre_commit_scope: this buffer owns the attempt only until the first committable business frame; delivered frames thereafter live in v3.sse.client_frame_ledger
+      whole_attempt_admission: with early commit disabled (request-level predicate), deliverability is checked across the complete buffered Direct SSE attempt after every registered response rewrite, including memory envelope stripping, and before terminal seal or client commit
+      first_frame_admission: with early commit enabled, the first provider business frame (text, reasoning, or a name-bearing tool-call frame) commits the attempt; any whole-attempt rewrite that could change already-delivered frames must be excluded by the request-level predicate, never applied after delivery
+      blank_assistant_final: explicit assistant text that remains entirely whitespace across a complete attempt is internal 502 only when no business frame was delivered before terminal; reasoning already delivered to the client commits the attempt, consistent with the preservation rule
       empty_after_non_client_removal: if declared non-client envelope removal leaves no text, tool call, reasoning, refusal, or content_filter result, return ProviderFailure/provider_response_empty as internal 502 into Error01
       representable_business_failure: if a real representable business result is lost, corrupted, or rejected during rewrite, projection, or framing, return RuntimeFailure/internal 599 into Error01 instead of upstream blame or an empty success
-      unharvestable_tool_markup: recognized attempted tool markup that cannot be represented as a complete native call rejects the entire attempt through the registered Direct response hook and existing typed response-processing Error recovery, even with visible prose; no control flag enters the payload
+      unharvestable_tool_markup: recognized attempted tool markup that cannot be represented as a complete native call rejects a buffered attempt through the registered Direct response hook; a streamed attempt whose delivered prefix contains no markup keeps the delivered frames and the transport ends silently, preserving the no-client-error contract
       recovery_identity: this Direct boundary emits only V3DirectResp14UnharvestableToolMarkup internal code 500-211; Relay Resp03 separately emits 500-231. Error02-05 owns their exact typed eligibility, candidate exclusion and exhaustion, keeping internal599 separate from the actual upstream status
       preservation_rule: tool-call-only, reasoning, refusal, content_filter, and visible text remain deliverable without semantic judgment
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: active
+
+  - resource_id: v3.sse.client_frame_ledger
+    resource_kind: direct_sse_client_frame_ledger
+    lifecycle: v3.responses.direct.sse.attempt_until_terminal
+    owner_feature_id: v3.responses_first_frame_commit
+    owner_crate: routecodex-v3-runtime
+    owner_module: direct_runtime_helpers_stream
+    owner_node: V3CommittedClientSseBuilder
+    identity: [requestId, attemptId, providerKey, protocol]
+    allowed_writers: [V3CommittedClientSseBuilder::commit_client_stream, V3CommittedClientSseBuilder::flush_client_frames, V3CommittedClientSseBuilder::seal_after_validated_terminal, V3CommittedClientSseBuilder::drop]
+    allowed_readers: [V3CommittedClientSseBuilder::client_frames_flushed, V3CommittedClientSseStream, V3ClientSseChannelStream]
+    forbidden_writers: [routecodex-v3-sse, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload, session.cache]
+    must_pass_through: [V3ProviderResp14Raw, V3DirectResp14ProviderProjectionPrepared]
+    semantic_contract:
+      append_only: delivered frames are written to the client channel exactly once, in provider order, tracked by a monotonically increasing flushed count
+      no_retraction: a delivered frame is never rewritten, replaced, suppressed, or re-emitted by later rewrites; whole-attempt rewrites are rejected once the ledger is non-empty
+      terminal_remainder: terminal seal replays only frames after the flushed count, so the client stream equals the fully buffered attempt byte for byte
+      streaming_failure: after delivery, provider or transport failure ends the committed client channel silently with no status, error frame, or provider payload, and never switches candidates or re-issues the attempt
+      projection_owner: the ledger indexes already-projected client frames; it never serializes payload of its own and v3.response.client_payload stays the only declared client body carrier
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
 
   - resource_id: v3.runtime.provider_attempt_business_control
     resource_kind: provider_attempt_control

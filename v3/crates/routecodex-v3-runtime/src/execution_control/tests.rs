@@ -385,3 +385,79 @@ async fn committed_sse_drop_after_last_handoff_frame_is_completed() {
         V3CommittedSseTerminal::Completed
     );
 }
+
+#[tokio::test]
+async fn first_frame_commit_flushes_delivered_frames_before_terminal() {
+    let mut builder = V3CommittedClientSseBuilder::new();
+    let (sink, mut rx) = V3CommittedClientFrameSink::channel();
+    builder.push(b"frame-a".to_vec()).unwrap();
+    assert!(rx.try_recv().is_err(), "no delivery before commit");
+    builder.commit_client_stream(sink);
+    assert_eq!(rx.try_recv().unwrap(), b"frame-a".to_vec());
+    assert_eq!(builder.client_frames_flushed(), 1);
+    builder.push(b"frame-b".to_vec()).unwrap();
+    assert_eq!(rx.try_recv().unwrap(), b"frame-b".to_vec());
+    builder.push(b"frame-c".to_vec()).unwrap();
+    builder.mark_last_frame_as_terminal().unwrap();
+    assert_eq!(rx.try_recv().unwrap(), b"frame-c".to_vec());
+    assert_eq!(builder.client_frames_flushed(), 3);
+    let sealed = builder.seal_after_validated_terminal().unwrap();
+    let remainder: Vec<Vec<u8>> = sealed.collect().await;
+    assert!(remainder.is_empty(), "every frame already delivered");
+    assert!(rx.try_recv().is_err(), "no duplicate delivery");
+}
+
+#[tokio::test]
+async fn first_frame_commit_seal_remainder_preserves_byte_identity() {
+    let frames = [
+        b"created".to_vec(),
+        b"delta1".to_vec(),
+        b"delta2".to_vec(),
+        b"terminal".to_vec(),
+    ];
+    let mut delivered = Vec::new();
+    {
+        let mut builder = V3CommittedClientSseBuilder::new();
+        let (sink, mut rx) = V3CommittedClientFrameSink::channel();
+        builder.push(frames[0].clone()).unwrap();
+        builder.push(frames[1].clone()).unwrap();
+        builder.commit_client_stream(sink);
+        builder.push(frames[2].clone()).unwrap();
+        builder.push(frames[3].clone()).unwrap();
+        builder.mark_last_frame_as_terminal().unwrap();
+        let sealed = builder.seal_after_validated_terminal().unwrap();
+        while let Ok(frame) = rx.try_recv() {
+            delivered.push(frame);
+        }
+        delivered.extend(sealed.collect::<Vec<_>>().await);
+    }
+    let mut buffered = Vec::new();
+    {
+        let mut builder = V3CommittedClientSseBuilder::new();
+        for frame in &frames {
+            builder.push(frame.clone()).unwrap();
+        }
+        builder.mark_last_frame_as_terminal().unwrap();
+        buffered.extend(builder.seal_after_validated_terminal().unwrap().collect::<Vec<_>>().await);
+    }
+    assert_eq!(delivered, buffered, "streamed path must equal buffered path byte for byte");
+    assert_eq!(delivered, frames.to_vec());
+}
+
+#[test]
+fn first_frame_commit_rejects_whole_attempt_rewrite_after_delivery() {
+    let mut builder = V3CommittedClientSseBuilder::new();
+    let (sink, _rx) = V3CommittedClientFrameSink::channel();
+    builder.push(vec![1]).unwrap();
+    builder.commit_client_stream(sink);
+    builder.push(vec![2]).unwrap();
+    assert!(matches!(
+        builder.rewrite_frames_non_increasing(|frame| frame),
+        Err(V3AttemptStoreError::InvalidAttemptState(_))
+    ));
+    assert!(matches!(
+        builder
+            .rewrite_complete_attempt::<V3AttemptStoreError>(|_| Ok(Some((vec![vec![9]], 0)))),
+        Err(V3AttemptStoreError::InvalidAttemptState(_))
+    ));
+}

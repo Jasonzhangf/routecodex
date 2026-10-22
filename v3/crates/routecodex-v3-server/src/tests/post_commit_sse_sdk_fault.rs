@@ -26,6 +26,7 @@ async fn force_accepted_sse_transport(body: Body) -> Body {
         });
     accept_v3_client_sse_transport(
         runtime_outcome,
+        None,
         Box::new(|outcome| outcome),
         Duration::from_millis(2),
     )

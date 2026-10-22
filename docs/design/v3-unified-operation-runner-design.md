@@ -214,7 +214,8 @@ acceptance.
 The runner owns:
 
 - attempt budget and attempt identity;
-- full-attempt buffering before client commit;
+- pre-commit attempt buffering before the first committable business frame, and
+  append-only client frame delivery after that frame crosses the channel;
 - cancellation drain after wave completion;
 - one request finalizer that runs only after final client commit, terminal_client_error, cancel,
   or disconnect; retry and servertool_followup never trigger it; terminal_client_error,

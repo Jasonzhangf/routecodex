@@ -970,3 +970,72 @@ async fn direct_sse_text_anthropic_terminal_still_seals() {
     let text = String::from_utf8(frames.concat()).unwrap();
     assert!(text.contains("done"), "{text}");
 }
+
+/// Paced provider: the thinking delta arrives immediately, the terminal only
+/// after a delay. The client channel must observe a business frame before the
+/// provider terminal resolves, and the streamed bytes must equal the fully
+/// buffered attempt byte for byte.
+#[tokio::test]
+async fn first_frame_commit_delivers_business_frame_before_provider_terminal() {
+    let delta = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"hello\"}\n\n";
+    let terminal = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"status\":\"completed\",\"output\":[{\"id\":\"m1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}]}}\n\n";
+    let paced = stream::iter([Ok(delta.as_bytes().to_vec())]).chain(stream::once(async {
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        Ok(terminal.as_bytes().to_vec())
+    }));
+    let source: crate::nodes::V3ProviderAttemptSseInnerStream = Box::pin(paced);
+    let projected = wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(source),
+        V3RuntimeStreamObservation::default(),
+        V3RuntimeTimingState::start(),
+        false,
+        false,
+        V3HubProviderWireProtocol::Responses,
+    );
+    let (sink, mut rx) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let collector = tokio::spawn(collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
+        projected,
+        V3HubProviderWireProtocol::Responses,
+        crate::nodes::V3AttemptBudget::process_default(),
+        None,
+        None,
+        None,
+        Some(sink),
+    ));
+    let first = tokio::time::timeout(std::time::Duration::from_millis(900), rx.recv())
+        .await
+        .expect("first committable frame must reach the client channel before the provider terminal")
+        .expect("client channel frame");
+    assert!(
+        String::from_utf8_lossy(&first).contains("response.output_text.delta"),
+        "first delivered frame: {}",
+        String::from_utf8_lossy(&first)
+    );
+    let sealed = collector.await.expect("collector task").expect("sealed attempt");
+    let mut streamed = vec![first];
+    while let Ok(frame) = rx.try_recv() {
+        streamed.push(frame);
+    }
+    streamed.extend(sealed.collect::<Vec<_>>().await);
+    let buffered = collect_direct_sse_attempt_after_terminal(
+        test_direct_sse_attempt_stream(
+            stream::iter([
+                Ok(delta.as_bytes().to_vec()),
+                Ok(terminal.as_bytes().to_vec()),
+            ])
+            .boxed(),
+            V3HubProviderWireProtocol::Responses,
+        ),
+        V3HubProviderWireProtocol::Responses,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("buffered attempt")
+    .collect::<Vec<_>>()
+    .await;
+    assert_eq!(
+        String::from_utf8_lossy(&streamed.concat()),
+        String::from_utf8_lossy(&buffered.concat()),
+        "streamed client bytes must equal the buffered attempt"
+    );
+}

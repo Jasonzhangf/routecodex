@@ -84,11 +84,16 @@ payload.
 ## Invariants
 
 - The Server owns the committed client SSE transport channel and its
-  transport-only keepalives; the Runtime still fully buffers the provider attempt
-  before any provider payload projection.
+  transport-only keepalives; the Runtime buffers the provider attempt until the
+  first committable business frame, then delivers frame-by-frame under an
+  append-only ledger that never rewrites, replaces, suppresses, or re-emits a
+  delivered frame.
 - Establishing the channel is not a semantic client commit.
-- No provider payload byte or provider status reaches the client before the
-  runtime outcome exists.
+- Without first-frame commit enabled, no provider payload byte or provider status
+  reaches the client before the runtime outcome exists; with it enabled, the
+  first committable business frame (text, reasoning, or a name-bearing tool-call
+  frame) crosses at its provider arrival time and the terminal remainder replays
+  only the undelivered tail.
 - An outcome that arrives inside one keepalive interval returns the exact runtime
   status, headers, and body. The race adds no framing of its own.
 - A client never receives a provider error payload on the committed channel. The
@@ -146,7 +151,8 @@ while the client-visible silent-connection defect was being fixed:
 
 - a client must never receive an error return; errors are recorded and printed in
   the Error chain, and the provider switches inside the Runtime before any client
-  payload is committed;
+  payload is committed, while a failure after first-frame delivery ends the
+  committed channel silently without switching candidates;
 - the fix must conform to the declared `v3.direct_sse_accept_skeleton` contract
   instead of restoring the pre-runtime front commit path removed by `3a96357c3`.
 

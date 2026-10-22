@@ -181,6 +181,13 @@ impl ToolMarkupDeclarations {
         self.tools.remove(wire_name);
     }
 
+    /// True when no declared tool can match provider markup. A context with no
+    /// declarations cannot harvest anything, so its attempt rewrite is the
+    /// identity.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.tools.is_empty()
+    }
+
     fn get(&self, wire_name: &str) -> Option<&ToolMarkupIdentity> {
         self.tools.get(wire_name)
     }

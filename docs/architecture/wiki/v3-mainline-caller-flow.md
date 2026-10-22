@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 96 functional paths, 590 caller edges.
+Generated view: 96 functional paths, 591 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -73,7 +73,7 @@ flowchart TD
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|8 edges / 5 paths| module_v3_error
   module_v3_runtime -->|24 edges / 8 paths| module_v3_provider_responses
-  module_v3_runtime -->|65 edges / 20 paths| module_v3_runtime
+  module_v3_runtime -->|66 edges / 20 paths| module_v3_runtime
   module_v3_runtime -->|49 edges / 14 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|3 edges / 1 paths| module_v3_target
   module_v3_runtime -->|5 edges / 2 paths| module_v3_virtual_router
@@ -131,7 +131,7 @@ flowchart TD
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime | v3-provider-responses | 24 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime | v3-runtime | 65 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.direct_parser_binding`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-runtime | 66 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.direct_parser_binding`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-runtime::hub_v1 | 49 | `v3.error.raw_wire_evidence`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 3 | `v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 5 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
@@ -3506,7 +3506,7 @@ flowchart TD
 
 ## v3.responses_direct_full_attempt_commit
 
-Direct provider SSE attempts remain runtime-buffered until a protocol terminal; failure enters Error01-05 and reselects before any business frame reaches the client.
+Direct provider SSE attempts remain runtime-buffered until a protocol terminal; failure enters Error01-05 and reselects before any business frame reaches the client. A request that satisfies the first-frame-commit predicate instead commits the first committable business frame to the client channel and continues append-only.
 
 Owner feature: `v3.responses_direct_full_attempt_commit`
 Manifest: `docs/architecture/manifests/v3.direct_sse_accept_skeleton.mainline.yml`
@@ -3516,13 +3516,17 @@ flowchart TD
   subgraph c_83_v3_responses_direct_full_attempt_commit_m_v3_runtime["v3-runtime"]
     c_83_v3_responses_direct_full_attempt_commit_0["v3-runtime<br/>collect_direct_sse_attempt_after_terminal<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small>"]
     c_83_v3_responses_direct_full_attempt_commit_1["v3-runtime<br/>V3CommittedClientSseBuilder::push<br/><small>routecodex-v3-runtime/src/execution_control.rs</small>"]
+    c_83_v3_responses_direct_full_attempt_commit_2["v3-runtime<br/>collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small>"]
+    c_83_v3_responses_direct_full_attempt_commit_3["v3-runtime<br/>V3CommittedClientSseBuilder::commit_client_stream<br/><small>routecodex-v3-runtime/src/execution_control.rs</small>"]
   end
   c_83_v3_responses_direct_full_attempt_commit_0 -->|v3-direct-sse-full-attempt-buffer<br/>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared| c_83_v3_responses_direct_full_attempt_commit_1
+  c_83_v3_responses_direct_full_attempt_commit_2 -->|v3-direct-sse-first-frame-commit<br/>V3DirectResp14ProviderProjectionPrepared → V3DirectSseAccept03ProjectedClientFrame| c_83_v3_responses_direct_full_attempt_commit_3
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-direct-sse-full-attempt-buffer` | `V3ProviderResp14Raw` → `V3DirectResp14ProviderProjectionPrepared` | anchored | collect_direct_sse_attempt_after_terminal<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small> | V3CommittedClientSseBuilder::push<br/><small>routecodex-v3-runtime/src/execution_control.rs</small> | `v3.responses_direct_full_attempt_commit` |
+| `v3-direct-sse-first-frame-commit` | `V3DirectResp14ProviderProjectionPrepared` → `V3DirectSseAccept03ProjectedClientFrame` | anchored | collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small> | V3CommittedClientSseBuilder::commit_client_stream<br/><small>routecodex-v3-runtime/src/execution_control.rs</small> | `v3.responses_first_frame_commit` |
 
 ## v3.execution_control_payload_architecture
 

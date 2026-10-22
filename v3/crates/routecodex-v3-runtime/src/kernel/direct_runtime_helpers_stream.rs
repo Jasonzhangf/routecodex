@@ -267,6 +267,41 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
 }
 
 pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
+    stream: V3SseAttemptStream,
+    provider_protocol: V3HubProviderWireProtocol,
+    attempt_budget: crate::nodes::V3AttemptBudget,
+    manifest: Option<&V3Config05ManifestPublished>,
+    request_id: Option<&str>,
+    response_hook: Option<(
+        &crate::hooks::V3HookRegistry,
+        &crate::direct_response_hooks::V3DirectDsmlContext,
+    )>,
+) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
+    collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
+        stream,
+        provider_protocol,
+        attempt_budget,
+        manifest,
+        request_id,
+        response_hook,
+        None,
+    )
+    .await
+}
+
+/// Collector variant that opens the client SSE channel at the first
+/// committable business frame instead of only after the provider terminal.
+///
+/// The caller passes `Some(sink)` only after proving, at request level, that
+/// every whole-attempt rewrite this attempt could run (memory capture,
+/// DSML/thinking text repair) is a no-op for this request. Reasoning and
+/// native tool-call frames carry business content and are never harvested, so
+/// the channel commit at their arrival is byte-identical to the fully buffered
+/// path. Text/message frames are held until their item completes and then
+/// flushed only when the request-level predicate guarantees they cannot be
+/// rewritten; the existing whole-attempt rewrites remain fully buffered for
+/// requests that do not qualify.
+pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
     mut stream: V3SseAttemptStream,
     provider_protocol: V3HubProviderWireProtocol,
     attempt_budget: crate::nodes::V3AttemptBudget,
@@ -276,6 +311,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
         &crate::hooks::V3HookRegistry,
         &crate::direct_response_hooks::V3DirectDsmlContext,
     )>,
+    client_frames: Option<crate::nodes::V3CommittedClientFrameSink>,
 ) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
     let deadline = tokio::time::Instant::from_std(attempt_budget.residence_deadline());
     let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
@@ -290,6 +326,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
     let mut terminal_seen = false;
     let mut business_decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut has_business_content = false;
+    let mut client_committed = false;
     loop {
         let next = match tokio::time::timeout_at(deadline, stream.next()).await {
             Ok(next) => next,
@@ -341,6 +378,12 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
                 error.to_string(),
             )
         })?;
+        if !client_committed && has_business_content {
+            if let Some(sink) = client_frames.clone() {
+                committed.commit_client_stream(sink);
+                client_committed = true;
+            }
+        }
         if matches!(
             disposition,
             V3SseFrameDisposition::SemanticTerminal | V3SseFrameDisposition::LegalCloseout
@@ -363,18 +406,21 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
                 )
             })?;
             if disposition == V3SseFrameDisposition::LegalCloseout {
-                let _ = rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(
-                    |error| {
-                        direct_attempt_store_error_source(
-                            error,
-                            "V3ExecutionAttemptPayloadStore",
-                            "direct_sse_memory_strip_failed",
-                        )
-                    },
-                )?;
-                apply_complete_response_hook(&mut committed, response_hook)?;
-                has_business_content =
-                    direct_sse_frames_have_business_content(provider_protocol, committed.frames());
+                if !client_committed {
+                    let _ = rewrite_direct_sse_memory(&mut committed, manifest, request_id)
+                        .map_err(|error| {
+                            direct_attempt_store_error_source(
+                                error,
+                                "V3ExecutionAttemptPayloadStore",
+                                "direct_sse_memory_strip_failed",
+                            )
+                        })?;
+                    apply_complete_response_hook(&mut committed, response_hook)?;
+                    has_business_content = direct_sse_frames_have_business_content(
+                        provider_protocol,
+                        committed.frames(),
+                    );
+                }
                 if !has_business_content {
                     return Err(direct_sse_empty_attempt_failure());
                 }
@@ -410,17 +456,19 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
                     )
                 })?;
         }
-        let _ =
-            rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|error| {
-                direct_attempt_store_error_source(
-                    error,
-                    "V3ExecutionAttemptPayloadStore",
-                    "direct_sse_memory_strip_failed",
-                )
-            })?;
-        apply_complete_response_hook(&mut committed, response_hook)?;
-        has_business_content =
-            direct_sse_frames_have_business_content(provider_protocol, committed.frames());
+        if !client_committed {
+            let _ =
+                rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|error| {
+                    direct_attempt_store_error_source(
+                        error,
+                        "V3ExecutionAttemptPayloadStore",
+                        "direct_sse_memory_strip_failed",
+                    )
+                })?;
+            apply_complete_response_hook(&mut committed, response_hook)?;
+            has_business_content =
+                direct_sse_frames_have_business_content(provider_protocol, committed.frames());
+        }
         if !has_business_content {
             return Err(direct_sse_empty_attempt_failure());
         }
@@ -785,6 +833,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
     hook_registry: &V3HookRegistry,
     failure_session_scope: &V3ProviderFailureSessionScope,
     attempt_budget: V3AttemptBudget,
+    client_frames: Option<crate::nodes::V3CommittedClientFrameSink>,
 ) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
     let projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
         stream,
@@ -811,13 +860,14 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
         true,
         namespace_tool_identities,
     );
-    collect_direct_sse_attempt_after_terminal_with_hooks(
+    collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
         projected,
         compat_plan.provider_protocol,
         attempt_budget,
         Some(manifest),
         Some(request_id),
         Some((hook_registry, dsml_context)),
+        client_frames,
     )
     .await
 }
@@ -1086,6 +1136,34 @@ pub(crate) fn source_failure_output(
         None,
         None,
     )
+}
+
+/// Terminate an attempt whose first business frame already crossed the client
+/// commit point.
+///
+/// The client keeps the frames it received and never sees a provider status,
+/// error code, or error payload. The typed failure stays in the Error chain for
+/// diagnosis, and the attempt is not retried: a second attempt would append a
+/// second response to the same committed client channel.
+pub(crate) fn post_commit_client_transport_break_output(
+    source: Result<
+        V3Error01SourceRaised,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    last_external_http: Option<V3ExternalHttpWitness>,
+    node_trace: Vec<&'static str>,
+    hook_registry: &V3HookRegistry,
+) -> V3ResponsesDirectRuntimeOutput {
+    let mut output = source_failure_output(
+        source,
+        last_external_http,
+        node_trace,
+        hook_registry,
+    );
+    // No client payload exists after commit: the server projects a transport
+    // break and the committed channel ends without an error frame.
+    output.terminal_disposition = Some(V3ProviderTerminalDisposition::NoResponse);
+    output
 }
 
 pub(crate) fn source_failure_output_with_observability_and_snapshots(

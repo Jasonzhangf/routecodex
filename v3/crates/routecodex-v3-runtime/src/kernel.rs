@@ -130,6 +130,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         allow_exhaustion_rescue_probe,
         provider_failure_event_sink,
         route_selection_event_sink,
+        client_frame_sink,
         observability_accumulator: _,
         request_execution_control,
     } = state;
@@ -1604,6 +1605,19 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     .clone()
                     .unwrap_or_default();
                 response_projection.stream_observation = Some(stream_observation.clone());
+                // A committed client prefix can never be retracted. Commit the
+                // first real business frame only when every whole-attempt
+                // rewrite is provably the identity for this request.
+                let attempt_client_frame_sink = client_frame_sink
+                    .clone()
+                    .filter(|_| {
+                        !manifest.memory_raw_capture.enabled
+                            && direct_dsml_context.has_no_declared_tools()
+                            && !response_projection.compat_plan.has_block(
+                                crate::direct_response_hooks::V3DirectResponseCompatBlock::ThinkingTags,
+                            )
+                    });
+                let client_commit_probe = attempt_client_frame_sink.clone();
                 let committed =
                     match direct_runtime_helpers_stream::project_and_collect_direct_sse_attempt(
                         stream,
@@ -1619,6 +1633,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &hook_registry,
                         &direct_failure_session_scope,
                         attempt_budget.clone(),
+                        attempt_client_frame_sink,
                     )
                     .await
                     {
@@ -1627,6 +1642,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             if let Err(error) = runtime_timing.finish_external_if_active() {
                                 return direct_runtime_helpers_stream::source_failure_output(
                                     runtime_source("V3RuntimeTimingExternal", error),
+                                    last_external_http.clone(),
+                                    trace,
+                                    &hook_registry,
+                                );
+                            }
+                            if client_commit_probe
+                                .as_ref()
+                                .is_some_and(|sink| sink.is_committed())
+                            {
+                                drop(provider_action_permit.take());
+                                return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
+                                    Err(fault),
                                     last_external_http.clone(),
                                     trace,
                                     &hook_registry,
@@ -1652,6 +1679,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     &hook_registry,
                                 );
                             }
+                            if client_commit_probe
+                                .as_ref()
+                                .is_some_and(|sink| sink.is_committed())
+                            {
+                                drop(provider_action_permit.take());
+                                return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
+                                    Ok(source),
+                                    last_external_http.clone(),
+                                    trace,
+                                    &hook_registry,
+                                );
+                            }
                             drop(provider_action_permit.take());
                             return direct_runtime_helpers_stream::source_failure_output(
                                 Ok(source),
@@ -1664,6 +1703,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             if let Err(error) = runtime_timing.finish_external_if_active() {
                                 return direct_runtime_helpers_stream::source_failure_output(
                                     runtime_source("V3RuntimeTimingExternal", error),
+                                    last_external_http.clone(),
+                                    trace,
+                                    &hook_registry,
+                                );
+                            }
+                            if client_commit_probe
+                                .as_ref()
+                                .is_some_and(|sink| sink.is_committed())
+                            {
+                                drop(provider_action_permit.take());
+                                return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
+                                    Ok(source),
                                     last_external_http.clone(),
                                     trace,
                                     &hook_registry,
