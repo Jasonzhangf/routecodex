@@ -4927,8 +4927,9 @@ features:
   owner_scope: Unified Direct main-loop skeleton. Single lifecycle owner for
     direct passthrough orchestration (same_protocol entry==provider wire);
     protocol differences converge in per-protocol V3DirectProtocolCodec impls
-    (V3ResponsesDirectCodec / V3ChatDirectCodec); hooks remain the projection
-    thin shell (chat_direct_request_projection_hook /
+    (V3ChatDirectCodec; Responses Direct runs through the V3HookRegistry
+    kernel, not a generic codec); hooks remain the projection thin shell (
+    chat_direct_request_projection_hook /
     chat_direct_provider_transport_hook). No provider-specific branches; no
     Hub response conversion; direct response stays same_protocol.
   owner_crates:
@@ -5791,7 +5792,7 @@ features:
   - map_v3_toolreason_stream_event_at_resp03
   - V3DirectSseContentConsumer::take_toolreason_reasoning_projection
   - strip_v3_tool_thinking_fields_from_json_at_resp03
-  - V3ResponsesDirectCodec::prepare_before_send
+  - responses_direct_prepare_before_send
   - V3ChatDirectCodec::prepare_before_send
   - V3ToolThinkingTurnContext
   - compile_v3_tool_thinking_turn_context_at_req04

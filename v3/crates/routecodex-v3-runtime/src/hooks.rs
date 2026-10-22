@@ -471,6 +471,68 @@ fn apply_toolreason_sse_hook_with_stream_observation(
     Ok(())
 }
 
+/// Responses Direct Req04 pre-send preparation: tool-thinking and memory
+/// capture injection. This is the single live owner used by the Responses
+/// Direct kernel.
+pub(crate) fn responses_direct_prepare_before_send(
+    manifest: &routecodex_v3_config::V3Config05ManifestPublished,
+    server_id: &str,
+    standardized: &mut V3Req04StandardizedResponses,
+) -> V3DirectSourceResult<bool> {
+    let enabled = crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id);
+    let memory_enabled = manifest.memory_raw_capture.enabled;
+    if memory_enabled && !standardized.memory_raw_capture_guidance_injected {
+        routecodex_v3_agent_memory::inject_memory_raw_capture_guidance(&mut standardized.body)
+            .map_err(|error| {
+                crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3Req04StandardizedResponses",
+                    "direct_memory_raw_capture_guidance_injection_failed",
+                    error.to_string(),
+                    V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
+                )
+                .map(|(_, source)| source)
+            })?;
+        standardized.memory_raw_capture_guidance_injected = true;
+    }
+    if standardized.tool_thinking_turn_context.enabled_flag() {
+        return Ok(true);
+    }
+    if crate::hub_v1::is_v3_tool_thinking_output_continuation(&standardized.body) {
+        return Ok(false);
+    }
+    let current_payload_start = crate::hub_v1::current_v3_tool_thinking_payload_start(
+        &standardized.body,
+    )
+    .map_err(|error| {
+        crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Req04StandardizedResponses",
+            "direct_tool_thinking_req04_current_boundary_missing",
+            error,
+            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
+        )
+        .map(|(_, source)| source)
+    })?;
+    standardized.tool_thinking_turn_context =
+        crate::hub_v1::compile_v3_tool_thinking_turn_context_at_req04(
+            &mut standardized.body,
+            current_payload_start,
+            enabled,
+        )
+        .map_err(|error| {
+            crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Req04StandardizedResponses",
+                "direct_tool_thinking_req04_injection_failed",
+                error.to_string(),
+                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Req04StandardizedResponses),
+            )
+            .map(|(_, source)| source)
+        })?;
+    Ok(enabled || memory_enabled)
+}
+
 fn responses_direct_route_hook(
     selected: V3Target10ConcreteProviderSelected,
     standardized: &V3Req04StandardizedResponses,

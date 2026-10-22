@@ -698,10 +698,10 @@ fn classify_v3_provider_openai_chat_json_event(
             .ok_or_else(|| "provider OpenAI Chat choice must be an object".to_string())?;
         if let Some(finish_reason) = choice.get("finish_reason") {
             if !finish_reason.is_null() {
-                if finish_reason.as_str().is_none() {
-                    return Err("provider OpenAI Chat finish_reason must be a string".to_string());
-                }
-                terminal |= has_non_empty_string(Some(finish_reason));
+                let reason = finish_reason.as_str().ok_or_else(|| {
+                    "provider OpenAI Chat finish_reason must be a string".to_string()
+                })?;
+                terminal |= !reason.trim().is_empty();
             }
         }
         if let Some(delta) = choice.get("delta") {
@@ -1208,6 +1208,12 @@ mod provider_sse_json_codec_tests {
         assert_eq!(
             classify(
                 r#"{"id":"chatcmpl_1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":""}]}"#
+            ),
+            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
+        );
+        assert_eq!(
+            classify(
+                r#"{"id":"chatcmpl_1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"  "}]}"#
             ),
             Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
         );

@@ -66,9 +66,7 @@ pub(crate) use direct_sse_consumers::V3DirectSseTypedHookCatalog;
 mod v3_direct_gemini_codec;
 mod v3_direct_protocol_codec;
 pub use v3_direct_gemini_codec::V3GeminiDirectCodec;
-pub use v3_direct_protocol_codec::{
-    V3ChatDirectCodec, V3DirectProtocolCodec, V3ResponsesDirectCodec,
-};
+pub use v3_direct_protocol_codec::{V3ChatDirectCodec, V3DirectProtocolCodec};
 mod v3_direct_anthropic_codec;
 pub use v3_direct_anthropic_codec::{
     V3AnthropicDirect11Policy, V3AnthropicDirectCodec, V3Req04StandardizedAnthropic,
@@ -798,19 +796,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
 
         // Responses direct has a protocol-specific kernel, so it must enter the
         // same Req04 tool-thinking hook explicitly as the generic direct kernel.
-        // Keep the injection owner in the shared Req04 hook; this call only wires
-        // the direct lifecycle edge before policy and provider wire projection.
-        if let Err(source) =
-            crate::kernel::v3_direct_protocol_codec::V3ResponsesDirectCodec::prepare_before_send(
-                &mut (),
-                manifest,
-                &standardized_server_id,
-                &mut standardized,
-                &standardized_request_id,
-                now_epoch_ms,
-                &mut trace,
-            )
-        {
+        // Keep the injection owner in the shared Responses Direct hook; this call
+        // only wires the direct lifecycle edge before policy and provider wire
+        // projection.
+        if let Err(source) = crate::hooks::responses_direct_prepare_before_send(
+            manifest,
+            &standardized_server_id,
+            &mut standardized,
+        ) {
             return direct_runtime_helpers_stream::source_failure_output(
                 source,
                 last_external_http.clone(),

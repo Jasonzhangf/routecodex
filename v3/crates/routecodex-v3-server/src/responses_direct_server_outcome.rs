@@ -25,10 +25,45 @@ pub(super) fn take_responses_direct_terminal_outcome(
         output.diagnostic_source.as_ref(),
         output.diagnostic_cause.as_ref(),
     );
-    output
-        .terminal_disposition
-        .take()
-        .map(V3ResponsesDirectServerOutcome::ProviderTerminal)
+    let disposition = output.terminal_disposition.take()?;
+    // A Responses Direct provider terminal ends the client transport without a
+    // client payload, so the request never reaches the Direct frame closeout
+    // that would write its terminal observability row. Record the already-typed
+    // Error06 chain before breaking the transport: the Direct lane really holds
+    // `V3Error06ClientProjected`, so the terminal row keeps the real chain
+    // instead of reading "not_reached" or, worse, leaving no row at all.
+    let client_disconnect = output.diagnostic_source.as_ref().is_some_and(|source| {
+        source.source_kind == routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect
+    });
+    if !client_disconnect {
+        if let Some(error_chain) = output.error_chain.as_deref() {
+            if let Err(error) = webui_observability::record_v3_webui_error_projection(
+                &state.webui_observability,
+                state.server.port,
+                request_id,
+                path,
+                "responses",
+                None,
+                None,
+                output.client_payload.status,
+                None,
+                webui_observability::V3ObsErrorProjection {
+                    exposed: true,
+                    error_chain,
+                    ..Default::default()
+                },
+            ) {
+                let line = format_v3_console_timed_content(
+                    "[webui-observability]",
+                    &format!("req={} error={}", request_id, error),
+                );
+                append_v3_human_console_line(state, &line);
+            }
+        }
+    }
+    Some(V3ResponsesDirectServerOutcome::ProviderTerminal(
+        disposition,
+    ))
 }
 
 pub(super) fn execute_responses_direct_server_outcome<'a>(
