@@ -23,6 +23,7 @@ import {
 } from './protocol-semantics.mjs';
 import {
   CODEX_REAL_EXEC_CONSUMER,
+  codexCliAvailability,
   runCodexRealExec,
 } from './codex-exec-consumer.mjs';
 import { runToolFollowup } from './tool-consumer.mjs';
@@ -122,6 +123,12 @@ export async function runCase({
   if (codexRealExec) {
     const sendHttpIndex = gaps.indexOf('capability_missing: caller sendHttp adapter required');
     if (sendHttpIndex >= 0) gaps.splice(sendHttpIndex, 1);
+  }
+  if (codexRealExec && !codexExecutor) {
+    const availability = codexCliAvailability();
+    if (availability.kind === 'not_found') {
+      gaps.push(`capability_missing: Codex CLI not found (${availability.reason})`);
+    }
   }
   if (gaps.length > 0) {
     return finalizeReport(report, {
