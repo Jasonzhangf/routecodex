@@ -8,7 +8,6 @@ use std::collections::{BTreeSet, HashMap};
 
 use routecodex_v3_config::V3WebSearchExecutionMode;
 
-use super::is_v3_gpt_canonical_model;
 use super::request_outbound_mcp_names::provider_function_name;
 use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
 
@@ -259,7 +258,7 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
     payload: &mut Value,
-    model_id: Option<&str>,
+    _model_id: Option<&str>,
     web_search_execution_mode: V3WebSearchExecutionMode,
     has_web_search_capability: bool,
     drop_context: &V3ProjectionDropContext,
@@ -313,11 +312,6 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
         ));
         return Ok(());
     };
-    // gpt 家族模型保留标准 hosted web_search 语义（openai 官方支持）；其余
-    // 所有模型统一替换为内部 websearch 工具（RouteCodex 本地搜索 hop 执行，
-    // 不区分 provider、不依赖 provider 原生搜索能力）。家族判定真源在 compat
-    // 层（is_v3_gpt_canonical_model 委托 config 家族判定），本节点只消费结果。
-    let is_gpt_model = model_id.is_some_and(is_v3_gpt_canonical_model);
     let mut normalized_tools = Vec::new();
     let mut normalized_tool_indexes = HashMap::<String, usize>::new();
     let mut web_search_options = Map::new();
@@ -356,18 +350,6 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
                         &format!("$.tools[{index}]"),
                     )?;
                 }
-            } else if has_web_search_capability
-                && (web_search_execution_mode.is_metadata_center_local_search() || !is_gpt_model)
-            {
-                // Mode B（显式内部路由，如 MiniMax 走标准 web search 内部路由）
-                // 或非 gpt 模型：标准 web_search 声明投影为本地 websearch
-                // function tool（单一工具名 websearch，供 Resp03 同轮拦截本地执行）。
-                push_unique_provider_function_tool(
-                    &mut normalized_tools,
-                    &mut normalized_tool_indexes,
-                    build_local_web_search_function_tool(tool, index, "websearch")?,
-                    "openai_chat",
-                )?;
             } else if has_web_search_capability {
                 // gpt 模型 + provider 具备 web_search 能力：保持既有 hosted
                 // web_search_options 投影（与 HEAD 行为一致）。
@@ -429,97 +411,6 @@ fn push_provider_tool_with_refresh_precedence(
     } else {
         push_unique_provider_function_tool(tools, tool_indexes, tool, target_protocol)
     }
-}
-
-fn build_local_web_search_function_tool(
-    tool: &Value,
-    index: usize,
-    local_tool_name: &str,
-) -> Result<Value, String> {
-    let path = format!("$.tools[{index}]");
-    let row = tool
-        .as_object()
-        .ok_or_else(|| format!("MalformedOutboundField target_protocol=openai_chat path={path}"))?;
-    for key in row.keys() {
-        if !matches!(
-            key.as_str(),
-            "type"
-                | "search_context_size"
-                | "user_location"
-                | "external_web_access"
-                | "search_content_types"
-        ) {
-            return Err(format!(
-                "UnmappedOutboundFields target_protocol=openai_chat paths={path}.{key}"
-            ));
-        }
-    }
-    let content_types = row
-        .get("search_content_types")
-        .cloned()
-        .unwrap_or_else(|| Value::Array(vec![Value::String("text".to_string())]));
-    if !content_types
-        .as_array()
-        .is_some_and(|values| !values.is_empty() && values.iter().all(Value::is_string))
-    {
-        return Err(format!(
-            "MalformedOutboundField target_protocol=openai_chat path={path}.search_content_types"
-        ));
-    }
-    let mut properties = Map::new();
-    properties.insert(
-        "query".to_string(),
-        serde_json::json!({
-            "type":"string",
-            "description":"The search query. Construct a concise query with the key terms for the information the user needs."
-        }),
-    );
-    properties.insert(
-        "search_content_types".to_string(),
-        serde_json::json!({
-            "type":"array",
-            "items":{"type":"string","enum":content_types},
-            "default":content_types
-        }),
-    );
-    if let Some(value) = row.get("search_context_size") {
-        properties.insert(
-            "search_context_size".to_string(),
-            serde_json::json!({"type":"string","default":value}),
-        );
-    }
-    if let Some(value) = row.get("user_location") {
-        properties.insert(
-            "user_location".to_string(),
-            serde_json::json!({"type":"object","default":value}),
-        );
-    }
-    normalize_openai_chat_function_tool(
-        &Map::from_iter([
-            ("type".to_string(), Value::String("function".to_string())),
-            (
-                "name".to_string(),
-                Value::String(local_tool_name.to_string()),
-            ),
-            (
-                "description".to_string(),
-                Value::String("Search the web for up-to-date information.".to_string()),
-            ),
-            (
-                "parameters".to_string(),
-                Value::Object(Map::from_iter([
-                    ("type".to_string(), Value::String("object".to_string())),
-                    ("properties".to_string(), Value::Object(properties)),
-                    (
-                        "required".to_string(),
-                        Value::Array(vec![Value::String("query".to_string())]),
-                    ),
-                    ("additionalProperties".to_string(), Value::Bool(false)),
-                ])),
-            ),
-        ]),
-        &path,
-    )
 }
 
 fn merge_openai_chat_web_search_options(

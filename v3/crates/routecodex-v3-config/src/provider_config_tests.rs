@@ -54,18 +54,16 @@ fn snake_case_web_search_mode_parses_via_alias() {
         r#"
 wireName = "MiniMax-M3"
 capabilities = ["web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
+web_search_execution_mode = "native_remote_search_tool_mix"
 "#,
     )
     .expect("parse");
     assert_eq!(
         parsed.web_search_execution_mode().as_str(),
-        "metadata_center_local_search",
+        "native_remote_search_tool_mix",
         "snake_case web_search_execution_mode must parse (found {:?})",
         parsed.web_search_execution_mode()
     );
-    assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
 }
 
 #[test]
@@ -73,16 +71,14 @@ fn camel_case_web_search_mode_still_parses() {
     let parsed: V2ProviderModelConfig = toml::from_str(
         r#"
 wireName = "MiniMax-M3"
-webSearchExecutionMode = "metadata_center_local_search"
-webSearchBackend = "MiniMax-M3"
+webSearchExecutionMode = "native_remote_search_tool_mix"
 "#,
     )
     .expect("parse");
     assert_eq!(
         parsed.web_search_execution_mode().as_str(),
-        "metadata_center_local_search"
+        "native_remote_search_tool_mix"
     );
-    assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
 }
 
 #[test]

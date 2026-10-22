@@ -21,8 +21,6 @@ fn project_sse_event_payload(
     session_id: Option<&str>,
     payload: Value,
     compatibility_profile: Option<&str>,
-    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    web_search_center_state: Option<&V3WebSearchCenterState>,
     retain_response_cipher: bool,
     expected_model_id: &str,
     response_control: &V3RuntimeStreamObservation,
@@ -37,8 +35,6 @@ fn project_sse_event_payload(
         V3HubTransportIntent::Sse,
         &mut trace,
         compatibility_profile,
-        web_search_execution_mode,
-        web_search_center_state,
         retain_response_cipher,
         false,
         expected_model_id,
@@ -57,8 +53,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
     session_id: String,
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     compatibility_profile: Option<String>,
-    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
     _stream_observation: V3RuntimeStreamObservation,
@@ -68,9 +62,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
     let decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
         routecodex_v3_sse::SseTransportLimits::default(),
     );
-    let transducer = V3OpenAiChatAnthropicSseTransducer::new(
-        web_search_execution_mode.is_metadata_center_local_search(),
-    );
+    let transducer = V3OpenAiChatAnthropicSseTransducer::new(false);
     let request_id = request_id;
     Box::pin(futures_util::stream::unfold(
         (
@@ -82,8 +74,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
             false,
             false,
             compatibility_profile,
-            web_search_execution_mode,
-            web_search_center_state,
             retain_response_cipher,
             provider_outcome,
         ),
@@ -96,8 +86,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
             mut done_seen,
             mut finished,
             compatibility_profile,
-            web_search_execution_mode,
-            web_search_center_state,
             retain_response_cipher,
             mut provider_outcome,
         )| {
@@ -117,8 +105,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 done_seen,
                                 finished,
                                 compatibility_profile,
-                                web_search_execution_mode,
-                                web_search_center_state,
                                 retain_response_cipher,
                                 provider_outcome,
                             ),
@@ -152,8 +138,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                     done_seen,
                                     finished,
                                     compatibility_profile,
-                                    web_search_execution_mode,
-                                    web_search_center_state,
                                     retain_response_cipher,
                                     provider_outcome,
                                 ),
@@ -191,8 +175,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                         done_seen,
                                         finished,
                                         compatibility_profile,
-                                        web_search_execution_mode,
-                                        web_search_center_state,
                                         retain_response_cipher,
                                         provider_outcome,
                                     ),
@@ -211,8 +193,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                     done_seen,
                                     finished,
                                     compatibility_profile,
-                                    web_search_execution_mode,
-                                    web_search_center_state,
                                     retain_response_cipher,
                                     provider_outcome,
                                 ),
@@ -237,8 +217,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 done_seen,
                                 finished,
                                 compatibility_profile,
-                                web_search_execution_mode,
-                                web_search_center_state,
                                 retain_response_cipher,
                                 provider_outcome,
                             ),
@@ -288,18 +266,11 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                         Some(session_id.as_str()),
                                         payload,
                                         compatibility_profile.as_deref(),
-                                        web_search_execution_mode,
-                                        web_search_center_state.as_ref(),
                                         retain_response_cipher,
                                         provider_outcome.model_id.as_str(),
                                         &provider_outcome.response_control,
                                     )
-                                    .map_err(|error| match error {
-                                        V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
-                                            "ROUTECODEX_GOVERNANCE_REJECTED".to_string()
-                                        }
-                                        other => other.to_string(),
-                                    })?;
+                                    .map_err(|error| error.to_string())?;
                                     pending.push_back(format!("data: {governed}\n\n").into_bytes());
                                 }
                             }
@@ -313,25 +284,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                         Ok(_) => continue,
                         Err(error) => {
                             finished = true;
-                            if error.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
-                                return Some((
-                                    Err(error),
-                                    (
-                                        provider,
-                                        decoder,
-                                        transducer,
-                                        toolreason,
-                                        pending,
-                                        done_seen,
-                                        finished,
-                                        compatibility_profile,
-                                        web_search_execution_mode,
-                                        web_search_center_state,
-                                        retain_response_cipher,
-                                        provider_outcome,
-                                    ),
-                                ));
-                            }
                             let recorded = provider_outcome.record_failure(&error).await;
                             return Some((
                                 Err(recorded.map(|_| error).unwrap_or_else(|record| record)),
@@ -344,8 +296,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                     done_seen,
                                     finished,
                                     compatibility_profile,
-                                    web_search_execution_mode,
-                                    web_search_center_state,
                                     retain_response_cipher,
                                     provider_outcome,
                                 ),
@@ -368,8 +318,6 @@ fn project_gemini_sse_as_openai_chat_stream(
     session_id: String,
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     compatibility_profile: Option<String>,
-    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
     _stream_observation: V3RuntimeStreamObservation,
@@ -403,8 +351,6 @@ fn project_gemini_sse_as_openai_chat_stream(
                 V3HubTransportIntent::Sse,
                 &mut Vec::new(),
                 compatibility_profile.as_deref(),
-                web_search_execution_mode,
-                web_search_center_state.as_ref(),
                 retain_response_cipher,
                 tool_thinking_enabled,
                 &provider_outcome.model_id,
@@ -415,15 +361,7 @@ fn project_gemini_sse_as_openai_chat_stream(
                     if let V3OpenAiChatRelayRuntimeError::Response(error) = &error {
                         provider_outcome.response_control.record_response_governance_failure(error.clone())?;
                     }
-                    let reason = match error {
-                        V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
-                            "ROUTECODEX_GOVERNANCE_REJECTED".to_string()
-                        }
-                        other => other.to_string(),
-                    };
-                    if reason.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
-                        return Err(reason);
-                    }
+                    let reason = error.to_string();
                     let recorded = provider_outcome.record_failure(&reason).await;
                     return Err(recorded.map(|_| reason).unwrap_or_else(|record| record));
                 }

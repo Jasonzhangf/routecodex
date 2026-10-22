@@ -41,7 +41,7 @@ fn relay_runtime_failure_propagates_supplied_observability() {
     observability.provider_status = Some(598);
 
     let output = project_v3_responses_relay_runtime_failure(
-        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed("red-test propagation".to_string()),
+        V3ResponsesRelayRuntimeError::RuntimeTiming("red-test propagation".to_string()),
         Some(observability.clone()),
     );
     assert_eq!(output.status, 598);
@@ -70,7 +70,7 @@ fn relay_runtime_failure_propagates_supplied_observability() {
     assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
     assert_eq!(
         body["error"]["message"],
-        "web_search local search hop failed: red-test propagation"
+        "V3 Responses Relay Runtime timing failed: red-test propagation"
     );
     assert!(
         body["error"].get("stage").is_none()
@@ -84,7 +84,7 @@ fn relay_runtime_failure_propagates_supplied_observability() {
     );
 
     let none_output = project_v3_responses_relay_runtime_failure(
-        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed("no-obs".to_string()),
+        V3ResponsesRelayRuntimeError::RuntimeTiming("no-obs".to_string()),
         None,
     );
     assert!(

@@ -199,6 +199,9 @@ async fn run_case_shape(
     image_only: bool,
     tool_output: Option<Value>,
 ) {
+    // These cases count upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     // External HTTP providers capture the complete request. Exhausted image
     // pools use an explicit declared unavailable provider, preserving the real
     // multimodal capability declaration.
@@ -549,6 +552,9 @@ async fn mixed_multimodal_pool_skips_text_candidates_and_projects_only_after_exh
 }
 
 async fn assert_isolated_image_boundary(path: &str, content: Value, retain_image: bool) {
+    // These cases count upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let completion = serde_json::to_vec(&json!({
         "id":"chat_boundary","object":"chat.completion","model":"boundary-wire",
         "choices":[{"index":0,"message":{"role":"assistant","content":"boundary-ok"},"finish_reason":"stop"}],

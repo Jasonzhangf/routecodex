@@ -1450,7 +1450,7 @@ routing_group = "g"
 endpoints = ["openai_chat"]
 [servers.s.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.malformed_mm]
@@ -3223,7 +3223,7 @@ routing_group = "controlled"
 endpoints = ["openai_chat"]
 [servers.controlled.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.controlled]
@@ -3262,7 +3262,7 @@ routing_group = "controlled"
 endpoints = ["openai_chat"]
 [servers.controlled.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.controlled]
@@ -3302,7 +3302,7 @@ routing_group = "{identity}"
 endpoints = ["openai_chat"]
 [servers.{identity}.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {{}}
 [providers.{identity}]
@@ -3363,7 +3363,7 @@ routing_group = "__SCOPE__"
 endpoints = ["openai_chat"]
 [servers.__SCOPE__.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.__PRIMARY__]
@@ -3429,7 +3429,7 @@ routing_group = "__SCOPE__"
 endpoints = ["openai_chat"]
 [servers.__SCOPE__.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.__PRIMARY__]
@@ -3487,7 +3487,7 @@ routing_group = "__SCOPE__"
 endpoints = ["openai_chat"]
 [servers.__SCOPE__.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.__PRIMARY__]
@@ -3879,7 +3879,7 @@ routing_group = "cross_protocol"
 endpoints = ["openai_chat", "responses"]
 [servers.cross_protocol.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.__MM_PROVIDER__]
@@ -3981,7 +3981,7 @@ routing_group = "model_pool"
 endpoints = ["openai_chat", "responses"]
 [servers.model_pool.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.mm]
@@ -4014,7 +4014,7 @@ targets = [{ kind = "provider_model", provider = "text", model = "deepseek-v4-fl
     .unwrap()
 }
 
-fn manifest_with_anthropic_mode_b_websearch() -> routecodex_v3_config::V3Config05ManifestPublished {
+fn manifest_with_anthropic_hosted_websearch() -> routecodex_v3_config::V3Config05ManifestPublished {
     ensure_openai_chat_relay_test_state_dir();
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
@@ -4027,7 +4027,7 @@ routing_group = "cross_protocol"
 endpoints = ["openai_chat", "responses"]
 [servers.cross_protocol.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.mm]
@@ -4038,8 +4038,6 @@ auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
 [providers.mm.models.MiniMax-M3]
 wire_name = "MiniMax-M3"
 capabilities = ["text", "tools", "multimodal", "vision", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
 [route_groups.cross_protocol.pools.web_search]
 selection = { strategy = "priority" }
 match = { precedence = 20, required_capabilities = ["web_search"] }
@@ -4087,65 +4085,6 @@ impl ResponsesTransport for AnthropicWebSearchWireTransport {
             }))
             .unwrap(),
         ))
-    }
-}
-
-#[tokio::test]
-async fn openai_chat_entry_mode_b_web_search_intercepted_must_fail_fast_not_silently_strip() {
-    // 红测：chat 入口 + Mode B web_search 拦截后无结果投影路径，
-    // 必须显式 WebSearchInterceptedUnprojected，禁止静默剥离成普通文本。
-    let manifest = manifest_with_anthropic_mode_b_websearch();
-    let payload = json!({
-        "model": "MiniMax-M3",
-        "messages": [{"role": "user", "content": "search routecodex"}],
-        "tools": [{"type": "function", "function": {"name": "websearch", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}],
-        "stream": false
-    });
-    let transport = AnthropicWebSearchWireTransport {
-        captured_request: Mutex::new(None),
-    };
-    let output = execute_v3_openai_chat_relay_runtime(
-        &manifest,
-        V3OpenAiChatRelayRuntimeInput {
-            server_id: "cross_protocol".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                "openai-chat-mode-b-ws",
-            )
-            .expect("scope"),
-            request_id: "openai-chat-mode-b-ws-1".into(),
-            payload,
-        },
-        &transport,
-    )
-    .await;
-    // 请求 wire 必须保留 web_search 工具（Mode B outbound 投影）。
-    let wire = transport
-        .captured_request
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("provider request wire must be captured");
-    let tool_names: Vec<&str> = wire["tools"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|tool| {
-            tool.get("name")
-                .and_then(Value::as_str)
-                .or_else(|| tool.pointer("/function/name").and_then(Value::as_str))
-        })
-        .collect();
-    assert!(
-        tool_names.iter().any(|name| *name == "web_search"),
-        "provider wire must keep web_search server tool, got: {tool_names:?}"
-    );
-    let err =
-        output.expect_err("Mode B web_search interception must fail fast, not silently strip");
-    match err {
-        routecodex_v3_runtime::V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {}
-        other => panic!("expected WebSearchInterceptedUnprojected, got: {other:?}"),
     }
 }
 
@@ -4226,212 +4165,11 @@ fn routing_latest_image_attachment_survives_text_only_turns() {
 }
 
 #[tokio::test]
-async fn openai_chat_sse_mode_b_web_search_rejects_stream_before_silent_passthrough() {
-    // 红测：OpenAiChat wire SSE + Mode B 激活时，流式帧无法逐 chunk 拦截，
-    // 必须 fail-fast（WebSearchInterceptedUnprojected），禁止静默透传。
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
-            r#"
-version = 3
-[servers.ws]
-bind = "127.0.0.1"
-port = 1
-routing_group = "ws"
-endpoints = ["openai_chat"]
-[servers.ws.execution]
-allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
-allowed_transports = ["json", "sse"]
-attempt_store = {}
-[providers.wschat]
-type = "openai_chat"
-base_url = "http://wschat.invalid/v1"
-default_model = "ws-wire-model"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "WS_KEY" }] }
-[providers.wschat.models.ws-wire-model]
-wire_name = "ws-wire-model"
-supports_streaming = true
-capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
-[route_groups.ws.pools.web_search]
-selection = { strategy = "priority" }
-match = { precedence = 20, required_capabilities = ["web_search"] }
-targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
-[route_groups.ws.pools.default]
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
-"#,
-        )
-        .unwrap(),
-    )
-    .unwrap();
-
-    struct SseWsTransport;
-    #[async_trait]
-    impl ResponsesTransport for SseWsTransport {
-        async fn send(
-            &self,
-            request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            let stream = futures_util::stream::iter([
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_ws\",\"type\":\"function\",\"function\":{\"name\":\"websearch\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n".to_vec()),
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}}]},\"finish_reason\":null}]}\n\n".to_vec()),
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n".to_vec()),
-            ]);
-            Ok(V3ProviderResp14Raw::from_sse(
-                request.request_id().to_string(),
-                request.provider_id().to_string(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"text/event-stream".to_vec(),
-                }],
-                Box::pin(stream),
-            ))
-        }
-    }
-
-    let result = execute_v3_openai_chat_relay_runtime(
-        &manifest,
-        V3OpenAiChatRelayRuntimeInput {
-            server_id: "ws".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                "openai-chat-sse-mode-b-ws",
-            )
-            .expect("scope"),
-            request_id: "openai-chat-sse-mode-b-ws-1".into(),
-            payload: json!({
-                "model": "ws-wire-model",
-                "messages": [{"role": "user", "content": "search the web for x"}],
-                "tools": [{"type": "function", "function": {"name": "websearch",
-                 "description": "Search the web", "parameters": {"type":"object","properties":{}}}}],
-                "stream": true
-            }),
-        },
-        &SseWsTransport,
-    )
-    .await;
-    let error = match result {
-        Ok(_) => panic!("Mode B governance rejection must not commit a client stream"),
-        Err(error) => error,
-    };
-    assert!(
-        error.to_string().contains("web_search"),
-        "governance rejection must remain explicit: {error}"
-    );
-}
-
-#[tokio::test]
-async fn openai_chat_sse_mode_b_plain_text_stream_passes_through_without_websearch_call() {
-    // 防误伤：Mode B 激活 + OpenAiChat wire SSE 纯文本流（无 websearch tool call）
-    // 必须正常透传（逐帧判定只在出现本地 websearch tool call 时 fail-fast）。
-    use futures_util::StreamExt;
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
-            r#"
-version = 3
-[servers.ws]
-bind = "127.0.0.1"
-port = 1
-routing_group = "ws"
-endpoints = ["openai_chat"]
-[servers.ws.execution]
-allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
-allowed_transports = ["json", "sse"]
-attempt_store = {}
-[providers.wschat]
-type = "openai_chat"
-base_url = "http://wschat.invalid/v1"
-default_model = "ws-wire-model"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "WS_KEY" }] }
-[providers.wschat.models.ws-wire-model]
-wire_name = "ws-wire-model"
-supports_streaming = true
-capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
-[route_groups.ws.pools.web_search]
-selection = { strategy = "priority" }
-match = { precedence = 20, required_capabilities = ["web_search"] }
-targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
-[route_groups.ws.pools.default]
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
-"#,
-        )
-        .unwrap(),
-    )
-    .unwrap();
-
-    struct SseWsTextTransport;
-    #[async_trait]
-    impl ResponsesTransport for SseWsTextTransport {
-        async fn send(
-            &self,
-            request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            let stream = futures_util::stream::iter([
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-text\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"plain text\"},\"finish_reason\":null}]}\n\n".to_vec()),
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-text\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".to_vec()),
-            ]);
-            Ok(V3ProviderResp14Raw::from_sse(
-                request.request_id().to_string(),
-                request.provider_id().to_string(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"text/event-stream".to_vec(),
-                }],
-                Box::pin(stream),
-            ))
-        }
-    }
-
-    let output = execute_v3_openai_chat_relay_runtime(
-        &manifest,
-        V3OpenAiChatRelayRuntimeInput {
-            server_id: "ws".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                "openai-chat-sse-mode-b-ws-text",
-            )
-            .expect("scope"),
-            request_id: "openai-chat-sse-mode-b-ws-text-1".into(),
-            payload: json!({
-                "model": "ws-wire-model",
-                "messages": [{"role": "user", "content": "hello"}],
-                "stream": true
-            }),
-        },
-        &SseWsTextTransport,
-    )
-    .await
-    .expect("plain text SSE stream must succeed under Mode B");
-    assert_eq!(output.status, 200);
-    let stream = match output.client_body {
-        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
-        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
-    };
-    let frames = stream.collect::<Vec<_>>().await;
-    let text = String::from_utf8_lossy(&frames.concat()).to_string();
-    assert!(
-        text.contains("plain text") && text.contains("[DONE]"),
-        "client frames must carry plain text and [DONE]: {text:?}"
-    );
-}
-
-#[tokio::test]
-async fn openai_chat_mode_b_mismatch_without_request_activation_fails_fast_on_websearch_call() {
-    // 候选 Mode B（pool 直连）但请求侧未激活 websearch surface（model 缺失
-    // 导致 Req04 不激活）。provider 返回 hosted `web_search` server tool →
-    // 按 2026-08-08 语义透传为 chat tool_calls（客户端执行搜索，MEMORY 4241）；
-    // 仅本地 `websearch` function tool call 才 fail-fast。
-    let manifest = manifest_with_anthropic_mode_b_websearch();
+async fn openai_chat_hosted_web_search_tool_use_passes_through_as_chat_tool_calls() {
+    // Provider-owned hosted `web_search` server tool stays transparent to the
+    // client (MEMORY 4241): project it to chat tool_calls instead of treating
+    // it as a local search request.
+    let manifest = manifest_with_anthropic_hosted_websearch();
     let transport = AnthropicWebSearchWireTransport {
         captured_request: Mutex::new(None),
     };
@@ -4447,10 +4185,10 @@ async fn openai_chat_mode_b_mismatch_without_request_activation_fails_fast_on_we
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
                 "test-server",
                 "test-group",
-                "openai-chat-mode-b-mismatch",
+                "openai-chat-hosted-web-search",
             )
             .expect("scope"),
-            request_id: "openai-chat-mode-b-mismatch-1".into(),
+            request_id: "openai-chat-hosted-web-search-1".into(),
             payload,
         },
         &transport,
@@ -4472,110 +4210,10 @@ async fn openai_chat_mode_b_mismatch_without_request_activation_fails_fast_on_we
 }
 
 #[tokio::test]
-async fn openai_chat_sse_mode_b_mismatch_fails_fast_on_delta_websearch_tool_call() {
-    // 红测：OpenAiChat wire SSE + 候选 Mode B + 请求侧未激活（无 model）时，
-    // provider 在 delta.tool_calls 里返回 websearch call 必须 fail-fast，
-    // 禁止静默透传。
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
-            r#"
-version = 3
-[servers.ws]
-bind = "127.0.0.1"
-port = 1
-routing_group = "ws"
-endpoints = ["openai_chat"]
-[servers.ws.execution]
-allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
-allowed_transports = ["json", "sse"]
-attempt_store = {}
-[providers.wschat]
-type = "openai_chat"
-base_url = "http://wschat.invalid/v1"
-default_model = "ws-wire-model"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "WS_KEY" }] }
-[providers.wschat.models.ws-wire-model]
-wire_name = "ws-wire-model"
-supports_streaming = true
-capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
-[route_groups.ws.pools.web_search]
-selection = { strategy = "priority" }
-match = { precedence = 20, required_capabilities = ["web_search"] }
-targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
-[route_groups.ws.pools.default]
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
-"#,
-        )
-        .unwrap(),
-    )
-    .unwrap();
-
-    struct SseWsMismatchTransport;
-    #[async_trait]
-    impl ResponsesTransport for SseWsMismatchTransport {
-        async fn send(
-            &self,
-            request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            let stream = futures_util::stream::iter([
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_ws\",\"type\":\"function\",\"function\":{\"name\":\"websearch\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n".to_vec()),
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}}]},\"finish_reason\":null}]}\n\n".to_vec()),
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n".to_vec()),
-            ]);
-            Ok(V3ProviderResp14Raw::from_sse(
-                request.request_id().to_string(),
-                request.provider_id().to_string(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"text/event-stream".to_vec(),
-                }],
-                Box::pin(stream),
-            ))
-        }
-    }
-
-    let result = execute_v3_openai_chat_relay_runtime(
-        &manifest,
-        V3OpenAiChatRelayRuntimeInput {
-            server_id: "ws".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                "openai-chat-sse-mode-b-mismatch",
-            )
-            .expect("scope"),
-            request_id: "openai-chat-sse-mode-b-mismatch-1".into(),
-            payload: json!({
-                "messages": [{"role": "user", "content": "search the web for x"}],
-                "tools": [{"type": "function", "function": {"name": "websearch",
-                 "description": "Search the web", "parameters": {"type":"object","properties":{}}}}],
-                "stream": true
-            }),
-        },
-        &SseWsMismatchTransport,
-    )
-    .await;
-    let error = match result {
-        Ok(_) => panic!("governance mismatch must not commit a client stream"),
-        Err(error) => error,
-    };
-    assert!(error.to_string().contains("web_search"), "{error}");
-}
-
-#[tokio::test]
-async fn openai_chat_mode_b_mismatch_with_non_mode_b_forwarder_model_fails_fast() {
-    // 复现生产：请求 model 是存在的 forwarder（gpt-5.5 -> cc-sol 非 Mode B），
-    // 但 VR 因 web_search 意图路由到 Mode B pool（minimax_anthropic）。
-    // 候选 Mode B + 请求侧未激活（forwarder 非 Mode B）→ provider 返回 hosted
-    // `web_search` server tool（anthropic wire）→ 按 2026-08-08 语义透传为
-    // chat tool_calls 由客户端执行（MEMORY 4241：Chat function calls named
-    // web_search project back to web_search_call）；仅本地 `websearch` function
-    // tool call 才 fail-fast。
+async fn openai_chat_forwarder_hosted_web_search_tool_use_passes_through_as_chat_tool_calls() {
+    // A forwarder model routes a web_search intent to an Anthropic-wire pool.
+    // The provider-owned hosted `web_search` tool_use must stay transparent and
+    // project to chat tool_calls for client execution (MEMORY 4241).
     let manifest = compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
             r#"
@@ -4587,7 +4225,7 @@ routing_group = "g"
 endpoints = ["openai_chat"]
 [servers.s.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.mm]
@@ -4598,8 +4236,6 @@ auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
 [providers.mm.models."MiniMax-M3"]
 wire_name = "MiniMax-M3"
 capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
 [providers.text]
 type = "openai_chat"
 base_url = "http://text.invalid/v1"
@@ -4664,10 +4300,10 @@ targets = [{ kind = "provider_model", provider = "text", model = "plain-model", 
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
                 "test-server",
                 "test-group",
-                "openai-chat-mode-b-fwd-mismatch",
+                "openai-chat-forwarder-hosted-web-search",
             )
             .expect("scope"),
-            request_id: "openai-chat-mode-b-fwd-mismatch-1".into(),
+            request_id: "openai-chat-forwarder-hosted-web-search-1".into(),
             payload: json!({
                 "model": "gpt-5.5",
                 "messages": [{"role": "user", "content": "search the web for RouteCodex release"}],

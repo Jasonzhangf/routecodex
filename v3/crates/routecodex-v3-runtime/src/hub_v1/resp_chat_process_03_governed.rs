@@ -722,7 +722,6 @@ pub struct V3HubRespChatProcess03Governed {
     pub(crate) previous: V3HubRespInbound02Normalized,
     pub(crate) terminality: V3HubResponseTerminality,
     pub(crate) tool_calls: Vec<V3HubResponseToolCall>,
-    pub(crate) servertool_action: V3HubServertoolResponseAction,
 }
 
 pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
@@ -732,7 +731,6 @@ pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
         previous: input,
         terminality: V3HubResponseTerminality::Terminal,
         tool_calls: Vec::new(),
-        servertool_action: V3HubServertoolResponseAction::None,
     }
 }
 
@@ -781,10 +779,6 @@ impl V3HubRespChatProcess03Governed {
         self.tool_calls.len()
     }
 
-    pub fn servertool_action(&self) -> V3HubServertoolResponseAction {
-        self.servertool_action
-    }
-
     pub fn tool_call_kinds(&self) -> Vec<V3HubRelayToolKind> {
         self.tool_calls
             .iter()
@@ -796,31 +790,11 @@ impl V3HubRespChatProcess03Governed {
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRespChatProcess03Outcome {
     data: V3HubRespChatProcess03Governed,
-    web_search_transition: Option<V3WebSearchCenterState>,
-    web_search_hook_outcome: V3WebSearchHookOutcome,
 }
 
 impl V3HubRespChatProcess03Outcome {
-    pub fn into_parts(
-        self,
-    ) -> (
-        V3HubRespChatProcess03Governed,
-        Option<V3WebSearchCenterState>,
-        V3WebSearchHookOutcome,
-    ) {
-        (
-            self.data,
-            self.web_search_transition,
-            self.web_search_hook_outcome,
-        )
-    }
-
-    pub fn web_search_transition(&self) -> Option<&V3WebSearchCenterState> {
-        self.web_search_transition.as_ref()
-    }
-
-    pub fn web_search_hook_outcome(&self) -> &V3WebSearchHookOutcome {
-        &self.web_search_hook_outcome
+    pub fn into_governed(self) -> V3HubRespChatProcess03Governed {
+        self.data
     }
 }
 
@@ -901,7 +875,7 @@ fn v3_governed_tool_call_kind(item_type: &str) -> Option<V3HubRelayToolKind> {
         "function_call" | "function" => Some(V3HubRelayToolKind::Function),
         "custom_tool_call" | "custom" => Some(V3HubRelayToolKind::Custom),
         "tool_search_call" | "tool_search" | "web_search_call" | "web_search" => {
-            Some(V3HubRelayToolKind::Servertool)
+            Some(V3HubRelayToolKind::Native)
         }
         "mcp_call" | "mcp" => Some(V3HubRelayToolKind::Mcp),
         "computer_call"
@@ -1288,9 +1262,6 @@ impl V3HubRelaySerializedToolContext {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRelayResponseHookProfile {
-    servertool_names: BTreeSet<String>,
-    web_search_execution_mode: Option<routecodex_v3_config::V3WebSearchExecutionMode>,
-    web_search_center_state: Option<V3WebSearchCenterState>,
     /// 请求侧 VR 路由决策时算好的"该请求是否保留响应密文"标记：仅当目标是 gpt 模型
     /// **且该模型只有单一 provider 候选**时，响应里的 `encrypted_content` 才原样透传给
     /// Codex 客户端（客户端用自己的密文重建 reasoning 历史）；其余情况 Resp03 一律剥离。
@@ -1308,18 +1279,8 @@ pub struct V3HubRelayResponseHookProfile {
 }
 
 impl V3HubRelayResponseHookProfile {
-    pub fn new<I, S>(servertool_names: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
+    pub fn empty() -> Self {
         Self {
-            servertool_names: servertool_names
-                .into_iter()
-                .map(|name| name.as_ref().to_owned())
-                .collect(),
-            web_search_execution_mode: None,
-            web_search_center_state: None,
             retain_response_cipher: false,
             tool_thinking: false,
             toolreason_client_projection: true,
@@ -1331,19 +1292,6 @@ impl V3HubRelayResponseHookProfile {
             serialized_tool_context: V3HubRelaySerializedToolContext::default(),
             complete_provider_attempt: false,
         }
-    }
-
-    pub fn empty() -> Self {
-        Self::new(std::iter::empty::<&'static str>())
-    }
-
-    pub fn with_servertool_name(mut self, name: impl Into<String>) -> Self {
-        self.servertool_names.insert(name.into());
-        self
-    }
-
-    pub(crate) fn is_servertool_name(&self, name: &str) -> bool {
-        self.servertool_names.contains(name)
     }
 
     pub(crate) fn with_serialized_tool_context(
@@ -1360,25 +1308,6 @@ impl V3HubRelayResponseHookProfile {
 
     pub(crate) fn with_complete_provider_attempt(mut self, complete: bool) -> Self {
         self.complete_provider_attempt = complete;
-        self
-    }
-
-    pub fn with_web_search_execution_mode(
-        mut self,
-        mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    ) -> Self {
-        self.web_search_execution_mode = Some(mode);
-        self
-    }
-
-    pub fn web_search_execution_mode(
-        &self,
-    ) -> Option<routecodex_v3_config::V3WebSearchExecutionMode> {
-        self.web_search_execution_mode
-    }
-
-    pub fn with_web_search_center_state(mut self, state: V3WebSearchCenterState) -> Self {
-        self.web_search_center_state = Some(state);
         self
     }
 
@@ -1403,7 +1332,7 @@ impl V3HubRelayResponseHookProfile {
 
     pub(crate) fn with_tool_thinking_turn_context(
         mut self,
-        context: &super::servertool_hooks::V3ToolThinkingTurnContext,
+        context: &super::tool_thinking_hooks::V3ToolThinkingTurnContext,
     ) -> Self {
         self.tool_thinking_original_custom_tool_names = context
             .original_custom_tool_names()
@@ -1460,21 +1389,6 @@ impl V3HubRelayResponseHookProfile {
     pub fn toolreason_observation_request_id(&self) -> Option<&str> {
         self.toolreason_observation_request_id.as_deref()
     }
-
-    pub fn web_search_center_state(&self) -> Option<&V3WebSearchCenterState> {
-        self.web_search_center_state.as_ref()
-    }
-
-    /// Mode B：本地 ServerToolCenter 治理的 web_search 需在 Resp03 拦截并
-    /// 本地执行，而不是投影为客户端 exec_command。
-    pub fn web_search_local_surface_active(&self) -> bool {
-        self.web_search_execution_mode.is_some_and(
-            routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search,
-        ) && self
-            .web_search_center_state
-            .as_ref()
-            .is_some_and(|state| state.phase() == V3WebSearchCenterPhase::LocalToolSurfaceActive)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -1487,12 +1401,6 @@ pub enum V3HubRelayResponseError {
     ProviderResponseOutputNotArray,
     #[error("malformed tool call at output index {index}: {reason}")]
     MalformedToolCall { index: usize, reason: &'static str },
-    #[error("web_search ServerTool activation missing at Resp03 interception")]
-    MissingWebSearchActivation,
-    #[error("web_search ServerTool state transition failed at Resp03: {reason}")]
-    WebSearchStateTransitionFailed { reason: String },
-    #[error("web_search typed hook contract failed at Resp03: {reason}")]
-    WebSearchHookContractFailed { reason: String },
     #[error("provider response status is required")]
     MissingStatus,
     #[error("unsupported provider response status: {status}")]
@@ -1654,23 +1562,11 @@ fn govern_v3_hub_relay_response(
     if profile.complete_provider_attempt {
         tool_markup::govern_thinking(&mut input);
     }
-    let _identified_servertool_tool = super::servertool_hooks::inspect_v3_servertool_response_tool(
-        input.provider_payload().as_ref(),
-    );
     let governance = build_v3_resp03_protocol_governance(&input)?;
     let branch = inspect_v3_resp03_finish_reason(&input, &governance);
-    let mut web_search_center_state = None;
-    let mut web_search_hook_outcome = V3WebSearchHookOutcome::NotApplicable;
     let (input, governance) = match branch {
         V3Resp03FinishReasonBranch::ToolCall => {
-            let tool_call_hook = apply_v3_tool_call_servertool_hook_at_resp03(input, profile)?;
-            web_search_center_state = tool_call_hook.web_search_state;
-            web_search_hook_outcome = tool_call_hook.web_search_hook_outcome;
-            let mut input = if tool_call_hook.intercepted {
-                tool_call_hook.input
-            } else {
-                project_v3_apply_patch_freeform_calls_at_resp03(tool_call_hook.input)
-            };
+            let mut input = project_v3_apply_patch_freeform_calls_at_resp03(input);
             restore_v3_tool_thinking_custom_calls_at_resp03(
                 &mut input,
                 profile.tool_thinking_original_custom_tool_names(),
@@ -1684,24 +1580,8 @@ fn govern_v3_hub_relay_response(
         }
         V3Resp03FinishReasonBranch::Other => (input, governance),
     };
-    let servertool_tool_call_followup = governance
-        .tool_calls
-        .iter()
-        .any(|tool_call| profile.is_servertool_name(&tool_call.name));
-    let servertool_action = if servertool_tool_call_followup {
-        V3HubServertoolResponseAction::FollowupRequired
-    } else {
-        V3HubServertoolResponseAction::None
-    };
-    let typed_servertool_continuation = servertool_tool_call_followup
-        || web_search_center_state.is_some()
-        || !matches!(
-            web_search_hook_outcome,
-            V3WebSearchHookOutcome::NotApplicable
-        );
     // Only the complete post-governance result authorizes client delivery.
     if profile.complete_provider_attempt
-        && !typed_servertool_continuation
         && !super::v3_provider_attempt_has_deliverable_business_content(
             input.semantic_protocol(),
             input.provider_payload().as_ref(),
@@ -1719,10 +1599,7 @@ fn govern_v3_hub_relay_response(
             previous: input,
             terminality,
             tool_calls: governance.tool_calls,
-            servertool_action,
         },
-        web_search_transition: web_search_center_state,
-        web_search_hook_outcome,
     })
 }
 
@@ -2232,9 +2109,6 @@ pub(crate) fn classify_v3_hub_relay_tool_kind(raw_kind: &str, name: &str) -> V3H
     }
     if raw_kind == "custom_tool_call" {
         return V3HubRelayToolKind::Custom;
-    }
-    if name.strip_prefix("servertool.").is_some() || name.strip_prefix("servertool__").is_some() {
-        return V3HubRelayToolKind::Servertool;
     }
     if name.strip_prefix("mcp.").is_some() || name.strip_prefix("mcp__").is_some() {
         return V3HubRelayToolKind::Mcp;
@@ -5452,18 +5326,7 @@ mod canonical_govern_registry_tests {
     }
 
     fn success_profile() -> V3HubRelayResponseHookProfile {
-        let active_search = V3WebSearchCenterState::new()
-            .transition_to(
-                V3WebSearchCenterPhase::LocalToolSurfaceActive,
-                "registry_test_request",
-            )
-            .expect("typed web_search state must activate");
         V3HubRelayResponseHookProfile::empty()
-            .with_servertool_name("registry_followup")
-            .with_web_search_execution_mode(
-                routecodex_v3_config::V3WebSearchExecutionMode::MetadataCenterLocalSearch,
-            )
-            .with_web_search_center_state(active_search)
     }
 
     #[test]
@@ -5478,7 +5341,7 @@ mod canonical_govern_registry_tests {
             json!("typed sidecar")
         );
         assert!(!expected.to_string().contains("<think>"));
-        assert!(!expected.to_string().contains("call_registry_web_search"));
+        assert!(expected.to_string().contains("call_registry_web_search"));
         assert!(expected.to_string().contains("call_registry_followup"));
         assert!(expected.to_string().contains("preserved"));
 
@@ -5487,21 +5350,7 @@ mod canonical_govern_registry_tests {
             .expect("public registry governance must succeed");
 
         assert_eq!(outcome.finalized_payload(), &expected);
-        assert_eq!(
-            outcome.servertool_action(),
-            V3HubServertoolResponseAction::FollowupRequired
-        );
         assert_eq!(outcome.terminality(), V3HubResponseTerminality::NonTerminal);
-        let sidecar = outcome
-            .web_search_transition()
-            .expect("local web_search must preserve its typed state transition");
-        assert_eq!(sidecar.phase(), V3WebSearchCenterPhase::ToolCallObserved);
-        assert_eq!(sidecar.original_call_id(), Some("call_registry_web_search"));
-        assert_eq!(sidecar.query(), Some("registry"));
-        assert_eq!(
-            outcome.web_search_hook_outcome(),
-            &V3WebSearchHookOutcome::NotApplicable
-        );
     }
 
     #[test]
@@ -5594,10 +5443,7 @@ mod canonical_govern_registry_tests {
                 previous: input,
                 terminality: V3HubResponseTerminality::Terminal,
                 tool_calls: Vec::new(),
-                servertool_action: V3HubServertoolResponseAction::None,
             },
-            web_search_transition: None,
-            web_search_hook_outcome: V3WebSearchHookOutcome::NotApplicable,
         })
     }
 

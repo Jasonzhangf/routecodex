@@ -11,7 +11,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.openai]
@@ -49,7 +49,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.first]
@@ -183,7 +183,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.first]
@@ -230,7 +230,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.grok]
@@ -267,7 +267,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.optional]
@@ -315,7 +315,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.openai]
@@ -359,7 +359,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.ds]

@@ -103,9 +103,9 @@ use routecodex_v3_runtime::{
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
-    execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state,
+    execute_v3_responses_relay_dry_run_orchestration_outcome,
     execute_v3_responses_relay_runtime_with_default_transport,
-    execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state,
+    execute_v3_responses_relay_runtime_with_default_transport_health,
     foundation_output_from_error_sdk_result,
     plan_v3_responses_protocol_execution_with_provider_health,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
@@ -121,12 +121,11 @@ use routecodex_v3_runtime::{
     V3OpenAiChatClientStream, V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody,
     V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3ProviderHealthListenerScope,
     V3RelayProviderSnapshots, V3RequestExecutionControl, V3Resp15ClientPayload,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
-    V3ResponsesDirectServerToolState, V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody,
+    V3ResponsesDirectRuntimeSharedState, V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody,
     V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
     V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
     V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
-    V3ResponsesRelayRuntimeSeeds, V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState,
+    V3ResponsesRelayRuntimeSeeds,
     V3RuntimeObservability, V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
     V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
@@ -193,8 +192,6 @@ struct V3ListenerState {
     sse_dump_enabled: bool,
     request_counter: Arc<Mutex<V3RequestIdCounter>>,
     codex_sample_store: Arc<routecodex_v3_debug::V3CodexSampleStore>,
-    responses_direct_server_tool_state: Arc<V3ResponsesDirectServerToolState>,
-    responses_relay_server_tool_state: Arc<V3ResponsesRelayServerToolState>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeMap<String, u64>>>,
     responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
@@ -483,20 +480,6 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     admin_config_path: Option<std::path::PathBuf>,
     hooks_sidecar_socket: Option<PathBuf>,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
-    if hooks_sidecar_socket.is_none()
-        && manifest.providers.values().any(|provider| {
-            provider.models.values().any(|model| {
-                model
-                    .web_search_execution_mode
-                    .is_metadata_center_local_search()
-            })
-        })
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "web_search metadata_center_local_search requires a hooks sidecar socket",
-        ));
-    }
     let sse_dump_enabled = v3_sse_dump_env_flag();
     let console_enabled = manifest.debug.log_console;
     let debug_manifest = manifest.debug.clone();
@@ -518,13 +501,6 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             );
         }
     }
-    let responses_direct_server_tool_state = Arc::new(
-        V3ResponsesDirectServerToolState::default()
-            .with_hooks_sidecar_socket(hooks_sidecar_socket.clone()),
-    );
-    let responses_relay_server_tool_state = Arc::new(
-        V3ResponsesRelayServerToolState::default().with_hooks_sidecar_socket(hooks_sidecar_socket),
-    );
     let codex_sample_store = Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
         manifest.debug.codex_samples,
         routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
@@ -652,8 +628,6 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                 sse_dump_enabled,
                 request_counter: Arc::clone(&request_counter),
                 codex_sample_store: codex_sample_store.clone(),
-                responses_direct_server_tool_state: responses_direct_server_tool_state.clone(),
-                responses_relay_server_tool_state: responses_relay_server_tool_state.clone(),
                 provider_health: listener_provider_health,
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
                 responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),

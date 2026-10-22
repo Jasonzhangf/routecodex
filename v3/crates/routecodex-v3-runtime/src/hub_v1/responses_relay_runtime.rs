@@ -1,8 +1,4 @@
 use super::common::V3ChatProcessRefillDisposition;
-use super::web_search_hop::{
-    apply_v3_responses_relay_web_search_control_completion,
-    project_web_search_result_into_finalized, resolve_web_search_mode_and_backend,
-};
 use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
@@ -113,8 +109,7 @@ pub(crate) use responses_openai_chat_conversion::build_v3_responses_reasoning_it
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
 pub use responses_relay_dry_run::{
-    execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state,
-    execute_v3_responses_relay_dry_run_runtime_with_server_tool_state,
+    execute_v3_responses_relay_dry_run_orchestration_outcome,
     project_v3_responses_relay_runtime_failure,
 };
 pub(crate) use responses_relay_failures::provider_response_stream_relay_failure;
@@ -156,25 +151,16 @@ pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state<
-    T: ResponsesTransport,
->(
+pub async fn execute_v3_responses_relay_runtime_with_transport_health<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayServerToolScope,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
-        Some(V3ResponsesRelayServerToolExecution {
-            control: server_tool_state,
-            scope,
-            commit_effects: true,
-        }),
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         true,
@@ -188,12 +174,10 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayServerToolScope,
     provider_snapshots: V3ResponsesRelayProviderSnapshotCapture,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
@@ -241,11 +225,6 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
             manifest,
             execution_input,
             &transport,
-            Some(V3ResponsesRelayServerToolExecution {
-                control: server_tool_state,
-                scope: scope.clone(),
-                commit_effects: true,
-            }),
             provider_health.runtime_health(),
             V3ResponsesRelayRetryPolicy::from_manifest(manifest),
             true,
@@ -348,7 +327,6 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         manifest,
         input,
         transport,
-        None,
         provider_health.runtime_health(),
         retry_policy,
         true,
@@ -375,7 +353,6 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         manifest,
         input,
         transport,
-        None,
         provider_health.runtime_health(),
         retry_policy,
         true,
@@ -387,12 +364,6 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
-}
-
-pub(crate) struct V3ResponsesRelayServerToolExecution<'state> {
-    pub(crate) control: &'state V3ResponsesRelayServerToolState,
-    pub(crate) scope: V3ResponsesRelayServerToolScope,
-    pub(crate) commit_effects: bool,
 }
 
 async fn handle_v3_responses_relay_provider_failure(

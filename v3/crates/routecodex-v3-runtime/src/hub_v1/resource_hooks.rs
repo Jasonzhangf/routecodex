@@ -1,6 +1,6 @@
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3HubFixedNode, V3HubHookManifest, V3HubHookPhase,
-    V3HubHookProfile, V3HubHookRequirement, V3HubResourceManifest, V3HubV1Manifest,
+    V3HubHookRequirement, V3HubResourceManifest, V3HubV1Manifest,
 };
 use std::collections::BTreeMap;
 
@@ -399,20 +399,6 @@ pub fn validate_v3_hub_v1_hook_manifest(
         {
             return Err(V3HubStartupError::ConfiguredManifest {
                 reason: format!("hook {} has conflicting resource access", hook.hook_id),
-            });
-        }
-        if hook.profile == Some(V3HubHookProfile::Servertool)
-            && !matches!(
-                hook.node,
-                V3HubFixedNode::V3HubReqChatProcess04Governed
-                    | V3HubFixedNode::V3HubRespChatProcess03Governed
-            )
-        {
-            return Err(V3HubStartupError::ConfiguredManifest {
-                reason: format!(
-                    "servertool profile is incompatible with node {}",
-                    hook.node.node_id()
-                ),
             });
         }
     }

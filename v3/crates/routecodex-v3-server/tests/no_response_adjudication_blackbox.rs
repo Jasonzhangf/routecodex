@@ -4313,9 +4313,6 @@ async fn start_entry_configured(
         two_provider_route,
         refill_max,
     } = options;
-    // Apply the typed refill policy for this entry. `None` clears the injection
-    // so the compiled `internal.toml` value is the only active source.
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(refill_max);
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("public regression requires loopback sockets");
@@ -4351,6 +4348,10 @@ async fn start_entry_configured(
     });
     let declaration = hub_v1_fixture::hub_v1_test_declaration();
     let execution = hub_v1_fixture::hub_v1_server_execution("a");
+    // Apply the typed refill policy for this entry after the shared fixture has
+    // prepared the process. `None` clears the injection so the compiled
+    // `internal.toml` value is the only active source.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(refill_max);
     let port = test_ports::free_port();
     let auth_entries = if auth_entries.is_empty() {
         let alias = if health_enabled {

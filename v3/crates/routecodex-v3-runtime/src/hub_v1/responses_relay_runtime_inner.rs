@@ -1,7 +1,5 @@
 use super::relay_runtime_shared::bind_v3_selected_business_auth_kind;
 use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
-use super::web_search_hop::store_v3_responses_relay_web_search_state;
-use super::web_search_sidecar::execute_web_search_through_hooks_sidecar;
 use super::*;
 use crate::operation_runner::plan_execution::{
     run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
@@ -76,7 +74,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
     manifest: &'a V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     transport: &'a T,
-    server_tool_state: Option<V3ResponsesRelayServerToolExecution<'a>>,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3ResponsesRelayRetryPolicy,
     allow_exhaustion_rescue_probe: bool,
@@ -100,7 +97,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
             manifest,
             input,
             transport,
-            server_tool_state,
             provider_health,
             retry_policy,
             allow_exhaustion_rescue_probe,
@@ -127,7 +123,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
     manifest: &'a V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     transport: &'a T,
-    server_tool_state: Option<V3ResponsesRelayServerToolExecution<'a>>,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3ResponsesRelayRetryPolicy,
     allow_exhaustion_rescue_probe: bool,
@@ -182,21 +177,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     .to_string(),
             ));
         }
-        apply_v3_responses_relay_web_search_control_completion(
-            manifest,
-            &input.server_id,
-            server_tool_state.as_ref(),
-            &input.payload,
-        )?;
-        let request_web_search_execution_mode =
-            resolve_request_web_search_execution_mode(manifest, &input.payload);
-        if request_web_search_execution_mode.is_metadata_center_local_search()
-            && server_tool_state.is_none()
-        {
-            return Err(V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
-                "web_search execution state is unavailable".to_string(),
-            ));
-        }
         let req01 = build_v3_hub_req_inbound_01_client_raw(
             input.payload,
             V3HubEntryProtocol::Responses,
@@ -219,11 +199,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         let req02 = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(req01)
             .map_err(V3ResponsesRelayRuntimeError::ClientInboundCanonical)?;
         trace.push("V3HubReqInbound02Normalized");
-        let request_hook_profile = responses_relay_request_hook_profile(
-            manifest,
-            &input.server_id,
-            request_web_search_execution_mode,
-        );
+        let request_hook_profile = responses_relay_request_hook_profile(manifest, &input.server_id);
         let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
         let resolve_mode = match initial_expanded.as_ref() {
             Some(expanded) => {
@@ -397,11 +373,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 .run_from_normalized(req02, &request_hook_profile)?
         };
         trace.push("V3HubReqChatProcess04Governed");
-        let request_web_search_state = request_outcome.web_search_state().cloned();
-        store_v3_responses_relay_web_search_state(
-            server_tool_state.as_ref(),
-            request_web_search_state.as_ref(),
-        )?;
         let provider_semantic_body = std::sync::Arc::clone(request_outcome.payload_arc());
         let anthropic_response_projection_context =
             V3AnthropicResponsesProjectionContext::from_chat_canonical_request(
@@ -1103,16 +1074,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         }
                         continue;
                     }
-                    let request_web_search_state = match request_web_search_state.clone() {
-                        Some(state) => Some(state),
-                        None => match server_tool_state.as_ref() {
-                            Some(execution) => execution
-                                .control
-                                .web_search_load_for_scope(&execution.scope)?,
-                            None => None,
-                        },
-                    };
-                    let (mut finalized_provider_value, response_web_search_state, governed_facts) =
+                    let (mut finalized_provider_value, governed_facts) =
                         match run_json_response_hooks_with_invocation_source(
                             V3ResponsesRelayJsonResponseHookInput {
                                 session_id: input.failure_session_scope.session_id(),
@@ -1136,10 +1098,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     .candidate
                                     .compatibility_profile
                                     .as_deref(),
-                                web_search_execution_mode: selected
-                                    .candidate
-                                    .web_search_execution_mode,
-                                web_search_center_state: request_web_search_state,
                                 retain_response_cipher: is_v3_retain_response_cipher(
                                     selected.route.target_plan.len(),
                                     &selected.candidate.model_id,
@@ -1187,48 +1145,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         &mut finalized_provider_value,
                         provider_semantic_body.as_ref(),
                     );
-                    if let Some(web_search_state) = response_web_search_state {
-                        let captured = if web_search_state.phase()
-                            == V3WebSearchCenterPhase::SearchResultCaptured
-                        {
-                            web_search_state
-                        } else {
-                            let execution = server_tool_state.as_ref().ok_or_else(|| {
-                                V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
-                                    "web_search execution scope is unavailable".to_string(),
-                                )
-                            })?;
-                            execute_web_search_through_hooks_sidecar(
-                                execution.control.hooks_sidecar_socket(),
-                                &input.request_id,
-                                &execution.scope,
-                                &request_execution_control,
-                                &web_search_state,
-                            )
-                            .await?
-                        };
-                        project_web_search_result_into_finalized(
-                            &mut finalized_provider_value,
-                            &captured,
-                        )?;
-                        if let Some(execution) = server_tool_state.as_ref() {
-                            if execution.commit_effects
-                                && execution.scope.has_client_session_scope()
-                            {
-                                execution.control.web_search_store_for_scope(
-                                    &execution.scope,
-                                    captured,
-                                    V3ServerToolCenterWriteOrigin {
-                                        module: "responses_relay_runtime",
-                                        symbol: "web_search_store_for_scope",
-                                        stage: "resp03_commit_effects",
-                                    },
-                                    Some("resp03 commit effects persist captured web_search state"),
-                                    None,
-                                )?;
-                            }
-                        }
-                    }
                     let attempt_success_receipt =
                         crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
                     let _ = (
@@ -1407,7 +1323,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         } else {
                             provider_wire_protocol
                         };
-                    let (mut finalized_provider_value, response_web_search_state, governed_facts) =
+                    let (mut finalized_provider_value, governed_facts) =
                         match run_json_response_hooks_with_invocation_source(
                             V3ResponsesRelayJsonResponseHookInput {
                                 session_id: input.failure_session_scope.session_id(),
@@ -1431,25 +1347,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     .candidate
                                     .compatibility_profile
                                     .as_deref(),
-                                web_search_execution_mode: selected
-                                    .candidate
-                                    .web_search_execution_mode,
-                                // web_search 当前轮拦截直接使用 Req04
-                                // 激活的 LocalToolSurfaceActive state（request_web_search_state），
-                                // 不依赖其他控制面状态。
-                                web_search_center_state: request_web_search_state.clone().or_else(
-                                    || {
-                                        server_tool_state
-                                            .as_ref()
-                                            .and_then(|execution| {
-                                                execution
-                                                    .control
-                                                    .web_search_load_for_scope(&execution.scope)
-                                                    .ok()
-                                            })
-                                            .flatten()
-                                    },
-                                ),
                                 retain_response_cipher: is_v3_retain_response_cipher(
                                     selected.route.target_plan.len(),
                                     &selected.candidate.model_id,
@@ -1497,51 +1394,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         &mut finalized_provider_value,
                         provider_semantic_body.as_ref(),
                     );
-                    if let Some(web_search_state) = response_web_search_state {
-                        // MiniMax hosted search：结果已随同一响应返回
-                        // （SearchResultCaptured）→ 跳过本地搜索 hop；否则走
-                        // backend direct pin 的搜索 hop。
-                        let captured = if web_search_state.phase()
-                            == V3WebSearchCenterPhase::SearchResultCaptured
-                        {
-                            web_search_state
-                        } else {
-                            let execution = server_tool_state.as_ref().ok_or_else(|| {
-                                V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
-                                    "web_search execution scope is unavailable".to_string(),
-                                )
-                            })?;
-                            execute_web_search_through_hooks_sidecar(
-                                execution.control.hooks_sidecar_socket(),
-                                &input.request_id,
-                                &execution.scope,
-                                &request_execution_control,
-                                &web_search_state,
-                            )
-                            .await?
-                        };
-                        project_web_search_result_into_finalized(
-                            &mut finalized_provider_value,
-                            &captured,
-                        )?;
-                        if let Some(execution) = server_tool_state.as_ref() {
-                            if execution.commit_effects
-                                && execution.scope.has_client_session_scope()
-                            {
-                                execution.control.web_search_store_for_scope(
-                                    &execution.scope,
-                                    captured,
-                                    V3ServerToolCenterWriteOrigin {
-                                        module: "responses_relay_runtime",
-                                        symbol: "web_search_store_for_scope",
-                                        stage: "resp03_commit_effects",
-                                    },
-                                    Some("resp03 commit effects persist captured web_search state"),
-                                    None,
-                                )?;
-                            }
-                        }
-                    }
                     let attempt_success_receipt =
                         crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt();
                     let _ = (

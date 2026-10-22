@@ -182,16 +182,8 @@ async fn exhaust_handoff_at_relay(
     };
     let expanded = handoff.expanded;
     let excluded = handoff.request_local_excluded_candidates;
-    let server_tool_state = crate::V3ResponsesRelayServerToolState::default();
-    let scope = crate::V3ResponsesRelayServerToolScope::new(
-        "/v1/responses",
-        format!("session-{request_id}"),
-        format!("conversation-{request_id}"),
-        7777,
-        routing_group,
-    );
     let output =
-        crate::execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+        crate::execute_v3_responses_relay_runtime_with_default_transport_health(
             manifest,
             crate::V3ResponsesRelayRuntimeInput {
                 server_id: "test".to_string(),
@@ -200,8 +192,6 @@ async fn exhaust_handoff_at_relay(
                 payload: json!({"model": "client-model", "input": "hello"}),
             },
             relay_health,
-            &server_tool_state,
-            scope,
             crate::V3ResponsesRelayProviderSnapshotCapture::new(true, true),
             None,
             None,

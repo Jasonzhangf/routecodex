@@ -34,7 +34,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.anthropic_first]
@@ -83,7 +83,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.relay_first]
@@ -178,7 +178,6 @@ async fn execution_control_payload_architecture_relay_reselection_returns_typed_
             payload: json!({"model": "client-model", "input": "hello"}),
         },
         &transport,
-        None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
         false,
@@ -274,7 +273,6 @@ async fn target_protocol_unmapped_field_projects_internal_598_without_switching_
             }),
         },
         &transport,
-        None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
         false,
@@ -345,7 +343,6 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
             }),
         },
         &transport,
-        None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
         false,
@@ -639,7 +636,7 @@ routing_group = "g"
 endpoints = ["responses"]
 [servers.s.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.glm]
@@ -712,7 +709,7 @@ routing_group = "g"
 endpoints = ["responses"]
 [servers.s.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.minimax]

@@ -418,26 +418,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         .await;
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-        let server_tool_scope = match build_responses_relay_server_tool_scope(
-            &request_headers,
-            Some(&payload),
-            &request_id,
-            &state.server,
-            &path,
-        ) {
-            Ok(scope) => scope,
-            Err(message) => {
-                return error_output_response_for_responses_request_with_project_path(
-                    &state.server,
-                    &path,
-                    &request_id,
-                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                    &request_headers,
-                    Some(&payload),
-                    request_console_project_path.as_deref(),
-                );
-            }
-        };
         let console_payload = payload.clone();
         let runtime_input = V3ResponsesRelayRuntimeInput {
             server_id: state.server.id.clone(),
@@ -460,12 +440,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         // snapshot stages are disabled. Successful requests still persist only
         // explicitly enabled intermediate stages.
         let plan = responses_protocol_plan.as_ref();
-        let mut output = match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+        let mut output = match execute_v3_responses_relay_runtime_with_default_transport_health(
             &state.manifest,
             runtime_input,
             &state.provider_health,
-            &state.responses_relay_server_tool_state,
-            server_tool_scope.clone(),
             V3ResponsesRelayProviderSnapshotCapture::new(true, true),
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
@@ -1091,28 +1069,8 @@ fn execute_v3_provider_request_dry_run_branch<'a>(
             return foundation_output_response(output);
         }
         if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-            let server_tool_scope = match build_responses_relay_server_tool_scope(
-                request_headers,
-                Some(&payload),
-                &request_id,
-                &state.server,
-                &path,
-            ) {
-                Ok(scope) => scope,
-                Err(message) => {
-                    return error_output_response_for_responses_request_with_project_path(
-                        &state.server,
-                        &path,
-                        &request_id,
-                        project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                        request_headers,
-                        Some(&payload),
-                        request_console_project_path,
-                    );
-                }
-            };
             let output =
-                match execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state(
+                match execute_v3_responses_relay_dry_run_orchestration_outcome(
                     &state.manifest,
                     V3ResponsesRelayRuntimeInput {
                         server_id: state.server.id.clone(),
@@ -1120,8 +1078,6 @@ fn execute_v3_provider_request_dry_run_branch<'a>(
                         request_id: request_id.clone(),
                         payload: payload.clone(),
                     },
-                    &state.responses_relay_server_tool_state,
-                    server_tool_scope,
                 )
                 .await
                 {

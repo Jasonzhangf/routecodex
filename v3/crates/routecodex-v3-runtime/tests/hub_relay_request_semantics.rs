@@ -1,7 +1,7 @@
 use routecodex_v3_runtime::{
     build_v3_hub_req_inbound_01_client_raw, compile_v3_hub_relay_request_hooks, V3HubEntryProtocol,
     V3HubInvocationSource, V3HubRelayRequestError, V3HubRelayRequestHookEvent,
-    V3HubRequestSemanticProtocol, V3HubServertoolRequestProfile, V3HubTransportIntent,
+    V3HubRequestHookProfile, V3HubRequestSemanticProtocol, V3HubTransportIntent,
 };
 use serde_json::{json, Value};
 
@@ -34,7 +34,7 @@ fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
     let governed = hooks
         .run(
             raw_for(payload.clone(), V3HubEntryProtocol::OpenAiChat),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     assert_eq!(governed.payload(), &payload);
@@ -52,7 +52,6 @@ fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
             V3HubRelayRequestHookEvent::Req04Entry,
             V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned,
             V3HubRelayRequestHookEvent::Req04ToolGoverned,
-            V3HubRelayRequestHookEvent::ServertoolOptionalNoop,
             V3HubRelayRequestHookEvent::Req04Exit,
         ]
     );
@@ -82,7 +81,7 @@ fn responses_req_inbound02_keeps_named_unpaired_tool_output_through_req04_govern
                     }
                 ]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .expect("named unpaired tool output must pass ReqInbound02 and Req04 governance");
 
@@ -137,7 +136,7 @@ fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_sear
                     }
                 ]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
 
@@ -173,7 +172,7 @@ fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_sear
 #[test]
 fn responses_relay_req04_injects_memory_guidance_once_before_tool_governance() {
     let hooks = compile_v3_hub_relay_request_hooks();
-    let profile = V3HubServertoolRequestProfile::enabled([]).with_memory_raw_capture_enabled(true);
+    let profile = V3HubRequestHookProfile::enabled().with_memory_raw_capture_enabled(true);
     let governed = hooks
         .run(
             raw(json!({
@@ -195,7 +194,7 @@ fn responses_relay_req04_injects_memory_guidance_once_before_tool_governance() {
 #[test]
 fn responses_relay_memory_guidance_injection_fails_fast_on_bad_instructions() {
     let hooks = compile_v3_hub_relay_request_hooks();
-    let profile = V3HubServertoolRequestProfile::enabled([]).with_memory_raw_capture_enabled(true);
+    let profile = V3HubRequestHookProfile::enabled().with_memory_raw_capture_enabled(true);
     let error = hooks
         .run(
             raw(json!({
@@ -250,7 +249,7 @@ fn req04_preserves_malformed_shell_like_function_call_and_parse_error_output() {
                     }
                 ]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
 
@@ -302,7 +301,7 @@ fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
     let governed = hooks
         .run(
             raw_for(valid, V3HubEntryProtocol::OpenAiChat),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     let events = governed.hook_events();
@@ -323,7 +322,7 @@ fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
         assert!(matches!(
             hooks.run(
                 raw_for(invalid, V3HubEntryProtocol::OpenAiChat),
-                &V3HubServertoolRequestProfile::disabled(),
+                &V3HubRequestHookProfile::disabled(),
             ),
             Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
                 protocol: "openai_chat",
@@ -335,7 +334,7 @@ fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
     let governed = hooks
         .run(
             raw_for(duplicate.clone(), V3HubEntryProtocol::OpenAiChat),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     assert_eq!(governed.payload()["messages"], duplicate["messages"]);
@@ -354,7 +353,7 @@ fn gemini_function_response_identity_is_governed_at_req04_after_normalization() 
     let governed = hooks
         .run(
             raw_for(valid, V3HubEntryProtocol::Gemini),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     // ReqInbound02 已把 Gemini 归一化为 canonical Chat `messages`，不再对原始
@@ -386,7 +385,7 @@ fn gemini_function_response_identity_is_governed_at_req04_after_normalization() 
     assert!(matches!(
         hooks.run(
             raw_for(orphan, V3HubEntryProtocol::Gemini),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         ),
         Err(V3HubRelayRequestError::OrphanToolOutput { .. })
     ));
@@ -402,7 +401,7 @@ fn gemini_function_response_identity_is_governed_at_req04_after_normalization() 
     let governed = hooks
         .run(
             raw_for(no_id, V3HubEntryProtocol::Gemini),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     assert!(governed
@@ -433,7 +432,7 @@ fn protocol_tool_identity_governance_uses_entry_protocol_not_payload_shape() {
             raw(json!({
                 "messages":[{"role":"tool","tool_call_id":"shape_only","content":"preserve"}]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     assert!(!governed
@@ -455,7 +454,7 @@ fn apply_patch_guidance_is_not_injected_into_payload_at_req04() {
                     "format":{"type":"grammar","syntax":"lark","definition":"start: patch"}
                 }]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
 
@@ -473,7 +472,7 @@ fn apply_patch_guidance_text_is_preserved_at_req04() {
                 "input":[{"role":"user","content":"Patch a file"}],
                 "tools":[{"type":"custom","name":"apply_patch","format":"freeform"}]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     assert!(serde_json::to_string(governed.payload())
@@ -487,7 +486,7 @@ fn apply_patch_guidance_text_is_preserved_at_req04() {
                 "input":[{"role":"user","content":"Lookup"}],
                 "tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     assert!(without_apply_patch.payload().get("instructions").is_none());
@@ -498,16 +497,8 @@ fn malformed_tool_output_and_required_hook_failure_are_explicit() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let malformed = json!({"input":[{"type":"function_call_output","output":"missing call id"}]});
     assert!(matches!(
-        hooks.run(raw(malformed), &V3HubServertoolRequestProfile::disabled()),
+        hooks.run(raw(malformed), &V3HubRequestHookProfile::disabled()),
         Err(V3HubRelayRequestError::ReqInboundInvalid { .. })
-    ));
-
-    assert!(matches!(
-        hooks.run(
-            raw(json!({"input":[{"role":"user","content":"continue"}]})),
-            &V3HubServertoolRequestProfile::required_failure("req04.required")
-        ),
-        Err(V3HubRelayRequestError::RequiredHookFailed { .. })
     ));
 }
 
@@ -538,7 +529,7 @@ fn mixed_kind_duplicate_call_id_survives_canonical_chat_branch_in_either_order()
                     mixed_kind_duplicate_responses_input(custom_declared_first),
                     V3HubEntryProtocol::Responses,
                 ),
-                &V3HubServertoolRequestProfile::disabled(),
+                &V3HubRequestHookProfile::disabled(),
             )
             .expect("mixed function/custom duplicate call_id must not be rejected at Req04");
 
@@ -612,7 +603,7 @@ fn mixed_kind_duplicate_call_id_survives_raw_input_branch_in_either_order() {
                     mixed_kind_duplicate_responses_input(custom_declared_first),
                     V3HubEntryProtocol::OpenAiChat,
                 ),
-                &V3HubServertoolRequestProfile::disabled(),
+                &V3HubRequestHookProfile::disabled(),
             )
             .expect("mixed function/custom duplicate call_id must not be rejected at Req04");
 

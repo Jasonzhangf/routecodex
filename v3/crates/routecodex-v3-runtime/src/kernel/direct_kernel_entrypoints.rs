@@ -1,8 +1,7 @@
 pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
-    shared_state: V3ResponsesDirectRuntimeSharedState<'_>,
+    shared_state: V3ResponsesDirectRuntimeSharedState,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
-    server_tool_scope: V3ResponsesDirectServerToolScope,
     hook_registry: V3HookRegistry,
     debug: &V3DebugRuntime,
     now_epoch_ms: u64,
@@ -11,7 +10,6 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_and_de
         shared_state,
         manifest,
         raw,
-        server_tool_scope,
         hook_registry,
         debug,
         now_epoch_ms,
@@ -22,10 +20,9 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_and_de
     .await
 }
 pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
-    shared_state: V3ResponsesDirectRuntimeSharedState<'_>,
+    shared_state: V3ResponsesDirectRuntimeSharedState,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
-    server_tool_scope: V3ResponsesDirectServerToolScope,
     hook_registry: V3HookRegistry,
     debug: &V3DebugRuntime,
     now_epoch_ms: u64,
@@ -37,7 +34,6 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
         shared_state,
         manifest,
         raw,
-        server_tool_scope,
         hook_registry,
         debug,
         now_epoch_ms,
@@ -49,10 +45,9 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
 }
 
 async fn execute_v3_responses_direct_runtime_kernel_with_refill(
-    shared_state: V3ResponsesDirectRuntimeSharedState<'_>,
+    shared_state: V3ResponsesDirectRuntimeSharedState,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
-    server_tool_scope: V3ResponsesDirectServerToolScope,
     hook_registry: V3HookRegistry,
     debug: &V3DebugRuntime,
     now_epoch_ms: u64,
@@ -110,7 +105,6 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
 
         let mut state = V3ResponsesDirectRuntimeCoreState::new()
             .with_now_epoch_ms(now_epoch_ms)
-            .with_server_tool_state(shared_state.server_tool_state, server_tool_scope.clone())
             .with_provider_health(shared_state.provider_health.clone())
             .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
             .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())

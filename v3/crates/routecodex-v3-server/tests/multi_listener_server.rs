@@ -782,7 +782,7 @@ hooks = [
   { hook_id = "hub_v1.V3HubReqInbound01ClientRaw.exit.not_implemented", node = "V3HubReqInbound01ClientRaw", phase = "exit", requirement = "required", priority = 0, order = 1, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqInbound02Normalized.entry.not_implemented", node = "V3HubReqInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 2, allowed_resources = ["metadata_center"], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqInbound02Normalized.exit.not_implemented", node = "V3HubReqInbound02Normalized", phase = "exit", requirement = "optional", enabled = false, priority = 0, order = 3, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.entry.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "entry", requirement = "required", priority = 0, order = 4, allowed_resources = [], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.entry.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "entry", requirement = "required", priority = 0, order = 4, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqChatProcess04Governed.exit.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "exit", requirement = "required", priority = 0, order = 5, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqExecution05Planned.entry.not_implemented", node = "V3HubReqExecution05Planned", phase = "entry", requirement = "required", priority = 0, order = 6, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqExecution05Planned.exit.not_implemented", node = "V3HubReqExecution05Planned", phase = "exit", requirement = "required", priority = 0, order = 7, allowed_resources = [], forbidden_resources = [] },
@@ -802,7 +802,7 @@ hooks = [
   { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.exit.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 21, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespInbound02Normalized.entry.not_implemented", node = "V3HubRespInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 22, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespInbound02Normalized.exit.not_implemented", node = "V3HubRespInbound02Normalized", phase = "exit", requirement = "required", priority = 0, order = 23, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespChatProcess03Governed.exit.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "exit", requirement = "required", priority = 0, order = 25, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.entry.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "entry", requirement = "required", priority = 0, order = 26, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.exit.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "exit", requirement = "required", priority = 0, order = 27, allowed_resources = [], forbidden_resources = [] },
@@ -814,12 +814,12 @@ hooks = [
 const HUB_V1_TEST_SERVER_EXECUTION: &str = r#"
 [servers.a.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [servers.b.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 "#;
 
@@ -860,55 +860,6 @@ auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_TEST_KEY" }}]
 log_console = false
 snapshots = {snapshots}
 dry_run = {dry_run}
-retention = {{ raw_requests = 4, raw_responses = 4, events = 128 }}
-[route_groups.default.pools.default]
-selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
-"#
-    );
-    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
-}
-
-fn metadata_center_local_search_manifest(
-    port_a: u16,
-    port_b: u16,
-) -> routecodex_v3_config::V3Config05ManifestPublished {
-    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
-    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
-    let source = format!(
-        r#"
-version = 3
-{hub_v1_declaration}
-[servers.a]
-bind = "127.0.0.1"
-port = {port_a}
-routing_group = "default"
-endpoints = ["responses"]
-[servers.b]
-bind = "127.0.0.1"
-port = {port_b}
-routing_group = "default"
-endpoints = ["responses"]
-{hub_v1_server_execution}
-[providers.test]
-type = "responses"
-base_url = "http://127.0.0.1:9/v1"
-default_model = "test"
-auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_TEST_KEY" }}] }}
-[providers.test.models.test]
-capabilities = ["web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "search.backend"
-[providers.search]
-type = "responses"
-base_url = "http://127.0.0.1:9/v1"
-default_model = "test"
-auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_TEST_KEY" }}] }}
-[providers.search.models.backend]
-[debug]
-log_console = false
-snapshots = false
-dry_run = false
 retention = {{ raw_requests = 4, raw_responses = 4, events = 128 }}
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
@@ -1167,7 +1118,7 @@ routing_group = "default"
 endpoints = ["responses"]
 [servers.a.execution]
 allowed_modes = [{allowed_modes}]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 [servers.b]
 bind = "127.0.0.1"
@@ -1176,7 +1127,7 @@ routing_group = "default"
 endpoints = ["responses"]
 [servers.b.execution]
 allowed_modes = [{allowed_modes}]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 [providers.mixed]
 type = "{provider_type}"
@@ -3623,24 +3574,6 @@ async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_err
 }
 
 #[tokio::test]
-async fn aggregate_rejects_metadata_center_local_search_without_hooks_sidecar_socket() {
-    let _test_guard = TEST_LOCK.lock().await;
-    let error = spawn_v3_server_aggregate(metadata_center_local_search_manifest(
-        free_port(),
-        free_port(),
-    ))
-    .await
-    .expect_err("Mode B must not start without a hooks sidecar socket");
-    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
-    assert!(
-        error
-            .to_string()
-            .contains("requires a hooks sidecar socket"),
-        "unexpected startup error: {error}"
-    );
-}
-
-#[tokio::test]
 async fn entry_protocol_binding_dispatches_relay_without_body_leakage() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
@@ -4121,9 +4054,6 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                         web_search_execution_mode: manifest.providers["test"].models["test"]
                             .web_search_execution_mode
                             .clone(),
-                        web_search_backend_binding: manifest.providers["test"].models["test"]
-                            .web_search_backend_binding
-                            .clone(),
                         features: std::collections::BTreeMap::new(),
                     },
                 ),
@@ -4147,9 +4077,6 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                         context_token_estimate_scale_bps: 10_000,
                         web_search_execution_mode: manifest.providers["test"].models["test"]
                             .web_search_execution_mode
-                            .clone(),
-                        web_search_backend_binding: manifest.providers["test"].models["test"]
-                            .web_search_backend_binding
                             .clone(),
                         features: std::collections::BTreeMap::new(),
                     },
@@ -6937,6 +6864,9 @@ async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
 #[tokio::test]
 async fn capture_node_preconnection_matches_responses_http_success_and_failure() {
     let _test_guard = TEST_LOCK.lock().await;
+    // This case counts upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-node01-compare");
     let handle =

@@ -1,7 +1,6 @@
 use crate::direct_response_hooks::V3DirectResponseCompatBlock;
 use crate::hooks::{build_v3_provider_error_source, V3HookRegistry};
 use crate::hub_v1::{
-    apply_v3_tool_call_servertool_hook_at_resp03,
     build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
     build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
     build_v3_provider_resp_inbound_01_raw_with_compat_profile, record_v3_provider_sse_json_frame,
@@ -9,7 +8,7 @@ use crate::hub_v1::{
     V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile, V3HubTransportIntent,
     V3ProviderRespInbound01RawContext, V3RuntimeObservability, V3RuntimeProviderFailureEventSink,
     V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
-    V3RuntimeStreamObservation, V3ServerToolCenterWriteOrigin,
+    V3RuntimeStreamObservation,
 };
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
@@ -50,8 +49,6 @@ use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
-
-include!("kernel/direct_web_search.rs");
 
 pub mod direct_request_key_hooks;
 mod direct_runtime_helpers_stream;
@@ -114,8 +111,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
     require_static_hooks(&hook_registry);
     let V3ResponsesDirectRuntimeCoreState {
-        server_tool_state,
-        server_tool_scope,
         now_epoch_ms,
         provider_health,
         initial_selected_target,
@@ -738,37 +733,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 request_execution_control,
             );
         }
-        match prepare_v3_responses_direct_web_search_control_request(
-            manifest,
-            server_tool_state.as_deref(),
-            server_tool_scope.as_ref(),
-            &mut standardized.body,
-            &mut trace,
-        ) {
-            Ok(()) => {}
-            Err(source) => {
-                return direct_runtime_helpers_stream::source_failure_output(
-                    source,
-                    last_external_http.clone(),
-                    trace,
-                    &hook_registry,
-                )
-            }
-        }
-        if let Err(source) = apply_v3_responses_direct_web_search_control_completion(
-            server_tool_state.as_deref(),
-            server_tool_scope.as_ref(),
-            &standardized.body,
-            &mut trace,
-        ) {
-            return direct_runtime_helpers_stream::source_failure_output(
-                source,
-                last_external_http.clone(),
-                trace,
-                &hook_registry,
-            );
-        }
-
         // Responses direct has a protocol-specific kernel, so it must enter the
         // same Req04 tool-thinking hook explicitly as the generic direct kernel.
         // Keep the injection owner in the shared Req04 hook; this call only wires
@@ -1359,21 +1323,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 )
             })
             .unwrap_or(false);
-        let direct_web_search_request_state =
-            match (server_tool_state.as_deref(), server_tool_scope.as_ref()) {
-                (Some(control), Some(scope)) => match control.web_search_load_for_scope(scope) {
-                    Ok(state) => state,
-                    Err(error) => {
-                        return direct_runtime_helpers_stream::source_failure_output(
-                            runtime_source("V3DirectWebSearchResp01Intercepted", error),
-                            last_external_http.clone(),
-                            trace,
-                            &hook_registry,
-                        )
-                    }
-                },
-                _ => None,
-            };
         if let V3ProviderAttemptBody::Json(body) = &mut response_projection.attempt_payload.body {
             let normalization = hook_registry
                 .project_complete_direct_json(body, &direct_dsml_context)
@@ -1387,123 +1336,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     ),
                     retain_response_cipher,
                 );
-                match apply_v3_responses_direct_web_search_json_response_control(
-                    server_tool_state.as_deref(),
-                    server_tool_scope.as_ref(),
-                    body,
-                    &mut trace,
-                ) {
-                    Ok(Some(state)) => {
-                        // Mode B 本地 websearch 拦截成功。MiniMax hosted
-                        // search：结果已随同一响应返回（SearchResultCaptured）
-                        // → 跳过搜索 hop；否则执行异步搜索 hop（backend
-                        // direct pin 走正常 Hub 链 + VR 路由）。结果投影为
-                        // hosted web_search_call + 原 call_id 配对。
-                        let captured = if state.phase()
-                            == crate::hub_v1::V3WebSearchCenterPhase::SearchResultCaptured
-                        {
-                            state
-                        } else {
-                            let Some(server_tool_scope) = server_tool_scope.as_ref() else {
-                                return direct_runtime_helpers_stream::source_failure_output(
-                                    runtime_source(
-                                        "V3DirectWebSearchResp02RuntimeControlUpdated",
-                                        "web_search execution scope is unavailable",
-                                    ),
-                                    last_external_http.clone(),
-                                    trace,
-                                    &hook_registry,
-                                );
-                            };
-                            match crate::hub_v1::execute_web_search_through_hooks_sidecar(
-                                server_tool_state.as_deref().and_then(
-                                    V3ResponsesDirectServerToolState::hooks_sidecar_socket,
-                                ),
-                                &standardized.request_id,
-                                server_tool_scope,
-                                &request_execution_control,
-                                &state,
-                            )
-                            .await
-                            {
-                                Ok(captured) => captured,
-                                Err(error) => {
-                                    let source = match error {
-                                    crate::hub_v1::V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
-                                        call_id,
-                                        code,
-                                        message,
-                                        retryable: _,
-                                    } => crate::hub_v1::web_search_sidecar_failure_source(
-                                        &call_id, code, &message,
-                                    ),
-                                    error => runtime_source(
-                                        "V3DirectWebSearchResp02RuntimeControlUpdated",
-                                        error,
-                                    ),
-                                };
-                                    return direct_runtime_helpers_stream::source_failure_output(
-                                        source,
-                                        last_external_http.clone(),
-                                        trace,
-                                        &hook_registry,
-                                    );
-                                }
-                            }
-                        };
-                        match crate::hub_v1::project_web_search_result_into_finalized(
-                            body, &captured,
-                        ) {
-                            Ok(()) => {}
-                            Err(error) => {
-                                return direct_runtime_helpers_stream::source_failure_output(
-                                    runtime_source(
-                                        "V3DirectWebSearchResp03HostedResultProjected",
-                                        error,
-                                    ),
-                                    last_external_http.clone(),
-                                    trace,
-                                    &hook_registry,
-                                )
-                            }
-                        }
-                        if let (Some(control), Some(scope)) =
-                            (server_tool_state.as_ref(), server_tool_scope.as_ref())
-                        {
-                            if let Err(error) = control.web_search_store_for_scope(
-                                scope,
-                                captured,
-                                V3ServerToolCenterWriteOrigin {
-                                    module: "kernel",
-                                    symbol: "resp02_direct_web_search_control_updated",
-                                    stage: "resp02_runtime_control_updated",
-                                },
-                                Some("resp02 persist captured web_search state"),
-                                None,
-                            ) {
-                                return direct_runtime_helpers_stream::source_failure_output(
-                                    runtime_source(
-                                        "V3DirectWebSearchResp02RuntimeControlUpdated",
-                                        error,
-                                    ),
-                                    last_external_http.clone(),
-                                    trace,
-                                    &hook_registry,
-                                );
-                            }
-                        }
-                        trace.push("V3DirectWebSearchResp03HostedResultProjected");
-                    }
-                    Ok(None) => {}
-                    Err(source) => {
-                        return direct_runtime_helpers_stream::source_failure_output(
-                            source,
-                            last_external_http.clone(),
-                            trace,
-                            &hook_registry,
-                        )
-                    }
-                }
             }
             if let Err(source) = normalization.and_then(|()| {
                 crate::shared::enforce_v3_provider_json_attempt_admission(

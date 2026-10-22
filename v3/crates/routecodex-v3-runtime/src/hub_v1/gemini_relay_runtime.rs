@@ -251,9 +251,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
             attempted_candidates,
         },
         // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
-        V3RelayCoreError::Target(message)
-        | V3RelayCoreError::StaticRegistry(message)
-        | V3RelayCoreError::WebSearchIntercepted(message) => {
+        V3RelayCoreError::Target(message) | V3RelayCoreError::StaticRegistry(message) => {
             V3GeminiRelayRuntimeError::Target(message)
         }
     })
@@ -281,15 +279,12 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         manifest: &V3Config05ManifestPublished,
         server_id: &str,
         _payload: &Value,
-    ) -> Result<V3HubServertoolRequestProfile, V3RelayCoreError> {
+    ) -> Result<V3HubRequestHookProfile, V3RelayCoreError> {
         let enabled = v3_tool_thinking_enabled_for_server(manifest, server_id);
         if enabled {
-            Ok(
-                V3HubServertoolRequestProfile::enabled(["servertool.request"])
-                    .with_tool_thinking_enabled(true),
-            )
+            Ok(V3HubRequestHookProfile::enabled().with_tool_thinking_enabled(true))
         } else {
-            Ok(V3HubServertoolRequestProfile::disabled())
+            Ok(V3HubRequestHookProfile::disabled())
         }
     }
 
@@ -320,8 +315,6 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         transport_intent: V3HubTransportIntent,
         trace: &mut Vec<&'static str>,
         compatibility_profile: Option<&str>,
-        _web_search_execution_mode: V3WebSearchExecutionMode,
-        _web_search_state: Option<&V3WebSearchCenterState>,
         retain_response_cipher: bool,
         tool_thinking_enabled: bool,
         _expected_model_id: &str,
@@ -374,8 +367,6 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         provider: V3ProviderSseStream,
         provider_wire_protocol: V3HubProviderWireProtocol,
         compatibility_profile: Option<String>,
-        _web_search_execution_mode: V3WebSearchExecutionMode,
-        _web_search_state: Option<V3WebSearchCenterState>,
         _retain_response_cipher: bool,
         tool_thinking_enabled: bool,
         stream_observation: V3RuntimeStreamObservation,
@@ -689,7 +680,7 @@ fn project_json_response_with_source(
             .with_tool_thinking_enabled(tool_thinking_enabled),
     )?;
     trace.push("V3HubRespChatProcess03Governed");
-    let (resp03, _, _) = resp03.into_parts();
+    let resp03 = resp03.into_governed();
     let resp05 = if request_id.is_some() {
         try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
             resp03,

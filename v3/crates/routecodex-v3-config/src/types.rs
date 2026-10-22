@@ -122,8 +122,6 @@ pub struct V3HubHookAuthoringConfig {
     pub order: u32,
     pub allowed_resources: Vec<String>,
     pub forbidden_resources: Vec<String>,
-    #[serde(default)]
-    pub profile: Option<V3HubHookProfile>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -210,12 +208,6 @@ impl V3HubHookPhase {
 pub enum V3HubHookRequirement {
     Required,
     Optional,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum V3HubHookProfile {
-    Servertool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -636,9 +628,10 @@ pub struct V3ProviderModelAuthoringConfig {
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub web_search_execution_mode: V3WebSearchExecutionMode,
-    /// Mode B（metadata_center_local_search / servertool_search_backend）的
-    /// 编译期唯一搜索后端引用（例如 search provider 池目标 "provider.model"）。
-    /// 缺失或歧义在 manifest 编译期 fail-fast。
+    /// Retired legacy authoring token. Local search backends are no longer
+    /// supported; the field is parsed only so that config compilation can
+    /// reject it with an explicit `V3ConfigError::Validation` instead of
+    /// silently ignoring it.
     #[serde(default)]
     pub web_search_backend: Option<String>,
     #[serde(default)]
@@ -668,11 +661,12 @@ pub enum V3WebSearchExecutionMode {
     None,
     NativeRemoteSearchToolMix,
     NativeRemoteSearchSearchOnly,
-    /// Proposal `metadata_center_local_search`: local ServerToolCenter
-    /// governed search with exactly one compiled backend binding.
+    /// Retired legacy parse token. RCC-owned local search is no longer
+    /// supported; config compilation rejects this value with an explicit
+    /// `V3ConfigError::Validation`.
     MetadataCenterLocalSearch,
-    /// Legacy alias for `MetadataCenterLocalSearch`; kept for config
-    /// compatibility and maps to the same Mode B semantics.
+    /// Retired legacy parse token (alias of `MetadataCenterLocalSearch`);
+    /// config compilation rejects this value explicitly.
     ServertoolSearchBackend,
 }
 
@@ -687,8 +681,7 @@ impl V3WebSearchExecutionMode {
         }
     }
 
-    /// Mode B: local ServerToolCenter governed search requires exactly one
-    /// compiled backend binding.
+    /// Retired local-search modes; config compilation rejects them.
     pub const fn is_metadata_center_local_search(self) -> bool {
         matches!(
             self,
@@ -1183,7 +1176,6 @@ pub struct V3HubHookManifest {
     pub order: u32,
     pub allowed_resources: Vec<String>,
     pub forbidden_resources: Vec<String>,
-    pub profile: Option<V3HubHookProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1259,7 +1251,6 @@ pub struct V3ProviderModelManifest {
     pub aliases: Vec<String>,
     pub capabilities: Vec<String>,
     pub web_search_execution_mode: V3WebSearchExecutionMode,
-    pub web_search_backend_binding: Option<String>,
     pub supports_streaming: bool,
     pub supports_thinking: bool,
     pub thinking: Option<String>,

@@ -104,23 +104,6 @@ chains:
       produces: [v3.hooks.delivery_ledger]
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-hooks-sidecar-web-search-01
-    from_node: ControlServer
-    to_node: HooksSidecarCore
-    caller_symbol: handle_control_request
-    caller_file: v3/crates/routecodex-v3-hooks/src/control.rs
-    callee_symbol: HooksSidecarCore::execute_web_search
-    callee_file: v3/crates/routecodex-v3-hooks/src/lib.rs
-    status: as_is_bound
-    owner_feature_id: v3.web_search_servertool_state_machine
-    resource_flow:
-      consumes:
-        - v3.hooks.control_socket
-        - v3.web_search.hook_request
-      produces:
-        - v3.web_search.hook_outcome
-      side_channel_reads: []
-      side_channel_writes: []
 - chain_id: v3.provider_global_cooldown_persistence
   owner_feature_id: v3.provider_global_cooldown_persistence
   summary: Provider cooldown state is loaded before listeners bind, persisted on provider health mutation, and probed once after ready before re-admission.
@@ -2638,7 +2621,7 @@ chains:
 - chain_id: v3.hub_pipeline.v1.response
   owner_feature_id: v3.hub_pipeline_static_skeleton
   manifest: docs/architecture/manifests/v3.hub_pipeline.v1.response.mainline.yml
-  summary: Fixed Hub v1 response topology. Direct/Relay/JSON/SSE/servertool outcomes merge before the sole client projection and Server frame exit.
+  summary: Fixed Hub v1 response topology. Direct/Relay/JSON/SSE outcomes merge before the sole client projection and Server frame exit.
   edges:
   - step_id: v3-hub-resp-01
     from_node: V3ProviderRespInbound01Raw
@@ -4790,7 +4773,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.hub_relay.runtime_closeout
   owner_feature_id: v3.hub_relay_runtime_closeout
-  summary: Controlled Hub Relay Runtime closeout over the fixed Req01-Req09 and Resp01-Resp06 topology. It binds JSON/SSE, Responses field parity, servertool hook profile, Responses Relay source server entry, Error01-06, and one-response-exit evidence without claiming live/P6/global cutover.
+  summary: Controlled Hub Relay Runtime closeout over the fixed Req01-Req09 and Resp01-Resp06 topology. It binds JSON/SSE, Responses field parity, Responses Relay source server entry, Error01-06, and one-response-exit evidence without claiming live/P6/global cutover.
   manifest: docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
   edges:
   - step_id: v3-hub-relay-closeout-01
@@ -5435,7 +5418,7 @@ chains:
     to_node: V3EntryBind04ExecutionBindingProjected
     caller_symbol: responses_relay_manifest
     caller_file: v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
-    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state
+    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
     status: anchored
     owner_feature_id: v3.hub_relay_runtime_closeout
@@ -5454,7 +5437,7 @@ chains:
     to_node: V3HubReqInbound01ClientRaw
     caller_symbol: pending_endpoint
     caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
-    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state
+    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
     status: anchored
     edge_kind: aggregate_entry_edge
@@ -5677,187 +5660,9 @@ chains:
       produces: [v3.debug.codex_sample_persist_queue]
       side_channel_reads: [v3.error.source, v3.runtime.responses_observability]
       side_channel_writes: [v3.debug.codex_sample_persist_queue]
-- chain_id: v3.servertool_center.skeleton
-  owner_feature_id: v3.servertool_center_skeleton
-  summary: Unified ServertoolCenter (MetadataCenter) skeleton. Tools (web_search and servertool CLI) are identified, state-loaded, and projected only through fixed Req04/Resp03 governance hooks; data plane stays logic-free.
-  edges:
-  - step_id: v3-servertool-center-req-01
-    from_node: V3HubReqInbound02Normalized
-    to_node: V3HubReqChatProcess04Governed
-    caller_symbol: V3HubRelayRequestHooks::run_from_normalized
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
-    status: anchored
-    owner_feature_id: v3.servertool_center_skeleton
-    resource_flow:
-      consumes: [v3.request.normal_payload]
-      produces: [v3.request.normal_payload]
-      side_channel_reads: []
-      side_channel_writes: []
-  - step_id: v3-servertool-center-req-02
-    from_node: V3HubReqChatProcess04Governed
-    to_node: V3ServertoolReq01ToolIdentified
-    caller_symbol: govern_v3_servertool_request_at_req04
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    callee_symbol: apply_v3_web_search_request_hook_at_req04
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    status: anchored
-    owner_feature_id: v3.servertool_center_skeleton
-    resource_flow:
-      consumes: [v3.request.normal_payload]
-      produces: [v3.servertool.state_machine_control]
-      side_channel_reads: []
-      side_channel_writes: [v3.servertool.state_machine_control]
-  - step_id: v3-servertool-center-req-03
-    from_node: V3ServertoolReq01ToolIdentified
-    to_node: V3ServertoolReq02StateLoaded
-    caller_symbol: V3ServerToolCenter::load
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
-    callee_symbol: V3ServerToolCenterKey
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
-    status: anchored
-    owner_feature_id: v3.servertool_center_skeleton
-    resource_flow:
-      consumes: [v3.servertool.state_machine_control]
-      produces: [v3.servertool.state_machine_control]
-      side_channel_reads: [v3.servertool.state_machine_control]
-      side_channel_writes: []
-  - step_id: v3-servertool-center-resp-01
-    from_node: V3HubRespChatProcess03Governed
-    to_node: V3ServertoolResp01ToolInspected
-    caller_symbol: apply_v3_tool_call_servertool_hook_at_resp03
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    callee_symbol: first_local_websearch_tool_call
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
-    status: anchored
-    owner_feature_id: v3.servertool_center_skeleton
-    resource_flow:
-      consumes: [v3.hub.response_semantic]
-      produces: [v3.servertool.state_machine_control]
-      side_channel_reads: []
-      side_channel_writes: [v3.servertool.state_machine_control]
-  - step_id: v3-servertool-center-resp-02
-    from_node: V3ServertoolResp01ToolInspected
-    to_node: V3ServertoolResp02StateTransitioned
-    caller_symbol: V3ServerToolCenter::transition
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
-    callee_symbol: V3ServerToolInstanceState
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
-    status: anchored
-    owner_feature_id: v3.servertool_center_skeleton
-    resource_flow:
-      consumes: [v3.servertool.state_machine_control]
-      produces: [v3.servertool.state_machine_control]
-      side_channel_reads: [v3.servertool.state_machine_control]
-      side_channel_writes: [v3.servertool.state_machine_control]
-  - step_id: v3-servertool-center-resp-03
-    from_node: V3ServertoolResp02StateTransitioned
-    to_node: V3ServertoolResp03Projected
-    caller_symbol: apply_v3_tool_call_servertool_hook_at_resp03
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    callee_symbol: V3ServerToolResponseHookOutcome
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    status: anchored
-    owner_feature_id: v3.servertool_center_skeleton
-    resource_flow:
-      consumes: [v3.servertool.state_machine_control, v3.hub.response_semantic]
-      produces: [v3.response.client_payload]
-      side_channel_reads: [v3.servertool.state_machine_control]
-      side_channel_writes: []
-- chain_id: v3.hub_relay.tool_servertool_multiturn_parity
-  owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-  summary: Controlled Hub Relay tool/servertool multiturn parity over Rust Chat Process current-turn tool pairing and apply_patch feedback preservation, response tool harvest, Resp03 apply_patch freeform client projection, SSE ordering, and single response exit.
-  manifest: docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml
-  edges:
-  - step_id: v3-relay-tool-parity-01
-    from_node: V3HubReqInbound02Normalized
-    to_node: V3HubReqChatProcess04Governed
-    caller_symbol: protocol_transport_matrix_uses_one_chat_process_governance_path
-    caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-    callee_symbol: run_from_normalized
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    status: anchored
-    owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-    resource_flow:
-      consumes:
-      - v3.request.normal_payload
-      produces: []
-      side_channel_reads:
-      - v3.request.normal_payload
-      side_channel_writes:
-      - v3.hub.tool_governance_truth
-  - step_id: v3-relay-tool-parity-02
-    from_node: V3HubReqInbound02Normalized
-    to_node: V3HubReqChatProcess04Governed
-    caller_symbol: request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id
-    caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-    callee_symbol: govern_tool_outputs_at_req04
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    status: anchored
-    owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-    resource_flow:
-      consumes:
-      - v3.request.normal_payload
-      produces: []
-      side_channel_reads:
-      - v3.request.normal_payload
-      side_channel_writes:
-      - v3.hub.tool_governance_truth
-  - step_id: v3-relay-tool-parity-04
-    from_node: V3HubRespInbound02Normalized
-    to_node: V3HubRespChatProcess03Governed
-    caller_symbol: response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit
-    caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-    callee_symbol: govern_v3_hub_relay_response
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-    status: anchored
-    owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-    resource_flow:
-      consumes:
-      - v3.hub.response_semantic
-      produces:
-      - v3.hub.response_semantic
-      side_channel_reads:
-      - v3.hub.static_hook_registry
-      side_channel_writes:
-      - v3.hub.tool_governance_truth
-  - step_id: v3-relay-tool-parity-05
-    from_node: V3HubRespChatProcess03Governed
-    to_node: V3HubRespOutbound05ClientSemantic
-    caller_symbol: response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit
-    caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
-    status: anchored
-    owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-    resource_flow:
-      consumes:
-      - v3.hub.response_semantic
-      - v3.hub.tool_governance_truth
-      produces:
-      - v3.response.client_payload
-      side_channel_reads:
-      - v3.hub.entry_protocol
-      side_channel_writes: []
-  - step_id: v3-relay-tool-parity-06
-    from_node: V3HubRespOutbound05ClientSemantic
-    to_node: V3ServerRespOutbound06ClientFrame
-    caller_symbol: responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order
-    caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-    callee_symbol: build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
-    status: anchored
-    owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-    resource_flow:
-      consumes:
-      - v3.response.client_payload
-      produces: []
-      side_channel_reads: []
-      side_channel_writes: []
 - chain_id: v3.resp03_tool_governance_gap_closeout
   owner_feature_id: v3.resp03_tool_governance_gap_closeout
-  summary: 'Resp03 response small skeleton: provider-neutral text harvest occurs before finish_reason branch; tool_call branch runs servertool hook before ordinary governance; terminal branch preserves response semantics (a completed tool-call response stays completed/tool_calls, never a fabricated requires_action); Resp05 consumes the governed response directly.'
+  summary: 'Resp03 response small skeleton: provider-neutral text harvest occurs before finish_reason branch; tool_call branch runs ordinary tool governance; terminal branch preserves response semantics (a completed tool-call response stays completed/tool_calls, never a fabricated requires_action); Resp05 consumes the governed response directly.'
   manifest: docs/architecture/manifests/v3.resp03_tool_governance_gap_closeout.mainline.yml
   edges:
   - step_id: v3-resp03-tool-governance-01
@@ -5891,26 +5696,8 @@ chains:
       produces: []
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-resp03-tool-governance-03
-    from_node: V3Resp03FinishReasonBranch
-    to_node: V3Resp03ToolCallServertoolHook
-    caller_symbol: govern_v3_hub_relay_response
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-    callee_symbol: apply_v3_tool_call_servertool_hook_at_resp03
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    status: anchored
-    owner_feature_id: v3.resp03_tool_governance_gap_closeout
-    resource_flow:
-      consumes:
-      - v3.hub.response_semantic
-      produces:
-      - v3.hub.response_semantic
-      side_channel_reads:
-      - v3.hub.static_hook_registry
-      side_channel_writes:
-      - v3.hub.tool_governance_truth
   - step_id: v3-resp03-tool-governance-04
-    from_node: V3Resp03ToolCallServertoolHook
+    from_node: V3Resp03FinishReasonBranch
     to_node: V3Resp03OrdinaryToolGovernance
     caller_symbol: govern_v3_hub_relay_response
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
@@ -5945,8 +5732,8 @@ chains:
   - step_id: v3-resp03-tool-governance-06
     from_node: V3HubRespOutbound05ClientSemantic
     to_node: V3ServerRespOutbound06ClientFrame
-    caller_symbol: responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order
-    caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+    caller_symbol: resp05_consumes_resp03_governed_payload_without_semantic_repair
+    caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
     callee_symbol: build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
     status: anchored
@@ -6301,190 +6088,6 @@ chains:
       side_channel_reads:
       - v3.hub.resolved_target
       side_channel_writes: []
-- chain_id: v3.web_search_servertool_state_machine
-  owner_feature_id: v3.web_search_servertool_state_machine
-  status: source_bound
-  summary: Req04/Resp03 Chat Process hooks preserve web_search control state; the managed lifecycle explicitly passes the instance hooks-sidecar socket through ServerTool control state, and Relay/Direct execute one typed ExecuteWebSearch request without provider re-entry.
-  manifest: docs/goals/v3-web-search-servertool-state-machine-proposal.md
-  edges:
-  - step_id: v3-web-search-sm-sidecar-socket-01
-    from_node: V3Lifecycle04ChildSpawned
-    to_node: V3ServerToolState01ControlScope
-    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
-    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
-    callee_symbol: spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket
-    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
-    binding_kind: typed_control_path_carrier
-    behavior_gap: The lifecycle derives the socket path from the managed instance directory, waits for hooks-sidecar readiness before publishing managed Running, and calls the server constructor; the server constructor is the sole carrier writer into Relay and Direct ServerTool state.
-    owner_feature_id: v3.web_search_servertool_state_machine
-    resource_flow:
-      consumes:
-      - v3.lifecycle.hooks_sidecar_process
-      produces:
-      - v3.hooks.control_socket.runtime_carrier
-      side_channel_reads: []
-      side_channel_writes: []
-    status: as_is_bound
-  - step_id: v3-web-search-sm-01
-    from_node: V3HubReqChatProcess04Governed
-    to_node: V3WebSearch01RouteEvidenceClassified
-    caller_symbol: govern_v3_servertool_request_at_req04
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    callee_symbol: apply_v3_web_search_request_hook_at_req04
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    binding_kind: typed_runtime_node
-    behavior_gap: As-Is hook activates the local web_search surface from the current request; the typed WebSearchHookRequest is constructed by build_v3_web_search_hook_request from the bound scope/deadline sources and dispatched by execute_web_search_through_hooks_sidecar. The remaining gap is route evidence for the sidecar-backed execution path.
-    owner_feature_id: v3.web_search_servertool_state_machine
-    resource_flow:
-      consumes:
-      - v3.request.normal_payload
-      produces:
-      - v3.servertool.state_machine_control
-      side_channel_reads: []
-      side_channel_writes:
-      - v3.servertool.state_machine_control
-    status: as_is_bound
-  - step_id: v3-web-search-sm-02
-    from_node: V3WebSearch01RouteEvidenceClassified
-    to_node: V3WebSearchBackendBindingCompiled
-    caller_symbol: resolve_request_web_search_execution_mode
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
-    callee_symbol: resolve_web_search_mode_and_backend
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
-    binding_kind: typed_runtime_node
-    behavior_gap: As-Is resolves the compiled backend binding only; no current-turn route classifier edge is bound, so the target-state route-evidence dependency remains missing.
-    owner_feature_id: v3.web_search_servertool_state_machine
-    resource_flow:
-      consumes:
-      - v3.servertool.state_machine_control
-      - v3.web_search.execution_mode
-      produces:
-      - v3.web_search.backend_binding
-      side_channel_reads:
-      - v3.servertool.state_machine_control
-      - v3.web_search.execution_mode
-      side_channel_writes: []
-    status: as_is_bound
-  - step_id: v3-web-search-sm-03
-    from_node: HubRespChatProcess03Governed
-    to_node: V3ServerToolState01ControlScope
-    caller_symbol: apply_v3_tool_call_servertool_hook_at_resp03
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    callee_symbol: web_search_hook_outcome_from_center_state
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    binding_kind: typed_runtime_node
-    behavior_gap: Resp03 observes the local call, transitions typed state, and emits a typed HookOutcome; persistence is only bound in the response runtime paths that commit effects.
-    owner_feature_id: v3.web_search_servertool_state_machine
-    resource_flow:
-      consumes:
-      - v3.response.client_payload
-      - v3.servertool.state_machine_control
-      produces:
-      - v3.servertool.state_machine_control
-      side_channel_reads:
-      - v3.servertool.state_machine_control
-      side_channel_writes:
-      - v3.servertool.state_machine_control
-    status: as_is_bound
-  - step_id: v3-web-search-sm-04
-    from_node: V3ServerToolState01ControlScope
-    to_node: V3WebSearch02SearchDispatchPrepared
-    caller_symbol: execute_web_search_through_hooks_sidecar
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs
-    callee_symbol: capture_sidecar_result
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs
-    binding_kind: typed_runtime_node
-    behavior_gap: The active sidecar helper advances SearchDispatchPrepared -> SearchInFlight -> SearchResultCaptured only after a typed call-id-bound result is validated.
-    owner_feature_id: v3.web_search_servertool_state_machine
-    resource_flow:
-      consumes:
-      - v3.servertool.state_machine_control
-      produces:
-      - v3.servertool.state_machine_control
-      side_channel_reads:
-      - v3.servertool.state_machine_control
-      side_channel_writes: []
-    status: as_is_bound
-  - step_id: v3-web-search-sm-05
-    from_node: V3WebSearch02SearchDispatchPrepared
-    to_node: ControlServer
-    caller_symbol: execute_web_search_through_hooks_sidecar
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs
-    callee_symbol: ControlRequest::ExecuteWebSearch
-    callee_file: v3/crates/routecodex-v3-hooks/src/control.rs
-    binding_kind: typed_control_request
-    behavior_gap: The active path sends one typed control request over the configured hooks sidecar socket and validates protocol, call id, typed outcome, malformed/missing adapter response, and deadline before capturing state; no provider request is reconstructed.
-    owner_feature_id: v3.web_search_servertool_state_machine
-    resource_flow:
-      consumes:
-      - v3.hooks.control_socket.runtime_carrier
-      - v3.web_search.hook_request
-      produces:
-      - v3.web_search.hook_outcome
-      - v3.servertool.state_machine_control
-      side_channel_reads: []
-      side_channel_writes: []
-    status: as_is_bound
-  - step_id: v3-web-search-sm-06
-    from_node: HubRespChatProcess03Governed
-    to_node: V3WebSearch03SearchResultCaptured
-    caller_symbol: apply_v3_tool_call_servertool_hook_at_resp03
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    callee_symbol: intercept_local_web_search_call
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    binding_kind: typed_runtime_node
-    behavior_gap: Hosted text is captured when present and converted into a typed WebSearchResult/HookOutcome; otherwise the state remains observed until the local hop or a later typed adapter supplies the result.
-    owner_feature_id: v3.web_search_servertool_state_machine
-    resource_flow:
-      consumes:
-      - v3.response.client_payload
-      - v3.servertool.state_machine_control
-      produces:
-      - v3.servertool.state_machine_control
-      side_channel_reads:
-      - v3.servertool.state_machine_control
-      side_channel_writes:
-      - v3.servertool.state_machine_control
-    status: as_is_bound
-  - step_id: v3-web-search-sm-07
-    from_node: V3WebSearch03SearchResultCaptured
-    to_node: V3HubRespOutbound05ClientSemantic
-    caller_symbol: project_web_search_result_into_finalized
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
-    callee_symbol: project_web_search_result_into_finalized
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
-    binding_kind: typed_result_projection
-    behavior_gap: Result projection consumes the call-id-bound typed sidecar result and preserves pairing.
-    owner_feature_id: v3.web_search_servertool_state_machine
-    resource_flow:
-      consumes:
-      - v3.servertool.state_machine_control
-      produces:
-      - v3.response.client_payload
-      side_channel_reads:
-      - v3.servertool.state_machine_control
-      side_channel_writes: []
-    status: as_is_bound
-  - step_id: v3-web-search-sm-08
-    from_node: V3HubReqChatProcess04Governed
-    to_node: V3WebSearch04ToolResultInjected
-    caller_symbol: apply_v3_responses_relay_web_search_control_completion
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
-    callee_symbol: apply_v3_responses_relay_web_search_control_completion
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
-    binding_kind: typed_runtime_node
-    behavior_gap: Completion currently verifies the paired function_call_output; typed injection into the same governed request remains a P5 target binding.
-    owner_feature_id: v3.web_search_servertool_state_machine
-    resource_flow:
-      consumes:
-      - v3.servertool.state_machine_control
-      - v3.request.normal_payload
-      produces:
-      - v3.request.normal_payload
-      side_channel_reads:
-      - v3.servertool.state_machine_control
-      side_channel_writes: []
-    status: as_is_bound
 - chain_id: v3.console_request_count_visibility.mainline
   owner_feature_id: v3.console_request_count_visibility
   summary: One aggregate-owned request counter handle is shared by every listener, and one atomic V3 request identity allocation carries total and local-day counts into both human request and terminal response headlines.
@@ -6919,7 +6522,7 @@ chains:
     to_node: V3RuntimeTimingExternalAttempt
     caller_symbol: execute_responses_direct_server_outcome_inner
     caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
-    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state
+    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
     status: anchored
     owner_feature_id: v3.runtime_timing_observability
@@ -8721,8 +8324,8 @@ chains:
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: V3HubRelayRequestHooks::run_from_normalized_with_events
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: govern_v3_servertool_request_at_req04
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: compile_v3_tool_thinking_turn_context_at_req04
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tool_thinking_hooks.rs
     status: anchored
     behavior_gap: implementation is bound; remaining gap is the complete live matrix evidence for this edge
     owner_feature_id: v3.tool_thinking_hook_skeleton
@@ -8752,7 +8355,7 @@ chains:
     to_node: ProviderReqCompat06ProviderCompat
     caller_symbol: project_v3_operation_runner_standard_provider_request
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs
-    callee_symbol: build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording
+    callee_symbol: build_v3_openai_chat_standard_request_from_chat_canonical_recording
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
     status: anchored
     behavior_gap: current Req04 wrapper and mechanical projection are source-controlled; remaining gap is complete native/custom live evidence across every provider protocol
@@ -9697,7 +9300,7 @@ chains:
 - chain_id: v3.operation_runner.dagpipe.request
   owner_feature_id: v3.unified_operation_runner_design
   manifest: docs/architecture/dagpipe/v3.operation_runner.request.graph.json
-  summary: Existing DAGpipe request graph; one source client JSON and one exit transport request. Candidate M2 accepts nine request-side stages through the canonical SDK Registry, compile, and Runtime.run path. The accepted control stages resolve_target and plan_execution use actual callers in Direct kernels, four-protocol Relay, and the Server non-admitting preplan, and passed the fresh full-chain matrix. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
+  summary: Existing DAGpipe request graph; one source client JSON and one exit transport request. Candidate M2 accepts nine request-side stages through the canonical SDK Registry, compile, and Runtime.run path. The accepted control stages resolve_target and plan_execution use actual callers in Direct kernels, four-protocol Relay, and the Server non-admitting preplan, and passed the fresh full-chain matrix. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. A refill is a new execution through this same request mainline; the static DAG has no back-edge. Refill execution preserves the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client origin and never rebuilds it from the continuation payload.
   entry_contract:
     node: V3OperationRunnerCaptureClientJson
     owner_doc: docs/design/v3-unified-operation-runner-design.md
@@ -10066,24 +9669,24 @@ chains:
       producer: RuntimeRequestGraphEntry
       readers:
       - V3OperationRunnerNormalizeRequest
-      legal_values: [client_entry, retry, internal_followup]
-      client_entry:
-        effect: RuntimeRequestGraphEntry creates originKind=client_entry before the original graph invocation; V3OperationRunnerNormalizeRequest initializes request_inverse_context and explicit_history_pairing from the original client entry payload
-      retry:
-        effect: RuntimeRetryLaunch routes re-entry through RuntimeRequestGraphEntry, which creates originKind=retry before the next graph invocation; V3OperationRunnerNormalizeRequest reads the existing request_inverse_context and does not rebuild it
-      internal_followup:
-        effect: RuntimeInternalFollowup routes re-entry through RuntimeRequestGraphEntry, which creates originKind=internal_followup before the next graph invocation; V3OperationRunnerNormalizeRequest reads the existing request_inverse_context and does not rebuild it
+      legal_values: [client, dry_run, refill]
+      client:
+        effect: RuntimeRequestGraphEntry creates originKind=client before the original graph invocation; V3OperationRunnerNormalizeRequest initializes request_inverse_context and explicit_history_pairing from the original client entry payload
+      dry_run:
+        effect: RuntimeRequestGraphEntry creates originKind=dry_run for a dry-run execution; the request graph validates the same normal request path without granting client delivery
+      refill:
+        effect: RuntimeRequestGraphEntry creates originKind=refill for a Chat Process continuation; V3OperationRunnerNormalizeRequest reads the existing request_inverse_context and does not rebuild it from the continuation payload
       payload_rule: request origin is typed control state and is never serialized into request, response, provider, or client bodies
       release: graph_invocation_return; storage none; RuntimeRequestFinalizer does not consume or release it
     request_inverse_context:
       resource: v3.operation_runner.request_inverse_context
       producer: V3OperationRunnerNormalizeRequest
-      conditional_write: initialized only when request_origin_kind=client_entry
+      conditional_write: initialized only when request_origin_kind=client
       readers:
       - V3OperationRunnerNormalizeRequest
       - V3OperationRunnerProjectProviderSemantic
       - V3OperationRunnerInverseProjectClient
-      reentry_rule: when request_origin_kind=retry or internal_followup, V3OperationRunnerNormalizeRequest reads and preserves the existing slot and never overwrites it from follow-up payload
+      reentry_rule: when request_origin_kind=refill, V3OperationRunnerNormalizeRequest reads and preserves the existing slot and never overwrites it from the continuation payload
       release: runtime_request_finalizer
 
 - chain_id: v3.operation_runner.dagpipe.response
@@ -10237,7 +9840,7 @@ chains:
       - v3.operation_runner.explicit_history_pairing
       - v3.operation_runner.response_provenance
       - v3.operation_runner.tool_thinking_turn_context
-      side_channel_writes: [v3.operation_runner.response_tool_binding, v3.operation_runner.execution_disposition, v3.operation_runner.servertool_sidecar_plan]
+      side_channel_writes: [v3.operation_runner.response_tool_binding, v3.operation_runner.execution_disposition]
   - step_id: v3-op-runner-resp-04
     from_node: V3OperationRunnerInverseProjectClient
     to_node: V3OperationRunnerFrameClient
@@ -10252,16 +9855,44 @@ chains:
       produces: [v3.operation_runner.client_frame_candidate]
       side_channel_reads: [v3.operation_runner.execution_disposition]
       side_channel_writes: [v3.operation_runner.client_frame_candidate]
+  - step_id: v3-op-runner-refill-reentry-relay-01
+    from_node: V3OperationRunnerGovernResponse
+    to_node: V3OperationRunnerCaptureClientJson
+    caller_symbol: execute_v3_responses_relay_runtime
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    callee_symbol: execute_v3_responses_relay_runtime_inner_with_refill
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    status: runtime_bound
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.operation_runner.execution_disposition, v3.operation_runner.refill_continuation_signal]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-op-runner-refill-reentry-direct-01
+    from_node: V3OperationRunnerGovernResponse
+    to_node: V3OperationRunnerCaptureClientJson
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_with_refill
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+    callee_symbol: begin_refill_execution
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+    status: runtime_bound
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.operation_runner.execution_disposition, v3.operation_runner.refill_continuation_signal]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
   execution_disposition:
     resource: v3.operation_runner.execution_disposition
     producer: V3OperationRunnerGovernResponse
-    legal_values: [client_commit, servertool_followup]
+    legal_values: [client_commit, refill_requested]
     client_commit:
       consumers: [V3OperationRunnerInverseProjectClient, V3OperationRunnerFrameClient, RuntimeClientCommit, RuntimeRequestFinalizer]
       effect: all response nodes run and stage a candidate; RuntimeClientCommit alone submits it after the graph returns; typed attempt_cleanup then releases successful-attempt resources before RuntimeRequestFinalizer releases request scope
-    servertool_followup:
-      consumers: [V3OperationRunnerInverseProjectClient, V3OperationRunnerFrameClient, RuntimeInternalFollowup, RuntimeAttemptCleanup, V3OperationRunnerNormalizeRequest]
-      effect: inverse and frame stages return an empty candidate; Runtime discards it, runs typed attempt_cleanup after the sidecar, and re-enters the request graph with internal origin; RuntimeRequestFinalizer is not triggered by this hop
+    refill_requested:
+      consumers: [V3OperationRunnerInverseProjectClient, V3OperationRunnerFrameClient, execute_v3_responses_relay_runtime, execute_v3_responses_direct_runtime_kernel_with_refill, RuntimeAttemptCleanup, V3OperationRunnerNormalizeRequest]
+      effect: inverse and frame stages return an empty candidate; Runtime discards it, releases the completed attempt scope, and launches a new execution through the normal Runtime request mainline without client commit
   response_typed_resource_edges:
     attempt_declaration_map:
       resource: v3.operation_runner.attempt_declaration_map
@@ -10271,7 +9902,7 @@ chains:
       - V3OperationRunnerGovernResponse
       - V3OperationRunnerInverseProjectClient
       content: tools actually emitted for this successful attempt only
-      release: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_servertool_followup_attempt_cleanup
+      release: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_refill_requested_attempt_cleanup
       payload_rule: arguments and inputs remain opaque business payload; only identity, namespace, kind, encoding, and call/output references enter the typed resource
     explicit_history_pairing:
       resource: v3.operation_runner.explicit_history_pairing
@@ -10289,7 +9920,7 @@ chains:
       - V3OperationRunnerGovernResponse
       - V3OperationRunnerInverseProjectClient
       content: successful attempt provider response source and canonical-path provenance
-      release: after_final_client_inverse_projection_or_after_servertool_followup_attempt_cleanup_or_runtime_request_finalizer
+      release: after_final_client_inverse_projection_or_after_refill_requested_attempt_cleanup_or_runtime_request_finalizer
       payload_rule: provenance is typed control metadata and is never reconstructed from response payload fields
     response_tool_binding:
       resource: v3.operation_runner.response_tool_binding
@@ -10297,23 +9928,23 @@ chains:
       readers:
       - V3OperationRunnerInverseProjectClient
       content: new provider call returned in this successful attempt bound to response provenance and attempt declaration map
-      release: after_final_client_inverse_projection_or_after_servertool_followup_attempt_cleanup_or_runtime_request_finalizer
+      release: after_final_client_inverse_projection_or_after_refill_requested_attempt_cleanup_or_runtime_request_finalizer
     client_frame_candidate:
       resource: v3.operation_runner.client_frame_candidate
       producer: V3OperationRunnerFrameClient
       readers: [RuntimeClientCommit]
       staging_only: the graph sink is a staged candidate and never writes directly to a client body
       commit_owner: RuntimeClientCommit alone may submit the staged candidate to Server/SSE after execution_disposition=client_commit
-      servertool_rule: RespOutbound and frame staging return an empty candidate for servertool_followup; Runtime discards it before servertool re-entry
-      release: runtime_client_commit; empty_servertool_candidate_released_by_attempt_cleanup_before_request_reentry
-    servertool_sidecar_plan:
-      resource: v3.operation_runner.servertool_sidecar_plan
+      refill_rule: RespOutbound and frame staging return an empty candidate for refill_requested; Runtime discards it before the new request execution
+      release: runtime_client_commit; empty_refill_candidate_released_by_attempt_cleanup_before_new_execution
+    refill_continuation_signal:
+      resource: v3.operation_runner.refill_continuation_signal
       producer: V3OperationRunnerGovernResponse
-      readers: [RuntimeInternalFollowup]
-      condition: emitted only when execution_disposition=servertool_followup
-      content: declared sidecar identity and execution plan for the servertool follow-up
-      release: after_sidecar_execution_before_request_reentry
-      payload_rule: sidecar plan is typed control state and never serialized into client or provider body
+      readers: [execute_v3_responses_relay_runtime, execute_v3_responses_direct_runtime_kernel_with_refill]
+      condition: emitted only when execution_disposition=refill_requested
+      content: typed refill continuation signal for the new Runtime request execution
+      release: refill_requested_disposition_released_by_attempt_cleanup_before_new_execution
+      payload_rule: refill signal is typed control state and never serialized into client or provider body
 
 - chain_id: v3.operation_runner.dagpipe.error
   owner_feature_id: v3.unified_operation_runner_design
@@ -10870,7 +10501,7 @@ chains:
       current_binding: post_rewrite_whole_attempt_public_blackbox_candidate
       empty: ProviderFailure/provider_response_empty/internal_502
       processing_failure: RuntimeFailure/internal_599
-      internal_followup: typed_servertool_followup_without_client_commit
+      refill_requested: typed_refill_requested_without_client_commit
     resource_flow:
       consumes: [v3.response.provider_raw, v3.sse.direct.full_attempt_buffer]
       produces: [v3.error.source]

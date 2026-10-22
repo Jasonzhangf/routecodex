@@ -293,54 +293,6 @@ async fn anthropic_provider_sse_live_malformed_tool_json_unquoted_session_id_fai
 }
 
 #[test]
-fn web_search_state_machine_advances_to_search_result_captured_via_hop() {
-    // 搜索 hop 的状态迁移契约：ToolCallObserved -> SearchResultCaptured
-    // 携带归一化结果；非相邻迁移必须被拒绝。
-    let observed = V3WebSearchCenterState::new()
-        .transition_to(
-            V3WebSearchCenterPhase::LocalToolSurfaceActive,
-            "req04_web_search_surface_active",
-        )
-        .expect("idle -> local_tool_surface_active")
-        .with_original_call_id(Some("call_ws_1"))
-        .with_query(Some("routecodex v3"))
-        .transition_to(
-            V3WebSearchCenterPhase::ToolCallObserved,
-            "resp03_websearch_call_observed",
-        )
-        .expect("local_tool_surface_active -> tool_call_observed");
-    let prepared = observed
-        .transition_to(
-            V3WebSearchCenterPhase::SearchDispatchPrepared,
-            "search_hop_dispatch_prepared",
-        )
-        .expect("tool_call_observed -> search_dispatch_prepared");
-    let in_flight = prepared
-        .transition_to(
-            V3WebSearchCenterPhase::SearchInFlight,
-            "search_hop_in_flight",
-        )
-        .expect("search_dispatch_prepared -> search_in_flight");
-    let captured = in_flight
-        .transition_to(
-            V3WebSearchCenterPhase::SearchResultCaptured,
-            "search_hop_result_captured",
-        )
-        .expect("search_in_flight -> search_result_captured");
-    assert_eq!(
-        captured.phase(),
-        V3WebSearchCenterPhase::SearchResultCaptured
-    );
-    assert_eq!(captured.original_call_id(), Some("call_ws_1"));
-    assert_eq!(captured.query(), Some("routecodex v3"));
-    // 非法迁移：SearchResultCaptured -> SearchInFlight 必须拒绝
-    let error = captured
-        .transition_to(V3WebSearchCenterPhase::SearchInFlight, "backwards")
-        .expect_err("terminal captured must not move backwards");
-    assert!(error.contains("invalid web_search ServerTool transition"));
-}
-
-#[test]
 fn relay_runtime_failure_propagates_supplied_observability() {
     // Red guard: project_v3_responses_relay_runtime_failure 之前对所有
     // source raised 路径都丢弃 observability。本次修复后调用方可显式
@@ -363,7 +315,7 @@ fn relay_runtime_failure_propagates_supplied_observability() {
     observability.provider_status = Some(598);
 
     let output = project_v3_responses_relay_runtime_failure(
-        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed("red-test propagation".to_string()),
+        V3ResponsesRelayRuntimeError::RuntimeTiming("red-test propagation".to_string()),
         Some(observability.clone()),
     );
     assert_eq!(output.status, 598);
@@ -392,7 +344,7 @@ fn relay_runtime_failure_propagates_supplied_observability() {
     assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
     assert_eq!(
         body["error"]["message"],
-        "web_search local search hop failed: red-test propagation"
+        "V3 Responses Relay Runtime timing failed: red-test propagation"
     );
     assert!(
         body["error"].get("stage").is_none()
@@ -406,7 +358,7 @@ fn relay_runtime_failure_propagates_supplied_observability() {
     );
 
     let none_output = project_v3_responses_relay_runtime_failure(
-        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed("no-obs".to_string()),
+        V3ResponsesRelayRuntimeError::RuntimeTiming("no-obs".to_string()),
         None,
     );
     assert!(
@@ -620,7 +572,7 @@ fn anthropic_dotted_custom_name_survives_request_entry_and_hooks() {
     let governed = super::super::compile_v3_hub_relay_request_hooks()
         .run_from_normalized(
             normalized,
-            &super::super::V3HubServertoolRequestProfile::disabled(),
+            &super::super::V3HubRequestHookProfile::disabled(),
         )
         .expect("request hooks");
     let semantic = governed.payload_arc().as_ref();

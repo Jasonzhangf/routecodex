@@ -78,8 +78,6 @@ mod tests {
             "test-session-id".to_string(),
             provider,
             None,
-            V3WebSearchExecutionMode::None,
-            None,
             false,
             false,
             V3RuntimeStreamObservation::default(),
@@ -111,8 +109,6 @@ mod tests {
             "test-request-id".to_string(),
             "test-session-id".to_string(),
             provider,
-            None,
-            V3WebSearchExecutionMode::None,
             None,
             false,
             false,
@@ -152,8 +148,6 @@ mod tests {
             "test-session-id".to_string(),
             provider,
             None,
-            V3WebSearchExecutionMode::None,
-            None,
             false,
             false,
             V3RuntimeStreamObservation::default(),
@@ -187,8 +181,6 @@ mod tests {
             "test-session-id".to_string(),
             provider,
             None,
-            V3WebSearchExecutionMode::None,
-            None,
             false,
             false,
             V3RuntimeStreamObservation::default(),
@@ -219,8 +211,6 @@ mod tests {
             "test-session-id".to_string(),
             provider,
             None,
-            V3WebSearchExecutionMode::None,
-            None,
             false,
             false,
             V3RuntimeStreamObservation::default(),
@@ -249,8 +239,6 @@ mod tests {
             "test-request-id".to_string(),
             "test-session-id".to_string(),
             provider,
-            None,
-            V3WebSearchExecutionMode::None,
             None,
             false,
             false,
@@ -290,8 +278,6 @@ mod tests {
             "test-request-id".to_string(),
             "test-session-id".to_string(),
             provider,
-            None,
-            V3WebSearchExecutionMode::None,
             None,
             false,
             false,
@@ -364,8 +350,6 @@ mod tests {
             V3HubTransportIntent::Sse,
             &mut trace,
             None,
-            V3WebSearchExecutionMode::None,
-            None,
             false,
             true,
             "MiniMax-M3",
@@ -400,7 +384,7 @@ routing_group = "default"
 
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = { request_max_attempts = 1, attempt_max_bytes = 67108864, attempt_max_frames = 262144, request_max_bytes = 67108864, process_max_bytes = 536870912, residence_timeout_ms = 600000 }
 

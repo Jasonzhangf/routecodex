@@ -1744,13 +1744,8 @@ features:
   - V3HubRespChatProcess03Outcome::into_parts
   - V3HubRespInbound02Normalized::normalized_kind
   - V3HubRespChatProcess03Governed::terminality
-  - V3HubRespChatProcess03Governed::servertool_action
   control_boundary:
   - V3HubRespChatProcess03Governed contains response data only
-  - Web search transition leaves Resp03 through V3HubRespChatProcess03Outcome and
-    remains outside Resp04 response data
-  - Runtime consumes the typed web search transition before passing only into_data
-    to Resp05
   source_nodes:
   - V3ProviderRespInbound01Raw
   - V3HubRespInbound02Normalized
@@ -1802,7 +1797,6 @@ features:
   - relay_json_moves_one_business_payload_through_req04
   - relay_sse_keeps_one_canonical_payload_without_materializing_stream
   - local_context_is_retained_until_req04_outcome_release
-  - servertool_roundtrip_uses_one_resp04_context_and_restores_before_req04_hook
   - verify-v3-relay-payload-copy-budget
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_payload_copy_runtime_probes.rs
@@ -1831,7 +1825,6 @@ features:
   runtime_status: relay_payload_copy_probes_and_gates_only
   pending_runtime:
   - live Relay Server entry wiring and replay
-  - servertool runtime execution
   - P6 cutover or deletion
 - feature_id: v3.hub_relay_runtime_resources_hooks
   owner_crates:
@@ -2618,7 +2611,7 @@ features:
     Request reasoning effort, numeric budget, summary, context, mode, include-thoughts,
     display policy, client metadata, arguments, and other protocol fields remain payload
     data-plane semantics owned by adjacent codecs. Routing, switching, retry, health
-    and servertool control remain in typed control resources/MetadataCenter;
+    and Chat Process control remain in typed control resources/MetadataCenter;
     neither side may mirror or reconstruct the other.
   compatibility_exceptions:
   - exception_id: v3.responses_inbound.codex_builtin_integer_schema
@@ -2689,7 +2682,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/reasoning_projection.rs
@@ -2860,7 +2852,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/reasoning_projection.rs
@@ -2899,7 +2890,6 @@ features:
   - sharedmodule
   - v3/crates/routecodex-v3-server/src
   - v3/crates/routecodex-v3-provider-responses
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - MetadataCenter
   - SSE transport
   - provider transport
@@ -3121,7 +3111,7 @@ features:
   change_risk: critical
   owner_kind: rust_project_v3_runtime_integration_gate
   owner_scope: Controlled Hub Relay Runtime closeout over fixed Req01-Req09 and Resp01-Resp06
-    topology, Responses field parity, servertool response hook profile, Error01-06,
+    topology, Responses field parity, Error01-06,
     isolation, copy-budget gates, and Responses Relay source server entry.
   owner_crates:
   - routecodex-v3-config
@@ -3183,11 +3173,11 @@ features:
   - v3-responses-provider-event-terminal-merge-01
   - v3-gemini-provider-event-materialization-01
   entry_symbols:
-  - execute_v3_anthropic_relay_runtime_with_servertool_profile
+  - execute_v3_anthropic_relay_runtime
   - execute_v3_responses_relay_runtime_with_default_transport
   - execute_v3_responses_relay_runtime
   - execute_v3_responses_relay_dry_run_runtime
-  - execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state
+  - execute_v3_responses_relay_dry_run_orchestration_outcome
   - V3ProviderRequestDryRunNoNetworkTransport
   - execute_v3_responses_relay_request
   - responses_relay_output_response
@@ -3288,103 +3278,6 @@ features:
   pending_runtime:
   - P6 deletion
   - full production replacement
-- feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-  status: controlled_runtime_parity_verified
-  change_risk: critical
-  owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: Controlled V3 Hub Relay tool/servertool multiturn parity matrix across
-    Req04 current-turn tool governance, Resp03 tool harvest, Resp03 apply_patch freeform
-    client projection, JSON/SSE ordering, and one response exit.
-  owner_files:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-  - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
-  - v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs
-  - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
-  - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
-  resource_bindings:
-  - v3.request.normal_payload
-  - v3.hub.tool_governance_truth
-  - v3.hub.response_semantic
-  - v3.response.client_payload
-  mainline_bindings:
-  - v3-relay-tool-parity-01
-  - v3-relay-tool-parity-02
-  - v3-relay-tool-parity-04
-  - v3-relay-tool-parity-05
-  - v3-relay-tool-parity-06
-  entry_symbols:
-  - govern_tool_outputs_at_req04
-  - V3HubRelayToolKind
-  - project_v3_apply_patch_freeform_calls_at_resp03
-  - response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit
-  - apply_patch_response_is_projected_to_freeform_custom_tool_before_commit
-  - apply_patch_tool_output_error_is_preserved_without_continuation_state
-  - apply_patch_legacy_function_call_accepts_custom_output_after_client_projection
-  - responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order
-  - json_two_turn_restores_tool_call_pairs_output_and_preserves_tools
-  - responses_relay_apply_patch_feedback_preserves_client_output_two_turns
-  - wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
-  - verify-v3-relay-tool-servertool-multiturn-parity-closeout
-  allowed_paths:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-  - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
-  - v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs
-  - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
-  - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
-  - docs/goals/v3-relay-tool-servertool-multiturn-parity-closeout-plan.md
-  - docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml
-  - docs/architecture/v3-resource-operation-map.yml
-  - docs/architecture/v3-function-map.yml
-  - docs/architecture/v3-mainline-call-map.yml
-  - docs/architecture/v3-verification-map.yml
-  - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
-  - package.json
-  - note.md
-  - MEMORY.md
-  - .agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md
-  forbidden_paths:
-  - src
-  - sharedmodule
-  - v3/crates/routecodex-v3-server/src
-  - v3/crates/routecodex-v3-provider-responses/src
-  - v3/crates/routecodex-v3-runtime/src/kernel.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
-  - ~/.rcc
-  - provider credentials
-  - live config mutation
-  - global install
-  - restart
-  - release
-  - production cutover
-  - P6 deletion
-  - fallback
-  required_gates:
-  - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout
-  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime
-    --test responses_relay_field_parity_integration -- --test-threads=1 --nocapture
-  - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
-  - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
-  - npm run test:v3-hub-relay-runtime-closeout
-  - npm run verify:v3-hub-relay-runtime-closeout
-  - npm run test:v3-relay-payload-copy-runtime-probes
-  - npm run verify:v3-relay-payload-copy-budget
-  - npm run verify:v3-architecture-docs
-  - npm run verify:v3-resource-map
-  - npm run verify:v3-module-boundaries
-  - npm run verify:v3-cargo-fmt
-  - npm run verify:v3-clippy
-  - npm run test:v3-workspace
-  - git diff --check
-  runtime_status: controlled_parity_and_minimum_live_5555_replay_verified
-  pending_runtime:
-  - Anthropic/Gemini live provider replay in an authorized final profile
-  - live provider error samples for 401/403/5xx/timeout
-  - P6 deletion and production cutover
 - feature_id: v3.live_provider_compat_parity_closeout
   status: partial_live_provider_replay_verified
   change_risk: high
@@ -3578,38 +3471,29 @@ features:
   change_risk: critical
   owner_kind: rust_project_v3_runtime_chat_process_gate
   owner_scope: Resp03 owns provider-neutral response text harvest, finish_reason branch
-    selection, the registered tool_call servertool hook, and ordinary tool governance
-    before Resp05 client projection; it preserves a completed tool-call response as
-    completed/tool_calls and never fabricates a Responses tool-continuation status.
+    selection and ordinary tool governance before Resp05 client projection; it
+    preserves a completed tool-call response as completed/tool_calls and never
+    fabricates a Responses tool-continuation status.
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
-  - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
-  - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
   resource_bindings:
   - v3.hub.response_semantic
   - v3.hub.tool_governance_truth
   mainline_bindings:
   - v3-resp03-tool-governance-01
   - v3-resp03-tool-governance-02
-  - v3-resp03-tool-governance-03
   - v3-resp03-tool-governance-04
   - v3-resp03-tool-governance-05
   - v3-resp03-tool-governance-06
   entry_symbols:
   - govern_v3_hub_relay_response
   - inspect_v3_resp03_finish_reason
-  - apply_v3_tool_call_servertool_hook_at_resp03
   - project_v3_apply_patch_freeform_calls_at_resp03
   - resp05_consumes_resp03_governed_payload_without_semantic_repair
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-  - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
-  - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
   - docs/goals/v3-resp03-tool-governance-gap-closeout-plan.md
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
@@ -3626,10 +3510,6 @@ features:
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics
     -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity
-    -- --nocapture
-  - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
-  - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
   - npm run verify:v3-normalization-payload-logic-boundary
   - npm run verify:v3-architecture-docs
   - npm run verify:architecture-wiki-html-sync
@@ -3641,65 +3521,6 @@ features:
     runtime: No install, restart, or live replay is claimed by this source slice.
     forbidden_claim: Do not claim live closeout without global install, restart, and
       real sample replay.
-- feature_id: v3.servertool_center_skeleton
-  status: design_locked_docs_and_maps
-  change_risk: critical
-  owner_kind: rust_project_v3_runtime_servertool_metadata_center
-  owner_scope: '统一 ServertoolCenter（MetadataCenter）：管理 web_search / servertool
-    CLI 的工具识别（当前是哪一个）、状态注册与状态机整体推进；hook 只在 Req04 请求治理与 Resp03
-    响应治理固定挂载点调用；数据面（SSE/payload）零控制逻辑。三段式：识别 -> 状态判断 -> 操作。'
-  owner_files:
-  - docs/design/v3-servertool-center-skeleton.md
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-  resource_bindings:
-  - v3.hooks.control_socket.runtime_carrier
-  - v3.servertool.state_machine_control
-  - v3.web_search.execution_mode
-  - v3.web_search.backend_binding
-  mainline_bindings:
-  - v3-servertool-center-req-01
-  - v3-servertool-center-req-02
-  - v3-servertool-center-req-03
-  - v3-servertool-center-resp-01
-  - v3-servertool-center-resp-02
-  - v3-servertool-center-resp-03
-  entry_symbols:
-  - V3ServerToolCenter
-  - V3ServerToolCenter::register
-  - V3ServerToolCenter::load
-  - V3ServerToolCenter::transition
-  - V3ServerToolCenter::store
-  - V3ServerToolCenterKey
-  - V3ServerToolInstanceState
-  - V3ServerToolName
-  allowed_paths:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-  - v3/crates/routecodex-v3-runtime/src/kernel/direct_web_search.rs
-  - v3/crates/routecodex-v3-runtime/src/kernel.rs
-  - docs/design/v3-servertool-center-skeleton.md
-  - docs/architecture/v3-mainline-call-map.yml
-  - docs/architecture/v3-function-map.yml
-  - docs/architecture/v3-resource-operation-map.yml
-  - docs/architecture/v3-verification-map.yml
-  forbidden_paths:
-  - v3/crates/routecodex-v3-sse
-  - v3/crates/routecodex-v3-server/src/lib.rs
-  - v3/crates/routecodex-v3-provider-responses
-  - src
-  required_gates:
-  - npm run verify:v3-resource-map
-  - npm run verify:v3-module-boundaries
-  - npm run verify:v3-mainline-caller-flow
-  - npm run verify:v3-architecture-docs
-  - npm run verify:v3-servertool-center-skeleton
-  - npm run test:v3-servertool-center-skeleton-red-fixtures
-  runtime_status: design_locked_docs_and_maps
 - feature_id: v3.protocol_normalization_tool_governance_boundary
   status: source_controlled_runtime_boundary_verified
   change_risk: critical
@@ -3792,8 +3613,6 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics
     -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics
-    -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity
     -- --nocapture
   - npm run verify:v3-architecture-docs
   - npm run verify:function-map-compile-gate
@@ -4160,88 +3979,6 @@ features:
   - npm run verify:architecture-wiki-html-sync
   - git diff --check
   runtime_status: source_controlled_verified_live_restart_pending
-- feature_id: v3.web_search_servertool_state_machine
-  status: design
-  owner_crates:
-  - routecodex-v3-config
-  - routecodex-v3-runtime
-  - routecodex-v3-hooks
-  - routecodex-v3-lifecycle
-  - routecodex-v3-virtual-router
-  - routecodex-v3-target
-  - routecodex-v3-server
-  owner_scope: V3 web_search two-axis route activation and ServerTool internal state-machine
-    lifecycle; Route/VR selects only from current-turn evidence, ChatProcess owns
-    tool/result pairing, provider compat owns wire shape only.
-  design:
-  - docs/goals/v3-web-search-servertool-state-machine-proposal.md
-  resource_bindings:
-  - v3.servertool.state_machine_control
-  - v3.web_search.execution_mode
-  - v3.web_search.backend_binding
-  - v3.web_search.hook_request
-  - v3.web_search.hook_outcome
-  - v3.request.normal_payload
-  - v3.response.client_payload
-  entry_symbols:
-  - V3ServerToolCenter
-  - V3ServerToolCenterKey
-  - V3ServerToolInstanceState
-  - V3ServerToolName
-  - V3WebSearchCenterState
-  - V3WebSearchCenterPhase
-  - V3WebSearchResult
-  - V3WebSearchHookOutcome
-  - WebSearchHookRequest
-  - CommandWebSearchAdapter
-  - HooksSidecarCore::execute_web_search
-  - execute_web_search_through_hooks_sidecar
-  - apply_v3_web_search_request_hook_at_req04
-  - apply_v3_web_search_tool_call_hook_at_resp03
-  - V3WebSearchDispatcher
-  - V3WebSearchBackendBindingCompiled
-  mainline_bindings:
-  - v3-web-search-sm-sidecar-socket-01
-  - v3-web-search-sm-01
-  - v3-web-search-sm-02
-  - v3-web-search-sm-03
-  - v3-web-search-sm-04
-  - v3-web-search-sm-05
-  - v3-web-search-sm-06
-  - v3-web-search-sm-07
-  - v3-web-search-sm-08
-  - v3-hooks-sidecar-web-search-01
-  allowed_paths:
-  - docs/goals/v3-web-search-servertool-state-machine-proposal.md
-  - docs/architecture/v3-resource-operation-map.yml
-  - docs/architecture/v3-function-map.yml
-  - docs/architecture/v3-mainline-call-map.yml
-  - docs/architecture/v3-verification-map.yml
-  - docs/architecture/wiki/v3-mainline-caller-flow.md
-  - docs/architecture/wiki/html/v3-mainline-caller-flow.html
-  - v3/crates/servertool-core
-  - v3/crates/routecodex-v3-hooks
-  - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
-  - v3/crates/provider-compat-core/src
-  - v3/crates/routecodex-v3-config
-  - v3/crates/routecodex-v3-runtime
-  - v3/Cargo.lock
-  - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
-  - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar/tests.rs
-  - v3/crates/routecodex-v3-lifecycle/src/lib.rs
-  - v3/crates/routecodex-v3-server/src/lib.rs
-  - v3/crates/routecodex-v3-virtual-router
-  - v3/crates/routecodex-v3-target
-  forbidden_paths:
-  - v3/crates/routecodex-v3-sse
-  - src/server/runtime/http-server
-  - src/providers
-  required_gates:
-  - npm run verify:v3-resource-map
-  - npm run verify:v3-mainline-caller-flow
-  - npm run verify:v3-architecture-docs
-  - npm run build:v3-cli
-  runtime_status: design_only_not_implemented
 - feature_id: v3.console_request_count_visibility
   status: active
   owner_crate: routecodex-v3-server
@@ -5186,7 +4923,7 @@ features:
   change_risk: critical
   owner_kind: rust_v3_provider_terminal_response_error_policy
   complete_chat_sse_owner: registered Resp03 callback govern_complete_chat_sse in hub_v1/resp_chat_process_complete_chat_sse.rs; Runtime admits only final governed frames using shared business facts before seal, and takes original async errors from the physically separate typed stream control resource
-  owner_scope: Genuine provider errors enter the typed Error chain before provider success or client commit; representable successful response content and terminals pass without semantic adjudication. A complete provider attempt with no deliverable business content after every declared response rewrite, including non-client memory stripping, becomes internal typed 502. Direct SSE collector owns post-rewrite whole-attempt adjudication at both sealing exits; protocol-independent frame storage and Server/SSE do not judge business content. Processing loss or failure of representable content retains internal 599. Typed servertool_followup remains an internal continuation. No client error or empty completion is fabricated.
+  owner_scope: Genuine provider errors enter the typed Error chain before provider success or client commit; representable successful response content and terminals pass without semantic adjudication. A complete provider attempt with no deliverable business content after every declared response rewrite, including non-client memory stripping, becomes internal typed 502. Direct SSE collector owns post-rewrite whole-attempt adjudication at both sealing exits; protocol-independent frame storage and Server/SSE do not judge business content. Processing loss or failure of representable content retains internal 599. Typed refill_requested remains an internal continuation. No client error or empty completion is fabricated.
   owner_crates:
   - routecodex-v3-config
   - routecodex-v3-runtime
@@ -5673,7 +5410,7 @@ features:
   owner_modules:
   - routecodex-v3-runtime
   owner_files:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/tool_thinking_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   typed_plumbing_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
@@ -5697,8 +5434,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/shared.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
   test_files:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_tests.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_anthropic_native_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
@@ -5732,7 +5467,7 @@ features:
   - strip_v3_toolreason_markers_at_resp03
   - v3_json_contains_toolreason_marker_at_resp03
   allowed_paths:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/tool_thinking_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
@@ -5753,8 +5488,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_tests.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_anthropic_native_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
@@ -6448,7 +6181,7 @@ features:
   - v3.operation_runner.response_tool_binding
   - v3.operation_runner.execution_disposition
   - v3.operation_runner.client_frame_candidate
-  - v3.operation_runner.servertool_sidecar_plan
+  - v3.operation_runner.refill_continuation_signal
   - v3.error.client_projection_candidate
   - v3.error.execution_decision
   - v3.operation_runner.metadata_center_control

@@ -40,66 +40,6 @@ fn openai_chat_wire_projects_responses_web_search_tool_to_options() {
 }
 
 #[test]
-fn openai_chat_wire_projects_local_websearch_tool_for_metadata_center_local_search() {
-    let payload = json!({
-        "model":"local-model", "messages":[{"role":"user", "content":"search"}],
-        "tools":[
-            {"type":"function", "name":"read_file", "description":"Read one file",
-             "parameters":{"type":"object", "properties":{}}},
-            {"type":"web_search", "external_web_access":true,
-             "search_content_types":["text"], "search_context_size":"medium"}
-        ]
-    });
-    let request = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
-        &payload,
-        routecodex_v3_config::V3WebSearchExecutionMode::MetadataCenterLocalSearch,
-        true,
-    )
-    .expect("Mode B local websearch projection must compile");
-    let tools = request["tools"].as_array().expect("tools array");
-    assert_eq!(tools.len(), 2, "ordinary tools must remain unchanged");
-    let read = tools
-        .iter()
-        .find(|tool| tool["function"]["name"] == "read_file")
-        .unwrap();
-    let search = tools
-        .iter()
-        .find(|tool| tool["function"]["name"] == "websearch")
-        .unwrap();
-    assert_eq!(
-        read,
-        &json!({"type":"function", "function":{
-            "name":"read_file", "description":payload["tools"][0]["description"],
-            "parameters":payload["tools"][0]["parameters"]
-        }})
-    );
-    assert_eq!(search["type"], "function");
-    assert_eq!(
-        search["function"]["parameters"]["required"],
-        json!(["query"])
-    );
-    let description = search["function"]["description"].as_str().unwrap();
-    assert_eq!(description, "Search the web for up-to-date information.");
-    let query_description = search["function"]["parameters"]["properties"]["query"]["description"]
-        .as_str()
-        .unwrap();
-    assert!(query_description.contains("concise query"));
-    assert!(!description.contains("RouteCodex") && !description.contains("ServerTool"));
-    assert_eq!(
-        search["function"]["parameters"]["properties"]["search_context_size"]["default"],
-        "medium"
-    );
-    assert_eq!(
-        search["function"]["parameters"]["properties"]["search_content_types"]["default"],
-        json!(["text"])
-    );
-    assert!(
-        request.get("web_search_options").is_none(),
-        "Mode B must not emit hosted web_search_options"
-    );
-}
-
-#[test]
 fn responses_namespace_custom_tool_projects_to_chat_provider_function() {
     let canonical =
         super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
@@ -1269,7 +1209,7 @@ fn chat_default_target_drops_anthropic_hosted_search_shape() {
 }
 
 #[test]
-fn chat_mode_b_without_selected_search_capability_drops_local_search() {
+fn chat_native_remote_search_without_capability_drops_hosted_search() {
     let payload = json!({
         "model": "local-model",
         "messages": [{"role": "user", "content": "summarize"}],
@@ -1281,7 +1221,7 @@ fn chat_mode_b_without_selected_search_capability_drops_local_search() {
     });
     let wire = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
         &payload,
-        V3WebSearchExecutionMode::MetadataCenterLocalSearch,
+        V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
         false,
     )
     .unwrap();

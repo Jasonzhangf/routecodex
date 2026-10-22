@@ -39,32 +39,6 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
 
-  - resource_id: v3.hooks.control_socket.runtime_carrier
-    resource_kind: typed_control_path_carrier
-    lifecycle: v3.web_search_servertool_state_machine
-    owner_feature_id: v3.web_search_servertool_state_machine
-    owner_crate: routecodex-v3-server
-    owner_node: spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket
-    identity: [socketPath]
-    allowed_writers:
-      - spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket
-    allowed_readers:
-      - V3ResponsesRelayServerToolState
-      - V3ResponsesDirectServerToolState
-      - execute_web_search_through_hooks_sidecar
-    forbidden_writers:
-      - request.normal_payload
-      - response.client_payload
-      - provider.wire_payload
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    may_enter_metadata_center: false
-    binding_status: anchored
-    required_gates:
-      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib web_search_sidecar -- --nocapture
-      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_mode_b_web_search_integration -- --nocapture
-      - npm run verify:v3-resource-map
-      - npm run verify:v3-mainline-caller-flow
   - resource_id: v3.hooks.native_appserver_transport
     resource_kind: native_codex_transport
     lifecycle: v3.rcc_internal_hooks_sidecar
@@ -1151,8 +1125,8 @@ resources:
     binding_status: anchored
   - resource_id: v3.hub.tool_governance_truth
     resource_kind: side_channel
-    lifecycle: v3.hub_relay.tool_servertool_multiturn_parity
-    owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
+    lifecycle: v3.resp03_tool_governance_gap_closeout
+    owner_feature_id: v3.resp03_tool_governance_gap_closeout
     owner_crate: routecodex-v3-runtime
     owner_node: V3HubReqChatProcess04Governed
     identity: [entryProtocol, requestId, callId, toolKind]
@@ -1894,170 +1868,6 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
-
-  - resource_id: v3.servertool.state_machine_control
-    resource_kind: internal_control_state
-    lifecycle: v3.web_search_servertool_state_machine
-    owner_feature_id: v3.web_search_servertool_state_machine
-    owner_crate: routecodex-v3-runtime
-    owner_node: V3ServerToolState01ControlScope
-    identity: [entryProtocol, endpoint, serverId, port, routingGroup, sessionId, conversationId, toolName, toolRunId]
-    implementation_handles: [V3ServerToolCenter(generic_registry), V3ServerToolCenterKey(toolName+scope_key), V3ServerToolInstanceState(typed_per_tool), V3ServerToolName(websearch)]
-    allowed_writers:
-      - V3ServerToolStateManager
-      - V3ServerToolCenter::register
-      - V3ServerToolCenter::store
-      - V3ServerToolCenter::transition
-      - V3ServerToolCenter::clear
-      - HubReqChatProcess03Governed
-      - HubRespChatProcess03Governed
-    allowed_readers:
-      - V3ServerToolStateManager
-      - V3ServerToolCenter::load
-      - HubReqChatProcess03Governed
-      - HubRespChatProcess03Governed
-    forbidden_writers:
-      - routecodex-v3-server
-      - routecodex-v3-sse
-      - routecodex-v3-virtual-router
-      - routecodex-v3-target
-      - routecodex-v3-provider-responses
-      - v3.hub.provider_wire_payload
-      - v3.response.client_payload
-      - v3.debug.payload_budget
-    isolation_contract: { tool_name: hard_isolation_boundary, session_id: hard_session_boundary, cross_tool_access: fail_fast, cross_session_access: fail_fast, per_tool_typed_state: required, generic_untyped_state: forbidden }
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    may_enter_metadata_center: true
-    binding_status: design
-    required_gates:
-      - npm run verify:v3-resource-map
-      - npm run verify:v3-mainline-caller-flow
-      - npm run verify:v3-architecture-docs
-
-  - resource_id: v3.web_search.execution_mode
-    resource_kind: compiled_capability_truth
-    lifecycle: v3.web_search_servertool_state_machine
-    owner_feature_id: v3.web_search_servertool_state_machine
-    owner_crate: routecodex-v3-config
-    owner_node: V3WebSearchExecutionModeCompiled
-    identity: [providerId, modelId, executionMode]
-    allowed_writers:
-      - V3ConfigStore
-      - V3Config05ManifestPublished
-    allowed_readers:
-      - V3RouteClassifier
-      - V3ServerToolStateManager
-      - HubReqChatProcess03Governed
-    forbidden_writers:
-      - routecodex-v3-server
-      - routecodex-v3-sse
-      - routecodex-v3-provider-responses
-      - v3.hub.provider_wire_payload
-      - v3.response.client_payload
-      - v3.debug.payload_budget
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    may_enter_metadata_center: false
-    binding_status: design
-    required_gates:
-      - npm run verify:v3-resource-map
-      - npm run verify:v3-mainline-caller-flow
-      - npm run verify:v3-architecture-docs
-
-  - resource_id: v3.web_search.backend_binding
-    resource_kind: compiled_backend_binding
-    lifecycle: v3.web_search_servertool_state_machine
-    owner_feature_id: v3.web_search_servertool_state_machine
-    owner_crate: routecodex-v3-config
-    owner_node: V3WebSearchBackendBindingCompiled
-    identity: [providerId, modelId, backendBindingId, executionMode]
-    allowed_writers:
-      - V3ConfigStore
-      - V3Config05ManifestPublished
-    allowed_readers:
-      - V3ServerToolStateManager
-      - V3WebSearchDispatcher
-      - HubReqChatProcess03Governed
-      - HubRespChatProcess03Governed
-    forbidden_writers:
-      - routecodex-v3-server
-      - routecodex-v3-sse
-      - routecodex-v3-virtual-router
-      - routecodex-v3-target
-      - routecodex-v3-provider-responses
-      - v3.hub.provider_wire_payload
-      - v3.response.client_payload
-      - v3.debug.payload_budget
-    binding_rules: { exactly_one_backend: required_before_dispatch, fallback_engine_iteration: forbidden, ambiguous_binding: fail_before_transport, unsupported_content_types: fail_explicitly }
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    may_enter_metadata_center: false
-    binding_status: design
-    required_gates:
-      - npm run verify:v3-resource-map
-      - npm run verify:v3-mainline-caller-flow
-      - npm run verify:v3-architecture-docs
-
-  - resource_id: v3.web_search.hook_request
-    resource_kind: typed_hook_request
-    lifecycle: v3.web_search_servertool_state_machine
-    owner_feature_id: v3.web_search_servertool_state_machine
-    owner_crate: routecodex-v3-runtime
-    owner_node: WebSearchHookRequest
-    identity: [requestId, callId, sessionId, conversationId, entryEndpoint, deadlineUnixMs]
-    allowed_writers:
-      - build_v3_web_search_hook_request
-      - build_v3_web_search_hook_request_from_value
-    allowed_readers:
-      - ControlRequest::ExecuteWebSearch
-      - WebSearchAdapter::execute
-      - CommandWebSearchAdapter::execute
-    forbidden_writers:
-      - routecodex-v3-server
-      - routecodex-v3-sse
-      - routecodex-v3-virtual-router
-      - routecodex-v3-target
-      - routecodex-v3-provider-responses
-      - v3.hub.provider_wire_payload
-      - v3.response.client_payload
-      - v3.debug.payload_budget
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    binding_status: anchored
-    required_gates:
-      - cargo test --manifest-path v3/Cargo.toml -p servertool-core web_search_contract -- --nocapture
-      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib web_search_hook_ -- --nocapture
-      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks -- --nocapture
-
-  - resource_id: v3.web_search.hook_outcome
-    resource_kind: typed_hook_result
-    lifecycle: v3.web_search_servertool_state_machine
-    owner_feature_id: v3.web_search_servertool_state_machine
-    owner_crate: routecodex-v3-hooks
-    owner_node: WebSearchHookOutcome
-    identity: [callId, status, errorCode, sourceRefs]
-    allowed_writers:
-      - WebSearchAdapter::execute
-      - CommandWebSearchAdapter::execute
-    allowed_readers:
-      - handle_control_request
-      - HooksSidecarCore::execute_web_search
-    forbidden_writers:
-      - routecodex-v3-server
-      - routecodex-v3-sse
-      - routecodex-v3-virtual-router
-      - routecodex-v3-target
-      - routecodex-v3-provider-responses
-      - v3.hub.provider_wire_payload
-      - v3.response.client_payload
-      - v3.debug.payload_budget
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    binding_status: anchored
-    required_gates:
-      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks -- --nocapture
-
 
   - resource_id: v3.server.request_identity
     resource_kind: runtime_identity_counter
@@ -3426,12 +3236,12 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: RuntimeRequestGraphEntry
     identity: [requestId, invocationId, originKind]
-    legal_values: [client_entry, retry, internal_followup]
+    legal_values: [client, dry_run, refill]
     semantic_contract:
       producer: RuntimeRequestGraphEntry
-      lifetime: immutable invocation-scoped typed control resource; RuntimeRequestGraphEntry creates client_entry, retry, or internal_followup before every request graph invocation; scope ends naturally when the graph invocation returns, with no MetadataCenter slot and no cross-invocation storage to clean
-      client_entry_rule: RuntimeRequestGraphEntry creates originKind=client_entry before the original graph invocation; normalize_v3_operation_runner_request_losslessly initializes request_inverse_context and explicit_history_pairing from the original client entry payload
-      retry_internal_followup_rule: RuntimeRetryLaunch/RuntimeInternalFollowup route re-entry through RuntimeRequestGraphEntry, which creates originKind=retry or internal_followup before the next graph invocation; normalize_v3_operation_runner_request_losslessly reads the existing request_inverse_context and never rebuilds or overwrites it from an internal follow-up payload
+      lifetime: immutable invocation-scoped typed control resource; RuntimeRequestGraphEntry creates client, dry_run, or refill before every request graph invocation; scope ends naturally when the graph invocation returns, with no MetadataCenter slot and no cross-invocation storage to clean
+      client_rule: RuntimeRequestGraphEntry creates originKind=client before the original graph invocation; normalize_v3_operation_runner_request_losslessly initializes request_inverse_context and explicit_history_pairing from the original client entry payload
+      refill_rule: RuntimeRequestGraphEntry creates originKind=refill for a Chat Process continuation; normalize_v3_operation_runner_request_losslessly reads the existing request_inverse_context and never rebuilds or overwrites it from the refill payload
       payload_rule: request origin is typed control state and is never serialized into request, response, provider, or client bodies
     allowed_writers: [RuntimeRequestGraphEntry]
     allowed_readers:
@@ -3452,10 +3262,10 @@ resources:
     identity: [requestId, entryProtocol]
     semantic_contract:
       storage: metadata_center.inbound_inverse_context
-      content: immutable original client entry-protocol field provenance and current request tool identity, namespace, kind, name, and source path/encoding references; remains valid across retry and internal servertool follow-up
-      internal_origin_rule: never rebuilt from an internal follow-up payload; request graph re-entry reads the preserved slot and does not replace it
-      client_entry_rule: initialized only when request_origin_kind=client_entry
-      retry_internal_followup_rule: read and preserved when request_origin_kind=retry or internal_followup; never overwritten from follow-up payload
+      content: immutable original client entry-protocol field provenance and current request tool identity, namespace, kind, name, and source path/encoding references; remains valid across refill executions
+      refill_origin_rule: never rebuilt from a refill payload; request graph re-entry reads the preserved slot and does not replace it
+      client_rule: initialized only when request_origin_kind=client
+      refill_rule: read and preserved when request_origin_kind=refill; never overwritten from the continuation payload
       payload_rule: arguments and tool business values remain in canonical payload; only identity, paths, and encoding are stored here
     allowed_writers: [normalize_v3_operation_runner_request_losslessly]
     allowed_readers: [normalize_v3_operation_runner_request_losslessly, project_v3_operation_runner_standard_provider_request, inverse_project_v3_operation_runner_client_response]
@@ -3479,7 +3289,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: true
-    release_point: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_servertool_followup_attempt_cleanup; terminal_client_error_cancel_or_disconnect_attempt_cleanup_before_request_finalizer
+    release_point: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_refill_requested_attempt_cleanup; terminal_client_error_cancel_or_disconnect_attempt_cleanup_before_request_finalizer
     binding_status: design_pending
 
   - resource_id: v3.operation_runner.attempt_declaration_map
@@ -3501,7 +3311,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: true
-    release_point: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_servertool_followup_attempt_cleanup; terminal_client_error_cancel_or_disconnect_attempt_cleanup_before_request_finalizer
+    release_point: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_refill_requested_attempt_cleanup; terminal_client_error_cancel_or_disconnect_attempt_cleanup_before_request_finalizer
     binding_status: design_pending
 
   - resource_id: v3.operation_runner.explicit_history_pairing
@@ -3513,8 +3323,8 @@ resources:
     identity: [requestId, entryProtocol, callId, outputId]
     semantic_contract:
       writer: normalize_v3_operation_runner_request_losslessly
-      client_entry_rule: initialized only when request_origin_kind=client_entry
-      retry_internal_followup_rule: read and preserved when request_origin_kind=retry or internal_followup; never overwritten from follow-up payload
+      client_rule: initialized only when request_origin_kind=client
+      refill_rule: read and preserved when request_origin_kind=refill; never overwritten from continuation payload
       content: explicit_current_request_history_call_and_output_identity_pairs_with_original_kind_namespace_name_argument_paths_encoding
       authority: history validates and passes through prior calls; it never authorizes a new provider call
       resp03_reader: Chat Process Resp03 reads explicit history pairing for validation and pass-through only
@@ -3548,7 +3358,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: true
-    release_point: after_final_client_inverse_projection_or_after_servertool_followup_attempt_cleanup_or_before_terminal_client_error_cancel_disconnect_request_finalizer
+    release_point: after_final_client_inverse_projection_or_after_refill_requested_attempt_cleanup_or_before_terminal_client_error_cancel_disconnect_request_finalizer
     binding_status: design_pending
 
   - resource_id: v3.operation_runner.tool_thinking_turn_context
@@ -3580,7 +3390,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: true
-    release_point: after_final_client_inverse_projection_or_after_servertool_followup_attempt_cleanup_or_before_terminal_client_error_cancel_disconnect_request_finalizer
+    release_point: after_final_client_inverse_projection_or_after_refill_requested_attempt_cleanup_or_before_terminal_client_error_cancel_disconnect_request_finalizer
     binding_status: design_pending
 
   - resource_id: v3.operation_runner.execution_disposition
@@ -3592,7 +3402,7 @@ resources:
     identity: [requestId, successfulAttemptId, outcome]
     semantic_contract:
       producer: govern_v3_operation_runner_chat_response
-      legal_values: [client_commit, servertool_followup]
+      legal_values: [client_commit, refill_requested]
       graph_rule: every response node runs once in fixed order; the disposition never changes graph topology or skips a node
       whole_attempt_rule: business deliverability is checked after every declared Direct or Relay response rewrite, across the complete attempt, without usage/output-token or last-frame inference
       client_commit_effect: after all declared rewrites, the complete attempt must retain deliverable business content; RuntimeClientCommit may submit the staged client-frame-candidate only after the graph returns and this typed value is client_commit
@@ -3600,17 +3410,17 @@ resources:
       processing_failure_effect: loss or failure of representable business content during rewrite, inverse projection, or framing enters Error01 as RuntimeFailure/internal 599 instead of upstream blame or partial success
       business_content_rule: ordinary text, tool-call-only, reasoning, refusal, and content_filter are deliverable business results
       blank_assistant_final: an explicit whitespace-only assistant final without independent business invalidates the complete attempt even with earlier reasoning; drop the candidate and enter Error01 with internal 502 for declared reselection
-      servertool_effect: inverse and frame staging produce an empty candidate for servertool_followup; Runtime discards it, executes the declared typed sidecar plan, and re-enters the request graph without client commit
+      refill_effect: inverse and frame staging produce an empty candidate for refill_requested; Runtime discards it, releases the completed attempt scope, and launches a new execution through the normal Runtime request mainline without client commit
       retry_rule: retry is owned by ErrorErr05ExecutionDecision through v3.error.execution_decision, not by Resp03
       cancel_rule: cancellation is owned by RuntimeCancellation, not produced by Resp03
-      finalization: client_commit reaches RuntimeClientCommit and then RuntimeRequestFinalizer; terminal_client_error_cancel_and_disconnect run typed attempt_cleanup before RuntimeRequestFinalizer; servertool_followup runs RuntimeInternalFollowup, typed attempt_cleanup, and re-enters the request graph without request-scoped finalization
+      finalization: client_commit reaches RuntimeClientCommit and then RuntimeRequestFinalizer; terminal_client_error_cancel_and_disconnect run typed attempt_cleanup before RuntimeRequestFinalizer; refill_requested runs typed attempt_cleanup and launches a new request execution without request-scoped finalization
     allowed_writers: [govern_v3_operation_runner_chat_response]
-    allowed_readers: [inverse_project_v3_operation_runner_client_response, frame_v3_operation_runner_committed_client_response, runtime_client_commit, RuntimeInternalFollowup, RuntimeRequestFinalizer]
+    allowed_readers: [inverse_project_v3_operation_runner_client_response, frame_v3_operation_runner_committed_client_response, runtime_client_commit, execute_v3_responses_relay_runtime, execute_v3_responses_direct_runtime_kernel_with_refill, RuntimeRequestFinalizer]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, protocol_adapter, payload_writer]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    release_point: runtime_request_finalizer_after_attempt_cleanup_for_terminal_outcomes; servertool_followup_disposition_released_by_attempt_cleanup_before_request_reentry
+    release_point: runtime_request_finalizer_after_attempt_cleanup_for_terminal_outcomes; refill_requested_disposition_released_by_attempt_cleanup_before_new_execution
     binding_status: design_pending
 
   - resource_id: v3.operation_runner.client_semantic_response
@@ -3643,37 +3453,37 @@ resources:
       blank_assistant_final: after all filtering and harvesting require visible body, complete tools or independent business results; reasoning alone cannot authorize completion, and unharvestable recognized tool markup fails the whole attempt through internal 502 (e63d2f2)
       empty_attempt_rule: no candidate is committed when the complete attempt is empty after declared non-client envelope removal; ProviderFailure/provider_response_empty enters Error01 as internal 502
       processing_failure_rule: loss or failure of representable business content enters Error01 as RuntimeFailure/internal 599, not as client success or upstream failure
-      servertool_rule: RespOutbound and frame staging return an empty candidate for servertool_followup; Runtime discards it and re-enters the request graph
+      refill_rule: RespOutbound and frame staging return an empty candidate for refill_requested; Runtime discards it and launches a new request execution
       terminal_rule: terminal failures produce no client frame candidate; Runtime consumes the typed no-commit decision and Server/SSE aborts the affected transport
       client_communication_owner: Server/SSE owns actual HTTP/WebSocket/SSE framing and final delivery; graph nodes do not communicate with the client
     allowed_writers: [frame_v3_operation_runner_committed_client_response]
     allowed_readers: [runtime_client_commit]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, servertool_hook, payload_writer, V3Server16HttpFrame, V3ServerRespOutbound06ClientFrame]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, payload_writer, V3Server16HttpFrame, V3ServerRespOutbound06ClientFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    release_point: runtime_client_commit; terminal_client_error_candidate_released_by_attempt_cleanup_before_request_finalizer; empty_servertool_candidate_released_by_attempt_cleanup_before_request_reentry
+    release_point: runtime_client_commit; terminal_client_error_candidate_released_by_attempt_cleanup_before_request_finalizer; empty_refill_candidate_released_by_attempt_cleanup_before_new_execution
     binding_status: design_pending
 
-  - resource_id: v3.operation_runner.servertool_sidecar_plan
+  - resource_id: v3.operation_runner.refill_continuation_signal
     resource_kind: typed_control_resource
     lifecycle: v3.operation_runner.response
     owner_feature_id: v3.unified_operation_runner_design
     owner_crate: routecodex-v3-runtime
     owner_node: V3OperationRunnerExecutionDisposition
-    identity: [requestId, successfulAttemptId, servertoolHookId, sidecarPlan]
+    identity: [requestId, successfulAttemptId, disposition]
     semantic_contract:
       producer: govern_v3_operation_runner_chat_response
-      only_emitted_for: execution_disposition=servertool_followup
-      consumer_rule: RuntimeInternalFollowup alone executes the declared sidecar and releases the plan before re-entering the request graph
-      payload_rule: the sidecar plan is typed control state and is never serialized into client or provider body
+      only_emitted_for: execution_disposition=refill_requested
+      consumer_rule: execute_v3_responses_relay_runtime and execute_v3_responses_direct_runtime_kernel_with_refill read the disposition, release the completed attempt scope, and launch a new execution through the normal Runtime request mainline
+      payload_rule: the refill signal is typed control state and is never serialized into client or provider body
     allowed_writers: [govern_v3_operation_runner_chat_response]
-    allowed_readers: [RuntimeInternalFollowup]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, servertool_hook, payload_writer, protocol_adapter]
+    allowed_readers: [execute_v3_responses_relay_runtime, execute_v3_responses_direct_runtime_kernel_with_refill]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, payload_writer, protocol_adapter]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    release_point: after_sidecar_execution_before_request_reentry
+    release_point: refill_requested_disposition_released_by_attempt_cleanup_before_new_execution
     binding_status: design_pending
 
   - resource_id: v3.error.client_projection_candidate

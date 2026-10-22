@@ -56,66 +56,6 @@ pub(crate) fn responses_effective_execution_mode_for_request_purpose(
     responses_effective_execution_mode_for_entry_facts(configured_mode, entry_facts)
 }
 
-pub(crate) fn build_responses_relay_server_tool_scope(
-    headers: &HeaderMap,
-    payload: Option<&Value>,
-    request_id: &str,
-    server: &V3ServerManifest,
-    endpoint: &str,
-) -> Result<V3ResponsesRelayServerToolScope, String> {
-    let (session_id, conversation_id) =
-        request_local_server_tool_scope(headers, payload, false, request_id)?;
-    Ok(V3ResponsesRelayServerToolScope::new(
-        endpoint,
-        session_id,
-        conversation_id,
-        server.port,
-        server.routing_group.clone(),
-    ))
-}
-
-pub(crate) fn build_responses_direct_server_tool_scope(
-    headers: &HeaderMap,
-    payload: Option<&Value>,
-    request_id: &str,
-    server: &V3ServerManifest,
-    endpoint: &str,
-) -> Result<V3ResponsesDirectServerToolScope, String> {
-    let (session_id, conversation_id) =
-        request_local_server_tool_scope(headers, payload, false, request_id)?;
-    Ok(V3ResponsesDirectServerToolScope::new(
-        endpoint,
-        session_id,
-        conversation_id,
-        server.port,
-        server.routing_group.clone(),
-    ))
-}
-
-pub(crate) fn request_local_server_tool_scope(
-    headers: &HeaderMap,
-    payload: Option<&Value>,
-    requires_client_scope: bool,
-    request_id: &str,
-) -> Result<(String, String), String> {
-    let (session_id, conversation_id) = responses_control_scope_headers(headers, payload)?;
-    match (session_id, conversation_id) {
-        (Some(session_id), Some(conversation_id)) => Ok((session_id, conversation_id)),
-        (None, None) if !requires_client_scope => {
-            let request_scope = format!("request:{request_id}");
-            Ok((request_scope.clone(), request_scope))
-        }
-        (Some(_), None) | (None, Some(_)) if !requires_client_scope => {
-            let request_scope = format!("request:{request_id}");
-            Ok((request_scope.clone(), request_scope))
-        }
-        _ => Err(
-            "Responses server tool scope requires typed session and conversation control identity in control headers, x-codex-turn-metadata, or request payload client_metadata"
-                .to_string(),
-        ),
-    }
-}
-
 pub(crate) fn responses_control_scope_headers(
     headers: &HeaderMap,
     payload: Option<&Value>,

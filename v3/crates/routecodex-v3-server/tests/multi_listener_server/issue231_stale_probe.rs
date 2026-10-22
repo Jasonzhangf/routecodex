@@ -36,6 +36,9 @@
 include!("issue231_stale_probe_fixture.rs");
 
 async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
+    // This case counts upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let _home_guard = TestHomeGuard::new("issue231-stale-probe");
     std::env::set_var(AUTH_ENV, AUTH_SECRET);
     let cooled_peer = Arc::new(Peer {

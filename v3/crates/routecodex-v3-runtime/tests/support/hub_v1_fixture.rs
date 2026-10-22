@@ -51,12 +51,23 @@ hooks = [
     )
 }
 
+/// Test-process preparation shared by every managed-server fixture.
+///
+/// Cases built from this fixture count upstream provider attempts, health
+/// probes and cooldown receipts. The Chat Process continuation is therefore
+/// pinned off unless the calling test injects its own typed limit, so an
+/// unrelated case cannot see an extra execution.
+pub fn pin_test_process_refill_off() {
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+}
+
 pub fn hub_v1_server_execution(server_id: &str) -> String {
+    pin_test_process_refill_off();
     format!(
         r#"
 [servers.{server_id}.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 "#
     )

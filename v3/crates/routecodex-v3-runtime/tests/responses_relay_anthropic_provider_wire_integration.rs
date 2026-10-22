@@ -1554,7 +1554,7 @@ endpoints = ["responses", "anthropic"]
 
 [servers.gateway_priority_5555.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.minimax]
@@ -1596,7 +1596,7 @@ endpoints = ["responses"]
 
 [servers.anthropic_incomplete_exhaustion.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.anthropic_incomplete_primary]
@@ -1656,7 +1656,7 @@ endpoints = ["responses"]
 
 [servers.anthropic_v3_10000.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.modrouter_anthropic]

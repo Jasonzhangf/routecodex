@@ -95,11 +95,6 @@ pub enum V3AnthropicRelayRuntimeError {
     ExecutionControlRequest(String),
     #[error("V3 Anthropic response execution control failed: {0}")]
     ExecutionControlResponse(String),
-    #[error(
-        "V3 Anthropic web_search Mode B intercepted a websearch call but the chat-entry response \
-         has no result projection path yet; refusing silent strip"
-    )]
-    WebSearchInterceptedUnprojected,
 }
 
 pub async fn execute_v3_anthropic_relay_runtime_with_default_transport(
@@ -425,31 +420,6 @@ pub async fn execute_v3_anthropic_relay_runtime_with_client_headers_provider_hea
     .await
 }
 
-pub async fn execute_v3_anthropic_relay_runtime_with_servertool_profile<T, I, S>(
-    manifest: &V3Config05ManifestPublished,
-    input: V3AnthropicRelayRuntimeInput,
-    transport: &T,
-    servertool_names: I,
-) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError>
-where
-    T: ResponsesTransport,
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-{
-    execute_v3_anthropic_relay_runtime_inner(
-        manifest,
-        input,
-        transport,
-        Vec::new(),
-        V3HubRelayResponseHookProfile::new(servertool_names),
-        V3ProviderFailureRuntimeHealth::from_manifest(manifest),
-        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
-        true,
-        None,
-    )
-    .await
-}
-
 async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3AnthropicRelayRuntimeInput,
@@ -484,20 +454,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         V3HubTransportIntent::Sse
     } else {
         V3HubTransportIntent::Json
-    };
-    // Mode B 判定用请求声明的 model 的编译期 mode（Req04 在 route 之前，
-    // 无法感知最终 selected target；Resp03 侧再用 selected target mode 校验）。
-    let request_web_search_execution_mode = {
-        let model = input
-            .payload
-            .get("model")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        match model {
-            Some(model) => resolve_web_search_mode_and_backend(manifest, model).0,
-            None => routecodex_v3_config::V3WebSearchExecutionMode::None,
-        }
     };
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
@@ -647,35 +603,19 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let mut initial_admitted = Some((initial_plan.selected, initial_plan.admission));
     let request_outcome = {
         let tool_thinking_enabled = v3_tool_thinking_enabled_for_server(manifest, &input.server_id);
-        let request_hook_profile = if request_web_search_execution_mode
-            .is_metadata_center_local_search()
-            || tool_thinking_enabled
-        {
-            // Mode B：Req04 需在工具面含标准 web_search 声明时激活 websearch
-            // ServerTool 实例（LocalToolSurfaceActive），供 Resp03 同轮拦截。
-            V3HubServertoolRequestProfile::enabled(["servertool.request"])
-                .with_web_search_execution_mode(request_web_search_execution_mode)
-                .with_tool_thinking_enabled(tool_thinking_enabled)
+        let request_hook_profile = if tool_thinking_enabled {
+            V3HubRequestHookProfile::enabled().with_tool_thinking_enabled(true)
         } else {
-            V3HubServertoolRequestProfile::disabled()
+            V3HubRequestHookProfile::disabled()
         };
         compile_v3_hub_relay_request_hooks().run_from_normalized(req02, &request_hook_profile)?
     };
     trace.push("V3HubReqChatProcess04Governed");
-    let request_web_search_state = request_outcome.web_search_state().cloned();
     let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
     let mut response_hook_profile =
         response_hook_profile.with_tool_thinking_enabled(request_tool_thinking_enabled);
     response_hook_profile = response_hook_profile
         .with_tool_thinking_turn_context(request_outcome.tool_thinking_turn_context());
-    if request_web_search_execution_mode.is_metadata_center_local_search() {
-        response_hook_profile =
-            response_hook_profile.with_web_search_execution_mode(request_web_search_execution_mode);
-        if let Some(state) = request_web_search_state.as_ref() {
-            response_hook_profile =
-                response_hook_profile.with_web_search_center_state(state.clone());
-        }
-    }
     let req04 = request_outcome.into_governed();
     let mut req05 =
         build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(req04, execution_mode);
@@ -1225,7 +1165,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     )
                     .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
                 );
-                let (client_response, servertool_followup_required, stream_observation) =
+                let (client_response, stream_observation) =
                     match closeout_anthropic_relay_sse_response(
                         resp01,
                         &input.request_id,
@@ -1250,14 +1190,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     {
                         Ok(closeout) => closeout,
                         Err(error) => {
-                            // 治理层拦截（web_search Mode B 已剥离但 chat 类入口
-                            // 无投影路径）：不是 provider 响应失败，禁止进入
-                            // provider failure 重试/降级链，直接 fail-fast。
-                            if let V3AnthropicRelayRuntimeError::WebSearchInterceptedUnprojected =
-                                &error
-                            {
-                                return Err(error);
-                            }
                             // 成功 provider 业务响应的 tool 参数无法表示为
                             // Anthropic tool_use.input：这是请求本地的表示边界
                             // 失败，不是 provider 失败。禁止进入 provider failure
@@ -1375,7 +1307,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     client_body,
                     node_trace: trace,
                     error_chain: None,
-                    servertool_followup_required,
                     observability: Some(observability),
                     provider_failure_attempts: Vec::new(),
                     diagnostic_source: None,
@@ -1487,109 +1418,100 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     )
                     .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
                 );
-                let (client_response, servertool_followup_required, stream_observation) =
-                    match closeout_anthropic_relay_response(
-                        resp01,
-                        &input.request_id,
-                        &response_hook_profile,
-                        trace.as_mut(),
-                        move |finalized| {
-                            if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
-                                project_v3_anthropic_client_response_for_provider(
-                                    finalized,
-                                    provider_wire_protocol,
-                                    transport_intent,
-                                )
-                                .map_err(V3AnthropicRelayRuntimeError::from)
-                            } else if transport_intent == V3HubTransportIntent::Sse {
-                                let client_events =
-                                    project_v3_responses_json_as_anthropic_events(finalized)?;
-                                Ok(project_v3_anthropic_client_events(client_events))
-                            } else {
-                                Ok(project_v3_responses_json_as_anthropic_message(finalized)?)
-                            }
-                        },
-                    ) {
-                        Ok(closeout) => closeout,
-                        Err(error) => {
-                            // 治理层拦截（web_search Mode B 已剥离但 chat 类入口
-                            // 无投影路径）：不是 provider 响应失败，禁止进入
-                            // provider failure 重试/降级链，直接 fail-fast。
-                            if let V3AnthropicRelayRuntimeError::WebSearchInterceptedUnprojected =
-                                &error
-                            {
-                                return Err(error);
-                            }
-                            // 成功 provider 业务响应的 tool 参数无法表示为
-                            // Anthropic tool_use.input：请求本地的表示边界失败，
-                            // 不是 provider 失败。禁止进入 provider failure
-                            // 重试/降级/health 链，直接 fail-fast，由 typed
-                            // request-local Error06 路径投影为 NoResponse 真实断开。
-                            if is_v3_anthropic_request_local_projection_failure(&error) {
-                                return Err(error);
-                            }
-                            let (mut failure, response_processing_code) =
-                                if let V3AnthropicRelayRuntimeError::Response(governance) = &error {
-                                    provider_response_governance_failure(
-                                        V3RelayCoreError::ResponseGovernance(governance.clone()),
-                                        &input.request_id,
-                                        &selected_target_provider_id,
-                                    )
-                                } else if matches!(
-                                    error,
-                                    V3AnthropicRelayRuntimeError::ProviderResponseEmpty
-                                ) {
-                                    (
-                                        provider_request_failure(
-                                            "V3ProviderRespInbound01Raw",
-                                            "provider_response_empty",
-                                            error,
-                                        ),
-                                        None,
-                                    )
-                                } else {
-                                    (
-                                        provider_runtime_failure(
-                                            V3ProviderError::ResponseBody {
-                                                request_id: input.request_id.clone(),
-                                                provider_id: selected_target_provider_id.clone(),
-                                                reason: format!(
-                                                    "provider response governance failed: {error}"
-                                                ),
-                                            },
-                                            &selected_target_provider_id,
-                                        ),
-                                        None,
-                                    )
-                                };
-                            failure.provider_status = Some(provider_status);
-                            drop(_provider_action_permit.take());
-                            if let Some(failure) = handle_provider_failure_with_response_code(
-                                &failure_context,
-                                selected,
-                                failure,
-                                &mut V3RelayProviderFailurePolicyState {
-                                    failed_candidates: &mut failed_candidates,
-                                    same_candidate_retries: &mut same_candidate_retries,
-                                    trace: &mut trace,
-                                    last_external_http: &mut last_external_http,
-                                },
-                                &mut retry_selected,
-                                &mut pending_provider_action_recovery,
-                                &mut provider_failure_events,
-                                response_processing_code,
+                let (client_response, stream_observation) = match closeout_anthropic_relay_response(
+                    resp01,
+                    &input.request_id,
+                    &response_hook_profile,
+                    trace.as_mut(),
+                    move |finalized| {
+                        if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
+                            project_v3_anthropic_client_response_for_provider(
+                                finalized,
+                                provider_wire_protocol,
+                                transport_intent,
                             )
-                            .await?
-                            {
-                                return Ok(provider_failure_output(
-                                    failure,
-                                    trace,
-                                    std::mem::take(&mut provider_failure_events),
-                                ));
-                            }
-                            continue;
+                            .map_err(V3AnthropicRelayRuntimeError::from)
+                        } else if transport_intent == V3HubTransportIntent::Sse {
+                            let client_events =
+                                project_v3_responses_json_as_anthropic_events(finalized)?;
+                            Ok(project_v3_anthropic_client_events(client_events))
+                        } else {
+                            Ok(project_v3_responses_json_as_anthropic_message(finalized)?)
                         }
-                    };
+                    },
+                ) {
+                    Ok(closeout) => closeout,
+                    Err(error) => {
+                        // 成功 provider 业务响应的 tool 参数无法表示为
+                        // Anthropic tool_use.input：请求本地的表示边界失败，
+                        // 不是 provider 失败。禁止进入 provider failure
+                        // 重试/降级/health 链，直接 fail-fast，由 typed
+                        // request-local Error06 路径投影为 NoResponse 真实断开。
+                        if is_v3_anthropic_request_local_projection_failure(&error) {
+                            return Err(error);
+                        }
+                        let (mut failure, response_processing_code) =
+                            if let V3AnthropicRelayRuntimeError::Response(governance) = &error {
+                                provider_response_governance_failure(
+                                    V3RelayCoreError::ResponseGovernance(governance.clone()),
+                                    &input.request_id,
+                                    &selected_target_provider_id,
+                                )
+                            } else if matches!(
+                                error,
+                                V3AnthropicRelayRuntimeError::ProviderResponseEmpty
+                            ) {
+                                (
+                                    provider_request_failure(
+                                        "V3ProviderRespInbound01Raw",
+                                        "provider_response_empty",
+                                        error,
+                                    ),
+                                    None,
+                                )
+                            } else {
+                                (
+                                    provider_runtime_failure(
+                                        V3ProviderError::ResponseBody {
+                                            request_id: input.request_id.clone(),
+                                            provider_id: selected_target_provider_id.clone(),
+                                            reason: format!(
+                                                "provider response governance failed: {error}"
+                                            ),
+                                        },
+                                        &selected_target_provider_id,
+                                    ),
+                                    None,
+                                )
+                            };
+                        failure.provider_status = Some(provider_status);
+                        drop(_provider_action_permit.take());
+                        if let Some(failure) = handle_provider_failure_with_response_code(
+                            &failure_context,
+                            selected,
+                            failure,
+                            &mut V3RelayProviderFailurePolicyState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                trace: &mut trace,
+                                last_external_http: &mut last_external_http,
+                            },
+                            &mut retry_selected,
+                            &mut pending_provider_action_recovery,
+                            &mut provider_failure_events,
+                            response_processing_code,
+                        )
+                        .await?
+                        {
+                            return Ok(provider_failure_output(
+                                failure,
+                                trace,
+                                std::mem::take(&mut provider_failure_events),
+                            ));
+                        }
+                        continue;
+                    }
+                };
                 let client_body = if transport_intent == V3HubTransportIntent::Sse {
                     V3AnthropicRelayClientBody::Sse(
                         project_v3_anthropic_client_sse_stream_with_budget(
@@ -1638,7 +1560,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     client_body,
                     node_trace: trace,
                     error_chain: None,
-                    servertool_followup_required,
                     observability: Some(observability),
                     provider_failure_attempts: Vec::new(),
                     diagnostic_source: None,
