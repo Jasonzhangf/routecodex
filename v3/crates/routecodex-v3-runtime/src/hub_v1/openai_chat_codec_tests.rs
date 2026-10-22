@@ -9,11 +9,14 @@ use serde_json::json;
 #[test]
 fn source_responses_completed_preserves_tool_handoff_before_normal_stop() {
     let canonical = json!({"status":"completed","output":[{"type":"function_call","call_id":"call_normal","name":"evaluate","arguments":"{}"}]});
-    let projected = project_v3_openai_chat_client_response_with_source_terminal(&canonical, None, true).unwrap();
+    let projected =
+        project_v3_openai_chat_client_response_with_source_terminal(&canonical, None, true)
+            .unwrap();
     assert_eq!(projected["choices"][0]["finish_reason"], "tool_calls");
     let mut limited = canonical;
     limited["incomplete_details"] = json!({"reason":"max_output_tokens"});
-    let projected = project_v3_openai_chat_client_response_with_source_terminal(&limited, None, true).unwrap();
+    let projected =
+        project_v3_openai_chat_client_response_with_source_terminal(&limited, None, true).unwrap();
     assert_eq!(projected["choices"][0]["finish_reason"], "length");
 }
 
@@ -660,9 +663,7 @@ fn transducer_preserves_terminal_only_responses_text_refusal_and_incomplete() {
 fn transducer_completed_event_without_nested_status_projects_stop_terminal() {
     let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
     transducer.push_event(created_event()).expect("created");
-    transducer
-        .push_event(delta_event("OK"))
-        .expect("delta");
+    transducer.push_event(delta_event("OK")).expect("delta");
     let chunks = transducer
         .push_event(json!({"type": "response.completed", "response": {"id": "resp_test_1"}}))
         .expect("completed");
@@ -694,16 +695,17 @@ fn transducer_completed_event_with_explicit_non_stop_status_never_becomes_stop()
     for status in ["incomplete", "failed", "cancelled", "in_progress"] {
         let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
         transducer.push_event(created_event()).expect("created");
-        transducer
-            .push_event(delta_event("OK"))
-            .expect("delta");
+        transducer.push_event(delta_event("OK")).expect("delta");
         let chunks = transducer
             .push_event(json!({
                 "type": "response.completed",
                 "response": {"id": "resp_test_1", "status": status}
             }))
             .expect("completed event must remain accepted");
-        assert!(chunks[0]["choices"][0]["finish_reason"].is_null(), "{status}");
+        assert!(
+            chunks[0]["choices"][0]["finish_reason"].is_null(),
+            "{status}"
+        );
         transducer.finish().expect("finish");
     }
 }

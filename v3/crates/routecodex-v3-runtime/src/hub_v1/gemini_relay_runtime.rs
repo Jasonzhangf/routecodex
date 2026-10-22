@@ -242,7 +242,9 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
     .await
     .map_err(|error| match error {
         V3RelayCoreError::EndpointPath(message) => V3GeminiRelayRuntimeError::EndpointPath(message),
-        V3RelayCoreError::ResponseGovernance(error) => V3GeminiRelayRuntimeError::Target(error.to_string()),
+        V3RelayCoreError::ResponseGovernance(error) => {
+            V3GeminiRelayRuntimeError::Target(error.to_string())
+        }
         V3RelayCoreError::ProviderPoolExhausted {
             attempted_candidates,
         } => V3GeminiRelayRuntimeError::ProviderPoolExhausted {
@@ -337,7 +339,9 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             true,
         )
         .map_err(|error| match error {
-            V3GeminiRelayRuntimeError::Response(error) => V3RelayCoreError::ResponseGovernance(error),
+            V3GeminiRelayRuntimeError::Response(error) => {
+                V3RelayCoreError::ResponseGovernance(error)
+            }
             other => V3RelayCoreError::Target(other.to_string()),
         })
     }

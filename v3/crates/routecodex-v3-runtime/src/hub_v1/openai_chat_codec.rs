@@ -464,11 +464,9 @@ impl V3OpenAiChatAnthropicSseTransducer {
         self.active_blocks.insert(index, kind.to_string());
         if kind == "text" {
             return match block.get("text").and_then(Value::as_str) {
-                Some(text) if !text.is_empty() => Ok(vec![self.chunk(
-                    json!({"content": text}),
-                    None,
-                    false,
-                )]),
+                Some(text) if !text.is_empty() => {
+                    Ok(vec![self.chunk(json!({"content": text}), None, false)])
+                }
                 _ => Ok(Vec::new()),
             };
         }
@@ -952,11 +950,8 @@ impl V3OpenAiChatResponsesSseTransducer {
                         .and_then(Value::as_str)
                         != Some("in_progress"))
                     && reason.is_none();
-                let finish_reason = responses_as_chat_finish_reason(
-                    self.emitted_tool_call,
-                    completed,
-                    reason,
-                );
+                let finish_reason =
+                    responses_as_chat_finish_reason(self.emitted_tool_call, completed, reason);
                 chunks.push(self.chunk(json!({}), finish_reason));
                 if let Some(usage) = response.and_then(|response| response.get("usage")) {
                     if let Some(chunk) = self.usage_chunk(usage) {
@@ -983,11 +978,8 @@ impl V3OpenAiChatResponsesSseTransducer {
                             .and_then(Value::as_str)
                     });
                 let mut chunks = self.terminal_output_chunks(response)?;
-                let finish_reason = responses_as_chat_finish_reason(
-                    self.emitted_tool_call,
-                    false,
-                    reason,
-                );
+                let finish_reason =
+                    responses_as_chat_finish_reason(self.emitted_tool_call, false, reason);
                 chunks.push(self.chunk(json!({}), finish_reason));
                 if let Some(usage) = response.and_then(|response| response.get("usage")) {
                     if let Some(chunk) = self.usage_chunk(usage) {

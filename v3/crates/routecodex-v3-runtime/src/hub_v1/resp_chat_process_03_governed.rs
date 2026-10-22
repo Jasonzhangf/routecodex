@@ -1167,7 +1167,10 @@ pub struct V3HubRelayResponseHookRegistry {
         &V3HubRelayResponseHookProfile,
     ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError>,
     typed_sse_catalog: V3RelaySseHookCatalog,
-    complete_chat_sse: fn(&[Vec<u8>]) -> Result<Option<(Vec<Vec<u8>>, usize)>, super::V3RelayCompleteResponseError>,
+    complete_chat_sse:
+        fn(
+            &[Vec<u8>],
+        ) -> Result<Option<(Vec<Vec<u8>>, usize)>, super::V3RelayCompleteResponseError>,
 }
 
 impl V3HubRelayResponseHookRegistry {
@@ -1199,7 +1202,10 @@ impl V3HubRelayResponseHookRegistry {
         self.typed_sse_catalog
     }
 
-    pub(crate) fn govern_complete_chat_sse(&self, builder: &mut crate::execution_control::V3CommittedClientSseBuilder) -> Result<(), super::V3RelayCompleteResponseError> {
+    pub(crate) fn govern_complete_chat_sse(
+        &self,
+        builder: &mut crate::execution_control::V3CommittedClientSseBuilder,
+    ) -> Result<(), super::V3RelayCompleteResponseError> {
         builder.rewrite_complete_attempt(self.complete_chat_sse)
     }
 }
@@ -1283,7 +1289,8 @@ fn govern_v3_hub_relay_response(
         );
     }
     if profile.serialized_tool_context().identities.is_empty()
-        && (profile.complete_provider_attempt || input.normalized_kind() == super::V3HubResponseNormalizedKind::Json)
+        && (profile.complete_provider_attempt
+            || input.normalized_kind() == super::V3HubResponseNormalizedKind::Json)
     {
         govern_v3_relay_control_markers_at_resp03(&mut input)?;
     } else if !profile.serialized_tool_context().identities.is_empty() {
