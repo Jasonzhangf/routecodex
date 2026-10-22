@@ -12175,7 +12175,10 @@ async fn db1f482_truncated_openai_chat_sse_public_case(execution_mode: &str, con
         EntryOptions {
             health_enabled: true,
             attempt_bodies: vec![partial],
-            auth_entries: vec![("key1".into(), KEY_ENV.into())],
+            auth_entries: vec![
+                ("key1".into(), KEY_ENV.into()),
+                ("key2".into(), KEY_ENV.into()),
+            ],
             pin_key: Some("key1".into()),
             execution_mode: Some(execution_mode.to_string()),
             ..EntryOptions::default()
@@ -12224,10 +12227,14 @@ async fn db1f482_truncated_openai_chat_sse_public_case(execution_mode: &str, con
         .unwrap();
     let entries = health["entries"].as_array().unwrap();
     assert!(
-        !entries.iter().any(|row| {
+        entries.iter().any(|row| {
             row["provider_id"] == "test" && row["auth_alias"] == "key1" && row["model_id"] == "test"
         }),
-        "{execution_mode}: last-candidate truncated HTTP 200 must stay health-neutral: {health}"
+        "{execution_mode}: truncated HTTP 200 must cool the exact failed identity: {health}"
+    );
+    assert!(
+        entries.iter().all(|row| row["auth_alias"] != "key2"),
+        "{execution_mode}: the untried key must stay routable: {health}"
     );
     stop_entry(handle, shutdown).await;
     let mut attempts = 0;
@@ -12238,19 +12245,18 @@ async fn db1f482_truncated_openai_chat_sse_public_case(execution_mode: &str, con
     }
     assert_eq!(
         attempts, 1,
-        "{execution_mode}: the single candidate must be attempted exactly once before terminal"
+        "{execution_mode}: the pinned candidate must be attempted exactly once before terminal"
     );
     std::env::remove_var(KEY_ENV);
 }
 
 #[tokio::test]
-async fn db1f482_truncated_openai_chat_sse_keeps_last_candidate_health_neutral_at_public_entry() {
+async fn db1f482_truncated_openai_chat_sse_cools_exact_identity_at_public_entry() {
     db1f482_truncated_openai_chat_sse_public_case("direct", "db1f482 truncated 200 direct").await;
 }
 
 #[tokio::test]
-async fn db1f482_truncated_openai_chat_sse_relay_keeps_last_candidate_health_neutral_at_public_entry(
-) {
+async fn db1f482_truncated_openai_chat_sse_relay_cools_exact_identity_at_public_entry() {
     db1f482_truncated_openai_chat_sse_public_case("relay", "db1f482 truncated 200 relay").await;
 }
 
