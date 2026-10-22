@@ -16,7 +16,7 @@ use crate::hub_v1::{
 };
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,
-    run_v3_relay_provider_failure_policy, v3_relay_provider_candidate_key_parts,
+    run_v3_relay_provider_failure_policy_with_response_source, v3_relay_provider_candidate_key_parts,
     V3RelayErrorOperatorFault, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
 };
@@ -47,6 +47,7 @@ pub enum V3RelayCoreError {
     StaticRegistry(String),
     EndpointPath(String),
     Target(String),
+    ResponseGovernance(super::V3HubRelayResponseError),
     ProviderPoolExhausted {
         attempted_candidates: Vec<String>,
     },
@@ -61,6 +62,7 @@ impl fmt::Display for V3RelayCoreError {
             V3RelayCoreError::StaticRegistry(message) => write!(f, "static registry: {message}"),
             V3RelayCoreError::EndpointPath(message) => write!(f, "endpoint path: {message}"),
             V3RelayCoreError::Target(message) => write!(f, "target: {message}"),
+            V3RelayCoreError::ResponseGovernance(error) => error.fmt(f),
             V3RelayCoreError::ProviderPoolExhausted {
                 attempted_candidates,
             } => write!(f, "provider pool exhausted after {attempted_candidates:?}"),
@@ -335,10 +337,24 @@ pub async fn handle_provider_failure(
     pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
     provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
+    handle_provider_failure_with_response_code(context, selected, failure, state, retry_selected,
+        pending_recovery, provider_failure_events, None).await
+}
+
+pub(crate) async fn handle_provider_failure_with_response_code(
+    context: &V3RelayProviderFailurePolicyContext<'_>,
+    selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    mut failure: V3RelayProviderFailure,
+    state: &mut V3RelayProviderFailurePolicyState<'_>,
+    retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
+    provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
+    response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
+) -> Result<Option<V3RelayProviderFailure>, String> {
     if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
     }
-    let mut result = match run_v3_relay_provider_failure_policy(
+    let mut result = match run_v3_relay_provider_failure_policy_with_response_source(
         context,
         selected,
         failure.source_stage,
@@ -347,6 +363,7 @@ pub async fn handle_provider_failure(
         provider_failure_message(&failure),
         None,
         state,
+        response_processing_code,
     )
     .await
     {
@@ -763,6 +780,30 @@ pub fn provider_http_body_read_failure(
 }
 
 /// 请求构造失败（共享版；gemini/openai/responses 形状）。
+pub(crate) fn provider_response_governance_failure(
+    error: V3RelayCoreError,
+    request_id: &str,
+    provider_id: &str,
+) -> (V3RelayProviderFailure, Option<routecodex_v3_error::V3InternalErrorCode>) {
+    match error {
+        V3RelayCoreError::ResponseGovernance(super::V3HubRelayResponseError::GovernedAttemptEmpty) => (
+            provider_request_failure("V3HubRespChatProcess03Governed", "provider_response_empty", "provider response contained no deliverable business content after Relay governance"), None,
+        ),
+        V3RelayCoreError::ResponseGovernance(super::V3HubRelayResponseError::UnharvestableToolMarkup) => (
+            provider_request_failure("V3HubRespChatProcess03Governed", "relay_unharvestable_tool_markup", "recognized incomplete tool invocation cannot be delivered"),
+            Some(routecodex_v3_error::V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup),
+        ),
+        V3RelayCoreError::ResponseGovernance(error) => {
+            let mut failure = provider_request_failure("V3HubRespChatProcess03Governed", "relay_response_processing_failure", error);
+            failure.status = 599;
+            (failure, Some(routecodex_v3_error::V3InternalErrorCode::V3HubRelayResp03Processing))
+        }
+        other => (provider_runtime_failure(V3ProviderError::ResponseBody {
+            request_id: request_id.to_string(), provider_id: provider_id.to_string(), reason: format!("provider response governance failed: {other}"),
+        }, provider_id), None),
+    }
+}
+
 pub fn provider_request_failure(
     source_stage: &'static str,
     error_type: &'static str,

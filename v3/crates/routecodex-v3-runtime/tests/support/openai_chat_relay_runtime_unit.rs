@@ -330,6 +330,7 @@ mod tests {
             auth_alias: "key".to_string(),
             model_id: "model".to_string(),
             recorded: false,
+            response_control: V3RuntimeStreamObservation::default(),
             _provider_action_permit: None,
         }
     }
@@ -368,6 +369,7 @@ mod tests {
             false,
             true,
             "MiniMax-M3",
+            false,
         )
         .expect("relay response hook must project without protocol failure");
 

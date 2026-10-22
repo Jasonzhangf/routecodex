@@ -1234,6 +1234,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                     },
                     project_path: resolve_v3_console_project_path(&request_headers, &Value::Null)
                         .as_deref(),
+                    execution_mode: None,
                     error06_exposed: true,
                     error_class: Some(error06_error_class),
                     health_action: error06_health_action.as_ref(),
@@ -1339,6 +1340,7 @@ fn pending_binding_output_response(
 }
 
 struct V3ErrorProjectionConsoleInput<'input> {
+    execution_mode: Option<&'input str>,
     endpoint: &'input str,
     request_id: &'input str,
     entry_protocol: &'input str,
@@ -1386,6 +1388,7 @@ fn emit_relay_error_chain_if_any(
             error_chain,
             body,
             project_path: request_console_project_path,
+            execution_mode: Some("relay"),
             error06_exposed: false,
             error_class: None,
             health_action: None,
@@ -1434,6 +1437,7 @@ fn record_and_emit_v3_error_projection(
         input.status,
         input.body,
         webui_observability::V3ObsErrorProjection {
+            execution_mode: input.execution_mode,
             exposed: input.error06_exposed,
             error_class: input.error_class,
             error_chain: input.error_chain,

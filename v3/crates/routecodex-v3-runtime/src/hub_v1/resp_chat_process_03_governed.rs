@@ -1167,6 +1167,7 @@ pub struct V3HubRelayResponseHookRegistry {
         &V3HubRelayResponseHookProfile,
     ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError>,
     typed_sse_catalog: V3RelaySseHookCatalog,
+    complete_chat_sse: fn(&[Vec<u8>]) -> Result<Option<(Vec<Vec<u8>>, usize)>, super::V3RelayCompleteResponseError>,
 }
 
 impl V3HubRelayResponseHookRegistry {
@@ -1197,6 +1198,10 @@ impl V3HubRelayResponseHookRegistry {
     pub(crate) fn typed_sse_catalog(&self) -> V3RelaySseHookCatalog {
         self.typed_sse_catalog
     }
+
+    pub(crate) fn govern_complete_chat_sse(&self, builder: &mut crate::execution_control::V3CommittedClientSseBuilder) -> Result<(), super::V3RelayCompleteResponseError> {
+        builder.rewrite_complete_attempt(self.complete_chat_sse)
+    }
 }
 
 pub fn compile_v3_hub_relay_response_hooks() -> V3HubRelayResponseHookRegistry {
@@ -1204,6 +1209,7 @@ pub fn compile_v3_hub_relay_response_hooks() -> V3HubRelayResponseHookRegistry {
         normalize: normalize_v3_hub_relay_response,
         govern: govern_v3_hub_relay_response,
         typed_sse_catalog: V3RelaySseHookCatalog::new(),
+        complete_chat_sse: super::resp_chat_process_complete_chat_sse::govern_complete_chat_sse,
     }
 }
 
@@ -1276,9 +1282,11 @@ fn govern_v3_hub_relay_response(
             profile.toolreason_client_projection_enabled(),
         );
     }
-    if profile.serialized_tool_context().identities.is_empty() {
+    if profile.serialized_tool_context().identities.is_empty()
+        && (profile.complete_provider_attempt || input.normalized_kind() == super::V3HubResponseNormalizedKind::Json)
+    {
         govern_v3_relay_control_markers_at_resp03(&mut input)?;
-    } else {
+    } else if !profile.serialized_tool_context().identities.is_empty() {
         tool_markup::govern(&mut input, profile.serialized_tool_context())?;
     }
     if profile.complete_provider_attempt {
@@ -2008,11 +2016,16 @@ fn strip_v3_openai_chat_control_markers(
         return Ok(false);
     };
     for choice in choices {
-        let Some(message) = choice.get_mut("message").and_then(Value::as_object_mut) else {
-            continue;
-        };
-        if let Some(content) = message.get_mut("content") {
-            changed |= strip_v3_relay_control_marker_content(content, declarations)?;
+        // The same declared label grammar governs both materialized Chat
+        // messages and projected Chat SSE delta carriers. Tool arguments,
+        // reasoning and opaque fields are not text carriers here.
+        for carrier in ["message", "delta"] {
+            let Some(object) = choice.get_mut(carrier).and_then(Value::as_object_mut) else {
+                continue;
+            };
+            if let Some(content) = object.get_mut("content") {
+                changed |= strip_v3_relay_control_marker_content(content, declarations)?;
+            }
         }
     }
     Ok(changed)

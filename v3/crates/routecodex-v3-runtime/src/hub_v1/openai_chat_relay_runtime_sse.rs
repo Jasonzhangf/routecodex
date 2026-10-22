@@ -25,9 +25,10 @@ fn project_sse_event_payload(
     web_search_center_state: Option<&V3WebSearchCenterState>,
     retain_response_cipher: bool,
     expected_model_id: &str,
+    response_control: &V3RuntimeStreamObservation,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
     let mut trace = Vec::new();
-    project_json_response(
+    let result = project_json_response(
         Some(request_id),
         session_id,
         payload,
@@ -41,7 +42,12 @@ fn project_sse_event_payload(
         retain_response_cipher,
         false,
         expected_model_id,
-    )
+        false,
+    );
+    if let Err(V3OpenAiChatRelayRuntimeError::Response(error)) = &result {
+        response_control.record_response_governance_failure(error.clone()).map_err(V3OpenAiChatRelayRuntimeError::Target)?;
+    }
+    result
 }
 
 /// Anthropic wire SSE stream -> responses canonical -> OpenAI Chat SSE 事件流
@@ -286,6 +292,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                         web_search_center_state.as_ref(),
                                         retain_response_cipher,
                                         provider_outcome.model_id.as_str(),
+                                        &provider_outcome.response_control,
                                     )
                                     .map_err(|error| match error {
                                         V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
@@ -401,9 +408,13 @@ fn project_gemini_sse_as_openai_chat_stream(
                 retain_response_cipher,
                 tool_thinking_enabled,
                 &provider_outcome.model_id,
+                true,
             ) {
                 Ok(projected) => projected,
                 Err(error) => {
+                    if let V3OpenAiChatRelayRuntimeError::Response(error) = &error {
+                        provider_outcome.response_control.record_response_governance_failure(error.clone())?;
+                    }
                     let reason = match error {
                         V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
                             "ROUTECODEX_GOVERNANCE_REJECTED".to_string()

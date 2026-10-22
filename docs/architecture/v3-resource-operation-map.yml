@@ -1122,6 +1122,8 @@ resources:
       serialized_tool_failure: recognized incomplete declared invocations discard the whole attempt even beside complete tools or prose; Relay internal code 500-231 and RuntimeFailure/internal599 enter existing Error02-05 health-neutral exact-attempt recovery, with actual upstream status retained separately
       serialized_tool_preservation: native invalid model arguments, literal/unknown complete envelopes and opaque associations remain business content; no guessed identity or control state enters the payload
       complete_attempt_admission: the Runtime marks a buffered complete provider attempt in the typed response hook profile; only that scope runs post-governance whole-attempt empty admission, never a transport keepalive, delta or terminal fragment alone
+      complete_chat_sse_governance: registered Resp03 complete_chat_sse callback owns complete text-carrier rewriting before Runtime final-frame business-content admission and seal; builder remains protocol-independent storage
+      async_governance_source: original V3HubRelayResponseError lives in V3RuntimeStreamControlState response_governance_failure under its separate control Arc, never in business payload or diagnostic snapshot
     allowed_writers: [V3HubRespInbound02Normalized, V3HubRespChatProcess03Governed]
     allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespOutbound05ClientSemantic]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3ServerRespOutbound06ClientFrame]
@@ -3536,7 +3538,8 @@ resources:
     semantic_contract:
       writer: normalize_v3_operation_runner_provider_response
       content: successful_attempt_source_and_provider_response_field_origin
-      terminal_reason_binding: V3HubRespInbound02Normalized.source_terminal_reason preserves the successful attempt source reason for adjacent Chat Outbound projection; absence stays absent and the witness never enters client or provider payload.
+      terminal_reason_binding: V3HubRespInbound02Normalized.source_terminal_reason and its typed source-protocol normal-completion witness preserve the successful attempt's original facts for adjacent Chat Outbound projection. An explicit non-stop reason keeps precedence; a genuine original Responses normal completion may project to the Chat normal terminal; a native Chat missing reason stays missing. Canonical lifecycle status, payload content and transport end are never completion witnesses, and the witness never enters client or provider payload.
+      attempt_lifetime_rule: the witness is bound to successfulAttemptId; a failed, earlier or alternate attempt cannot leave its completion fact in the next attempt.
       consumer_rule: Chat Process Resp03 and inverse projection may consume provenance only for the successful attempt
       payload_rule: provenance is typed control metadata; it is not reconstructed from response payload fields
     allowed_writers: [normalize_v3_operation_runner_provider_response]

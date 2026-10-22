@@ -27,6 +27,7 @@ pub enum V3InternalErrorCode {
     V3DirectResp14ProviderProjectionPrepared,
     V3DirectResp14UnharvestableToolMarkup,
     V3HubRelayResp03UnharvestableToolMarkup,
+    V3HubRelayResp03Processing,
     V3DirectResp15ClientPayloadReady,
     V3Server16HttpFrame,
     V3DebugArtifact,
@@ -195,6 +196,14 @@ impl V3InternalErrorCode {
                     title: "relay unharvestable tool markup internal failure",
                 }
             }
+            V3InternalErrorCode::V3HubRelayResp03Processing => V3InternalErrorRegistryEntry {
+                code: "500-230",
+                lane: V3InternalErrorLane::Response,
+                node_id: "V3HubRespChatProcess03Governed",
+                owner_feature_id: "v3.anthropic_control_text_resp03",
+                module_block: "500-23x",
+                title: "relay response governance processing failure",
+            },
             V3InternalErrorCode::V3DirectResp15ClientPayloadReady => V3InternalErrorRegistryEntry {
                 code: "500-220",
                 lane: V3InternalErrorLane::Response,
@@ -695,7 +704,11 @@ pub struct V3Error06ClientProjected {
 }
 
 fn internal_client_status(source: &V3Error01SourceRaised) -> u16 {
-    if is_v3_recoverable_response_processing_source(source) {
+    if is_v3_recoverable_response_processing_source(source)
+        && source.internal_error.as_ref().is_some_and(|error| {
+            error.internal_code != V3InternalErrorCode::V3HubRelayResp03Processing.registry_entry().code
+        })
+    {
         return 502;
     }
     match source.internal_error.as_ref().map(|error| error.lane) {
@@ -734,6 +747,15 @@ fn issuee63d2f2_unharvestable_tool_is_502_while_processing_damage_stays_599() {
         V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
     );
     assert_eq!(internal_client_status(&damage), 599);
+    let relay_damage = build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3HubRespChatProcess03Governed",
+        "relay_response_processing_failure",
+        "genuine Relay processing failure",
+        V3InternalErrorCode::V3HubRelayResp03Processing,
+    );
+    assert_eq!(internal_client_status(&relay_damage), 599);
+    assert!(is_v3_recoverable_response_processing_source(&relay_damage));
 }
 
 fn client_error_message(source: &V3Error01SourceRaised) -> String {
@@ -906,6 +928,7 @@ pub fn is_v3_recoverable_response_processing_source(source: &V3Error01SourceRais
         && [
             V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup,
             V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup,
+            V3InternalErrorCode::V3HubRelayResp03Processing,
         ]
         .iter()
         .any(|code| {

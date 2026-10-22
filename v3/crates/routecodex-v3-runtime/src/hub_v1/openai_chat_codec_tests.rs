@@ -7,6 +7,17 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn source_responses_completed_preserves_tool_handoff_before_normal_stop() {
+    let canonical = json!({"status":"completed","output":[{"type":"function_call","call_id":"call_normal","name":"evaluate","arguments":"{}"}]});
+    let projected = project_v3_openai_chat_client_response_with_source_terminal(&canonical, None, true).unwrap();
+    assert_eq!(projected["choices"][0]["finish_reason"], "tool_calls");
+    let mut limited = canonical;
+    limited["incomplete_details"] = json!({"reason":"max_output_tokens"});
+    let projected = project_v3_openai_chat_client_response_with_source_terminal(&limited, None, true).unwrap();
+    assert_eq!(projected["choices"][0]["finish_reason"], "length");
+}
+
+#[test]
 fn anthropic_text_delta_without_block_start_preserves_public_stream() {
     let events = [
         json!({"type":"message_start","message":{"id":"msg_public","type":"message","role":"assistant","content":[],"usage":{"input_tokens":7,"output_tokens":0}}}),
@@ -243,7 +254,7 @@ fn responses_usage_is_a_separate_chat_sse_chunk_without_choices() {
         2,
         "finish and usage need distinct Chat chunks"
     );
-    assert_eq!(chunks[0]["choices"][0]["finish_reason"], Value::Null);
+    assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
     assert!(chunks[0].get("usage").is_none());
     assert_eq!(chunks[1]["choices"], json!([]));
     assert_eq!(
@@ -287,7 +298,7 @@ fn responses_usage_is_not_sent_when_chat_client_opts_out() {
         .push_event(json!({"type": "response.completed", "response": {"status": "completed", "usage": {"input_tokens": 3, "output_tokens": 1}}}))
         .expect("completed");
     assert_eq!(chunks.len(), 1);
-    assert_eq!(chunks[0]["choices"][0]["finish_reason"], Value::Null);
+    assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
     assert!(chunks[0].get("usage").is_none());
 }
 
@@ -588,13 +599,13 @@ fn transducer_preserves_terminal_only_responses_text_refusal_and_incomplete() {
             "response.completed",
             "completed",
             json!({"type":"output_text","text":"NATIVE_OK"}),
-            Value::Null,
+            json!("stop"),
         ),
         (
             "response.completed",
             "completed",
             json!({"type":"refusal","refusal":"NATIVE_REFUSAL"}),
-            Value::Null,
+            json!("stop"),
         ),
         (
             "response.incomplete",
@@ -646,6 +657,68 @@ fn transducer_preserves_terminal_only_responses_text_refusal_and_incomplete() {
 }
 
 #[test]
+fn transducer_completed_event_without_nested_status_projects_stop_terminal() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    transducer
+        .push_event(delta_event("OK"))
+        .expect("delta");
+    let chunks = transducer
+        .push_event(json!({"type": "response.completed", "response": {"id": "resp_test_1"}}))
+        .expect("completed");
+    assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
+    transducer.finish().expect("finish");
+}
+
+#[test]
+fn transducer_completed_nested_length_filter_and_opaque_reason_never_become_stop() {
+    for (details, expected) in [
+        (json!({"reason":"max_output_tokens"}), json!("length")),
+        (json!({"reason":"content_filter"}), json!("content_filter")),
+        (json!({"reason":"opaque_reason"}), json!("opaque_reason")),
+    ] {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        let mut response = json!({"id":"resp_test_1", "status":"completed"});
+        response["incomplete_details"] = details.clone();
+        let chunks = transducer
+            .push_event(json!({"type":"response.completed", "response": response}))
+            .expect("completed with nested reason must project");
+        assert_eq!(chunks[0]["choices"][0]["finish_reason"], expected);
+        transducer.finish().expect("finish");
+    }
+}
+
+#[test]
+fn transducer_completed_event_with_explicit_non_stop_status_never_becomes_stop() {
+    for status in ["incomplete", "failed", "cancelled", "in_progress"] {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        transducer
+            .push_event(delta_event("OK"))
+            .expect("delta");
+        let chunks = transducer
+            .push_event(json!({
+                "type": "response.completed",
+                "response": {"id": "resp_test_1", "status": status}
+            }))
+            .expect("completed event must remain accepted");
+        assert!(chunks[0]["choices"][0]["finish_reason"].is_null(), "{status}");
+        transducer.finish().expect("finish");
+    }
+}
+
+#[test]
+fn transducer_stream_cut_without_completed_event_remains_missing() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    transducer
+        .push_event(delta_event("partial"))
+        .expect("delta");
+    assert!(transducer.finish().is_err());
+}
+
+#[test]
 fn transducer_preserves_refusal_deltas_alongside_text_without_terminal_duplication() {
     let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
     transducer.push_event(created_event()).unwrap();
@@ -673,7 +746,9 @@ fn transducer_preserves_refusal_deltas_alongside_text_without_terminal_duplicati
     transducer.finish().unwrap();
 }
 
-// Lifecycle status cannot establish an absent business terminal reason.
+// Canonical lifecycle status alone cannot establish a business terminal reason.
+// This is the canonical-only projector: a real source protocol completion
+// witness is absent here, so even `status=completed` stays missing.
 #[test]
 fn non_stream_projection_preserves_missing_reason_for_any_canonical_status() {
     for status in ["in_progress", "queued", "completed"] {
@@ -687,6 +762,41 @@ fn non_stream_projection_preserves_missing_reason_for_any_canonical_status() {
             finish_reason.is_null(),
             "status={status} must not fabricate a Chat finish_reason: {projected}"
         );
+    }
+}
+
+// A real Responses completed witness plus a non-empty business output maps to
+// Chat stop. Without the witness the same canonical completed stays missing.
+#[test]
+fn source_terminal_completed_witness_maps_plain_responses_completion_to_stop() {
+    let canonical = json!({"status":"completed","output":[{"type":"output_text","text":"pong"}]});
+    let projected =
+        project_v3_openai_chat_client_response_with_source_terminal(&canonical, None, true)
+            .expect("text output must project");
+    assert_eq!(projected["choices"][0]["finish_reason"], json!("stop"));
+}
+
+#[test]
+fn source_terminal_missing_witness_keeps_canonical_completed_missing() {
+    let canonical = json!({"status":"completed","output":[{"type":"output_text","text":"pong"}]});
+    let projected =
+        project_v3_openai_chat_client_response_with_source_terminal(&canonical, None, false)
+            .expect("text output must project");
+    assert!(projected["choices"][0]["finish_reason"].is_null());
+}
+
+#[test]
+fn source_terminal_explicit_reason_overrides_completed_witness() {
+    for (details, expected) in [
+        (json!({"reason":"max_output_tokens"}), json!("length")),
+        (json!({"reason":"content_filter"}), json!("content_filter")),
+        (json!({"reason":"opaque_reason"}), json!("opaque_reason")),
+    ] {
+        let canonical = json!({"status":"completed","incomplete_details":details,"output":[{"type":"output_text","text":"pong"}]});
+        let projected =
+            project_v3_openai_chat_client_response_with_source_terminal(&canonical, None, true)
+                .expect("text output must project");
+        assert_eq!(projected["choices"][0]["finish_reason"], expected);
     }
 }
 

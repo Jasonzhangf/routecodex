@@ -1,7 +1,7 @@
 {
   "id": "v3.operation_runner.response",
   "version": "1",
-  "description": "0e129d0: normalize and inverse-project actual terminal reasons losslessly; explicit non-stop and unknown reasons never become stop; missing reason stays missing. Lifecycle completed is independent of reason. Actual failures preserve source/cause/status and exit through the separate typed Error chain for candidate recovery, never client success. Observation is read-only and must not overwrite actual reasons.",
+  "description": "0e129d0: normalize and inverse-project terminal semantics losslessly. An explicit non-stop, incomplete or unknown reason never becomes stop. A genuine original Responses normal completion may map to the Chat protocol's normal terminal when the target protocol requires it; canonical lifecycle status, payload content and transport end are not completion witnesses. A native Chat response with a missing reason stays missing. Every complete buffered attempt, including Chat JSON and materialized SSE, runs post-governance deliverability admission before client projection. Empty and unharvestable governance failures retain their typed identity across the Relay codec/core boundary into the separate Error chain. Actual failures preserve source/cause/status and exit through the separate typed Error chain for candidate recovery, never client success. Observation is read-only and must not overwrite actual reasons.",
   "inputs": [
     { "id": "provider-raw", "schema": "Object", "schema_ref": "v3.operation_runner.arc.provider_raw" }
   ],

@@ -242,6 +242,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
     .await
     .map_err(|error| match error {
         V3RelayCoreError::EndpointPath(message) => V3GeminiRelayRuntimeError::EndpointPath(message),
+        V3RelayCoreError::ResponseGovernance(error) => V3GeminiRelayRuntimeError::Target(error.to_string()),
         V3RelayCoreError::ProviderPoolExhausted {
             attempted_candidates,
         } => V3GeminiRelayRuntimeError::ProviderPoolExhausted {
@@ -333,8 +334,12 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             compatibility_profile,
             retain_response_cipher,
             tool_thinking_enabled,
+            true,
         )
-        .map_err(|error| V3RelayCoreError::Target(error.to_string()))
+        .map_err(|error| match error {
+            V3GeminiRelayRuntimeError::Response(error) => V3RelayCoreError::ResponseGovernance(error),
+            other => V3RelayCoreError::Target(other.to_string()),
+        })
     }
 
     fn build_sse_outcome(
@@ -348,6 +353,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         permit: Option<V3ProviderActionPermit>,
     ) -> V3GeminiSseProviderOutcome {
         V3GeminiSseProviderOutcome {
+            response_control: V3RuntimeStreamObservation::default(),
             provider_health: provider_health.clone(),
             failure_session_scope: failure_session_scope.clone(),
             provider_id,
@@ -368,10 +374,11 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         _web_search_state: Option<V3WebSearchCenterState>,
         _retain_response_cipher: bool,
         tool_thinking_enabled: bool,
-        _stream_observation: V3RuntimeStreamObservation,
+        stream_observation: V3RuntimeStreamObservation,
         _client_include_usage: bool,
-        outcome: V3GeminiSseProviderOutcome,
+        mut outcome: V3GeminiSseProviderOutcome,
     ) -> Result<V3RelayProjectedSseStream, V3RelayCoreError> {
+        outcome.response_control = stream_observation;
         if provider_wire_protocol != V3HubProviderWireProtocol::Gemini {
             let request_id = request_id.to_owned();
             let mut outcome = outcome;
@@ -380,11 +387,15 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
                     let value = super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
                         provider_wire_protocol, provider,
                     ).await.map_err(|error| error.to_string())?;
-                    let client = project_json_response_with_source(
+                    let projection = project_json_response_with_source(
                         value, Some(&request_id), provider_wire_protocol, &Value::Null,
                         V3HubTransportIntent::Sse, &mut Vec::new(),
-                        compatibility_profile.as_deref(), _retain_response_cipher, tool_thinking_enabled,
-                    ).map_err(|error| error.to_string())?;
+                        compatibility_profile.as_deref(), _retain_response_cipher, tool_thinking_enabled, true,
+                    );
+                    if let Err(V3GeminiRelayRuntimeError::Response(error)) = &projection {
+                        outcome.response_control.record_response_governance_failure(error.clone())?;
+                    }
+                    let client = projection.map_err(|error| error.to_string())?;
                     let mut frame = b"data: ".to_vec();
                     serde_json::to_writer(&mut frame, &client).map_err(|error| error.to_string())?;
                     frame.extend_from_slice(b"\n\n");
@@ -625,6 +636,7 @@ fn project_json_response(
         compatibility_profile,
         retain_response_cipher,
         tool_thinking_enabled,
+        false,
     )
 }
 
@@ -638,6 +650,7 @@ fn project_json_response_with_source(
     compatibility_profile: Option<&str>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
+    complete_provider_attempt: bool,
 ) -> Result<Value, V3GeminiRelayRuntimeError> {
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         provider_value,
@@ -667,6 +680,7 @@ fn project_json_response_with_source(
     let resp03 = hooks.govern(
         resp02,
         &V3HubRelayResponseHookProfile::empty()
+            .with_complete_provider_attempt(complete_provider_attempt)
             .with_retain_response_cipher(retain_response_cipher)
             .with_tool_thinking_enabled(tool_thinking_enabled),
     )?;
@@ -707,6 +721,7 @@ struct V3GeminiSseState {
 }
 
 pub(crate) struct V3GeminiSseProviderOutcome {
+    response_control: V3RuntimeStreamObservation,
     provider_health: V3ProviderFailureRuntimeHealth,
     failure_session_scope: V3ProviderFailureSessionScope,
     provider_id: String,
@@ -719,7 +734,7 @@ pub(crate) struct V3GeminiSseProviderOutcome {
 
 impl V3GeminiSseProviderOutcome {
     async fn record_failure(&mut self, reason: &str) -> Result<(), String> {
-        if self.recorded {
+        if self.recorded || self.response_control.has_response_governance_failure()? {
             return Ok(());
         }
         drop(self._provider_action_permit.take());
@@ -889,6 +904,7 @@ fn enqueue_sse_client_chunks(
             state.compatibility_profile.as_deref(),
             state.retain_response_cipher,
             state.tool_thinking_enabled,
+            &state.provider_outcome.response_control,
         )?;
         state.terminal = terminal;
         state
@@ -903,17 +919,21 @@ fn project_sse_event_payload(
     compatibility_profile: Option<&str>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
+    response_control: &V3RuntimeStreamObservation,
 ) -> Result<Value, String> {
     let mut trace = Vec::new();
-    project_json_response(
+    let result = project_json_response(
         payload,
         V3HubTransportIntent::Sse,
         &mut trace,
         compatibility_profile,
         retain_response_cipher,
         tool_thinking_enabled,
-    )
-    .map_err(|error| error.to_string())
+    );
+    if let Err(V3GeminiRelayRuntimeError::Response(error)) = &result {
+        response_control.record_response_governance_failure(error.clone())?;
+    }
+    result.map_err(|error| error.to_string())
 }
 
 fn server_routing_group<'a>(

@@ -821,7 +821,10 @@ pub(crate) fn emit_v3_observability_console_lines(
                 context,
                 status,
                 None,
-                V3ObsErrorProjection::default(),
+                V3ObsErrorProjection {
+                    execution_mode: Some(observability.execution_mode.as_str()),
+                    ..Default::default()
+                },
             ) {
                 emit_v3_webui_projection_failure(context, &error);
             }
@@ -1251,6 +1254,7 @@ pub(crate) fn emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
                 Some(&projected.body),
                 // Forward the typed Error06 truth this lane already holds verbatim.
                 V3ObsErrorProjection {
+                    execution_mode: Some(observability.execution_mode.as_str()),
                     exposed: true,
                     error_class: Some(projected.error_class),
                     error_chain: &projected.chain,
