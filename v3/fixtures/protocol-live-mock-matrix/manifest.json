@@ -69,6 +69,8 @@
     "responses-to-chat-sse",
     "responses-to-gemini-json",
     "responses-to-gemini-sse",
+    "responses-to-responses-json",
+    "responses-to-responses-sse",
     "same-protocol-relay-chat-to-chat-json",
     "terminal-content-filter",
     "terminal-length",
