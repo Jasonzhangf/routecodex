@@ -829,17 +829,21 @@ impl V3CommittedClientSseBuilder {
                     .to_string(),
             )
         })?;
-        // The replay skips already-flushed frames, but the observer counts
-        // absolute frames: `next_frame_index` starts at the flushed prefix, so
-        // `terminal_frame_index` must stay absolute or the terminal would be
-        // marked consumed one frame early.
+        // While a client sink exists every push flushes, so a committed seal
+        // always replays an empty remainder and the observer never sees a tail
+        // frame. `next_frame_index` therefore starts and ends at
+        // `frames.len()`, and rebasing the terminal index onto the flushed
+        // prefix keeps the two comparable for the uncommitted seal, where the
+        // flushed prefix is empty and both forms agree.
+        let relative_terminal_frame_index =
+            terminal_frame_index.saturating_sub(self.flushed_frames);
         Ok(V3CommittedClientSseStream {
             inner: Box::pin(V3ReservedCommittedSseReplay {
                 frames: self.frames.into_iter().skip(self.flushed_frames),
                 _reservation: self.reservation,
             }),
             next_frame_index: self.flushed_frames,
-            terminal_frame_index,
+            terminal_frame_index: relative_terminal_frame_index,
         })
     }
 }
