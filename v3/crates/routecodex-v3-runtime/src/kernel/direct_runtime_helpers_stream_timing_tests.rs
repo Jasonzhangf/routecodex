@@ -1649,6 +1649,14 @@ async fn first_frame_commit_bare_gt_residue_with_newline_never_leaks() {
     let full = format!("hello\n>\n{close}");
     let chunks = responses_split_delta_sequence(&["hello\n>\n", close], &full);
     let run = run_early_commit_attempt(chunks.clone()).await;
+    assert!(
+        !run.committed,
+        "the residue line must stay pending and never certify the prefix"
+    );
+    assert!(
+        !run.failed,
+        "the DSML owner must remove the residue and seal the buffered attempt"
+    );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     assert!(
         !streamed.contains('>'),
