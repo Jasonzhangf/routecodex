@@ -14,7 +14,6 @@ thread_local! {
 }
 
 const V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY: usize = 32;
-const MAX_PROVIDER_COOLDOWN_MS: u64 = 5 * 60 * 60_000;
 
 type V3ProviderCooldownPersistenceEntries = Vec<(V3ProviderCooldownKey, u64, u64)>;
 
@@ -341,19 +340,18 @@ fn load_provider_cooldown_coordinator(
 ) -> Result<V3ProviderCooldownCoordinator, String> {
     if std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE").is_none() && !path.exists() {
         if let Some(legacy_path) = legacy_path.filter(|legacy| legacy != &path && legacy.exists()) {
-            let legacy =
-                V3ProviderCooldownCoordinator::load(legacy_path, MAX_PROVIDER_COOLDOWN_MS)?;
+            let legacy = V3ProviderCooldownCoordinator::load(legacy_path)?;
             let entries = legacy
                 .persisted_entries()
                 .into_iter()
                 .filter(|(key, _, _)| manifest_contains_cooldown_key(manifest, key))
                 .collect();
-            let mut migrated = V3ProviderCooldownCoordinator::new(path, MAX_PROVIDER_COOLDOWN_MS);
+            let mut migrated = V3ProviderCooldownCoordinator::new(path);
             migrated.replace_entries(entries)?;
             return Ok(migrated);
         }
     }
-    V3ProviderCooldownCoordinator::load(path, MAX_PROVIDER_COOLDOWN_MS)
+    V3ProviderCooldownCoordinator::load(path)
 }
 
 fn manifest_contains_cooldown_key(
@@ -804,7 +802,6 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         let path = root.path().join("provider-cooldowns.json");
         let writer = V3ProviderHealthPersistenceWriter::start(V3ProviderCooldownCoordinator::new(
             path.clone(),
-            60_000,
         ))
         .expect("start persistence writer");
         let store = V3ProviderHealthStore {
@@ -839,7 +836,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             .flush_persistence()
             .expect("flush receipt must follow the latest snapshot");
 
-        let restored = V3ProviderCooldownCoordinator::load(path, 60_000)
+        let restored = V3ProviderCooldownCoordinator::load(path)
             .expect("load flushed provider cooldown state");
         let entries = restored.persisted_entries();
         assert_eq!(entries.len(), 1);
@@ -859,16 +856,19 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
     fn health_persistence_preserves_other_failure_classes() {
         let root = tempfile::tempdir().expect("create isolated persistence directory");
         let path = root.path().join("provider-cooldowns.json");
-        let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone(), 60_000);
+        let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone());
         coordinator
-            .record_failure(
-                "provider-a",
-                Some("key-a"),
-                Some("model-a"),
-                V3ProviderCooldownFailureClass::Auth,
-                100,
-                crate::global_cooldown::V3ProviderCooldownObservation::default(),
-            )
+            .replace_entries(vec![(
+                V3ProviderCooldownKey {
+                    provider_id: "provider-a".into(),
+                    interface_id: "default".into(),
+                    auth_alias: Some("key-a".into()),
+                    model_id: Some("model-a".into()),
+                    failure_class: V3ProviderCooldownFailureClass::Auth,
+                },
+                60_100,
+                60_100,
+            )])
             .expect("seed auth cooldown");
         let writer = V3ProviderHealthPersistenceWriter::start(coordinator)
             .expect("start persistence writer");
@@ -894,8 +894,8 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             .flush_persistence()
             .expect("flush mixed failure classes");
 
-        let restored = V3ProviderCooldownCoordinator::load(path, 60_000)
-            .expect("load mixed provider cooldown state");
+        let restored =
+            V3ProviderCooldownCoordinator::load(path).expect("load mixed provider cooldown state");
         let entries = restored.persisted_entries();
         assert_eq!(entries.len(), 2);
         assert!(entries
@@ -919,7 +919,6 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         std::fs::create_dir_all(&root).expect("create isolated persistence target");
         let writer = V3ProviderHealthPersistenceWriter::start(V3ProviderCooldownCoordinator::new(
             root.clone(),
-            60_000,
         ))
         .expect("start persistence writer");
         let store = V3ProviderHealthStore {
@@ -1015,16 +1014,19 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
     fn persistence_writer_spawn_failure_disables_startup_without_panicking() {
         let root = tempfile::tempdir().expect("create isolated persistence directory");
         let path = root.path().join("provider-cooldowns.json");
-        let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone(), 60_000);
+        let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone());
         coordinator
-            .record_failure(
-                "p",
-                Some("k"),
-                Some("m"),
-                V3ProviderCooldownFailureClass::Semantic,
-                100,
-                crate::global_cooldown::V3ProviderCooldownObservation::default(),
-            )
+            .replace_entries(vec![(
+                V3ProviderCooldownKey {
+                    provider_id: "p".into(),
+                    interface_id: "default".into(),
+                    auth_alias: Some("k".into()),
+                    model_id: Some("m".into()),
+                    failure_class: V3ProviderCooldownFailureClass::Semantic,
+                },
+                60_100,
+                60_100,
+            )])
             .expect("seed persisted cooldown");
         let manifest = manifest("s", "127.0.0.1", 1);
         TEST_SPAWN_FAILURE
