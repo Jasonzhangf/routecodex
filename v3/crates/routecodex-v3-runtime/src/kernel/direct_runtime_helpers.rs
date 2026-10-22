@@ -586,6 +586,12 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 .as_ref()
                 .and_then(|error| error.code.as_deref()),
         );
+    // A provider transport failure has no upstream HTTP error status. It is a
+    // typed provider failure, so the last-candidate terminal boundary must not
+    // suppress its exact-identity health effect.
+    let is_transport_failure = source.source_kind == V3ErrorSourceKind::ProviderFailure
+        && source.code == "provider_transport_error"
+        && observed_status == 502;
     let failed_key = candidate_key(&selected.candidate);
     let expanded_candidates = match (context.expanded, context.provider_pinned) {
         (Some(expanded), _) => Some(&expanded.candidates),
@@ -659,7 +665,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     }
     // Health changes are allowed only after the captured target proves that
     // another eligible, untried identity can take this request.
-    let health_record = if is_health_neutral_failure || remaining == 0 {
+    let health_record = if is_health_neutral_failure || (remaining == 0 && !is_transport_failure) {
         V3ProviderFailureRecord {
             scope_label: failed_key.clone(),
             provider_key: failed_key.clone(),
