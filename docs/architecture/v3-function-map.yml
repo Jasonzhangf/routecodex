@@ -1379,6 +1379,7 @@ features:
   allowed_paths:
   - v3/crates/provider-compat-core
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_glm.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_reasoning_effort.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
@@ -1395,6 +1396,7 @@ features:
   - v3/crates/routecodex-v3-cli/tests/responses_custom_tool_function_compat_blackbox.rs
   - v3/crates/routecodex-v3-cli/tests/provider_reasoning_effort_policy_blackbox.rs
   - v3/crates/routecodex-v3-cli/tests/opencode_zen_tcm_bridge_blackbox.rs
+  - v3/crates/routecodex-v3-cli/tests/xcreate_glm_prompt_cache_public.rs
   - v3/scripts/test.mjs
   - v3/package.json
   - package.json
