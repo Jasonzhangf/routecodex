@@ -2,7 +2,7 @@ use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_aut
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityReader, V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass,
-    V3ProviderCooldownObservation, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
+    V3ProviderCooldownKey, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
 };
 
 fn health_disabled_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
@@ -39,16 +39,20 @@ fn health_disabled_provider_ignores_persisted_cooldown_and_never_writes_one() {
     ));
     // Seed a durable semantic cooldown for the same identity, as a real
     // runtime instance would leave behind, then load it with health disabled.
-    let mut coordinator = V3ProviderCooldownCoordinator::new(seeded_path.clone(), 5 * 60 * 60_000);
+    let mut coordinator = V3ProviderCooldownCoordinator::new(seeded_path.clone());
+    let persisted_until_ms = 1_000 + 5 * 60 * 60_000;
     coordinator
-        .record_failure(
-            "p",
-            Some("k"),
-            Some("m"),
-            V3ProviderCooldownFailureClass::Semantic,
-            1_000,
-            V3ProviderCooldownObservation::default(),
-        )
+        .replace_entries(vec![(
+            V3ProviderCooldownKey {
+                provider_id: "p".into(),
+                interface_id: "default".into(),
+                auth_alias: Some("k".into()),
+                model_id: Some("m".into()),
+                failure_class: V3ProviderCooldownFailureClass::Semantic,
+            },
+            persisted_until_ms,
+            persisted_until_ms,
+        )])
         .unwrap();
 
     let store = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, seeded_path);
@@ -75,36 +79,12 @@ fn health_disabled_provider_ignores_persisted_cooldown_and_never_writes_one() {
         .flush_persistence()
         .expect("disabled provider persistence flush must succeed");
     assert!(
-        V3ProviderCooldownCoordinator::load(fresh_path, 5 * 60 * 60_000)
+        V3ProviderCooldownCoordinator::load(fresh_path)
             .unwrap()
             .persisted_entries()
             .is_empty(),
         "disabled provider must not persist a cooldown"
     );
-}
-
-#[test]
-fn restart_loads_cooldown_and_startup_probe_is_the_only_recovery_path() {
-    let path =
-        std::env::temp_dir().join(format!("routecodex-cooldown-{}.json", std::process::id()));
-    let mut first = V3ProviderCooldownCoordinator::new(path.clone(), 5 * 60 * 60_000);
-    first
-        .record_failure(
-            "p",
-            Some("k"),
-            Some("m"),
-            V3ProviderCooldownFailureClass::Quota,
-            1_000,
-            V3ProviderCooldownObservation::default(),
-        )
-        .unwrap();
-    let mut restarted = V3ProviderCooldownCoordinator::load(path, 5 * 60 * 60_000).unwrap();
-    assert!(!restarted.availability("p", Some("k"), Some("m"), 2_000));
-    restarted.reset_probe_schedule_for_startup().unwrap();
-    assert!(!restarted.availability("p", Some("k"), Some("m"), 2_000));
-    let permit = restarted.acquire_due_probe(2_000).unwrap();
-    restarted.apply_probe_failure(permit, 2_001).unwrap();
-    assert!(!restarted.availability("p", Some("k"), Some("m"), 2_002));
 }
 
 #[test]
@@ -292,16 +272,19 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         "routecodex-restart-ordinary-long-probes-{}.json",
         std::process::id()
     ));
-    let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone(), 60_000);
+    let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone());
     coordinator
-        .record_failure(
-            "p",
-            Some("k"),
-            Some("m"),
-            V3ProviderCooldownFailureClass::ProbeLong,
-            1_000,
-            V3ProviderCooldownObservation::default(),
-        )
+        .replace_entries(vec![(
+            V3ProviderCooldownKey {
+                provider_id: "p".into(),
+                interface_id: "default".into(),
+                auth_alias: Some("k".into()),
+                model_id: Some("m".into()),
+                failure_class: V3ProviderCooldownFailureClass::ProbeLong,
+            },
+            61_000,
+            61_000,
+        )])
         .unwrap();
 
     let restored = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path);
@@ -351,16 +334,19 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         "routecodex-restart-fast-recovery-probes-{}.json",
         std::process::id()
     ));
-    let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone(), 60_000);
+    let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone());
     coordinator
-        .record_failure(
-            "p",
-            Some("k"),
-            Some("m"),
-            V3ProviderCooldownFailureClass::ProbeLong,
-            1_000,
-            V3ProviderCooldownObservation::default(),
-        )
+        .replace_entries(vec![(
+            V3ProviderCooldownKey {
+                provider_id: "p".into(),
+                interface_id: "default".into(),
+                auth_alias: Some("k".into()),
+                model_id: Some("m".into()),
+                failure_class: V3ProviderCooldownFailureClass::ProbeLong,
+            },
+            61_000,
+            61_000,
+        )])
         .unwrap();
 
     let restored = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path);
@@ -431,16 +417,19 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         "routecodex-restart-bounded-persisted-probe-{}.json",
         std::process::id()
     ));
-    let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone(), 30 * 60_000);
+    let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone());
     coordinator
-        .record_failure(
-            "p",
-            Some("k"),
-            Some("m"),
-            V3ProviderCooldownFailureClass::ProbeLong,
-            1_000,
-            V3ProviderCooldownObservation::default(),
-        )
+        .replace_entries(vec![(
+            V3ProviderCooldownKey {
+                provider_id: "p".into(),
+                interface_id: "default".into(),
+                auth_alias: Some("k".into()),
+                model_id: Some("m".into()),
+                failure_class: V3ProviderCooldownFailureClass::ProbeLong,
+            },
+            30 * 60_000 + 1_000,
+            30 * 60_000 + 1_000,
+        )])
         .unwrap();
     assert_eq!(
         coordinator.persisted_entries()[0].2,
