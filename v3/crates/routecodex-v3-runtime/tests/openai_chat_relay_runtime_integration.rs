@@ -939,6 +939,21 @@ async fn responses_provider_empty_incomplete_reselects_and_delivers_healthy_seco
         "empty primary attempt must be classified and reselected, not projected: {:?}",
         output.node_trace
     );
+    let reselected_position = output
+        .node_trace
+        .iter()
+        .position(|node| *node == "V3TargetLocalReselected")
+        .expect("empty primary attempt must record the reselection node");
+    let first_client_frame_position = output
+        .node_trace
+        .iter()
+        .position(|node| *node == "V3ServerRespOutbound06ClientFrame")
+        .expect("the healthy secondary attempt must project a client frame");
+    assert!(
+        reselected_position < first_client_frame_position,
+        "V3TargetLocalReselected must be recorded before the client frame commit: {:?}",
+        output.node_trace
+    );
     let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
         panic!("expected Chat SSE client body");
     };

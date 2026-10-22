@@ -1242,7 +1242,6 @@ where
                 ));
             }
             V3ProviderResponseBody::Sse(stream) => {
-                push_sse_response_chain_trace(&mut trace);
                 // 首帧守卫：provider SSE 首帧错误/空流/挂起在响应头前被捕获，
                 // 走 provider 失败策略切 provider（客户端无感，对话不断流）。
                 let sse_first_frame_timeout_ms = manifest
@@ -1794,6 +1793,10 @@ where
                         .map_err(V3RelayCoreError::Target)?;
                 }
                 observability.provider_failure_events = std::mem::take(failure_events);
+                // The response chain is recorded only once this attempt is
+                // validated and committed. A discarded attempt must not claim
+                // the client frame before the reselection trace.
+                push_sse_response_chain_trace(&mut trace);
                 return Ok(C::assemble_sse_output(
                     committed_sse,
                     trace,
