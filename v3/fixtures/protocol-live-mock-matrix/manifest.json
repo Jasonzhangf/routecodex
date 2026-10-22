@@ -63,6 +63,7 @@
     "responses-to-anthropic-json",
     "responses-to-anthropic-sse",
     "responses-to-chat-json",
+    "responses-to-chat-sse-blank-finish-reason",
     "responses-to-chat-sse",
     "responses-to-gemini-json",
     "responses-to-gemini-sse",

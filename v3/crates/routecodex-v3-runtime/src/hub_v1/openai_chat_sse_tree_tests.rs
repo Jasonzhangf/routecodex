@@ -746,6 +746,28 @@ fn chat_reducer_treats_empty_sse_finish_reason_as_nonterminal() {
 }
 
 #[test]
+fn chat_reducer_treats_blank_sse_finish_reason_as_nonterminal() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"  "}]
+        }))
+        .unwrap();
+    assert!(reducer.terminal.is_none());
+    reducer
+        .apply_chunk(&json!({
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{},"finish_reason":"stop"}]
+        }))
+        .unwrap();
+    assert_eq!(
+        reducer.materialize_completion().unwrap()["choices"][0]["finish_reason"],
+        "stop"
+    );
+}
+
+#[test]
 fn chat_json_document_round_trips_choices_messages_tools_usage_and_extensions() {
     let input = json!({
         "id": "chatcmpl_json_1",
