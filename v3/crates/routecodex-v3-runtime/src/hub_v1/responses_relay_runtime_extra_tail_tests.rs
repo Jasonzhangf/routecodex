@@ -642,7 +642,7 @@ fn anthropic_dotted_custom_name_survives_request_entry_and_hooks() {
     let wire =
         super::super::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(source)
             .expect("Anthropic wire projection");
-    assert_eq!(wire["tools"][0]["name"], "mcp__mcpx.exec");
+    assert_eq!(wire["tools"][0]["name"], "mcp__mcpx__exec");
     let content = wire["messages"]
         .as_array()
         .unwrap()
@@ -652,7 +652,7 @@ fn anthropic_dotted_custom_name_survives_request_entry_and_hooks() {
     assert!(
         content
             .iter()
-            .any(|part| part["type"] == "tool_use" && part["name"] == "mcp__mcpx.exec"),
+            .any(|part| part["type"] == "tool_use" && part["name"] == "mcp__mcpx__exec"),
         "{wire}"
     );
     assert!(

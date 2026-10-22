@@ -721,6 +721,24 @@ fn row_error_origin_opt(row: &QueryRow) -> Option<&'static str> {
 }
 
 fn row_status_code(row: &QueryRow) -> String {
+    // Error rows display their typed error identity first. A local conversion
+    // failure stays visibly local even when a legacy carrier still records a
+    // numeric provider status (e.g. an internal 400 that never reached the
+    // provider). Only a numeric typed identity may replace the provider status:
+    // non-numeric labels such as `network` describe a transport failure but must
+    // not split one status bucket away from its other origins.
+    if matches!(
+        row.result.as_deref(),
+        Some("error") | Some("failed-attempt")
+    ) {
+        if let Some(code) =
+            error_category_status_code(row.meta.get("error_category").and_then(Value::as_str))
+        {
+            if code.chars().all(|character| character.is_ascii_digit()) {
+                return code;
+            }
+        }
+    }
     let provider_status = status_code_label(row.meta.get("provider_status"));
     if provider_status != "unknown" {
         return provider_status;
