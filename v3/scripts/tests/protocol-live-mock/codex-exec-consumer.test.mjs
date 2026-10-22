@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import {
-  chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync,
+  chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,7 @@ import {
   CODEX_REAL_EXEC_CONSUMER,
   CURRENT_CODEX_EXEC_COMMAND_DESCRIPTION,
   buildCodexExecConfig,
+  executeCodexClient,
   codexCliAvailability,
   parseCodexExecEvents,
   runCodexRealExec,
@@ -25,6 +27,28 @@ function systemProbe(name) {
   const primary = `/bin/${name}`;
   return existsSync(primary) ? primary : `/usr/bin/${name}`;
 }
+
+test('consumer prepares a real isolated Git repository and exposes a missing executable', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'codex-consumer-setup-'));
+  try {
+    const result = await executeCodexClient({
+      fixture: positiveFixture,
+      rccUrl: 'http://127.0.0.1:41234',
+      evidenceRoot: root,
+      codexBinary: join(root, 'missing-codex'),
+      timeoutMs: 1000,
+    });
+    assert.equal(execFileSync('git', ['-C', result.workdir, 'rev-parse', '--is-inside-work-tree'],
+      { encoding: 'utf8' }).trim(), 'true');
+    assert.equal(realpathSync(execFileSync('git', ['-C', result.workdir, 'rev-parse', '--show-toplevel'],
+      { encoding: 'utf8' }).trim()), realpathSync(result.workdir));
+    assert.equal(result.spawn_error?.code, 'ENOENT');
+    assert.equal(result.exit_code, null);
+    assert.equal(readFileSync(result.stdout_path, 'utf8'), '');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('codex-real-exec is selected only by its explicit consumer name', () => {
   assert.equal(CODEX_REAL_EXEC_CONSUMER, 'codex-real-exec');
@@ -226,6 +250,10 @@ async function runInjectedCodex({
   events,
   functionCallOutput,
   originalFunctionCallOutput,
+  initialMessages = [
+    { role: 'system', content: 'Native client context' },
+    { role: 'user', content: 'Run the exec_command tool call returned by the server exactly once. Report the command result after it completes.' },
+  ],
 }) {
   const runRoot = join(root, 'codex-real-exec');
   const workdir = join(runRoot, 'workdir');
@@ -274,7 +302,7 @@ async function runInjectedCodex({
         captured_at_epoch_ms: 1,
         body: {
           model: 'chat-model',
-          messages: [],
+          messages: initialMessages,
           tools: [{
             type: 'function',
             function: {
@@ -342,6 +370,35 @@ async function runInjectedCodex({
   });
   return { result, output, expectedArguments };
 }
+
+test('real consumer requires its exact user prompt after a native preamble', async () => {
+  const prompt = 'Run the exec_command tool call returned by the server exactly once. Report the command result after it completes.';
+  const cases = [
+    { messages: [{ role: 'system', content: 'context' }, { role: 'user', content: prompt }], ok: true },
+    { messages: [{ role: 'system', content: 'context' }, { role: 'user', content: [
+      { type: 'text', text: prompt.slice(0, 30) }, { type: 'text', text: prompt.slice(30) },
+    ] }], ok: true },
+    { messages: [{ role: 'user', content: 'run pwd' }], ok: false },
+    { messages: [{ role: 'user', content: `${prompt} changed` }], ok: false },
+    { messages: [{ role: 'system', content: prompt }, { role: 'user', content: 'other' }], ok: false },
+    { messages: [], ok: false },
+  ];
+  for (const example of cases) {
+    const root = mkdtempSync(join(tmpdir(), 'codex-real-exec-prompt-'));
+    const output = `${join(root, 'codex-real-exec', 'workdir')}\n`;
+    try {
+      const { result } = await runInjectedCodex({
+        root, initialMessages: example.messages,
+        functionCallOutput: formattedFunctionCallOutput(output),
+        events: [commandExecution(output), agentMessage('done'), codexEvent('turn.completed')],
+      });
+      assert.equal(result.ok, example.ok, JSON.stringify(example.messages));
+      if (!example.ok) assert.match(result.productDiagnostics.join('; '), /user prompt/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
 
 test('runCodexRealExec preserves the complete Codex-authored tool output and final turn', async () => {
   const root = mkdtempSync(join(tmpdir(), 'codex-real-exec-receipt-'));

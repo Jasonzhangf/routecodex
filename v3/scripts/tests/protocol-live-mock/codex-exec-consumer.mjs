@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync,
 } from 'node:fs';
@@ -11,6 +11,7 @@ export const CURRENT_CODEX_EXEC_COMMAND_DESCRIPTION =
 
 const MAX_PROCESS_OUTPUT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 120000;
+const CONSUMER_PROMPT = 'Run the exec_command tool call returned by the server exactly once. Report the command result after it completes.';
 
 export function buildCodexExecConfig({ rccUrl }) {
   const url = new URL(String(rccUrl));
@@ -293,11 +294,12 @@ export async function executeCodexClient({
   const workdir = join(runRoot, 'workdir');
   mkdirSync(codexHome, { recursive: true });
   mkdirSync(workdir, { recursive: true });
+  execFileSync('git', ['init', '--quiet', workdir], { stdio: 'pipe' });
   const configPath = join(codexHome, 'config.toml');
   const promptPath = join(runRoot, 'prompt.txt');
   const stdoutPath = join(runRoot, 'codex-exec.stdout.jsonl');
   const stderrPath = join(runRoot, 'codex-exec.stderr.log');
-  const prompt = 'Run the exec_command tool call returned by the server exactly once. Report the command result after it completes.';
+  const prompt = CONSUMER_PROMPT;
   writeFileSync(configPath, buildCodexExecConfig({ rccUrl }));
   writeFileSync(promptPath, `${prompt}\n`);
 
@@ -308,7 +310,6 @@ export async function executeCodexClient({
     '--ephemeral',
     '--sandbox',
     'read-only',
-    '--skip-git-repo-check',
     '-C',
     workdir,
     '--strict-config',
@@ -380,6 +381,21 @@ function validateRegisteredExecSchema(capture) {
 function chatHistory(capture) {
   const messages = capture?.body?.messages;
   return Array.isArray(messages) ? messages : [];
+}
+
+function preservesConsumerUserPrompt(capture) {
+  return chatHistory(capture).some((message) => {
+    if (message?.role !== 'user') return false;
+    const content = message.content;
+    if (typeof content === 'string') return content === CONSUMER_PROMPT;
+    if (!Array.isArray(content)) return false;
+    const text = content.map((part) => {
+      if (typeof part === 'string') return part;
+      return ['text', 'input_text'].includes(part?.type) && typeof part.text === 'string'
+        ? part.text : '';
+    }).join('');
+    return text === CONSUMER_PROMPT;
+  });
 }
 
 function readOriginalClientFunctionCallOutput({ sampleRoot, listenerPort, callId }) {
@@ -674,6 +690,9 @@ export async function runCodexRealExec({
   } else {
     const schema = validateRegisteredExecSchema(providerWindows[0][0]);
     if (!schema.ok) diagnostic.push(schema.diagnostic);
+    if (!preservesConsumerUserPrompt(providerWindows[0][0])) {
+      diagnostic.push('provider request must preserve the exact real consumer user prompt');
+    }
   }
   if ((providerWindows[1] ?? []).length !== 1) {
     diagnostic.push(`follow-up provider turn must have exactly one business attempt, observed ${(providerWindows[1] ?? []).length}`);

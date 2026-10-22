@@ -58,7 +58,7 @@
       "iterator": "Whole",
       "resources": {
         "reads": ["v3.route.opaque_target", "v3.config.published_manifest", "v3.provider.health_state", "v3.provider.key_health_state", "v3.provider.availability_projection", "v3.operation_runner.request_local_exclusions"],
-        "writes": ["v3.hub.resolved_target", "v3.operation_runner.execution_mode"]
+        "writes": ["v3.hub.resolved_target", "v3.operation_runner.execution_mode", "v3.operation_runner.request_local_exclusions"]
       }
     },
     {

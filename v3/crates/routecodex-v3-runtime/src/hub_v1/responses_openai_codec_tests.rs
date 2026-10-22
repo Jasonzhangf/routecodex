@@ -353,13 +353,22 @@ fn responses_web_search_current_turn_item_projects_to_canonical_tools() {
 
 #[test]
 fn responses_inbound_restores_codex_integer_tool_schema_types() {
+    for description in [
+        "Runs a command in a PTY, returning output or a session ID.",
+        "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+    ] {
+        assert_registered_codex_integer_tool_schema_types(description);
+    }
+}
+
+fn assert_registered_codex_integer_tool_schema_types(description: &str) {
     let request = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(&json!({
         "model": "gpt-5.5",
         "tools": [
             {
                 "type": "function",
                 "name": "exec_command",
-                "description": "Runs a command in a PTY, returning output or a session ID.",
+                "description": description,
                 "strict": false,
                 "parameters": {
                     "type": "object",

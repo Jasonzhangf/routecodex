@@ -199,7 +199,7 @@ fn recoverable_response_processing_runtime_failure_with_capacity_is_nonterminal_
 }
 
 #[test]
-fn exhausted_recoverable_response_processing_runtime_failure_is_599_terminal() {
+fn exhausted_unharvestable_tool_markup_runtime_failure_is_502_terminal() {
     let decision = V3ErrorHandlingCenter::decide_provider(
         V3ErrorHandlingCenterInput {
             source: unharvestable_tool_markup_response_source(),
@@ -224,7 +224,7 @@ fn exhausted_recoverable_response_processing_runtime_failure_is_599_terminal() {
         .try_into_terminal()
         .expect("route and default exhaustion is terminal");
     let projected = build_v3_error_06_client_projected_from_v3_error_05(terminal);
-    assert_eq!(projected.status, 599);
+    assert_eq!(projected.status, 502);
     assert_eq!(
         projected.body["error"]["code"],
         "direct_tool_markup_unharvestable"

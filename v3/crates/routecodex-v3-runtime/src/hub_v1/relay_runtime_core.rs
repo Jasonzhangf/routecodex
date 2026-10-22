@@ -10,7 +10,10 @@
 //! 里程碑 2：trait + 骨架。SSE 状态机（协议特定）经 [`V3RelayProtocolCodec::project_sse`]
 //! 收敛；JSON 响应链（resp01->02->03->04->05->06）经 `project_json_response` 收敛。
 
-use super::relay_runtime_shared::{relay_handoff_entry_state, relay_request_execution_control};
+use super::relay_runtime_shared::{
+    handle_provider_failure_with_response_code, provider_response_governance_failure,
+    relay_handoff_entry_state, relay_request_execution_control,
+};
 use super::*;
 use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder};
 use crate::operation_runner::plan_execution::{
@@ -34,10 +37,10 @@ use routecodex_v3_provider_responses::{
     V3ProviderSseStream, V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
 };
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 enum V3RelayAttemptCollectFailure {
-    EmptyProviderAttempt,
+    ResponseGovernance(V3HubRelayResponseError),
     ProviderResponseBody(String),
     ProviderTransport(String),
     LocalStore(V3AttemptStoreError),
@@ -449,8 +452,12 @@ where
     let mut trace = Vec::with_capacity(17);
     // 统一 relay timing：internal = RouteCodex 处理，external = provider 等待；
     // 只写入 typed observability，不进入 payload。
-    let (runtime_timing, mut failed_candidates, mut retry_selected) =
-        relay_handoff_entry_state(initial_handoff.as_ref());
+    let (
+        runtime_timing,
+        mut failed_candidates,
+        mut request_local_busy_candidates,
+        mut retry_selected,
+    ) = relay_handoff_entry_state(initial_handoff.as_ref());
     let transport_intent = if payload.get("stream").and_then(Value::as_bool) == Some(true)
         || (C::ENTRY_PROTOCOL == V3HubEntryProtocol::Gemini
             && endpoint_path.ends_with(":streamGenerateContent"))
@@ -540,6 +547,7 @@ where
             &failure_session_scope,
             &provider_health,
             &failed_candidates,
+            &request_local_busy_candidates,
             v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
             deterministic_sample,
             allow_exhaustion_rescue_probe,
@@ -564,7 +572,29 @@ where
                     std::mem::take(failure_events),
                 ));
             }
-            Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
+            Err(V3PlanExecutionStop::Exhausted {
+                expanded: exhausted_expanded,
+                exhaustion,
+                source,
+                ..
+            }) => {
+                let source = match source {
+                    Some(source) => Some(source),
+                    None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
+                        &exhausted_expanded,
+                        &failed_candidates,
+                        &request_local_busy_candidates,
+                    ) {
+                        Ok(source) => source,
+                        Err(fault) => {
+                            return Ok(C::assemble_failure_output(
+                                super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                                trace,
+                                std::mem::take(failure_events),
+                            ))
+                        }
+                    },
+                };
                 let failure = C::request_failure_builder(
                     "V3Target10ConcreteProviderSelected",
                     "selected_target_exhausted",
@@ -574,7 +604,9 @@ where
                     ),
                 );
                 return Ok(C::assemble_failure_output(
-                    terminalize_provider_failure(failure, None),
+                    super::relay_runtime_shared::terminalize_provider_failure_with_source(
+                        failure, source, None,
+                    ),
                     trace,
                     std::mem::take(failure_events),
                 ));
@@ -583,6 +615,7 @@ where
     req02.previous.payload.0 = std::sync::Arc::new(execution_planned_request);
     let retained_expanded = initial_plan.expanded;
     failed_candidates.extend(initial_plan.request_local_excluded_candidates);
+    request_local_busy_candidates.extend(initial_plan.request_local_busy_candidates);
     let planned_execution_mode = initial_plan.execution_mode;
     let mut initial_admitted = Some((initial_plan.selected, initial_plan.admission));
     let request_outcome = compile_v3_hub_relay_request_hooks()
@@ -628,6 +661,7 @@ where
                 &failure_session_scope,
                 &provider_health,
                 &failed_candidates,
+                &request_local_busy_candidates,
                 v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
                 deterministic_sample,
                 allow_exhaustion_rescue_probe,
@@ -642,6 +676,7 @@ where
                     req05.previous.previous.previous.payload.0 =
                         std::sync::Arc::new(execution_planned_request);
                     failed_candidates.extend(plan.request_local_excluded_candidates);
+                    request_local_busy_candidates.extend(plan.request_local_busy_candidates);
                     (plan.selected, Some(plan.admission))
                 }
                 Err(V3PlanExecutionStop::Failed(source)) => {
@@ -660,7 +695,32 @@ where
                         std::mem::take(failure_events),
                     ));
                 }
-                Err(V3PlanExecutionStop::Exhausted { exhaustion, .. }) => {
+                Err(V3PlanExecutionStop::Exhausted {
+                    expanded: exhausted_expanded,
+                    exhaustion,
+                    source,
+                    ..
+                }) => {
+                    let source = match source {
+                        Some(source) => Some(source),
+                        None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
+                            &exhausted_expanded,
+                            &failed_candidates,
+                            &request_local_busy_candidates,
+                        ) {
+                            Ok(source) => source,
+                            Err(fault) => {
+                                return Ok(C::assemble_failure_output(
+                                    terminalize_provider_failure(
+                                        super::relay_runtime_shared::provider_operator_fault_failure(fault),
+                                        last_external_http.clone(),
+                                    ),
+                                    trace,
+                                    std::mem::take(failure_events),
+                                ))
+                            }
+                        },
+                    };
                     let attempted_candidates = exhaustion.attempted_candidates;
                     let failure = C::request_failure_builder(
                         "V3Target10ConcreteProviderSelected",
@@ -668,7 +728,11 @@ where
                         format!("selected target exhausted after {attempted_candidates:?}"),
                     );
                     return Ok(C::assemble_failure_output(
-                        terminalize_provider_failure(failure, last_external_http.clone()),
+                        super::relay_runtime_shared::terminalize_provider_failure_with_source(
+                            failure,
+                            source,
+                            last_external_http.clone(),
+                        ),
                         trace,
                         std::mem::take(failure_events),
                     ));
@@ -883,8 +947,9 @@ where
                             selected_admission = Some(admission)
                         }
                         V3AdmitAfterRecovery::Busy => {
-                            failed_candidates
-                                .insert(v3_relay_provider_candidate_key(&selected.candidate));
+                            let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                            failed_candidates.insert(busy_key.clone());
+                            request_local_busy_candidates.insert(busy_key);
                             drop(provider_action_permit.take());
                             provider_action_permit_target = None;
                             continue;
@@ -958,7 +1023,9 @@ where
                     runtime_timing
                         .finish_external()
                         .map_err(V3RelayCoreError::Target)?;
-                    failed_candidates.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                    let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                    failed_candidates.insert(busy_key.clone());
+                    request_local_busy_candidates.insert(busy_key);
                     drop(provider_action_permit.take());
                     provider_action_permit_target = None;
                     continue;
@@ -1149,25 +1216,25 @@ where
                         return Err(V3RelayCoreError::WebSearchIntercepted(message));
                     }
                     Err(error) => {
-                        let mut failure = if !has_business_content {
-                            provider_request_failure(
-                                "V3ProviderRespInbound01Raw",
-                                "provider_response_empty",
-                                "provider returned no deliverable business content",
+                        let (mut failure, response_processing_code) = if !has_business_content {
+                            (
+                                provider_request_failure(
+                                    "V3ProviderRespInbound01Raw",
+                                    "provider_response_empty",
+                                    "provider returned no deliverable business content",
+                                ),
+                                None,
                             )
                         } else {
-                            provider_runtime_failure(
-                                V3ProviderError::ResponseBody {
-                                    request_id: request_id.to_string(),
-                                    provider_id: selected_target_provider_id.clone(),
-                                    reason: format!("provider response governance failed: {error}"),
-                                },
+                            provider_response_governance_failure(
+                                error,
+                                request_id,
                                 &selected_target_provider_id,
                             )
                         };
                         failure.provider_status = Some(provider_status);
                         drop(provider_action_permit.take());
-                        if let Some(failure) = handle_provider_failure(
+                        if let Some(failure) = handle_provider_failure_with_response_code(
                             &failure_context,
                             selected,
                             failure,
@@ -1180,6 +1247,7 @@ where
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
                             failure_events,
+                            response_processing_code,
                         )
                         .await
                         .map_err(V3RelayCoreError::Target)?
@@ -1242,7 +1310,6 @@ where
                 ));
             }
             V3ProviderResponseBody::Sse(stream) => {
-                push_sse_response_chain_trace(&mut trace);
                 // 首帧守卫：provider SSE 首帧错误/空流/挂起在响应头前被捕获，
                 // 走 provider 失败策略切 provider（客户端无感，对话不断流）。
                 let sse_first_frame_timeout_ms = manifest
@@ -1445,26 +1512,21 @@ where
                                 Err(error @ V3RelayCoreError::WebSearchIntercepted(_)) => {
                                     return Err(error)
                                 }
-                                Err(error) => Err(provider_runtime_failure(
-                                    V3ProviderError::ResponseBody {
-                                        request_id: request_id.to_string(),
-                                        provider_id: selected_target_provider_id.clone(),
-                                        reason: format!(
-                                            "provider response governance failed: {error}"
-                                        ),
-                                    },
+                                Err(error) => Err(provider_response_governance_failure(
+                                    error,
+                                    request_id,
                                     &selected_target_provider_id,
                                 )),
                             }
                         }
-                        Err(failure) => Err(failure),
+                        Err(failure) => Err((failure, None)),
                     };
                     let (client_response, provider_response_snapshot) = match projection {
                         Ok(projected) => projected,
-                        Err(mut failure) => {
+                        Err((mut failure, response_processing_code)) => {
                             failure.provider_status = Some(provider_status);
                             drop(provider_action_permit.take());
-                            if let Some(failure) = handle_provider_failure(
+                            if let Some(failure) = handle_provider_failure_with_response_code(
                                 &failure_context,
                                 selected,
                                 failure,
@@ -1477,6 +1539,7 @@ where
                                 &mut retry_selected,
                                 &mut pending_provider_action_recovery,
                                 failure_events,
+                                response_processing_code,
                             )
                             .await
                             .map_err(V3RelayCoreError::Target)?
@@ -1618,7 +1681,7 @@ where
                     ))
                 })?;
                 let mut projected_sse = projected_sse;
-                let stream_failure = loop {
+                let mut stream_failure = loop {
                     let next = match tokio::time::timeout_at(attempt_deadline, projected_sse.next())
                         .await
                     {
@@ -1652,28 +1715,71 @@ where
                             }
                         }
                         Some(Err(reason)) => {
-                            break Some(V3RelayAttemptCollectFailure::ProviderResponseBody(reason))
+                            break Some(
+                                match stream_observation
+                                    .take_response_governance_failure()
+                                    .map_err(V3RelayCoreError::Target)?
+                                {
+                                    Some(error) => {
+                                        V3RelayAttemptCollectFailure::ResponseGovernance(error)
+                                    }
+                                    None => {
+                                        V3RelayAttemptCollectFailure::ProviderResponseBody(reason)
+                                    }
+                                },
+                            )
                         }
                         None => {
-                            break match stream_observation.has_provider_business_content() {
-                                Ok(true) => None,
-                                Ok(false) => {
-                                    Some(V3RelayAttemptCollectFailure::EmptyProviderAttempt)
-                                }
-                                Err(error) => {
-                                    Some(V3RelayAttemptCollectFailure::Observation(error))
-                                }
-                            }
+                            break None;
                         }
                     }
                 };
+                if stream_failure.is_none() && C::ENTRY_PROTOCOL == V3HubEntryProtocol::OpenAiChat {
+                    if let Err(error) = compile_v3_hub_relay_response_hooks()
+                        .govern_complete_chat_sse(&mut committed_attempt)
+                    {
+                        stream_failure = Some(match error {
+                            V3RelayCompleteResponseError::Governance(error) => {
+                                V3RelayAttemptCollectFailure::ResponseGovernance(error)
+                            }
+                            V3RelayCompleteResponseError::Processing(reason) => {
+                                V3RelayAttemptCollectFailure::ResponseGovernance(
+                                    V3HubRelayResponseError::ProviderCompatFailed { reason },
+                                )
+                            }
+                            V3RelayCompleteResponseError::Store(error) => {
+                                V3RelayAttemptCollectFailure::LocalStore(error)
+                            }
+                        });
+                    }
+                }
+                if stream_failure.is_none() {
+                    let protocol = match C::ENTRY_PROTOCOL {
+                        V3HubEntryProtocol::OpenAiChat => V3HubProviderWireProtocol::OpenAiChat,
+                        V3HubEntryProtocol::Responses => V3HubProviderWireProtocol::Responses,
+                        V3HubEntryProtocol::Anthropic => V3HubProviderWireProtocol::Anthropic,
+                        V3HubEntryProtocol::Gemini => V3HubProviderWireProtocol::Gemini,
+                    };
+                    stream_failure = match projected_sse_has_business_content(
+                        protocol,
+                        committed_attempt.frames(),
+                    ) {
+                        Ok(true) => None,
+                        Ok(false) => Some(V3RelayAttemptCollectFailure::ResponseGovernance(
+                            V3HubRelayResponseError::GovernedAttemptEmpty,
+                        )),
+                        Err(reason) => Some(V3RelayAttemptCollectFailure::ResponseGovernance(
+                            V3HubRelayResponseError::ProviderCompatFailed { reason },
+                        )),
+                    };
+                }
                 if let Some(failure) = stream_failure {
-                    let mut failure = match failure {
-                        V3RelayAttemptCollectFailure::EmptyProviderAttempt => {
-                            provider_request_failure(
-                                "V3ProviderRespInbound01Raw",
-                                "provider_response_empty",
-                                "provider returned no deliverable business content",
+                    let (mut failure, response_processing_code) = match failure {
+                        V3RelayAttemptCollectFailure::ResponseGovernance(error) => {
+                            provider_response_governance_failure(
+                                V3RelayCoreError::ResponseGovernance(error),
+                                request_id,
+                                &selected_target_provider_id,
                             )
                         }
                         V3RelayAttemptCollectFailure::LocalStore(error) => {
@@ -1693,18 +1799,21 @@ where
                                 drop(provider_action_permit.take());
                                 return Err(V3RelayCoreError::WebSearchIntercepted(reason));
                             }
-                            provider_runtime_failure(
-                                V3ProviderError::ResponseBody {
-                                    request_id: request_id.to_string(),
-                                    provider_id: selected_target_provider_id.clone(),
-                                    reason: format!(
-                                        "provider response event codec failed: {reason}"
-                                    ),
-                                },
-                                &selected_target_provider_id,
+                            (
+                                provider_runtime_failure(
+                                    V3ProviderError::ResponseBody {
+                                        request_id: request_id.to_string(),
+                                        provider_id: selected_target_provider_id.clone(),
+                                        reason: format!(
+                                            "provider response event codec failed: {reason}"
+                                        ),
+                                    },
+                                    &selected_target_provider_id,
+                                ),
+                                None,
                             )
                         }
-                        V3RelayAttemptCollectFailure::ProviderTransport(reason) => {
+                        V3RelayAttemptCollectFailure::ProviderTransport(reason) => (
                             provider_runtime_failure(
                                 V3ProviderError::Transport {
                                     request_id: request_id.to_string(),
@@ -1712,12 +1821,13 @@ where
                                     reason,
                                 },
                                 &selected_target_provider_id,
-                            )
-                        }
+                            ),
+                            None,
+                        ),
                     };
                     failure.provider_status = Some(provider_status);
                     drop(provider_action_permit.take());
-                    let terminal_failure = handle_provider_failure(
+                    let terminal_failure = handle_provider_failure_with_response_code(
                         &failure_context,
                         selected,
                         failure.clone(),
@@ -1730,6 +1840,7 @@ where
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
                         failure_events,
+                        response_processing_code,
                     )
                     .await
                     .map_err(V3RelayCoreError::Target)?;
@@ -1794,6 +1905,10 @@ where
                         .map_err(V3RelayCoreError::Target)?;
                 }
                 observability.provider_failure_events = std::mem::take(failure_events);
+                // The response chain is recorded only once this attempt is
+                // validated and committed. A discarded attempt must not claim
+                // the client frame before the reselection trace.
+                push_sse_response_chain_trace(&mut trace);
                 return Ok(C::assemble_sse_output(
                     committed_sse,
                     trace,

@@ -847,6 +847,10 @@ impl V3CommittedClientSseBuilder {
         &self.frames
     }
 
+    pub(crate) fn last_marked_terminal_frame_index(&self) -> Option<usize> {
+        self.terminal_frame_index
+    }
+
     pub(crate) fn seal_after_validated_terminal(
         self,
     ) -> Result<V3CommittedClientSseStream, V3AttemptStoreError> {

@@ -23,7 +23,8 @@ async fn issue_d94731e_thinking_upstream(Json(request): Json<Value>) -> Response
 }
 
 fn issue_d94731e_thinking_events() -> Vec<Value> {
-    let message = issue_d94731e_message("msg_d94731e", "<thinking>leading body");
+    let message = issue_d94731e_message("msg_d94731e", "<thinking>leading body</thinking>");
+    let call = json!({"type":"function_call","id":"fc_thinking_result","call_id":"call_thinking_result","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"});
     vec![
         json!({
             "type":"response.output_item.added",
@@ -62,21 +63,21 @@ fn issue_d94731e_thinking_events() -> Vec<Value> {
             "output_index":0,
             "item_id":"msg_d94731e",
             "content_index":0,
-            "delta":"body"
+            "delta":"body</thinking>"
         }),
         json!({
             "type":"response.output_text.done",
             "output_index":0,
             "item_id":"msg_d94731e",
             "content_index":0,
-            "text":"<thinking>leading body"
+            "text":"<thinking>leading body</thinking>"
         }),
         json!({
             "type":"response.content_part.done",
             "output_index":0,
             "item_id":"msg_d94731e",
             "content_index":0,
-            "part":{"type":"output_text","text":"<thinking>leading body"}
+            "part":{"type":"output_text","text":"<thinking>leading body</thinking>"}
         }),
         json!({
             "type":"response.output_item.done",
@@ -88,7 +89,7 @@ fn issue_d94731e_thinking_events() -> Vec<Value> {
             "response":{
                 "id":"resp_d94731e",
                 "status":"completed",
-                "output":[message]
+                "output":[message,call]
             }
         }),
     ]
@@ -365,6 +366,7 @@ async fn responses_direct_d94731e_thinking_tags_public_blackbox() {
     );
     assert!(body.contains("leading body"), "{body}");
     assert!(!body.contains("response.output_text.delta"), "{body}");
+    assert!(body.contains("call_thinking_result"), "{body}");
     assert!(!body.contains("<thinking>"), "{body}");
 }
 
@@ -378,6 +380,7 @@ async fn responses_direct_d94731e_without_profile_or_reasoning_capability() {
     );
     assert!(body.contains("leading body"), "{body}");
     assert!(!body.contains("response.output_text.delta"), "{body}");
+    assert!(body.contains("call_thinking_result"), "{body}");
     assert!(!body.contains("<thinking>"), "{body}");
 }
 

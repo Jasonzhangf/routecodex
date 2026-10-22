@@ -637,7 +637,7 @@ resources:
       release: Runtime admission drop, pre-acquired transport request drop, and Provider permit-guard drop release the lease exactly once on early exit, cancellation, transport failure, response completion, or stream drop
       boundary: lease and capacity state remain typed process-local control state and never enter request, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [V3AdaptiveConcurrencyController::ensure_initial_budget, V3AdaptiveConcurrencyController::try_acquire_business, V3AdaptiveConcurrencyController::try_acquire_scheduled_probe, V3AdaptiveConcurrencyController::release, V3AdaptiveConcurrencyController::complete_probe, V3AdaptiveConcurrencyController::observe_business_success, V3RuntimeProviderAdmission::drop, V3PreAcquiredProviderAdmission::release, V3AdaptiveConcurrencyPermitGuard::drop]
-    allowed_readers: [V3AdaptiveConcurrencyController::snapshot, select_v3_expanded_target_with_admission_rescue, V3ProviderResponsesTransport::send]
+    allowed_readers: [V3AdaptiveConcurrencyController::snapshot, try_admit_v3_selected_target, V3ProviderResponsesTransport::send]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-error, request.normal_payload, provider.wire_payload, response.client_payload, MetadataCenter.payload, Debug.payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1122,6 +1122,8 @@ resources:
       serialized_tool_failure: recognized incomplete declared invocations discard the whole attempt even beside complete tools or prose; Relay internal code 500-231 and RuntimeFailure/internal599 enter existing Error02-05 health-neutral exact-attempt recovery, with actual upstream status retained separately
       serialized_tool_preservation: native invalid model arguments, literal/unknown complete envelopes and opaque associations remain business content; no guessed identity or control state enters the payload
       complete_attempt_admission: the Runtime marks a buffered complete provider attempt in the typed response hook profile; only that scope runs post-governance whole-attempt empty admission, never a transport keepalive, delta or terminal fragment alone
+      complete_chat_sse_governance: registered Resp03 complete_chat_sse callback owns complete text-carrier rewriting before Runtime final-frame business-content admission and seal; builder remains protocol-independent storage
+      async_governance_source: original V3HubRelayResponseError lives in V3RuntimeStreamControlState response_governance_failure under its separate control Arc, never in business payload or diagnostic snapshot
     allowed_writers: [V3HubRespInbound02Normalized, V3HubRespChatProcess03Governed]
     allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespOutbound05ClientSemantic]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3ServerRespOutbound06ClientFrame]
@@ -3165,7 +3167,7 @@ resources:
       immutable_after_hit: true
       recovery_scope: Target-local reselect consumes this plan and never re-enters Router classify, route policy evaluation, or opaque pool hit.
     allowed_writers: [V3Target09CandidateSetExpanded]
-    allowed_readers: [execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core, V3Error05ExecutionDecision, resolve_v3_relay_entry_target]
+    allowed_readers: [execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core, V3Error05ExecutionDecision, run_v3_plan_execution_operator_with_probes]
     forbidden_writers: [SSE_stream_wrapper, ProviderTransport, protocol_codec, compat_hook, observability]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -3409,13 +3411,15 @@ resources:
     lifecycle: v3.operation_runner.request
     owner_feature_id: v3.unified_operation_runner_design
     owner_crate: routecodex-v3-runtime
-    owner_node: RuntimeErrorActionConsumed
+    owner_node: V3OperationRunnerPlanExecution
     identity: [requestId, invocationId, attemptId]
     semantic_contract:
-      storage_owner: reference to the existing request-local excluded-candidate set consumed by Target; not a second exclusion store
-      mutation_owner: the existing typed Error action consumer updates exclusions before a new attempt
-      request_boundary: exclusions never enter request, response, provider, or client bodies
-    allowed_writers: [RuntimeErrorActionConsumed]
+      storage_owner: V3OperationRunnerPlanExecution persists one request-local exclusion set plus exact capacity-busy provenance; this is not a process-global store or a second admission controller
+      mutation_owner: typed Error action consumption adds non-capacity exclusions; capacity admission and post-transport ConcurrencyBusy readmission add only exact candidate keys proven busy before captured-target reselection
+      provenance_rule: busy evidence never comes from cooldown, capability mismatch, provider failure, an initial exclusion, or attempted_candidates
+      classification: pure all-busy requires a nonempty captured Target09 set, every captured key busy, and every exclusion busy; any other exclusion cause leaves generic mixed exhaustion
+      request_boundary: exclusion and busy provenance never enter request, response, provider, client, MetadataCenter, or Debug payloads
+    allowed_writers: [RuntimeErrorActionConsumed, V3OperationRunnerPlanExecution]
     allowed_readers: [V3OperationRunnerPlanExecution]
     forbidden_writers: [V3OperationRunnerResolveTarget, routecodex-v3-server, routecodex-v3-debug]
     may_enter_provider_body: false
@@ -3559,6 +3563,8 @@ resources:
     semantic_contract:
       writer: normalize_v3_operation_runner_provider_response
       content: successful_attempt_source_and_provider_response_field_origin
+      terminal_reason_binding: V3HubRespInbound02Normalized.source_terminal_reason and its typed source-protocol normal-completion witness preserve the successful attempt's original facts for adjacent Chat Outbound projection. An explicit non-stop reason keeps precedence; a genuine original Responses normal completion may project to the Chat normal terminal; a native Chat missing reason stays missing. Canonical lifecycle status, payload content and transport end are never completion witnesses, and the witness never enters client or provider payload.
+      attempt_lifetime_rule: the witness is bound to successfulAttemptId; a failed, earlier or alternate attempt cannot leave its completion fact in the next attempt.
       consumer_rule: Chat Process Resp03 and inverse projection may consume provenance only for the successful attempt
       payload_rule: provenance is typed control metadata; it is not reconstructed from response payload fields
     allowed_writers: [normalize_v3_operation_runner_provider_response]
@@ -3659,7 +3665,7 @@ resources:
       staging_only: this resource is a staged candidate produced by the fixed response graph; it is never written directly to a client body
       committer: RuntimeClientCommit alone submits the staged candidate to Server/SSE after all declared rewrites leave deliverable whole-attempt business content and execution_disposition=client_commit
       deliverable_rule: ordinary text, tool-call-only, reasoning, refusal, and content_filter are business results; usage and the last frame alone do not establish deliverability
-      blank_assistant_final: do not commit an explicit whitespace-only assistant final solely because earlier reasoning exists; preserve independent business results and reasoning-only attempts without an assistant final
+      blank_assistant_final: after all filtering and harvesting require visible body, complete tools or independent business results; reasoning alone cannot authorize completion, and unharvestable recognized tool markup fails the whole attempt through internal 502 (e63d2f2)
       empty_attempt_rule: no candidate is committed when the complete attempt is empty after declared non-client envelope removal; ProviderFailure/provider_response_empty enters Error01 as internal 502
       processing_failure_rule: loss or failure of representable business content enters Error01 as RuntimeFailure/internal 599, not as client success or upstream failure
       servertool_rule: RespOutbound and frame staging return an empty candidate for servertool_followup; Runtime discards it and re-enters the request graph

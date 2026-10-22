@@ -2884,19 +2884,19 @@ fn anthropic_terminal_projection_preserves_opaque_details() {
 }
 
 #[test]
-fn anthropic_model_context_window_stop_is_explicitly_unsupported_for_responses() {
-    let error = project_v3_anthropic_message_as_responses_response(&json!({
+fn anthropic_model_context_window_stop_preserves_incomplete_business_response() {
+    let response = project_v3_anthropic_message_as_responses_response(&json!({
         "id":"msg_context_window",
         "role":"assistant",
         "content":[{"type":"text","text":"partial"}],
         "stop_reason":"model_context_window_exceeded"
     }))
-    .expect_err("Responses has no exact incomplete reason for Anthropic input-context exhaustion");
+    .expect("representable partial business content must pass through");
 
-    assert!(
-        error.to_string().contains("model_context_window_exceeded"),
-        "{error}"
-    );
+    assert_eq!(response["status"], "incomplete");
+    assert_eq!(response["output"][0]["content"][0]["text"], "partial");
+    assert!(response.get("finish_reason").is_none(), "{response}");
+    assert!(response.get("error").is_none(), "{response}");
 }
 
 #[test]

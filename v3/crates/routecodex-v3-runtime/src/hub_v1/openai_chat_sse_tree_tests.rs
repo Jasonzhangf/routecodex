@@ -678,17 +678,19 @@ fn chat_reducer_keeps_tool_call_when_terminal_delta_also_has_empty_content() {
 }
 
 #[test]
-fn chat_reducer_rejects_unknown_finish_reason() {
-    let error = V3OpenAiChatSseReducerState::default()
+fn chat_reducer_preserves_unknown_finish_reason() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
         .apply_chunk(&json!({
             "object":"chat.completion.chunk",
             "choices":[{"index":0,"delta":{},"finish_reason":"future_reason"}]
         }))
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        V3OpenAiChatSseTreeError::UnknownFinishReason { .. }
-    ));
+        .unwrap();
+    assert_eq!(reducer.terminal, Some(V3OpenAiChatSseTerminalState::Opaque));
+    assert_eq!(
+        reducer.materialize_completion().unwrap()["choices"][0]["finish_reason"],
+        "future_reason"
+    );
 }
 
 #[test]

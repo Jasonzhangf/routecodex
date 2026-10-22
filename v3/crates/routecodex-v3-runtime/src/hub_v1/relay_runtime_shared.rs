@@ -16,9 +16,10 @@ use crate::hub_v1::{
 };
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,
-    run_v3_relay_provider_failure_policy, v3_relay_provider_candidate_key_parts,
-    V3RelayErrorOperatorFault, V3RelayProviderFailurePolicyContext,
-    V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
+    run_v3_relay_provider_failure_policy_with_response_source,
+    v3_relay_provider_candidate_key_parts, V3RelayErrorOperatorFault,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
+    V3RelayProviderFailurePolicyState,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -47,6 +48,7 @@ pub enum V3RelayCoreError {
     StaticRegistry(String),
     EndpointPath(String),
     Target(String),
+    ResponseGovernance(super::V3HubRelayResponseError),
     ProviderPoolExhausted {
         attempted_candidates: Vec<String>,
     },
@@ -61,6 +63,7 @@ impl fmt::Display for V3RelayCoreError {
             V3RelayCoreError::StaticRegistry(message) => write!(f, "static registry: {message}"),
             V3RelayCoreError::EndpointPath(message) => write!(f, "endpoint path: {message}"),
             V3RelayCoreError::Target(message) => write!(f, "target: {message}"),
+            V3RelayCoreError::ResponseGovernance(error) => error.fmt(f),
             V3RelayCoreError::ProviderPoolExhausted {
                 attempted_candidates,
             } => write!(f, "provider pool exhausted after {attempted_candidates:?}"),
@@ -335,10 +338,33 @@ pub async fn handle_provider_failure(
     pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
     provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
+    handle_provider_failure_with_response_code(
+        context,
+        selected,
+        failure,
+        state,
+        retry_selected,
+        pending_recovery,
+        provider_failure_events,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn handle_provider_failure_with_response_code(
+    context: &V3RelayProviderFailurePolicyContext<'_>,
+    selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    mut failure: V3RelayProviderFailure,
+    state: &mut V3RelayProviderFailurePolicyState<'_>,
+    retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
+    provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
+    response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
+) -> Result<Option<V3RelayProviderFailure>, String> {
     if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
     }
-    let mut result = match run_v3_relay_provider_failure_policy(
+    let mut result = match run_v3_relay_provider_failure_policy_with_response_source(
         context,
         selected,
         failure.source_stage,
@@ -347,6 +373,7 @@ pub async fn handle_provider_failure(
         provider_failure_message(&failure),
         None,
         state,
+        response_processing_code,
     )
     .await
     {
@@ -763,6 +790,33 @@ pub fn provider_http_body_read_failure(
 }
 
 /// 请求构造失败（共享版；gemini/openai/responses 形状）。
+pub(crate) fn provider_response_governance_failure(
+    error: V3RelayCoreError,
+    request_id: &str,
+    provider_id: &str,
+) -> (
+    V3RelayProviderFailure,
+    Option<routecodex_v3_error::V3InternalErrorCode>,
+) {
+    match error {
+        V3RelayCoreError::ResponseGovernance(super::V3HubRelayResponseError::GovernedAttemptEmpty) => (
+            provider_request_failure("V3HubRespChatProcess03Governed", "provider_response_empty", "provider response contained no deliverable business content after Relay governance"), None,
+        ),
+        V3RelayCoreError::ResponseGovernance(super::V3HubRelayResponseError::UnharvestableToolMarkup) => (
+            provider_request_failure("V3HubRespChatProcess03Governed", "relay_unharvestable_tool_markup", "recognized incomplete tool invocation cannot be delivered"),
+            Some(routecodex_v3_error::V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup),
+        ),
+        V3RelayCoreError::ResponseGovernance(error) => {
+            let mut failure = provider_request_failure("V3HubRespChatProcess03Governed", "relay_response_processing_failure", error);
+            failure.status = 599;
+            (failure, Some(routecodex_v3_error::V3InternalErrorCode::V3HubRelayResp03Processing))
+        }
+        other => (provider_runtime_failure(V3ProviderError::ResponseBody {
+            request_id: request_id.to_string(), provider_id: provider_id.to_string(), reason: format!("provider response governance failed: {other}"),
+        }, provider_id), None),
+    }
+}
+
 pub fn provider_request_failure(
     source_stage: &'static str,
     error_type: &'static str,
@@ -907,6 +961,46 @@ pub fn provider_failure_message(failure: &V3RelayProviderFailure) -> String {
 
 /// Provider failure that consumed the request residence budget must still be
 /// projected through the typed Error01-06 chain before the relay loop exits.
+pub fn terminalize_provider_failure_with_source(
+    mut failure: V3RelayProviderFailure,
+    source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
+) -> V3RelayProviderFailure {
+    let Some(source) = source else {
+        return terminalize_provider_failure(failure, last_external_http);
+    };
+    if failure.terminal_projection.is_some() {
+        return failure;
+    }
+    if failure.terminal_disposition.is_none() {
+        failure.terminal_disposition = Some(match last_external_http {
+            Some(witness) => {
+                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)
+            }
+            None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        });
+    }
+    if failure.error_operator_fault.is_some() {
+        return failure;
+    }
+    failure.client_response = json!({
+        "error": {
+            "code": source.code.clone(),
+            "message": source.message.clone(),
+        }
+    });
+    match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+        source,
+        V3ErrorActionScope::None,
+        0,
+        None,
+    ) {
+        Ok(projected) => failure.terminal_projection = Some(projected),
+        Err(fault) => failure.error_operator_fault = Some(fault),
+    }
+    failure
+}
+
 pub fn terminalize_provider_failure(
     mut failure: V3RelayProviderFailure,
     last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
@@ -1182,16 +1276,19 @@ pub(crate) fn relay_handoff_entry_state(
 ) -> (
     crate::runtime_timing::V3RuntimeTimingState,
     std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
     Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
 ) {
     match handoff {
         Some(handoff) => (
             handoff.observability_accumulator.timing(),
             handoff.request_local_excluded_candidates.clone(),
+            handoff.request_local_busy_candidates.clone(),
             Some(handoff.target.clone()),
         ),
         None => (
             crate::runtime_timing::V3RuntimeTimingState::start(),
+            std::collections::BTreeSet::new(),
             std::collections::BTreeSet::new(),
             None,
         ),
@@ -1211,57 +1308,6 @@ pub(crate) fn relay_request_execution_control(
                     "V3ExecutionAttemptBudget rejected relay request: {error}"
                 ))
             }),
-    }
-}
-
-pub(crate) async fn resolve_v3_relay_entry_target(
-    input: crate::provider_failure_runtime_policy::V3RelayProviderTargetResolutionInput<'_>,
-    allow_exhaustion_rescue_probe: bool,
-    preferred_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    captured_expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
-) -> crate::provider_failure_runtime_policy::V3RelayProviderAdmittedTargetResolution {
-    use crate::provider_failure_runtime_policy::{
-        resolve_v3_relay_target_outcome_with_admission_rescue,
-        select_v3_expanded_target_with_admission_rescue, V3AdmittedTargetSelectionAfterRescue,
-        V3RelayProviderAdmittedTargetResolution,
-    };
-
-    let Some(expanded) = captured_expanded else {
-        return resolve_v3_relay_target_outcome_with_admission_rescue(
-            input,
-            allow_exhaustion_rescue_probe,
-            preferred_selected,
-        )
-        .await;
-    };
-
-    match select_v3_expanded_target_with_admission_rescue(
-        input.manifest,
-        expanded.clone(),
-        input.failure_session_scope,
-        input.provider_health,
-        input.request_local_excluded_candidates,
-        input.now_ms,
-        input.deterministic_sample,
-        allow_exhaustion_rescue_probe,
-        preferred_selected,
-    )
-    .await
-    {
-        V3AdmittedTargetSelectionAfterRescue::Selected(selected) => {
-            V3RelayProviderAdmittedTargetResolution::Selected(selected)
-        }
-        V3AdmittedTargetSelectionAfterRescue::Exhausted(exhausted) => {
-            V3RelayProviderAdmittedTargetResolution::Exhausted {
-                attempted_candidates: exhausted.attempted_candidates,
-            }
-        }
-        V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
-            V3RelayProviderAdmittedTargetResolution::Failed(source)
-        }
-        V3AdmittedTargetSelectionAfterRescue::OperatorFault(fault) => {
-            V3RelayProviderAdmittedTargetResolution::OperatorFault(fault)
-        }
     }
 }
 

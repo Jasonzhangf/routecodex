@@ -512,9 +512,36 @@
         "version": 1
       },
       "version": 19
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "但是这个样本有典型意义，我们处理方式是：1. 如果我们过滤后没有正文这个响应标记为传输错误，做失败处理，走失败502链条。2. 如果有泄露文本能收割：tool call就看能否收割到工具，不能就报错走错误链，finish reason=stop关键是正文是否非空，是否特判，如果是无意义的字符和空，就走失败502。",
+          "role": "user",
+          "source": "Explicit contract update in root chat 01a1345f-00c7-7f72-89b3-538b61fb4e66; issue e63d2f2; original incident scope port4444."
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261020-e63d2f2-postfilter-empty",
+        "requirement_id": "routecodex-post-filter-attempt-deliverability",
+        "text": "完整 provider attempt 经过全部声明过滤、标记治理和有限工具收割后，若没有可显示正文、完整工具调用或应保留的独立业务结果，必须产生内部502并走既有typed Error重试/切换链；不能正常空完成。reasoning须保真，但不能单独授权完整attempt成功；本条明确取代client-provider-error-decoupling、explicit-blank-assistant-final-recovery、invisible-assistant-final-recovery中允许无显式final的纯reasoning完成的部分，其余约束保留。stop、end_turn、completed和过滤前的非空事实均不能覆盖最终判定。无意义限于空白、不可见控制/格式字符和已识别协议残留，不判断自然语言计划或任务完成感；非空普通正文仍可通过。已识别工具泄露必须收割出完整工具，否则整个attempt进入内部502，即使伴随正文也不能局部伪成功；不以模型参数业务有效性或schema正确性阻断可表示的完整调用。完整工具应投影原生tool-call终态并保留身份、参数、call_id及后续配对结果。refusal、content_filter和其他独立多模态/opaque业务结果继续保真。真正本地处理损坏仍走599；不扩大健康/冷却/重试策略；耗尽仅中断该请求传输，不向客户端返回错误号、错误payload或正常空完成。Direct改写只在注册hook，Relay改写只在Chat Process，完整attempt判定复用唯一共享owner。7777样本仅可提供脱敏fixture形状，不得充作4444原故障证据。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "但是这个样本有典型意义，我们处理方式是：1. 如果我们过滤后没有正文这个响应标记为传输错误，做失败处理，走失败502链条。2. 如果有泄露文本能收割：tool call就看能否收割到工具，不能就报错走错误链，finish reason=stop关键是正文是否非空，是否特判，如果是无意义的字符和空，就走失败502。",
+          "role": "user",
+          "source": "Explicit contract update in root chat 01a1345f-00c7-7f72-89b3-538b61fb4e66; issue e63d2f2; original incident scope port4444."
+        },
+        "requirement_id": "routecodex-post-filter-attempt-deliverability",
+        "status": "active",
+        "text": "完整 provider attempt 经过全部声明过滤、标记治理和有限工具收割后，若没有可显示正文、完整工具调用或应保留的独立业务结果，必须产生内部502并走既有typed Error重试/切换链；不能正常空完成。reasoning须保真，但不能单独授权完整attempt成功；本条明确取代client-provider-error-decoupling、explicit-blank-assistant-final-recovery、invisible-assistant-final-recovery中允许无显式final的纯reasoning完成的部分，其余约束保留。stop、end_turn、completed和过滤前的非空事实均不能覆盖最终判定。无意义限于空白、不可见控制/格式字符和已识别协议残留，不判断自然语言计划或任务完成感；非空普通正文仍可通过。已识别工具泄露必须收割出完整工具，否则整个attempt进入内部502，即使伴随正文也不能局部伪成功；不以模型参数业务有效性或schema正确性阻断可表示的完整调用。完整工具应投影原生tool-call终态并保留身份、参数、call_id及后续配对结果。refusal、content_filter和其他独立多模态/opaque业务结果继续保真。真正本地处理损坏仍走599；不扩大健康/冷却/重试策略；耗尽仅中断该请求传输，不向客户端返回错误号、错误payload或正常空完成。Direct改写只在注册hook，Relay改写只在Chat Process，完整attempt判定复用唯一共享owner。7777样本仅可提供脱敏fixture形状，不得充作4444原故障证据。",
+        "version": 1
+      },
+      "version": 20
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 19
+  "version": 20
 }

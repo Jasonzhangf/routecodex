@@ -1215,6 +1215,10 @@ pub(crate) fn project_v3_responses_relay_error_chain(
             project_path: request_console_project_path,
             // The live-snapshot relay lane exposes only the chain; record the
             // explicit "Error06 typed truth not exposed" marker.
+            execution_mode: output
+                .observability
+                .as_ref()
+                .map(|observability| observability.execution_mode.as_str()),
             error06_exposed: false,
             error_class: None,
             health_action: None,

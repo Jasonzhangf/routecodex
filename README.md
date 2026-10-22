@@ -53,7 +53,7 @@ export OPENAI_API_KEY="your_openai_key"
 export ANTHROPIC_API_KEY="your_anthropic_key"
 ```
 
-不要创建或恢复 `config.json`、`configsamples/`、`webui/`、仓库 `samples/` 或 `rcc init` 生成的 V2 provider 文件。
+`provider/<id>/config.v2.toml` 是当前 V3 provider-directory 输入格式，文件名中的 `v2` 仅为格式兼容保留；它不是 V2 runtime、V2 root config reader 或迁移入口。加载契约见 [`v3/README.md`](v3/README.md#provider-config-contract)。不要创建或恢复 `config.json`、`configsamples/`、`webui/`、仓库 `samples/` 或 V2 root config。
 
 ## 文档
 
