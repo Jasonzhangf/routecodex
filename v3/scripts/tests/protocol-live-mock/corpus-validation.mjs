@@ -466,7 +466,7 @@ function validateToolFollowup(relative, value, findings) {
     || followup.assert_declared_tool_binding_only === true
     || followup.assert_tool_executed_once === true;
   if (!hasToolFlag) fail('tool_followup must declare at least one tool assertion flag');
-  const executingConsumers = new Set(['echo', 'echo-line-result', 'local-namespace-mock', 'unknown-tool-correction', 'codex-real-exec']);
+  const executingConsumers = new Set(['echo', 'structured-echo', 'echo-line-result', 'local-namespace-mock', 'unknown-tool-correction', 'codex-real-exec']);
   if (followup.assert_tool_executed_once === true && !executingConsumers.has(followup.consumer)) {
     fail('tool_followup.assert_tool_executed_once requires an executing consumer (echo, echo-line-result, local-namespace-mock or unknown-tool-correction)');
   }
@@ -494,6 +494,19 @@ function validateToolFollowup(relative, value, findings) {
   if (followup.consumer === 'echo-line-result') {
     validateEchoLineResultFollowup(relative, value, followup, findings);
     return;
+  }
+  if (followup.consumer === 'structured-echo') {
+    if (value.cell?.entry_protocol !== 'responses') {
+      fail('tool_followup.consumer structured-echo requires the responses entry protocol');
+    }
+    if (followup.side_effect !== 'none') {
+      fail('tool_followup.consumer structured-echo requires side_effect none');
+    }
+    if (followup.assert_no_synthesized_tool_result !== true
+      || followup.assert_declared_tool_binding_only !== true
+      || followup.assert_tool_executed_once !== true) {
+      fail('tool_followup.consumer structured-echo requires all three tool assertion flags');
+    }
   }
   if (followup.consumer === 'codex-real-exec') {
     validateCodexRealExecFollowup(relative, value, followup, findings);

@@ -75,9 +75,9 @@ function upstreamToolCall(upstream) {
       .find((call) => call?.function?.arguments);
 }
 
-test('real corpus loads 71 fixtures sorted with exact identities', () => {
+test('real corpus loads 75 fixtures sorted with exact identities', () => {
   const loaded = loadFixtures(realFixtureRoot);
-  assert.equal(loaded.length, 71);
+  assert.equal(loaded.length, 75);
   const ids = loaded.map((entry) => entry.value.case_id);
   assert.equal(ids.length, new Set(ids).size);
   assert.equal(ids[0], 'anthropic-to-anthropic-json');
@@ -85,12 +85,12 @@ test('real corpus loads 71 fixtures sorted with exact identities', () => {
   assert.deepEqual(loaded.map((entry) => entry.relative), [...loaded.map((entry) => entry.relative)].sort());
   const report = inspectCorpus(realFixtureRoot);
   assert.equal(report.ok, true, report.findings.join('\n'));
-  assert.equal(report.case_count, 71);
+  assert.equal(report.case_count, 75);
   assert.deepEqual(report.findings, []);
   assert.equal(report.coverage.base_cells, 16);
   assert.equal(report.coverage.base_cells_covered, 16);
   assert.equal(report.coverage.base_variants_covered, 32);
-  assert.equal(report.extensions.length, 39);
+  assert.equal(report.extensions.length, 43);
   assert.equal(report.source_refs.checked, false);
   assert.deepEqual(report.source_refs.stale_files, []);
   assert.deepEqual(report.source_refs.stale_tests, []);
@@ -123,6 +123,19 @@ test('fe1ec4b fixtures bind public JSON/SSE evidence and typed countercases', ()
     primary.turns[1].expected_client_must['output_items.3.output.encrypted_content'],
     'tool-business-cipher-sse',
   );
+  const toolFollowup = byId.get('fe1ec4b-responses-tool-cipher-json-sse-followup');
+  assert.ok(toolFollowup);
+  assert.equal(toolFollowup.tool_followup.consumer, 'structured-echo');
+  assert.equal(toolFollowup.expected_client.body_must['output.1.call_id'], 'call_fe1ec4b_tool');
+  assert.equal(
+    toolFollowup.expected_client.body_must['output.1.arguments.encrypted_content'],
+    'structured-tool-argument-business-value',
+  );
+  assert.equal(
+    toolFollowup.turns[1].expected_provider.body_must['input.2.call_id'],
+    'call_fe1ec4b_tool',
+  );
+  assert.equal(toolFollowup.turns[1].expected_provider.body_must['input.2.output'], 'ping');
 
   for (const caseId of [
     'fe1ec4b-responses-anthropic-signature-json',

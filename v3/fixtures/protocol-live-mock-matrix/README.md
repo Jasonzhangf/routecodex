@@ -21,10 +21,11 @@ fixture, and independently written expected values.
 
 ## Issue regressions
 
-Issue `fe1ec4b` has three public-listener cases:
+Issue `fe1ec4b` has four public-listener cases:
 
 ```text
 fe1ec4b-responses-ciphertext-json-sse-two-turn
+fe1ec4b-responses-tool-cipher-json-sse-followup
 fe1ec4b-responses-anthropic-signature-json
 fe1ec4b-responses-anthropic-signature-sse
 ```
@@ -32,9 +33,11 @@ fe1ec4b-responses-anthropic-signature-sse
 The first case starts a task-owned loopback listener with a two-provider
 Responses pool. Turn one verifies JSON output does not expose UUID-shaped or
 opaque reasoning ciphertext. Turn two replays that history over SSE and checks
-both provider history stripping and the client stream. The two Anthropic cases
-are typed-source counterexamples: their JSON and SSE reasoning signatures must
-survive Responses projection.
+both provider history stripping and the client stream. The second case returns
+a structured `function_call`, executes its declared echo binding with the
+observed identity and complete arguments, and sends the actual result back over
+a second SSE turn. The two Anthropic cases are typed-source counterexamples:
+their JSON and SSE reasoning signatures must survive Responses projection.
 
 Run one case without installing or restarting the user runtime:
 

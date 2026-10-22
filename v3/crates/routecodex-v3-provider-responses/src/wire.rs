@@ -392,8 +392,9 @@ fn build_responses_wire_payload_with_registry(
 /// `encrypted_content`（Codex 客户端需要官方密文重建 reasoning 历史）；
 /// `preserve_anthropic_signature=true` 仅由 typed Anthropic provider source
 /// 派生，保留 Anthropic thinking/redacted thinking signature。其余场景递归删除
-/// 除 `function_call_output` 外的所有 `encrypted_content`，保证跨 provider 密文
-/// 不进入客户端。响应侧是密文治理的唯一入口；本 hook 只消费判定结果。
+/// 非工具业务子树中的 `encrypted_content`，保证跨 provider 密文不进入客户端。
+/// 工具调用与工具结果可能携带结构化参数或业务字段，必须完整保留。响应侧是密文
+/// 治理的唯一入口；本 hook 只消费判定结果。
 pub fn apply_v3_response_cipher_policy(
     payload: &mut Value,
     retain_response_cipher: bool,
@@ -415,11 +416,15 @@ pub fn apply_v3_chat_reasoning_cipher_policy(payload: &mut Value, retain_respons
 
 /// 响应侧递归删除 reasoning 密文字段。`strip_all=true`（Responses wire）不按密文
 /// 形状判定，删除所有非工具 `encrypted_content`；`strip_all=false`（Chat wire）
-/// 只删除 Codex 本地密文前缀。`function_call_output` 属于业务数据，必须原样保留。
+/// 只删除 Codex 本地密文前缀。工具调用与工具结果属于业务数据，必须原样保留。
 fn strip_v3_response_encrypted_fields_recursive(value: &mut Value, strip_all: bool) {
     match value {
         Value::Object(map) => {
-            if map.get("type").and_then(Value::as_str) == Some("function_call_output") {
+            if map
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(is_v3_responses_tool_business_item)
+            {
                 return;
             }
             let remove = match map.get("encrypted_content") {
@@ -443,6 +448,32 @@ fn strip_v3_response_encrypted_fields_recursive(value: &mut Value, strip_all: bo
         }
         _ => {}
     }
+}
+
+fn is_v3_responses_tool_business_item(item_type: &str) -> bool {
+    matches!(
+        item_type,
+        "function_call"
+            | "function_call_output"
+            | "custom_tool_call"
+            | "custom_tool_call_output"
+            | "local_shell_call"
+            | "local_shell_call_output"
+            | "web_search_call"
+            | "file_search_call"
+            | "code_interpreter_call"
+            | "computer_call"
+            | "computer_call_output"
+            | "mcp_call"
+            | "mcp_list_tools"
+            | "mcp_approval_request"
+            | "mcp_approval_response"
+            | "tool_search_call"
+            | "tool_search_output"
+            | "apply_patch_call"
+            | "apply_patch_call_output"
+            | "image_generation_call"
+    )
 }
 
 /// DeepSeek 官方 Responses（provider 声明 profile `responses:deepseek-official`）

@@ -5,7 +5,7 @@ import { parseClientBody, SUPPORTED_PROTOCOLS } from './protocol-semantics.mjs';
 
 // A consumer value is the only thing that selects an implementation. A tool
 // name observed on the wire never grants execution authority by itself.
-const EXECUTING_CONSUMERS = Object.freeze(['echo', 'echo-line-result', 'local-namespace-mock', 'unknown-tool-correction']);
+const EXECUTING_CONSUMERS = Object.freeze(['echo', 'structured-echo', 'echo-line-result', 'local-namespace-mock', 'unknown-tool-correction']);
 
 // The bounded local mock binding this harness supports. It is an RCC test
 // extension: it launches no agent, sends no message, and runs no command.
@@ -123,6 +123,32 @@ export function executeDeclaredEchoTool({ request, call, entryProtocol }) {
   const key = echoArgumentKey(declaration);
   if (typeof args[key] !== 'string') throw new Error(`echo requires exactly one ${key} string argument`);
   return args[key];
+}
+
+// Structured echo keeps the complete observed argument object while deriving
+// the result from its declared text member. It is used to prove that a
+// provider-returned tool item does not lose unrelated business fields before
+// the client executes it and sends the matching result back.
+export function executeDeclaredStructuredEchoTool({ request, call, entryProtocol }) {
+  const declaration = declaredTool(request, call);
+  if (call.name !== 'echo' || declaration.type === 'custom') {
+    throw new Error('structured echo requires the declared function echo tool');
+  }
+  const protocol = entryProtocolOf(request, entryProtocol);
+  if (protocol !== 'responses') throw new Error('structured echo requires the Responses entry protocol');
+  if (typeof call.id !== 'string' || call.id.length === 0) throw new Error('structured echo requires a tool call id');
+  let args = call.arguments;
+  if (typeof args === 'string') {
+    try {
+      args = JSON.parse(args);
+    } catch (error) {
+      throw new Error(`structured echo arguments are not valid JSON: ${error.message}`);
+    }
+  }
+  if (!isPlainObject(args) || typeof args.text !== 'string') {
+    throw new Error('structured echo requires an object with a string text member');
+  }
+  return args.text;
 }
 
 // A pure local test function bound to the already-declared `echo` tool. It
@@ -377,7 +403,7 @@ export async function runToolFollowup({ fixture, firstResult, sendTurn, effectPa
       return { turnResults, executions, diagnostics, ok: true, localInvocation };
     }
     const calls = extractToolCalls(fixture.cell.entry_protocol, firstResult);
-    const echoLike = consumer === 'echo' || consumer === 'echo-line-result';
+    const echoLike = consumer === 'echo' || consumer === 'structured-echo' || consumer === 'echo-line-result';
     if (echoLike) {
       if (calls.length === 0) throw new Error('no observed echo tool call');
       if (calls.length !== 1) throw new Error('echo consumer requires exactly one observed call');
@@ -393,6 +419,8 @@ export async function runToolFollowup({ fixture, firstResult, sendTurn, effectPa
       const observedParts = fixture.cell.entry_protocol === 'gemini' ? observedGeminiParts(firstResult) : undefined;
       const output = consumer === 'echo'
         ? executeDeclaredEchoTool({ request, call, entryProtocol: fixture.cell.entry_protocol })
+        : consumer === 'structured-echo'
+          ? executeDeclaredStructuredEchoTool({ request, call, entryProtocol: fixture.cell.entry_protocol })
         : executeDeclaredEchoLineResult({ request, call, entryProtocol: fixture.cell.entry_protocol });
       executions.push({ ...call, output });
       if (typeof onExecution === 'function') onExecution(executions[executions.length - 1]);

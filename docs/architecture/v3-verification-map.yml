@@ -2128,6 +2128,7 @@ features:
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   - fe1ec4b-responses-ciphertext-json-sse-two-turn
+  - fe1ec4b-responses-tool-cipher-json-sse-followup
   - fe1ec4b-responses-anthropic-signature-json
   - fe1ec4b-responses-anthropic-signature-sse
   - responses_function_call_history_keeps_mcp_namespace_on_openai_chat_provider_wire

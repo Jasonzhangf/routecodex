@@ -2299,6 +2299,36 @@ mod tests {
                     "output": [{
                         "encrypted_content": "nested-tool-output-business-value"
                     }]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "name": "echo",
+                    "arguments": {
+                        "encrypted_content": "structured-tool-argument-business-value",
+                        "nested": {"encrypted_content": "nested-tool-argument-business-value"}
+                    }
+                },
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_3",
+                    "name": "freeform",
+                    "input": {
+                        "encrypted_content": "custom-tool-input-business-value"
+                    }
+                },
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_3",
+                    "output": {
+                        "encrypted_content": "custom-tool-output-business-value"
+                    }
+                },
+                {
+                    "type": "tool_search_call",
+                    "arguments": {
+                        "encrypted_content": "tool-search-argument-business-value"
+                    }
                 }
             ]
         });
@@ -2338,6 +2368,31 @@ mod tests {
             "nested-tool-output-business-value",
             "the complete function_call_output business subtree must be preserved"
         );
+        assert_eq!(
+            payload["output"][6]["arguments"]["encrypted_content"],
+            "structured-tool-argument-business-value",
+            "function_call structured arguments are business data"
+        );
+        assert_eq!(
+            payload["output"][6]["arguments"]["nested"]["encrypted_content"],
+            "nested-tool-argument-business-value",
+            "the complete function_call arguments subtree must be preserved"
+        );
+        assert_eq!(
+            payload["output"][7]["input"]["encrypted_content"],
+            "custom-tool-input-business-value",
+            "custom_tool_call input is business data"
+        );
+        assert_eq!(
+            payload["output"][8]["output"]["encrypted_content"],
+            "custom-tool-output-business-value",
+            "custom_tool_call_output is business data"
+        );
+        assert_eq!(
+            payload["output"][9]["arguments"]["encrypted_content"],
+            "tool-search-argument-business-value",
+            "tool_search_call arguments are business data"
+        );
 
         let mut retained =
             json!({"output": [{"type": "reasoning", "encrypted_content": "rsn_KEEP"}]});
@@ -2371,6 +2426,14 @@ mod tests {
                     "type": "function_call_output",
                     "call_id": "call_1",
                     "encrypted_content": "tool-business-cipher"
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "arguments": {
+                        "encrypted_content": "rsn_CALL_ARGUMENT_BUSINESS",
+                        "nested": {"encrypted_content": "gAAAA_CALL_ARGUMENT_BUSINESS"}
+                    }
                 }
             ]
         });
@@ -2386,6 +2449,15 @@ mod tests {
         assert_eq!(
             payload["output"][3]["encrypted_content"], "tool-business-cipher",
             "function_call_output remains business data on Chat wire"
+        );
+        assert_eq!(
+            payload["output"][4]["arguments"]["encrypted_content"], "rsn_CALL_ARGUMENT_BUSINESS",
+            "tool calls must not lose codex-shaped structured argument values"
+        );
+        assert_eq!(
+            payload["output"][4]["arguments"]["nested"]["encrypted_content"],
+            "gAAAA_CALL_ARGUMENT_BUSINESS",
+            "the complete Chat tool argument subtree must be preserved"
         );
     }
 
