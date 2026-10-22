@@ -234,13 +234,13 @@ mod tests {
     }
 
     #[test]
-    fn top_level_custom_tool_with_dotted_name_stays_top_level() {
+    fn top_level_custom_tool_with_dotted_name_restores_flat_client_identity() {
         let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
             "tools": [{"type": "custom", "name": "functions.exec"}]
         }))
         .expect("projection context");
         let call = anthropic_tool_use_as_responses_call(
-            &json!({"type": "tool_use", "id": "call_dotted", "name": "functions.exec", "input": {"input": "pwd"}}),
+            &json!({"type": "tool_use", "id": "call_dotted", "name": "functions__exec", "input": {"input": "pwd"}}),
             &context,
         )
         .expect("top-level custom tool name must be preserved");
