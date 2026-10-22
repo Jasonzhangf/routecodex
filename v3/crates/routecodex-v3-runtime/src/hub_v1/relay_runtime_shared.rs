@@ -49,9 +49,7 @@ pub enum V3RelayCoreError {
     EndpointPath(String),
     Target(String),
     ResponseGovernance(super::V3HubRelayResponseError),
-    ProviderPoolExhausted {
-        attempted_candidates: Vec<String>,
-    },
+    ProviderPoolExhausted { attempted_candidates: Vec<String> },
 }
 
 impl fmt::Display for V3RelayCoreError {
