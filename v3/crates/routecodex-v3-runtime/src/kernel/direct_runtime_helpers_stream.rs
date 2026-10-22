@@ -382,6 +382,18 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
             ));
         }
         let frame = frame.bytes;
+        // A semantic terminal or legal closeout must never reach a committed
+        // client channel before complete-attempt governance, business-content
+        // acceptance, and sealing succeed. A later acceptance failure cannot
+        // retract an already-delivered completion event, so the frame stays
+        // held here and is released only on the path that actually seals.
+        let terminal_frame = matches!(
+            disposition,
+            V3SseFrameDisposition::SemanticTerminal | V3SseFrameDisposition::LegalCloseout
+        );
+        if client_committed && terminal_frame {
+            committed.hold_client_flush();
+        }
         has_business_content |= direct_sse_chunk_has_business_content(
             provider_protocol,
             &frame,
@@ -399,7 +411,11 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
             // owner decide the complete attempt at the terminal. Protected
             // business text is then replayed unchanged instead of truncating a
             // valid response, and a real marker is rewritten before projection.
-            if commit_probe.governed_text_pending() {
+            // A semantic terminal or legal closeout is always held past this
+            // point too: acceptance, business-content checks and sealing have
+            // not run yet, and a later failure cannot retract a completion
+            // event already delivered to the client.
+            if commit_probe.governed_text_pending() || terminal_frame {
                 committed.hold_client_flush();
             } else {
                 committed.release_client_flush();
@@ -415,6 +431,12 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
         })?;
         if !client_committed && commit_probe.is_committable() {
             if let Some(sink) = client_frames.clone() {
+                // Defer the terminal frame past the acceptance boundary. The
+                // release immediately before sealing delivers it only after
+                // governance and business checks succeed.
+                if terminal_frame {
+                    committed.hold_client_flush();
+                }
                 committed.commit_client_stream(sink);
                 client_committed = true;
             }
@@ -468,9 +490,10 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                 if !has_business_content {
                     return Err(direct_sse_empty_attempt_failure());
                 }
-                // The owner disposed of every buffered frame, so the projection
-                // may resume only now, on the path that actually seals.
-                committed.release_client_flush();
+                // The terminal frame stays held inside the attempt. Only the
+                // sealed remainder may project it, after acceptance and sealing
+                // have succeeded, so an acceptance failure cannot deliver a
+                // normal completion event to a committed client.
                 let sealed = committed.seal_after_validated_terminal();
                 let sealed = sealed.map_err(|error| {
                     crate::shared::direct_plain_error(
@@ -524,9 +547,9 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
         if !has_business_content {
             return Err(direct_sse_empty_attempt_failure());
         }
-        // The owner disposed of every buffered frame, so the projection may
-        // resume only now, on the path that actually seals.
-        committed.release_client_flush();
+        // The terminal frame stays held inside the attempt. Only the sealed
+        // remainder projects it, so a failure between here and sealing never
+        // reaches a committed client channel.
         let sealed = committed.seal_after_validated_terminal();
         let sealed = sealed.map_err(|error| {
             crate::shared::direct_plain_error(

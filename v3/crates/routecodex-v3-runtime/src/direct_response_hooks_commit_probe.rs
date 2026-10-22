@@ -97,13 +97,29 @@ fn marker_prefix_at_end(text_tail: &str, last_line: &str, marker: &V3GovernedTex
     })
 }
 
+/// Carrier identity for Responses `output_text` deltas and done events. The
+/// delta stream carries `output_index` and `content_index` addressing the same
+/// output item and content part the complete-attempt owners read.
+fn direct_sse_output_text_key(event: &serde_json::Value) -> (usize, usize) {
+    (
+        event
+            .get("output_index")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as usize,
+        event
+            .get("content_index")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as usize,
+    )
+}
+
 #[derive(Debug)]
 pub(crate) struct V3DirectPrefixCommitProbe {
     protocol: V3HubProviderWireProtocol,
     markers: Vec<V3GovernedTextMarker>,
     visible_text: bool,
     confirmed_marker: bool,
-    text_tail: String,
+    tails_by_carrier: std::collections::BTreeMap<(usize, usize), String>,
 }
 
 impl V3DirectPrefixCommitProbe {
@@ -113,7 +129,7 @@ impl V3DirectPrefixCommitProbe {
             markers: crate::direct_response_hooks::v3_direct_governed_text_markers(),
             visible_text: false,
             confirmed_marker: false,
-            text_tail: String::new(),
+            tails_by_carrier: std::collections::BTreeMap::new(),
         }
     }
 
@@ -126,16 +142,24 @@ impl V3DirectPrefixCommitProbe {
             // The delta stream is the only incremental carrier, so it is the one
             // a governed marker can be split across.
             Some("response.output_text.delta") => {
-                self.observe_text(event.get("delta"), TextCarrier::Incremental);
+                self.observe_text(
+                    event.get("delta"),
+                    TextCarrier::Incremental,
+                    direct_sse_output_text_key(event),
+                );
             }
             Some("response.output_text.done") => {
-                self.observe_text(event.get("text"), TextCarrier::Complete);
+                self.observe_text(
+                    event.get("text"),
+                    TextCarrier::Complete,
+                    direct_sse_output_text_key(event),
+                );
             }
             Some("response.content_part.added" | "response.content_part.done") => {
-                self.observe_part(event.get("part"));
+                self.observe_part(event.get("part"), direct_sse_output_text_key(event));
             }
             Some("response.output_item.added" | "response.output_item.done") => {
-                self.observe_item(event.get("item"));
+                self.observe_item(event.get("item"), direct_sse_output_text_key(event));
             }
             // The complete-attempt owners read the terminal snapshot output, so
             // the certification has to read the same text.
@@ -152,21 +176,45 @@ impl V3DirectPrefixCommitProbe {
                     .into_iter()
                     .flatten()
                 {
-                    self.observe_item(Some(item));
+                    // Snapshot items are complete carriers. Their position in
+                    // the output array is the authoritative carrier identity,
+                    // matching how the complete-attempt owners read the
+                    // terminal snapshot.
+                    self.observe_item(
+                        Some(item),
+                        (
+                            self.snapshot_output_index(item),
+                            self.snapshot_content_index(item),
+                        ),
+                    );
                 }
             }
             _ => {}
         }
     }
 
-    fn observe_item(&mut self, item: Option<&Value>) {
+    fn snapshot_output_index(&self, item: &Value) -> usize {
+        item.get("output_index")
+            .and_then(Value::as_u64)
+            .map(|index| index as usize)
+            .unwrap_or(0)
+    }
+
+    fn snapshot_content_index(&self, item: &Value) -> usize {
+        item.get("content_index")
+            .and_then(Value::as_u64)
+            .map(|index| index as usize)
+            .unwrap_or(0)
+    }
+
+    fn observe_item(&mut self, item: Option<&Value>, carrier_key: (usize, usize)) {
         let Some(item) = item else {
             return;
         };
         // The complete-attempt thinking owner also rewrites a top-level
         // `output_text` output item, not only a message item.
         if item.get("type").and_then(Value::as_str) == Some("output_text") {
-            self.observe_text(item.get("text"), TextCarrier::Complete);
+            self.observe_text(item.get("text"), TextCarrier::Complete, carrier_key);
             return;
         }
         // Reasoning and tool-call items are never text-governed, so only
@@ -175,28 +223,34 @@ impl V3DirectPrefixCommitProbe {
         if item.get("type").and_then(Value::as_str) != Some("message") {
             return;
         }
-        self.observe_text(item.get("text"), TextCarrier::Complete);
-        for part in item
+        self.observe_text(item.get("text"), TextCarrier::Complete, carrier_key);
+        for (content_index, part) in item
             .get("content")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
+            .enumerate()
         {
-            self.observe_part(Some(part));
+            self.observe_part(Some(part), (carrier_key.0, content_index));
         }
     }
 
-    fn observe_part(&mut self, part: Option<&Value>) {
+    fn observe_part(&mut self, part: Option<&Value>, carrier_key: (usize, usize)) {
         let Some(part) = part else {
             return;
         };
         if part.get("type").and_then(Value::as_str) != Some("output_text") {
             return;
         }
-        self.observe_text(part.get("text"), TextCarrier::Complete);
+        self.observe_text(part.get("text"), TextCarrier::Complete, carrier_key);
     }
 
-    fn observe_text(&mut self, text: Option<&Value>, carrier: TextCarrier) {
+    fn observe_text(
+        &mut self,
+        text: Option<&Value>,
+        carrier: TextCarrier,
+        carrier_key: (usize, usize),
+    ) {
         let Some(text) = text.and_then(Value::as_str) else {
             return;
         };
@@ -206,35 +260,39 @@ impl V3DirectPrefixCommitProbe {
         self.visible_text |= crate::hub_v1::v3_text_has_visible_content(text);
         // Append incremental text so a marker split across two provider frames
         // stays one string. A complete carrier repeats text the deltas already
-        // delivered, so it replaces the tail instead of duplicating it.
+        // delivered, so it replaces that carrier's tail instead of duplicating
+        // it. Each carrier keeps its own tail so an unrelated output item or
+        // content part can never clear or replace another carrier's pending
+        // marker; the complete-attempt owners read the same carriers.
+        let text_tail = self.tails_by_carrier.entry(carrier_key).or_default();
         let scan = match carrier {
             TextCarrier::Incremental => {
                 // Scan the joined text before bounding it: a marker that
                 // straddles the junction is only visible while both halves are
                 // still adjacent, and the completing delta can be far longer
                 // than the tail window.
-                self.text_tail.push_str(text);
-                self.text_tail.clone()
+                text_tail.push_str(text);
+                text_tail.clone()
             }
             TextCarrier::Complete => text.to_string(),
         };
         self.confirmed_marker |= contains_governed_marker(&self.markers, &scan);
+        let text_tail = self.tails_by_carrier.entry(carrier_key).or_default();
         match carrier {
             TextCarrier::Incremental => {
-                self.text_tail = tail_chars(&scan).to_string();
+                *text_tail = tail_chars(&scan).to_string();
             }
             TextCarrier::Complete => {
-                self.text_tail = tail_chars(&scan).to_string();
+                *text_tail = tail_chars(&scan).to_string();
             }
         }
     }
 
     /// True only while the whole buffered prefix is governed business content:
-    /// no marker any text-governance owner could act on was observed, the newest
-    /// text does not end with a marker prefix, and the prefix already carries
-    /// visible text.
+    /// no marker any text-governance owner could act on was observed, no carrier
+    /// ends with a marker prefix, and the prefix already carries visible text.
     pub(crate) fn is_committable(&self) -> bool {
-        self.visible_text && !self.confirmed_marker && !self.trailing_marker_prefix()
+        self.visible_text && !self.governed_text_pending()
     }
 
     /// A complete governed marker was observed. Production code uses
@@ -260,34 +318,31 @@ impl V3DirectPrefixCommitProbe {
     /// follows it. The next provider frame decides which it is, so a committed
     /// channel must not project this frame yet.
     pub(crate) fn trailing_marker_prefix(&self) -> bool {
-        if self.text_tail.is_empty() {
-            return false;
-        }
-        let last_line = self
-            .text_tail
-            .rsplit('\n')
-            .next()
-            .unwrap_or_default()
-            .trim_end_matches('\r');
-        // A bare `>` line stays a residue candidate whether or not its newline
-        // has already arrived: the owner reads whole lines, so `>\n<close>` is
-        // the same residue as `><close>` for its line scan. Complete marker
-        // prefixes are line-scoped by contrast, so they must keep matching the
-        // final line only and never a line a newline already terminated.
-        let completed_line = self
-            .text_tail
-            .strip_suffix('\n')
-            .unwrap_or(&self.text_tail)
-            .rsplit('\n')
-            .next()
-            .unwrap_or_default()
-            .trim_end_matches('\r');
-        if last_line == ">" || completed_line == ">" {
-            return true;
-        }
-        self.markers
-            .iter()
-            .any(|marker| marker_prefix_at_end(&self.text_tail, last_line, marker))
+        self.tails_by_carrier.values().any(|text_tail| {
+            if text_tail.is_empty() {
+                return false;
+            }
+            let last_line = text_tail
+                .rsplit('\n')
+                .next()
+                .unwrap_or_default()
+                .trim_end_matches('\r');
+            // Keep the whole text in scope for the line-scope check so a bare
+            // `>` line is evaluated consistently; the tail window is enough.
+            let completed_line = text_tail
+                .strip_suffix('\n')
+                .unwrap_or(text_tail)
+                .rsplit('\n')
+                .next()
+                .unwrap_or_default()
+                .trim_end_matches('\r');
+            if last_line == ">" || completed_line == ">" {
+                return true;
+            }
+            self.markers
+                .iter()
+                .any(|marker| marker_prefix_at_end(text_tail, last_line, marker))
+        })
     }
 }
 
@@ -492,6 +547,47 @@ mod tests {
             "response": {"output": [{"type": "message", "content": [{"type": "output_text", "text": "<thinking>"}]}]}
         }));
         probe.observe_event(&delta("plain"));
+        assert!(!probe.is_committable());
+    }
+
+    /// An unrelated output item or content part must never clear another
+    /// carrier's pending marker tail. The complete-attempt owners read the
+    /// same carriers, so certification has to keep them isolated.
+    #[test]
+    fn cross_carrier_text_never_clears_another_carrier_pending_marker() {
+        let mut probe = probe();
+        // Carrier (0,0) ends with the start of a governed marker.
+        probe.observe_event(&json!({
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "content_index": 0,
+            "delta": "visible <thin"
+        }));
+        assert!(!probe.is_committable());
+        // Carrier (1,0) emits ordinary text that used to replace the shared
+        // tail and clear the pending marker.
+        probe.observe_event(&json!({
+            "type": "response.output_text.delta",
+            "output_index": 1,
+            "content_index": 0,
+            "delta": "ordinary"
+        }));
+        assert!(
+            !probe.is_committable(),
+            "an unrelated carrier must not clear carrier (0,0) pending marker"
+        );
+        assert!(
+            probe.trailing_marker_prefix(),
+            "carrier (0,0) pending marker must stay visible"
+        );
+        // Carrier (0,0) completes the marker; the attempt is governed.
+        probe.observe_event(&json!({
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "content_index": 0,
+            "delta": "king>secret"
+        }));
+        assert!(probe.confirmed_governed_marker());
         assert!(!probe.is_committable());
     }
 
