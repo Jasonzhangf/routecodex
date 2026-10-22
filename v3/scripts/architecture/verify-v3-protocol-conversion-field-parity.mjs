@@ -116,6 +116,11 @@ if ((fieldMap.whitelists?.responses ?? []).includes('previous_response_id')) fai
 if (!(fieldMap.whitelists?.responses ?? []).includes('thinking')) failures.push(`${fieldMapPath}: whitelists.responses missing thinking`);
 const finishMapPath = 'v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json';
 const finishMap = JSON.parse(readFileSync(resolve(repoRoot, finishMapPath), 'utf8'));
+for (const row of finishMap.values ?? []) {
+  if (row.openai_chat === 'stop' && row.hub !== 'stop') {
+    failures.push(`${finishMapPath}: non-stop terminal ${row.hub} must not map to stop`);
+  }
+}
 if (!(finishMap.values ?? []).some((row) => row.hub === 'content_filter' && row.anthropic === 'refusal' && row.openai_chat === 'content_filter' && row.responses === 'content_filter')) {
   failures.push(`${finishMapPath}: missing registered refusal/content_filter identity`);
 }
@@ -166,6 +171,10 @@ for (const [id, expected] of Object.entries({
 }
 const verification = (verificationMap?.features ?? []).find((entry) => entry?.feature_id === parityId);
 for (const test of [
+  'issue0e129d0_anthropic_nonstop_reason_public',
+  'issue0e129d0_actual_error_uses_error_chain_and_switches_provider',
+  'responses_wire_representation_survives_chat_and_anthropic_entries',
+  'genuine_http_and_native_sse_errors_break_transport_without_client_error',
   'responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect',
   'responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect',
   'responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input',

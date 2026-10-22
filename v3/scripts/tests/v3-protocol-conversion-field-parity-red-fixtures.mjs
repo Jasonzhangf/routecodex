@@ -24,6 +24,20 @@ const files = [
 // hashes and repeated examples of the same data failure are retired.
 const cases = [
   {
+    name: 'Non-stop terminal is folded into stop',
+    file: 'v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json',
+    from: '{ "hub": "stop_sequence", "direction": "outbound", "openai_chat": "stop_sequence" }',
+    to: '{ "hub": "stop_sequence", "direction": "outbound", "openai_chat": "stop" }',
+    diagnostic: /non-stop terminal stop_sequence must not map to stop/u,
+  },
+  {
+    name: 'Terminal fidelity public test loses required gate binding',
+    file: 'docs/architecture/v3-verification-map.yml',
+    from: '  - issue0e129d0_anthropic_nonstop_reason_public',
+    to: '  - terminal_fidelity_unbound',
+    diagnostic: /missing required_blackbox issue0e129d0/u,
+  },
+  {
     name: 'Anthropic content union loses its scalar semantic mapping', file: matrix,
     from: '        anthropic:\n          - request.messages\n          - request.messages[].content\n        gemini:\n',
     to: '        anthropic:\n          - request.messages\n        gemini:\n',

@@ -109,7 +109,7 @@ test('runCase dispatches codex-real-exec through the injected real-client execut
         captured_at_epoch_ms: 10,
         body: {
           model: 'chat-model',
-          messages: [{ role: 'system', content: 'run pwd' }],
+          messages: [{ role: 'user', content: 'Run the exec_command tool call returned by the server exactly once. Report the command result after it completes.' }],
           tools: [{
             type: 'function',
             function: {
@@ -132,7 +132,7 @@ test('runCase dispatches codex-real-exec through the injected real-client execut
         body: {
           model: 'chat-model',
           messages: [
-            { role: 'system', content: 'run pwd' },
+            { role: 'user', content: 'Run the exec_command tool call returned by the server exactly once. Report the command result after it completes.' },
             {
               role: 'assistant',
               tool_calls: [{
@@ -378,6 +378,48 @@ test('execution-mode collector keeps a wrong observed mode visible and fails acc
     assert.equal(entry.product_failures, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('native provider observations bind to one containing request interval without inventing send times', () => {
+  const caseId = 'issue-3192e71-codex-integer-positive';
+  const base = {
+    started_epoch_ms: 1000, finished_epoch_ms: 1050,
+    meta: { endpoint: '/v1/responses', entry_protocol: 'responses', execution_mode: 'relay' },
+  };
+  for (const example of [
+    { rows: [persistedRow(base)], status: 'pass' },
+    { rows: [persistedRow({ ...base, started_epoch_ms: 1020 })], status: 'incomplete' },
+    { rows: [persistedRow({ ...base, finished_epoch_ms: 1009 })], status: 'incomplete' },
+    { rows: [persistedRow(base), persistedRow({ ...base,
+      request_key: '4555:overlap', meta: { ...base.meta, request_id: 'overlap' },
+    })], status: 'incomplete' },
+  ]) {
+    const root = tempEvidenceRoot();
+    try {
+      const storePath = join(root, 'server-v3-4555.request-records.jsonl');
+      writePersistedStore(storePath, example.rows);
+      const result = collectExecutionModeEvidence({
+        caseId, caseRoot: root, storePath, listenerPort: 4555,
+        attempts: [attemptReceipt({ source: 'codex-real-exec', endpoint: '/v1/responses',
+          entry_protocol: 'responses', send_started_epoch_ms: null, send_settled_epoch_ms: null,
+          provider_capture_started_epoch_ms: 1010, provider_capture_settled_epoch_ms: 1010,
+        })],
+        captures: [businessCapture({ case_id: caseId, path: '/v1/chat/completions' })],
+        collectionPhase: 'post_stop_complete',
+      });
+      assert.equal(result.status, example.status, result.findings.join('; '));
+      assert.equal(result.turns[0].send_started_epoch_ms, null);
+      if (example.status === 'pass') {
+        assert.equal(result.actual_mode, 'relay');
+        assert.equal(result.turns[0].request_id, 'req_1');
+        assert.equal(result.turns[0].correlation_basis, 'provider_capture_interval');
+      } else {
+        assert.equal(result.turns[0].request_id, null);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 

@@ -490,9 +490,11 @@ export async function runCase({
       endpoint: turn.request?.path ?? null,
       method: turn.request?.method ?? 'POST',
       entry_protocol: entryProtocol,
-      send_started_epoch_ms: started,
-      send_settled_epoch_ms: settled,
-      outcome: 'settled',
+      send_started_epoch_ms: null,
+      send_settled_epoch_ms: null,
+      provider_capture_started_epoch_ms: started,
+      provider_capture_settled_epoch_ms: settled,
+      outcome: 'observed',
       failure_code: null,
       failure_message: null,
     });
@@ -909,13 +911,16 @@ function interpretPersistedRow(record, requestKey) {
 
 function correlateTurns({ attempts, captures, folded, caseId, listenerPort }) {
   const windows = attempts.map((attempt) => {
-    const started = epochMs(attempt.send_started_epoch_ms);
-    const settled = epochMs(attempt.send_settled_epoch_ms);
+    const providerObserved = attempt.source === CODEX_REAL_EXEC_CONSUMER;
+    const started = epochMs(providerObserved
+      ? attempt.provider_capture_started_epoch_ms : attempt.send_started_epoch_ms);
+    const settled = epochMs(providerObserved
+      ? attempt.provider_capture_settled_epoch_ms : attempt.send_settled_epoch_ms);
     const business = captures.some((capture) => isBusinessCapture(capture, attempt, caseId, started, settled));
     const candidates = started !== null && settled !== null
       ? folded.filter((row) => isCandidateRow(row, attempt, listenerPort, started, settled))
       : [];
-    return { attempt, started, settled, business, candidates };
+    return { attempt, started, settled, providerObserved, business, candidates };
   });
   const claims = new Map();
   for (const window of windows) {
@@ -929,9 +934,12 @@ function correlateTurns({ attempts, captures, folded, caseId, listenerPort }) {
       source: attempt.source ?? null,
       endpoint: attempt.endpoint ?? null,
       entry_protocol: attempt.entry_protocol ?? null,
-      send_started_epoch_ms: window.started,
-      send_settled_epoch_ms: window.settled,
-      send_outcome: attempt.outcome ?? null,
+      correlation_basis: window.providerObserved ? 'provider_capture_interval' : 'client_send_window',
+      send_started_epoch_ms: epochMs(attempt.send_started_epoch_ms),
+      send_settled_epoch_ms: epochMs(attempt.send_settled_epoch_ms),
+      send_outcome: window.providerObserved ? null : attempt.outcome ?? null,
+      provider_capture_started_epoch_ms: window.providerObserved ? window.started : null,
+      provider_capture_settled_epoch_ms: window.providerObserved ? window.settled : null,
       business_capture: window.business,
       candidate_request_keys: window.candidates.map((row) => row.request_key),
       request_key: null,
@@ -944,10 +952,13 @@ function correlateTurns({ attempts, captures, folded, caseId, listenerPort }) {
       line: null,
       gap: null,
     };
-    if (window.started === null || window.settled === null) return { ...base, gap: 'attempt never reached the wire' };
+    if (window.started === null || window.settled === null) return { ...base, gap: window.providerObserved
+      ? 'provider capture time unavailable' : 'attempt never reached the wire' };
     if (!window.business) return { ...base, gap: 'no business provider capture for turn' };
-    if (window.candidates.length === 0) return { ...base, gap: 'no persisted record started inside the send window' };
-    if (window.candidates.length > 1) return { ...base, gap: 'multiple persisted records started inside the send window' };
+    if (window.candidates.length === 0) return { ...base, gap: window.providerObserved
+      ? 'no persisted request interval contains the provider capture' : 'no persisted record started inside the send window' };
+    if (window.candidates.length > 1) return { ...base, gap: window.providerObserved
+      ? 'multiple persisted request intervals contain the provider capture' : 'multiple persisted records started inside the send window' };
     const row = window.candidates[0];
     if ((claims.get(row.request_key) ?? 0) > 1) return { ...base, gap: 'request key claimed by multiple turns' };
     return {
@@ -969,6 +980,9 @@ function isCandidateRow(row, attempt, listenerPort, started, settled) {
   if (row.endpoint !== attempt.endpoint) return false;
   if (row.entry_protocol !== attempt.entry_protocol) return false;
   if (row.started_epoch_ms === null) return false;
+  if (attempt.source === CODEX_REAL_EXEC_CONSUMER) {
+    return row.finished_epoch_ms !== null && row.started_epoch_ms <= started && row.finished_epoch_ms >= settled;
+  }
   return row.started_epoch_ms <= settled
     && (row.finished_epoch_ms === null || row.finished_epoch_ms >= started);
 }

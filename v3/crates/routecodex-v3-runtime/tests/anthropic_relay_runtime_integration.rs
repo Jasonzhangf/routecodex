@@ -922,7 +922,7 @@ data: {"type":"response.reasoning_summary_text.delta","output_index":0,"item_id"
 "#
             .to_vec()),
             Ok(br#"event: response.completed
-data: {"type":"response.completed","response":{"id":"resp_thinking_sse","status":"completed","output":[{"type":"reasoning","id":"rs_thinking","summary":[{"type":"summary_text","text":"signed thought"}],"encrypted_content":"resp04-signature"}],"usage":{"input_tokens":13,"output_tokens":8,"total_tokens":21}}}
+data: {"type":"response.completed","response":{"id":"resp_thinking_sse","status":"completed","output":[{"type":"reasoning","id":"rs_thinking","summary":[{"type":"summary_text","text":"signed thought"}],"encrypted_content":"resp04-signature"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Visible answer"}]}],"usage":{"input_tokens":13,"output_tokens":8,"total_tokens":21}}}
 
 "#
             .to_vec()),

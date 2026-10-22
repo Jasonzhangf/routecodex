@@ -1941,6 +1941,7 @@ struct ProviderState {
 struct HeldProviderState {
     captures: mpsc::UnboundedSender<ProviderCapture>,
     release: Arc<Semaphore>,
+    fail_probes: bool,
 }
 
 async fn controlled_held_responses_upstream(
@@ -1950,8 +1951,19 @@ async fn controlled_held_responses_upstream(
 ) -> Response<Body> {
     state
         .captures
-        .send(ProviderCapture::from_http(&headers, body))
+        .send(ProviderCapture::from_http(&headers, body.clone()))
         .unwrap();
+    if state.fail_probes
+        && body
+            .get("input")
+            .is_some_and(|input| input.to_string().contains("ping; reply pong"))
+    {
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"error":"controlled probe failure"}"#))
+            .unwrap();
+    }
     let release = Arc::clone(&state.release);
     let body = futures_util::stream::once(async {
         Ok::<_, std::io::Error>(
@@ -2430,6 +2442,41 @@ async fn start_controlled_held_upstream() -> (
         .with_state(Arc::new(HeldProviderState {
             captures: captures_tx,
             release: Arc::clone(&release),
+            fail_probes: false,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (
+        format!("http://{address}/v1"),
+        captures_rx,
+        release,
+        shutdown_tx,
+    )
+}
+
+async fn start_controlled_probe_failing_held_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    Arc<Semaphore>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let release = Arc::new(Semaphore::new(0));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_held_responses_upstream))
+        .with_state(Arc::new(HeldProviderState {
+            captures: captures_tx,
+            release: Arc::clone(&release),
+            fail_probes: true,
         }));
     tokio::spawn(async move {
         axum::serve(listener, app)
@@ -4562,7 +4609,7 @@ const DSML_ANTHROPIC_SSE: &str = concat!(
         "event: content_block_start\n",
         "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
         "event: content_block_delta\n",
-        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<thinking>internal plan\\n</｜DSML｜parameter>\\n</｜DSML｜invoke>\\n</｜DSML｜tool_calls>\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<thinking>internal plan</thinking>Visible answer.\\n\\\"</｜DSML｜parameter>\\\"\\n\\\"</｜DSML｜invoke>\\\"\\n\\\"</｜DSML｜tool_calls>\\\"\"}}\n\n",
         "event: content_block_stop\n",
         "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
         "event: message_delta\n",
@@ -5804,8 +5851,7 @@ async fn responses_relay_anthropic_dsml_complete_text_is_faithfully_returned() {
         .await
         .expect("Anthropic mock must receive provider request")
         .unwrap();
-    // The recognized thinking opener is governed under the current user policy;
-    // retain the complete body, including unrecognized DSML-like trailing text.
+    // Harvest thinking while preserving explicitly quoted marker examples.
     let response = send_result.expect("complete Anthropic text must reach the client");
     let status = response.status();
     assert_eq!(
@@ -5840,7 +5886,7 @@ async fn responses_relay_anthropic_dsml_complete_text_is_faithfully_returned() {
     );
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        text, "",
+        text, "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
         "known leading thinking content must leave visible prose: {body}"
     );
     let terminal = events
@@ -5848,7 +5894,16 @@ async fn responses_relay_anthropic_dsml_complete_text_is_faithfully_returned() {
         .find(|event| event["type"] == "response.completed")
         .expect("complete Anthropic text must project a completed business response");
     assert_eq!(terminal["response"]["status"], "completed", "{body}");
-    assert!(terminal["response"]["output"].as_array().unwrap().iter().any(|item| item["type"] == "reasoning" && item["summary"][0]["text"] == "internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>"), "{body}");
+    assert!(
+        terminal["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |item| item["type"] == "reasoning" && item["summary"][0]["text"] == "internal plan"
+            ),
+        "{body}"
+    );
 }
 
 #[tokio::test]
@@ -5919,7 +5974,7 @@ async fn responses_relay_anthropic_dsml_complete_text_does_not_attempt_fallback(
     );
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        text, "",
+        text, "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
         "known leading thinking content must leave visible prose: {body}"
     );
     let terminal = events
@@ -5927,7 +5982,16 @@ async fn responses_relay_anthropic_dsml_complete_text_does_not_attempt_fallback(
         .find(|event| event["type"] == "response.completed")
         .expect("complete Anthropic text must project a completed business response");
     assert_eq!(terminal["response"]["status"], "completed", "{body}");
-    assert!(terminal["response"]["output"].as_array().unwrap().iter().any(|item| item["type"] == "reasoning" && item["summary"][0]["text"] == "internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>"), "{body}");
+    assert!(
+        terminal["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |item| item["type"] == "reasoning" && item["summary"][0]["text"] == "internal plan"
+            ),
+        "{body}"
+    );
 }
 
 #[tokio::test]
@@ -5936,22 +6000,22 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
     std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
     let cases = [
         (
-            "<thinking>internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
+            "<thinking>internal plan\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
             true,
-            "internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
+            "internal plan\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
             "",
         ),
         ("<thinking>private</thinking>Visible answer", false, "Visible answer", "private"),
         (
-            "<thinking>private<\u{2f}thinking>Visible answer\n<\u{2f}｜DSML｜parameter>\n<\u{2f}｜DSML｜invoke>\n<\u{2f}｜DSML｜tool_calls>",
+            "<thinking>private<\u{2f}thinking>Visible answer\n\"<\u{2f}｜DSML｜parameter>\"\n\"<\u{2f}｜DSML｜invoke>\"\n\"<\u{2f}｜DSML｜tool_calls>\"",
             false,
-            "Visible answer\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
+            "Visible answer\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
             "private",
         ),
         ("Quoted \"<thinking>literal</thinking>\" text", false, "Quoted \"<thinking>literal</thinking>\" text", ""),
         ("```\n<thinking>literal</thinking>\n```", false, "```\n<thinking>literal</thinking>\n```", ""),
         ("Prefix <thinking>literal</thinking>", false, "Prefix ", "literal"),
-        ("<thinking>literal unfinished example", false, "", "literal unfinished example"),
+        ("Answer. <thinking>literal unfinished example", false, "Answer. literal unfinished example", ""),
     ];
     for (text, native_tool, expected_text, expected_reasoning) in cases {
         let (provider_base_url, mut captures, shutdown) =
@@ -6035,7 +6099,7 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
 #[tokio::test]
 async fn responses_relay_suspect_anthropic_text_is_preserved_without_reselection() {
     let _test_guard = TEST_LOCK.lock().await;
-    let literal = "<thinking>unfinished ｜DSML｜invoke";
+    let literal = "\"<thinking>unfinished ｜DSML｜invoke\"";
     let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
         StatusCode::OK,
         "text/event-stream",
@@ -6478,7 +6542,7 @@ async fn responses_relay_native_responses_null_reasoning_content_preserves_busin
                 "event: response.output_item.done\n",
                 "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"reasoning\",\"id\":\"rs_native_null_sse\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"native reasoning summary\"}],\"content\":null}}\n\n",
                 "event: response.completed\n",
-                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_native_null_sse\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_native_null_sse\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"native reasoning summary\"}],\"content\":null}]}}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_native_null_sse\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_native_null_sse\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"native reasoning summary\"}],\"content\":null},{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"native sse answer\"}]}]}}\n\n",
                 "data: [DONE]\n\n"
             )
             .as_bytes()
@@ -7145,6 +7209,462 @@ async fn responses_provider_concurrency_all_full_exhausts_without_queueing() {
     first_shutdown.send(()).unwrap();
     second_shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+fn concurrency_switch_manifest_with_mode(
+    first_url: &str,
+    second_url: &str,
+    execution_mode: V3EntryProtocolExecutionMode,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let mut manifest = concurrency_switch_manifest(first_url, second_url);
+    for provider in manifest.providers.values_mut() {
+        if let Some(health) = provider.health.as_mut() {
+            health.enabled = true;
+        }
+    }
+    match execution_mode {
+        V3EntryProtocolExecutionMode::Direct => {}
+        V3EntryProtocolExecutionMode::Relay => {
+            let binding = manifest
+                .hub_v1
+                .as_mut()
+                .expect("concurrency fixture must declare hub_v1")
+                .entry_protocol_bindings
+                .iter_mut()
+                .find(|binding| binding.entry_protocol == "responses")
+                .expect("concurrency fixture must declare the Responses binding");
+            binding.execution_mode = V3EntryProtocolExecutionMode::Relay;
+            binding.protocol_profile_owner = "v3.hub_relay_runtime_closeout".to_string();
+            binding.forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.".to_string();
+            binding.runtime_owner_symbol =
+                Some("execute_v3_responses_relay_runtime_with_default_transport".to_string());
+            binding.runtime_owner_path = Some(
+                "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs".to_string(),
+            );
+        }
+        _ => panic!("concurrency typed-source red tests require Direct or Relay mode"),
+    }
+    manifest
+}
+
+async fn wait_for_concurrency_failure_source(samples_root: &std::path::Path) -> Value {
+    for _ in 0..200 {
+        if let Ok(entries) = fs::read_dir(samples_root) {
+            for entry in entries.flatten() {
+                let path = entry.path().join("provider-failed-attempts.json");
+                if let Ok(raw) = fs::read_to_string(&path) {
+                    if let Ok(evidence) = serde_json::from_str::<Value>(&raw) {
+                        return evidence;
+                    }
+                }
+            }
+        }
+        sleep(Duration::from_millis(25)).await;
+    }
+    panic!("provider failure source evidence must appear under {samples_root:?}");
+}
+
+async fn concurrency_cooldown_entries(client: &reqwest::Client, base: &str) -> Vec<Value> {
+    let pool: Value = client
+        .get(format!("{base}/_routecodex/health/cooldown-pool"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    pool["entries"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| panic!("cooldown pool must return entries: {pool}"))
+}
+
+fn concurrency_cooldown_signature(entries: &[Value]) -> Vec<String> {
+    let mut signature = entries
+        .iter()
+        .map(|entry| {
+            format!(
+                "{}|{}|{}|{}|{}",
+                entry["provider_id"].as_str().unwrap_or("-"),
+                entry["interface_id"].as_str().unwrap_or("-"),
+                entry["auth_alias"].as_str().unwrap_or("-"),
+                entry["model_id"].as_str().unwrap_or("-"),
+                entry["kind"].as_str().unwrap_or("-"),
+            )
+        })
+        .collect::<Vec<_>>();
+    signature.sort();
+    signature
+}
+
+fn assert_no_concurrency_business_capture(
+    captures: &mut mpsc::UnboundedReceiver<ProviderCapture>,
+    allow_recovery_probes: bool,
+    label: &str,
+) {
+    while let Ok(capture) = captures.try_recv() {
+        assert!(
+            allow_recovery_probes && capture.body.to_string().contains("ping; reply pong"),
+            "{label} must receive no business request: {capture:?}"
+        );
+    }
+}
+
+async fn assert_concurrency_execution_mode(
+    client: &reqwest::Client,
+    base: &str,
+    request_id: &str,
+    expected_mode: &str,
+) {
+    let logs: Value = client
+        .get(format!("{base}/_routecodex/debug/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events = logs["logs"]
+        .as_array()
+        .unwrap_or_else(|| panic!("debug logs must return events: {logs}"));
+    let event = events
+        .iter()
+        .find(|event| {
+            event["request_id"] == request_id
+                && event["node_id"] == "V3Server03HttpRequestRaw"
+                && event["event"] == "received"
+        })
+        .unwrap_or_else(|| {
+            panic!("missing V3Server03HttpRequestRaw event for request {request_id}: {logs}")
+        });
+    assert_eq!(
+        event["details"]["execution_mode"], expected_mode,
+        "actual request execution mode must be {expected_mode}, not inferred from the port: {event}"
+    );
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ConcurrencyExhaustionShape {
+    PureAllBusy,
+    MixedBusyAndExcluded,
+}
+
+async fn run_concurrency_typed_source_case(
+    execution_mode: V3EntryProtocolExecutionMode,
+    shape: ConcurrencyExhaustionShape,
+    label: &str,
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new(label);
+    let (first_url, mut first_captures, first_release, first_shutdown) =
+        start_controlled_held_upstream().await;
+    let (second_url, mut second_captures, second_release, second_shutdown) = match shape {
+        ConcurrencyExhaustionShape::PureAllBusy => start_controlled_held_upstream().await,
+        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
+            start_controlled_probe_failing_held_upstream().await
+        }
+    };
+    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-typed-source");
+
+    let manifest = concurrency_switch_manifest_with_mode(&first_url, &second_url, execution_mode);
+    let second_id = format!("concurrency_second_{}", manifest.servers["a"].port);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let endpoint = format!("{base}/v1/responses");
+    let client = reqwest::Client::new();
+
+    let baseline_entries = match shape {
+        ConcurrencyExhaustionShape::PureAllBusy => {
+            let entries = concurrency_cooldown_entries(&client, &base).await;
+            assert!(
+                entries.is_empty(),
+                "pure all-busy baseline must not contain health exclusions: {entries:?}"
+            );
+            entries
+        }
+        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
+            let response = client
+                .post(format!("{base}/_routecodex/health/cooldown-pool/add"))
+                .json(&json!({
+                    "provider_id": second_id,
+                    "interface_id": "default",
+                    "auth_alias": "key",
+                    "model_id": "test",
+                    "kind": "auth_key",
+                    "duration_ms": 60_000
+                }))
+                .send()
+                .await
+                .unwrap();
+            let status = response.status();
+            let body = response.text().await.unwrap();
+            assert_eq!(status, StatusCode::OK, "{body}");
+
+            let entries = concurrency_cooldown_entries(&client, &base).await;
+            assert_eq!(
+                entries.len(),
+                2,
+                "mixed case must start with the typed auth-key cooldown/probe pair: {entries:?}"
+            );
+            for entry in &entries {
+                assert_eq!(entry["provider_id"], second_id.as_str());
+                assert_eq!(entry["interface_id"], "default");
+                assert_eq!(entry["auth_alias"], "key");
+                assert!(entry["model_id"].is_null());
+            }
+            let cooldown = entries
+                .iter()
+                .find(|entry| entry["kind"] == "auth_key")
+                .expect("mixed case must retain the auth-key cooldown entry");
+            assert_eq!(cooldown["state"], "auth_key_cooldown");
+            let probe = entries
+                .iter()
+                .find(|entry| entry["kind"] == "probe")
+                .expect("mixed case must retain the provider cooldown probe entry");
+            assert!(
+                matches!(
+                    probe["state"].as_str(),
+                    Some("blocked" | "waiting" | "probing")
+                ),
+                "mixed case probe must remain in a cooldown substate: {probe}"
+            );
+            entries
+        }
+    };
+    let baseline_health = concurrency_cooldown_signature(&baseline_entries);
+
+    let first = spawn_concurrency_client(&endpoint, &format!("{label}-held-first"));
+    timeout(Duration::from_secs(2), first_captures.recv())
+        .await
+        .expect("first provider must receive its held request")
+        .expect("first provider capture channel must stay open");
+
+    let second = if matches!(shape, ConcurrencyExhaustionShape::PureAllBusy) {
+        let task = spawn_concurrency_client(&endpoint, &format!("{label}-held-second"));
+        timeout(Duration::from_secs(2), second_captures.recv())
+            .await
+            .expect("second provider must receive its held request")
+            .expect("second provider capture channel must stay open");
+        Some(task)
+    } else {
+        None
+    };
+
+    let exhausted = match timeout(
+        Duration::from_millis(500),
+        client
+            .post(&endpoint)
+            .header("session-id", format!("{label}-exhausted"))
+            .header("thread-id", format!("{label}-exhausted"))
+            .json(&json!({"model":"client-test","input":"no-capacity","stream":false}))
+            .send(),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            let first_activity = first_captures.try_recv().ok();
+            let second_activity = second_captures.try_recv().ok();
+            panic!(
+                "capacity exhaustion must not wait for release; first_activity={first_activity:?} second_activity={second_activity:?}"
+            );
+        }
+    };
+    let error = exhausted.expect_err(
+        "a capacity terminal must break the client transport without an error payload or normal completion",
+    );
+    assert!(
+        !error.is_status(),
+        "the client must not receive a synthetic status payload: {error}"
+    );
+
+    if let Ok(capture) = first_captures.try_recv() {
+        panic!("the busy first provider must receive no extra request: {capture:?}");
+    }
+    match shape {
+        ConcurrencyExhaustionShape::PureAllBusy => {
+            if let Ok(capture) = second_captures.try_recv() {
+                panic!("the busy second provider must receive no extra request: {capture:?}");
+            }
+        }
+        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
+            let capture = second_captures
+                .try_recv()
+                .expect("the mixed case must perform exactly one recovery probe");
+            assert!(
+                capture.body.to_string().contains("ping; reply pong"),
+                "the excluded second provider must receive no business retry: {capture:?}"
+            );
+        }
+    }
+
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    let evidence = wait_for_concurrency_failure_source(&samples_root).await;
+    let request_id = evidence["request_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("failure evidence must carry request_id: {evidence}"));
+    assert_eq!(
+        evidence["attempts"],
+        json!([]),
+        "capacity rejection must not record or perform an upstream attempt: {evidence}"
+    );
+    let (expected_mode, expected_source_kind, expected_code) = match (execution_mode, shape) {
+        (V3EntryProtocolExecutionMode::Direct, ConcurrencyExhaustionShape::PureAllBusy) => (
+            "direct",
+            "target_pool_exhausted",
+            "provider_concurrency_busy",
+        ),
+        (V3EntryProtocolExecutionMode::Relay, ConcurrencyExhaustionShape::PureAllBusy) => (
+            "relay",
+            "target_pool_exhausted",
+            "provider_concurrency_busy",
+        ),
+        (
+            V3EntryProtocolExecutionMode::Direct,
+            ConcurrencyExhaustionShape::MixedBusyAndExcluded,
+        )
+        | (V3EntryProtocolExecutionMode::Relay, ConcurrencyExhaustionShape::MixedBusyAndExcluded) => {
+            (
+                if execution_mode == V3EntryProtocolExecutionMode::Direct {
+                    "direct"
+                } else {
+                    "relay"
+                },
+                "provider_failure",
+                "selected_target_exhausted",
+            )
+        }
+        _ => panic!("unsupported concurrency typed-source case"),
+    };
+    assert_eq!(
+        evidence["terminal_source"]["source_kind"], expected_source_kind,
+        "{expected_mode} {shape:?} must retain the expected typed source kind: {evidence}"
+    );
+    assert_eq!(
+        evidence["terminal_source"]["code"], expected_code,
+        "{expected_mode} {shape:?} must retain the expected typed source code: {evidence}"
+    );
+    assert_concurrency_execution_mode(&client, &base, request_id, expected_mode).await;
+
+    let after_entries = concurrency_cooldown_entries(&client, &base).await;
+    if matches!(shape, ConcurrencyExhaustionShape::PureAllBusy) {
+        assert_eq!(
+            concurrency_cooldown_signature(&after_entries),
+            baseline_health,
+            "pure capacity rejection must not add, remove, or replace health exclusions: before={baseline_entries:?} after={after_entries:?}"
+        );
+    } else {
+        assert!(
+            after_entries
+                .iter()
+                .all(|entry| entry["provider_id"] == second_id.as_str()),
+            "mixed capacity rejection must not mutate first-provider health: before={baseline_entries:?} after={after_entries:?}"
+        );
+    }
+    assert_eq!(
+        after_entries.len(),
+        baseline_entries.len(),
+        "capacity rejection must not mutate cooldown entry count"
+    );
+    assert!(
+        !first.is_finished(),
+        "the first provider holder must remain pending before release"
+    );
+    if let Some(second) = &second {
+        assert!(
+            !second.is_finished(),
+            "the second provider holder must remain pending before release"
+        );
+    }
+
+    first_release.add_permits(1);
+    if second.is_some() {
+        second_release.add_permits(1);
+    }
+    let mut held = vec![first];
+    if let Some(second) = second {
+        held.push(second);
+    }
+    for task in held {
+        let (status, body) = timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("response.completed"), "{body}");
+    }
+    let after_release = spawn_concurrency_client(&endpoint, &format!("{label}-after-release"));
+    timeout(Duration::from_secs(2), first_captures.recv())
+        .await
+        .expect("released capacity must admit a subsequent normal request")
+        .expect("first provider capture channel must stay open");
+    assert_no_concurrency_business_capture(
+        &mut second_captures,
+        matches!(shape, ConcurrencyExhaustionShape::MixedBusyAndExcluded),
+        "the subsequent normal request on the second provider",
+    );
+    first_release.add_permits(1);
+    let (status, body) = timeout(Duration::from_secs(2), after_release)
+        .await
+        .expect("the subsequent normal request must complete after release")
+        .expect("the subsequent request task must not panic");
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("response.completed"), "{body}");
+    assert_no_concurrency_business_capture(
+        &mut first_captures,
+        false,
+        "the exhausted request on the first provider",
+    );
+    assert_no_concurrency_business_capture(
+        &mut second_captures,
+        matches!(shape, ConcurrencyExhaustionShape::MixedBusyAndExcluded),
+        "the exhausted request on the second provider",
+    );
+
+    handle.shutdown().await;
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_provider_concurrency_direct_all_busy_preserves_typed_source() {
+    run_concurrency_typed_source_case(
+        V3EntryProtocolExecutionMode::Direct,
+        ConcurrencyExhaustionShape::PureAllBusy,
+        "concurrency-direct-all-busy-red",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn responses_provider_concurrency_direct_mixed_exclusion_stays_generic() {
+    run_concurrency_typed_source_case(
+        V3EntryProtocolExecutionMode::Direct,
+        ConcurrencyExhaustionShape::MixedBusyAndExcluded,
+        "concurrency-direct-mixed-red",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn responses_provider_concurrency_relay_all_busy_preserves_typed_source() {
+    run_concurrency_typed_source_case(
+        V3EntryProtocolExecutionMode::Relay,
+        ConcurrencyExhaustionShape::PureAllBusy,
+        "concurrency-relay-all-busy-red",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn responses_provider_concurrency_relay_mixed_exclusion_stays_generic() {
+    run_concurrency_typed_source_case(
+        V3EntryProtocolExecutionMode::Relay,
+        ConcurrencyExhaustionShape::MixedBusyAndExcluded,
+        "concurrency-relay-mixed-red",
+    )
+    .await;
 }
 
 #[tokio::test]

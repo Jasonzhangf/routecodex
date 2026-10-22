@@ -2605,6 +2605,12 @@ features:
   - Control state must arrive through typed side-channel facts; payload cannot rebuild it.
   - 'Source status is not runtime closeout: install, aggregate restart, and exact positive/reverse live replay remain required before delivery.'
 - feature_id: v3.protocol_conversion_field_parity
+  terminal_fidelity:
+    issue: 0e129d0
+    source_owner: V3HubRespInbound02Normalized source_terminal_reason and typed source-protocol normal-completion witness
+    projection_owner: project_v3_openai_chat_client_response_with_source_terminal for Chat JSON; V3OpenAiChatResponsesSseTransducer for Responses SSE
+    rule: Preserve source terminal identity and explicit non-stop reasons in typed response provenance until adjacent client projection. A genuine original Responses normal completion may map to Chat stop when no conflicting explicit reason exists, and a Responses response.completed event carries that witness. A native Chat missing reason stays missing; canonical lifecycle status, payload content, EOF and DONE never prove completion. Explicit non-stop, incomplete, content_filter, length, unknown and failed/error outcomes never become stop.
+    errors: Actual failures preserve cause and status in the separate typed Error graph and recover by candidate reselection.
   owner_crates:
   - provider-compat-core
   - routecodex-v3-runtime
@@ -4836,7 +4842,6 @@ features:
   - build_v3_runtime_provider_failed_attempt_evidence_no_response
   - relay_handoff_entry_state
   - relay_request_execution_control
-  - resolve_v3_relay_entry_target
   resource_bindings:
   - v3.runtime.responses_observability
   - v3.execution.target_plan
@@ -5068,9 +5073,10 @@ features:
   - complete_v3_provider_health_probe
   - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
   - build_v3_provider_global_probe_target
-  - select_v3_expanded_target_with_exhaustion_rescue
-  - select_v3_expanded_target_with_admission_rescue
-  - resolve_v3_relay_target_outcome_with_admission_rescue
+  - run_v3_plan_execution_operator_with_probes
+  - PlanExecutionOperator::execute_plan
+  - step_v3_target_planning_with_admission_sync
+  - try_admit_v3_selected_target
   - V3RuntimeProviderAdmission::into_lease
   - V3RuntimeProviderAdmission::drop
   - V3PreAcquiredProviderAdmission::release
@@ -5114,6 +5120,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
@@ -5178,6 +5185,7 @@ features:
   status: implementation_in_progress
   change_risk: critical
   owner_kind: rust_v3_provider_terminal_response_error_policy
+  complete_chat_sse_owner: registered Resp03 callback govern_complete_chat_sse in hub_v1/resp_chat_process_complete_chat_sse.rs; Runtime admits only final governed frames using shared business facts before seal, and takes original async errors from the physically separate typed stream control resource
   owner_scope: Genuine provider errors enter the typed Error chain before provider success or client commit; representable successful response content and terminals pass without semantic adjudication. A complete provider attempt with no deliverable business content after every declared response rewrite, including non-client memory stripping, becomes internal typed 502. Direct SSE collector owns post-rewrite whole-attempt adjudication at both sealing exits; protocol-independent frame storage and Server/SSE do not judge business content. Processing loss or failure of representable content retains internal 599. Typed servertool_followup remains an internal continuation. No client error or empty completion is fabricated.
   owner_crates:
   - routecodex-v3-config
@@ -5192,6 +5200,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_complete_chat_sse.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
@@ -5248,6 +5257,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_complete_chat_sse.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_attempt_business_content.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream_timing_tests.rs

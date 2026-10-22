@@ -1,4 +1,5 @@
 use super::*;
+use routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct DirectOnlyFailureTransport {
@@ -11,6 +12,46 @@ struct DirectProviderFamilyFailureTransport {
 
 struct DirectProviderCompatTerminalTransport {
     sends: AtomicUsize,
+}
+
+const HANDOFF_DIRECT_PROVIDER: &str = "first_handoff_busy_r5";
+const HANDOFF_RELAY_PROVIDER: &str = "chat_handoff_busy_r5";
+
+fn mixed_protocol_capacity_handoff_manifest(
+    routing_group: &str,
+) -> V3Config05ManifestPublished {
+    let mut manifest = mixed_protocol_reselection_manifest();
+    let mut direct = manifest
+        .providers
+        .remove("first")
+        .expect("mixed manifest direct provider");
+    direct.id = HANDOFF_DIRECT_PROVIDER.to_string();
+    manifest
+        .providers
+        .insert(HANDOFF_DIRECT_PROVIDER.to_string(), direct);
+    let mut relay = manifest
+        .providers
+        .remove("chat")
+        .expect("mixed manifest Relay provider");
+    relay.id = HANDOFF_RELAY_PROVIDER.to_string();
+    relay.auth.entries[0].env =
+        Some("ROUTECODEX_TEST_745F6E9_HANDOFF_BUSY_MISSING_SECRET".to_string());
+    manifest
+        .providers
+        .insert(HANDOFF_RELAY_PROVIDER.to_string(), relay);
+    for target in &mut manifest
+        .forwarders
+        .get_mut("mixed")
+        .expect("mixed forwarder")
+        .targets
+    {
+        match target.provider.as_deref() {
+            Some("first") => target.provider = Some(HANDOFF_DIRECT_PROVIDER.to_string()),
+            Some("chat") => target.provider = Some(HANDOFF_RELAY_PROVIDER.to_string()),
+            _ => {}
+        }
+    }
+    scoped_test_manifest(manifest, routing_group)
 }
 
 #[async_trait]
@@ -82,6 +123,205 @@ impl ResponsesTransport for DirectProviderCompatTerminalTransport {
             }),
         })
     }
+}
+
+async fn direct_busy_cross_protocol_handoff(
+    manifest: &V3Config05ManifestPublished,
+    routing_group: &str,
+    request_id: &str,
+) -> crate::V3ResponsesProtocolRelayHandoff {
+    let raw = test_responses_raw(
+        routing_group,
+        request_id,
+        &format!("exec-{request_id}"),
+        json!({"model": "client-model", "input": "hello"}),
+    );
+    let transport = ProviderConcurrencyRecordingTransport::default();
+    let output = crate::execute_v3_responses_direct_runtime_kernel(
+        manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert!(
+        transport.sends.lock().unwrap().is_empty(),
+        "busy Direct admission must hand off before provider transport"
+    );
+    assert!(output.error_chain.is_none(), "{output:?}");
+    let handoff = output
+        .protocol_relay_handoff
+        .expect("Direct busy admission must hand off the Chat candidate");
+    assert_eq!(
+        handoff.target.candidate.provider_id,
+        HANDOFF_RELAY_PROVIDER
+    );
+    assert!(
+        handoff
+            .request_local_excluded_candidates
+            .contains(&format!("{HANDOFF_DIRECT_PROVIDER}:default:key:test")),
+        "busy A must cross the typed handoff: {handoff:?}"
+    );
+    handoff
+}
+
+async fn exhaust_handoff_at_relay(
+    manifest: &V3Config05ManifestPublished,
+    handoff: crate::V3ResponsesProtocolRelayHandoff,
+    relay_health: &crate::V3ResponsesRelayProviderHealthHandle,
+    routing_group: &str,
+    request_id: &str,
+    use_handoff_target: bool,
+) -> crate::V3ResponsesRelayRuntimeOutput {
+    let relay_seeds = handoff.relay_runtime_seeds();
+    let selected_target = if use_handoff_target {
+        Some(handoff.target)
+    } else {
+        None
+    };
+    let expanded = handoff.expanded;
+    let excluded = handoff.request_local_excluded_candidates;
+    let server_tool_state = crate::V3ResponsesRelayServerToolState::default();
+    let scope = crate::V3ResponsesRelayServerToolScope::new(
+        "/v1/responses",
+        format!("session-{request_id}"),
+        format!("conversation-{request_id}"),
+        7777,
+        routing_group,
+    );
+    let output =
+        crate::execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+            manifest,
+            crate::V3ResponsesRelayRuntimeInput {
+                server_id: "test".to_string(),
+                failure_session_scope: test_failure_session_scope(routing_group),
+                request_id: request_id.to_string(),
+                payload: json!({"model": "client-model", "input": "hello"}),
+            },
+            relay_health,
+            &server_tool_state,
+            scope,
+            crate::V3ResponsesRelayProviderSnapshotCapture::new(true, true),
+            None,
+            None,
+            selected_target,
+            Some(expanded),
+            excluded,
+            relay_seeds,
+        )
+        .await
+        .expect("Relay handoff exhaustion must return typed runtime output");
+    output
+}
+
+#[tokio::test]
+async fn direct_to_relay_handoff_preserves_capacity_busy_exhaustion_source() {
+    let routing_group = "handoff_capacity_busy_r5";
+    let manifest = mixed_protocol_capacity_handoff_manifest(routing_group);
+    let first_capacity_key = format!("{HANDOFF_DIRECT_PROVIDER}:key");
+    let second_capacity_key = format!("{HANDOFF_RELAY_PROVIDER}:key");
+    let relay_health =
+        crate::V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+
+    let held_first = saturate_capacity_key(&first_capacity_key);
+    let handoff =
+        direct_busy_cross_protocol_handoff(&manifest, routing_group, "req-handoff-busy-r5").await;
+    let held_second = saturate_capacity_key(&second_capacity_key);
+    let output = exhaust_handoff_at_relay(
+        &manifest,
+        handoff,
+        &relay_health,
+        routing_group,
+        "req-handoff-busy-r5",
+        true,
+    )
+    .await;
+    let snapshots = output
+        .provider_snapshots
+        .as_ref()
+        .expect("Relay handoff output must retain provider snapshot evidence");
+    assert!(
+        snapshots.provider_request.is_none() && snapshots.provider_response.is_none(),
+        "Relay admission exhaustion must not send a provider request: {output:?}"
+    );
+    release_capacity_leases(held_first);
+    release_capacity_leases(held_second);
+    V3AdaptiveConcurrencyController::process_shared()
+        .observe_business_success(&first_capacity_key)
+        .expect("clear first capacity saturation");
+    V3AdaptiveConcurrencyController::process_shared()
+        .observe_business_success(&second_capacity_key)
+        .expect("clear second capacity saturation");
+
+    assert_eq!(output.status, 502, "{output:?}");
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("all-busy handoff exhaustion must retain its typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+    );
+    assert_eq!(
+        source.code, "provider_concurrency_busy",
+        "busy provenance from Direct must remain exact across Relay handoff"
+    );
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("all-busy handoff exhaustion must retain typed observability");
+    assert_eq!(observability.entry_protocol, "responses");
+    assert_eq!(observability.execution_mode, "relay");
+
+    let held_first = saturate_capacity_key(&first_capacity_key);
+    let mut handoff =
+        direct_busy_cross_protocol_handoff(&manifest, routing_group, "req-handoff-mixed-r5").await;
+    let relay_busy_key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+        &handoff.target.candidate,
+    );
+    assert!(
+        !handoff
+            .request_local_busy_candidates
+            .contains(&relay_busy_key),
+        "mixed Relay candidate must stay outside capacity-busy provenance"
+    );
+    handoff
+        .request_local_excluded_candidates
+        .insert(relay_busy_key);
+    let output = exhaust_handoff_at_relay(
+        &manifest,
+        handoff,
+        &relay_health,
+        routing_group,
+        "req-handoff-mixed-r5",
+        false,
+    )
+    .await;
+    release_capacity_leases(held_first);
+    V3AdaptiveConcurrencyController::process_shared()
+        .observe_business_success(&first_capacity_key)
+        .expect("clear mixed first capacity saturation");
+
+    assert_eq!(output.status, 502, "{output:?}");
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("mixed handoff exhaustion must retain its typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
+    );
+    assert_eq!(
+        source.code, "selected_target_exhausted",
+        "non-capacity exclusion must not be relabeled as provider_concurrency_busy"
+    );
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("mixed handoff exhaustion must retain typed observability");
+    assert_eq!(observability.entry_protocol, "responses");
+    assert_eq!(observability.execution_mode, "relay");
 }
 
 #[tokio::test]

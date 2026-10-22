@@ -10,6 +10,12 @@ static VISIBLE_TEXT_PATTERN: LazyLock<regex::Regex> = LazyLock::new(|| {
         .expect("visible-text Unicode property expression must compile")
 });
 
+fn has_visible_text(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|text| VISIBLE_TEXT_PATTERN.is_match(text))
+}
+
 pub(super) fn observe_v3_provider_sse(
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: super::V3RuntimeStreamObservation,
@@ -61,11 +67,11 @@ pub(super) fn observe_v3_provider_sse(
 ///
 /// This is the single owner of the empty-attempt classification. It reads the
 /// fully materialized canonical provider response (already accumulated for the
-/// whole attempt) and returns `true` when the attempt carries text, a tool
-/// call, refusal, reasoning, audio, a legal `content_filter` terminal, or
+/// whole attempt) and returns `true` when the attempt carries visible text, a tool
+/// call, refusal, audio, a legal `content_filter` terminal, or
 /// another representable business output. Envelope-only fields (`id`, `model`,
 /// `role`, `status`, `usage`, empty containers, a plain `end_turn`) do not
-/// count.
+/// count. Reasoning is preserved alongside results but cannot authorize success alone.
 ///
 /// Each protocol supplies business facts. Missing output containers and
 /// envelope-only objects do not establish a business result.
@@ -125,7 +131,8 @@ pub(crate) fn v3_gemini_attempt_has_deliverable_business_content(response: &Valu
 }
 
 fn v3_gemini_part_has_deliverable_content(part: &Value) -> bool {
-    has_non_empty_string(part.get("text"))
+    (part.get("thought").and_then(Value::as_bool) != Some(true)
+        && has_visible_text(part.get("text")))
         || part
             .get("functionCall")
             .and_then(Value::as_object)
@@ -152,6 +159,8 @@ fn v3_gemini_part_has_deliverable_content(part: &Value) -> bool {
                         | "executableCode"
                         | "codeExecutionResult"
                         | "thought"
+                        | "thoughtSignature"
+                        | "type"
                 ) && opaque_gemini_value_has_content(value)
             })
         })
@@ -208,17 +217,10 @@ pub(crate) fn v3_provider_event_has_deliverable_business_content(
 ) -> bool {
     match protocol {
         V3HubProviderWireProtocol::Responses => match event.get("type").and_then(Value::as_str) {
-            Some(
-                "response.output_text.delta"
-                | "response.reasoning_text.delta"
-                | "response.reasoning_summary_text.delta"
-                | "response.refusal.delta",
-            ) => has_non_empty_string(event.get("delta")),
-            Some(
-                "response.output_text.done"
-                | "response.reasoning_text.done"
-                | "response.reasoning_summary_text.done",
-            ) => has_non_empty_string(event.get("text")),
+            Some("response.output_text.delta" | "response.refusal.delta") => {
+                has_visible_text(event.get("delta"))
+            }
+            Some("response.output_text.done") => has_visible_text(event.get("text")),
             Some("response.output_item.added" | "response.output_item.done") => event
                 .get("item")
                 .is_some_and(v3_responses_output_item_has_deliverable_content),
@@ -238,9 +240,8 @@ pub(crate) fn v3_provider_event_has_deliverable_business_content(
                 .get("content_block")
                 .is_some_and(v3_anthropic_content_block_has_deliverable_content),
             Some("content_block_delta") => event.get("delta").is_some_and(|delta| {
-                ["text", "thinking", "partial_json", "signature"]
-                    .iter()
-                    .any(|field| has_non_empty_string(delta.get(*field)))
+                has_visible_text(delta.get("text"))
+                    || has_non_empty_string(delta.get("partial_json"))
                     || delta.get("citation").is_some()
             }),
             Some("message_delta") => event.get("delta").is_some_and(anthropic_refusal),
@@ -288,13 +289,9 @@ fn v3_anthropic_content_block_has_deliverable_content(block: &Value) -> bool {
         Some("text") => block
             .get("text")
             .and_then(Value::as_str)
-            .is_some_and(|text| !text.is_empty()),
+            .is_some_and(|text| VISIBLE_TEXT_PATTERN.is_match(text)),
         Some("tool_use") => true,
-        Some("thinking") => {
-            has_non_empty_string(block.get("thinking"))
-                || has_non_empty_string(block.get("signature"))
-        }
-        Some("redacted_thinking") => true,
+        Some("thinking" | "redacted_thinking") => false,
         // Image, document, server-tool, or an unmodeled block type is a
         // business payload; keep it deliverable rather than fabricate a 502.
         Some(_) => true,
@@ -302,12 +299,10 @@ fn v3_anthropic_content_block_has_deliverable_content(block: &Value) -> bool {
     }
 }
 
-/// Complete-attempt facts. Reasoning is business content, but cannot mask an
-/// explicit blank assistant final. These facts never rewrite provider payloads.
+/// Complete post-governance facts. Reasoning is preserved but cannot authorize
+/// success without a visible body or another independent result.
 #[derive(Default)]
 pub(crate) struct V3ProviderAttemptBusinessContent {
-    business: bool,
-    explicit_text: bool,
     visible_text: bool,
     independent_result: bool,
 }
@@ -315,9 +310,6 @@ pub(crate) struct V3ProviderAttemptBusinessContent {
 impl V3ProviderAttemptBusinessContent {
     fn text(&mut self, value: Option<&Value>) {
         if let Some(text) = value.and_then(Value::as_str) {
-            // An empty carrier may be a reasoning-only or stripped-memory
-            // placeholder. Actual whitespace characters establish a blank final.
-            self.explicit_text |= !text.is_empty();
             self.visible_text |= VISIBLE_TEXT_PATTERN.is_match(text);
         } else if value.is_some_and(|value| !value.is_null()) {
             // Representable structured model content stays opaque business.
@@ -326,6 +318,10 @@ impl V3ProviderAttemptBusinessContent {
     }
 
     fn part(&mut self, part: &Value) {
+        if part.get("thought").and_then(Value::as_bool) == Some(true) {
+            self.independent_result |= v3_gemini_part_has_deliverable_content(part);
+            return;
+        }
         match part.get("type").and_then(Value::as_str) {
             Some("text" | "output_text") => self.text(part.get("text")),
             Some("reasoning_text" | "summary_text") => {}
@@ -336,7 +332,6 @@ impl V3ProviderAttemptBusinessContent {
 
     fn item(&mut self, item: &Value) {
         let business = v3_responses_output_item_has_deliverable_content(item);
-        self.business |= business;
         match item.get("type").and_then(Value::as_str) {
             Some("reasoning") => {}
             Some("message") => {
@@ -359,8 +354,17 @@ impl V3ProviderAttemptBusinessContent {
             || response
                 .pointer("/stop_details/type")
                 .and_then(Value::as_str)
-                == Some("refusal");
-        self.business |= has_non_empty_string(response.get("output_text"));
+                == Some("refusal")
+            || response
+                .get("gemini_candidate_outcomes")
+                .and_then(Value::as_array)
+                .is_some_and(|outcomes| {
+                    outcomes.iter().any(|outcome| {
+                    super::gemini_terminal_semantics::candidate_finish_reason_has_business_outcome(
+                        outcome.get("finishReason").and_then(Value::as_str),
+                    )
+                })
+                });
         self.text(response.get("output_text"));
         if let Some(output) = response.get("output").and_then(Value::as_array) {
             for item in output {
@@ -370,8 +374,9 @@ impl V3ProviderAttemptBusinessContent {
     }
 
     pub(crate) fn observe_event(&mut self, protocol: V3HubProviderWireProtocol, event: &Value) {
-        self.business |= v3_provider_event_has_deliverable_business_content(protocol, event);
         if protocol != V3HubProviderWireProtocol::Responses {
+            self.independent_result |=
+                v3_provider_event_has_deliverable_business_content(protocol, event);
             return;
         }
         match event.get("type").and_then(Value::as_str) {
@@ -401,8 +406,7 @@ impl V3ProviderAttemptBusinessContent {
     }
 
     pub(crate) fn has_deliverable_business_content(&self) -> bool {
-        self.independent_result
-            || ((self.business || self.visible_text) && (!self.explicit_text || self.visible_text))
+        self.independent_result || self.visible_text
     }
 }
 
@@ -414,7 +418,7 @@ fn v3_responses_attempt_has_deliverable_business_content(response: &Value) -> bo
 
 pub(super) fn v3_responses_output_item_has_deliverable_content(item: &Value) -> bool {
     if let Some(text) = item.as_str() {
-        return !text.is_empty();
+        return VISIBLE_TEXT_PATTERN.is_match(text);
     }
     match item.get("type").and_then(Value::as_str) {
         Some("message") => {
@@ -423,21 +427,8 @@ pub(super) fn v3_responses_output_item_has_deliverable_content(item: &Value) -> 
                     .get("content")
                     .and_then(Value::as_array)
                     .is_some_and(|parts| parts.iter().any(business_part_has_content))
-                || item.as_object().is_some_and(|object| {
-                    super::responses_relay_runtime::build_v3_responses_reasoning_item_from_openai_chat_message(
-                        object,
-                    )
-                    .is_some()
-                })
         }
-        Some("reasoning") => {
-            has_non_empty_string(item.get("encrypted_content"))
-                || ["content", "summary"].iter().any(|field| {
-                    item.get(*field)
-                        .and_then(Value::as_array)
-                        .is_some_and(|parts| parts.iter().any(business_part_has_content))
-                })
-        }
+        Some("reasoning") => false,
         Some("output_text" | "refusal") => business_part_has_content(item),
         // Tool results and other typed output items are business objects. Their
         // argument validity belongs to the model/client correction flow.
@@ -468,18 +459,26 @@ pub(super) fn v3_responses_output_item_has_deliverable_content(item: &Value) -> 
 }
 
 fn business_part_has_content(part: &Value) -> bool {
+    if part.get("thought").and_then(Value::as_bool) == Some(true) {
+        return v3_gemini_part_has_deliverable_content(part);
+    }
     if let Some(text) = part.as_str() {
-        return !text.is_empty();
+        return VISIBLE_TEXT_PATTERN.is_match(text);
     }
     match part.get("type").and_then(Value::as_str) {
-        Some("text" | "output_text" | "reasoning_text" | "summary_text") => part
-            .get("text")
-            .is_some_and(|value| !value.is_null() && value != ""),
+        Some("text" | "output_text") => {
+            let mut facts = V3ProviderAttemptBusinessContent::default();
+            facts.text(part.get("text"));
+            facts.has_deliverable_business_content()
+        }
+        Some("reasoning_text" | "summary_text") => false,
         Some("refusal") => part
             .get("refusal")
             .is_some_and(|value| !value.is_null() && value != ""),
         Some(_) => true,
-        None => false,
+        // Gemini and opaque extensions can retain untagged multimodal parts
+        // in canonical Responses content. Their independent payload survives.
+        None => v3_gemini_part_has_deliverable_content(part),
     }
 }
 
@@ -507,15 +506,7 @@ fn v3_openai_chat_choice_has_deliverable_content(choice: &Value) -> bool {
 }
 
 fn v3_openai_chat_message_has_deliverable_content(message: &Value) -> bool {
-    if has_non_empty_string(message.get("content"))
-        || has_non_empty_string(message.get("refusal"))
-        || has_non_empty_string(message.get("reasoning_content"))
-        || has_non_empty_string(message.get("reasoning_text"))
-        || has_non_empty_string(message.get("reasoning"))
-        || message.as_object().is_some_and(|message| {
-            super::responses_relay_runtime::build_v3_responses_reasoning_item_from_openai_chat_message(message).is_some()
-        })
-    {
+    if has_visible_text(message.get("content")) || has_non_empty_string(message.get("refusal")) {
         return true;
     }
     if message.get("audio").is_some_and(|audio| !audio.is_null()) {
@@ -544,6 +535,25 @@ fn v3_openai_chat_message_has_deliverable_content(message: &Value) -> bool {
 #[cfg(test)]
 mod provider_attempt_business_content_tests {
     use super::*;
+
+    #[test]
+    fn issuee63d2f2_anthropic_event_facts_distinguish_text_from_tool_arguments() {
+        for text in ["   ", "\u{200b}"] {
+            assert!(!v3_provider_event_has_deliverable_business_content(
+                V3HubProviderWireProtocol::Anthropic,
+                &serde_json::json!({"type":"content_block_delta","delta":{"type":"text_delta","text":text}}),
+            ));
+        }
+        for delta in [
+            serde_json::json!({"type":"text_delta","text":"visible"}),
+            serde_json::json!({"type":"input_json_delta","partial_json":" "}),
+        ] {
+            assert!(v3_provider_event_has_deliverable_business_content(
+                V3HubProviderWireProtocol::Anthropic,
+                &serde_json::json!({"type":"content_block_delta","delta":delta}),
+            ));
+        }
+    }
 
     fn deliverable(protocol: V3HubProviderWireProtocol, data: &str) -> bool {
         let value: Value = serde_json::from_str(data).expect("fixture must be JSON");

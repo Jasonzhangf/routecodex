@@ -1538,12 +1538,19 @@ pub(crate) fn is_registered_codex_tool_schema(
         }
         _ => None,
     };
+    let description = tool.get("description").and_then(Value::as_str);
+    let registered_description = description == expected_description
+        || (tool_name == Some("exec_command")
+            && description
+                == Some(
+                    "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+                ));
     if !tool.keys().all(|key| {
         matches!(
             key.as_str(),
             "description" | "name" | "parameters" | "strict" | "type"
         )
-    }) || tool.get("description").and_then(Value::as_str) != expected_description
+    }) || !registered_description
     {
         return false;
     }

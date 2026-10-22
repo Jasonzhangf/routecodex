@@ -1,10 +1,3 @@
-pub(crate) enum V3TargetSelectionAfterRescue {
-    Selected(V3Target10ConcreteProviderSelected),
-    Exhausted(V3TargetExhaustion),
-    Failed(routecodex_v3_error::V3Error01SourceRaised),
-    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
-}
-
 pub(crate) struct V3AdmittedTargetSelection {
     pub(crate) selected: V3Target10ConcreteProviderSelected,
     pub(crate) admission: V3RuntimeProviderAdmission,
@@ -40,13 +33,6 @@ impl Drop for V3RuntimeProviderAdmission {
     }
 }
 
-pub(crate) enum V3AdmittedTargetSelectionAfterRescue {
-    Selected(V3AdmittedTargetSelection),
-    Exhausted(V3TargetExhaustion),
-    Failed(routecodex_v3_error::V3Error01SourceRaised),
-    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
-}
-
 pub(crate) enum V3SynchronousTargetPlanningStep {
     Selected(V3Target10ConcreteProviderSelected),
     NeedPreExhaustionProbes {
@@ -68,18 +54,24 @@ pub(crate) enum V3SynchronousTargetAdmissionStep {
     Selected {
         selected: V3AdmittedTargetSelection,
         request_local_excluded_candidates: BTreeSet<String>,
+        request_local_busy_candidates: BTreeSet<String>,
     },
     NeedPreExhaustionProbes {
         expanded: V3Target09CandidateSetExpanded,
         rescue_candidates: Vec<V3TargetCandidate>,
         request_local_excluded_candidates: BTreeSet<String>,
+        request_local_busy_candidates: BTreeSet<String>,
     },
     NeedExhaustionProbes {
         expanded: V3Target09CandidateSetExpanded,
         exhaustion: V3TargetExhaustion,
         request_local_excluded_candidates: BTreeSet<String>,
+        request_local_busy_candidates: BTreeSet<String>,
     },
-    Exhausted(V3TargetExhaustion),
+    Exhausted {
+        exhaustion: V3TargetExhaustion,
+        source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    },
     Failed(routecodex_v3_error::V3Error01SourceRaised),
     OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
 }
@@ -132,6 +124,7 @@ pub(crate) struct V3SynchronousTargetPlanningInput<'a> {
     pub(crate) failure_session_scope: &'a V3ProviderFailureSessionScope,
     pub(crate) provider_health: &'a V3ProviderFailureRuntimeHealth,
     pub(crate) request_local_excluded_candidates: &'a BTreeSet<String>,
+    pub(crate) request_local_busy_candidates: &'a BTreeSet<String>,
     pub(crate) now_ms: u64,
     pub(crate) deterministic_sample: u64,
     pub(crate) allow_exhaustion_rescue_probe: bool,
@@ -140,19 +133,43 @@ pub(crate) struct V3SynchronousTargetPlanningInput<'a> {
     pub(crate) exhaustion_probes_completed: bool,
 }
 
-pub(crate) enum V3RelayProviderAdmittedTargetResolution {
-    Selected(V3AdmittedTargetSelection),
-    Exhausted { attempted_candidates: Vec<String> },
-    Failed(routecodex_v3_error::V3Error01SourceRaised),
-    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
-}
-
 pub(crate) fn v3_provider_concurrency_key_parts(provider_id: &str, auth_alias: &str) -> String {
     format!("{provider_id}:{auth_alias}")
 }
 
 fn v3_provider_concurrency_key(candidate: &V3TargetCandidate) -> String {
     v3_provider_concurrency_key_parts(&candidate.provider_id, &candidate.auth_alias)
+}
+
+pub(crate) fn v3_pure_all_busy_exhaustion_source(
+    expanded: &V3Target09CandidateSetExpanded,
+    excluded: &BTreeSet<String>,
+    busy: &BTreeSet<String>,
+) -> Result<
+    Option<routecodex_v3_error::V3Error01SourceRaised>,
+    crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+> {
+    let captured: BTreeSet<String> = expanded
+        .candidates
+        .iter()
+        .map(v3_relay_provider_candidate_key)
+        .collect();
+    // Pure all-busy requires every captured candidate, and every request-local
+    // exclusion, to be proven busy by capacity. Any other exclusion reason
+    // makes the final exhaustion mixed.
+    if captured.is_empty() || !captured.is_subset(busy) || !excluded.is_subset(busy) {
+        return Ok(None);
+    }
+    crate::shared::direct_plain_error(
+        V3ErrorSourceKind::TargetPoolExhausted,
+        "V3Target10ConcreteProviderSelected",
+        "provider_concurrency_busy",
+        format!(
+            "{} capacity-saturated candidates unavailable",
+            captured.len()
+        ),
+    )
+    .map(Some)
 }
 
 pub(crate) fn try_admit_v3_selected_target(
@@ -280,6 +297,7 @@ pub(crate) fn step_v3_target_planning_sync(
         failure_session_scope,
         provider_health,
         request_local_excluded_candidates,
+        request_local_busy_candidates,
         now_ms,
         deterministic_sample,
         allow_exhaustion_rescue_probe,
@@ -369,6 +387,7 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
         failure_session_scope,
         provider_health,
         request_local_excluded_candidates,
+        request_local_busy_candidates,
         now_ms,
         deterministic_sample,
         allow_exhaustion_rescue_probe,
@@ -377,6 +396,7 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
         exhaustion_probes_completed,
     } = input;
     let mut excluded = request_local_excluded_candidates.clone();
+    let mut busy = request_local_busy_candidates.clone();
     let mut preferred = preferred_selected;
     let mut pre_exhaustion_probes_completed = pre_exhaustion_probes_completed;
     let mut exhaustion_probes_completed = exhaustion_probes_completed;
@@ -387,6 +407,7 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
             failure_session_scope,
             provider_health,
             request_local_excluded_candidates: &excluded,
+            request_local_busy_candidates: &busy,
             now_ms,
             deterministic_sample,
             allow_exhaustion_rescue_probe,
@@ -404,10 +425,13 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
                                 admission,
                             },
                             request_local_excluded_candidates: excluded,
+                            request_local_busy_candidates: busy,
                         };
                     }
                     Ok(None) => {
-                        excluded.insert(v3_relay_provider_candidate_key(&selected.candidate));
+                        let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                        excluded.insert(busy_key.clone());
+                        busy.insert(busy_key);
                         pre_exhaustion_probes_completed = false;
                         exhaustion_probes_completed = false;
                         // Capacity excludes only this candidate. Preserve the
@@ -435,6 +459,7 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
                     expanded,
                     rescue_candidates,
                     request_local_excluded_candidates,
+                    request_local_busy_candidates: busy,
                 };
             }
             V3SynchronousTargetPlanningStep::NeedExhaustionProbes {
@@ -447,130 +472,23 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
                     expanded,
                     exhaustion,
                     request_local_excluded_candidates,
+                    request_local_busy_candidates: busy,
                 };
             }
             V3SynchronousTargetPlanningStep::Exhausted(exhausted) => {
-                return V3SynchronousTargetAdmissionStep::Exhausted(exhausted);
+                return match v3_pure_all_busy_exhaustion_source(&expanded, &excluded, &busy) {
+                    Ok(source) => V3SynchronousTargetAdmissionStep::Exhausted {
+                        exhaustion: exhausted,
+                        source,
+                    },
+                    Err(fault) => V3SynchronousTargetAdmissionStep::OperatorFault(fault),
+                };
             }
             V3SynchronousTargetPlanningStep::Failed(source) => {
                 return V3SynchronousTargetAdmissionStep::Failed(source);
             }
             V3SynchronousTargetPlanningStep::OperatorFault(fault) => {
                 return V3SynchronousTargetAdmissionStep::OperatorFault(fault);
-            }
-        }
-    }
-}
-
-pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
-    manifest: &V3Config05ManifestPublished,
-    expanded: V3Target09CandidateSetExpanded,
-    failure_session_scope: &V3ProviderFailureSessionScope,
-    provider_health: &V3ProviderFailureRuntimeHealth,
-    request_local_excluded_candidates: &BTreeSet<String>,
-    now_ms: u64,
-    deterministic_sample: u64,
-    allow_exhaustion_rescue_probe: bool,
-    preferred_selected: Option<V3Target10ConcreteProviderSelected>,
-) -> V3AdmittedTargetSelectionAfterRescue {
-    let mut excluded = request_local_excluded_candidates.clone();
-    let mut selection = match preferred_selected {
-        Some(_) => {
-            let step = step_v3_target_planning_sync(V3SynchronousTargetPlanningInput {
-                manifest,
-                expanded: expanded.clone(),
-                failure_session_scope,
-                provider_health,
-                request_local_excluded_candidates: &excluded,
-                now_ms,
-                deterministic_sample,
-                allow_exhaustion_rescue_probe,
-                preferred_selected,
-                pre_exhaustion_probes_completed: false,
-                exhaustion_probes_completed: false,
-            });
-            match step {
-                V3SynchronousTargetPlanningStep::Selected(selected) => {
-                    V3TargetSelectionAfterRescue::Selected(selected)
-                }
-                V3SynchronousTargetPlanningStep::Exhausted(exhausted) => {
-                    V3TargetSelectionAfterRescue::Exhausted(exhausted)
-                }
-                V3SynchronousTargetPlanningStep::Failed(source) => {
-                    V3TargetSelectionAfterRescue::Failed(source)
-                }
-                V3SynchronousTargetPlanningStep::OperatorFault(fault) => {
-                    V3TargetSelectionAfterRescue::OperatorFault(fault)
-                }
-                V3SynchronousTargetPlanningStep::NeedPreExhaustionProbes { .. }
-                | V3SynchronousTargetPlanningStep::NeedExhaustionProbes { .. } => {
-                    unreachable!("preferred target planning cannot need rescue probes")
-                }
-            }
-        }
-        None => {
-            select_v3_expanded_target_with_exhaustion_rescue(
-                manifest,
-                expanded.clone(),
-                failure_session_scope,
-                provider_health,
-                request_local_excluded_candidates,
-                now_ms,
-                deterministic_sample,
-                allow_exhaustion_rescue_probe,
-            )
-            .await
-        }
-    };
-    loop {
-        match selection {
-            V3TargetSelectionAfterRescue::Selected(selected) => {
-                match try_admit_v3_selected_target(&selected) {
-                    Ok(Some(admission)) => {
-                        return V3AdmittedTargetSelectionAfterRescue::Selected(
-                            V3AdmittedTargetSelection {
-                                selected,
-                                admission,
-                            },
-                        );
-                    }
-                    Ok(None) => {
-                        excluded.insert(v3_relay_provider_candidate_key(&selected.candidate));
-                        // Capacity excludes only this candidate. Preserve the
-                        // caller's recovery policy for eligible cooled peers;
-                        // never wait for the full candidate's capacity.
-                        selection = select_v3_expanded_target_with_exhaustion_rescue(
-                            manifest,
-                            expanded.clone(),
-                            failure_session_scope,
-                            provider_health,
-                            &excluded,
-                            now_ms,
-                            deterministic_sample,
-                            allow_exhaustion_rescue_probe,
-                        )
-                        .await;
-                    }
-                    Err(reason) => {
-                        return match target_resolution_source(
-                            "V3Target10ConcreteProviderSelected",
-                            "provider_concurrency_admission_invalid_budget",
-                            reason,
-                        ) {
-                            Ok(source) => V3AdmittedTargetSelectionAfterRescue::Failed(source),
-                            Err(fault) => V3AdmittedTargetSelectionAfterRescue::OperatorFault(fault),
-                        };
-                    }
-                }
-            }
-            V3TargetSelectionAfterRescue::Exhausted(exhausted) => {
-                return V3AdmittedTargetSelectionAfterRescue::Exhausted(exhausted);
-            }
-            V3TargetSelectionAfterRescue::Failed(source) => {
-                return V3AdmittedTargetSelectionAfterRescue::Failed(source);
-            }
-            V3TargetSelectionAfterRescue::OperatorFault(fault) => {
-                return V3AdmittedTargetSelectionAfterRescue::OperatorFault(fault);
             }
         }
     }
@@ -698,233 +616,6 @@ impl V3ProviderFailureRuntimeHealth {
     ) -> Result<bool, String> {
         self.run_cooldown_rescue_probes_for_candidates(manifest, &expanded.candidates, now_ms)
             .await
-    }
-}
-
-pub(crate) async fn resolve_v3_relay_target_outcome_with_admission_rescue(
-    input: V3RelayProviderTargetResolutionInput<'_>,
-    allow_exhaustion_rescue_probe: bool,
-    preferred_selected: Option<V3Target10ConcreteProviderSelected>,
-) -> V3RelayProviderAdmittedTargetResolution {
-    let expanded = match build_v3_relay_target_candidates(&input) {
-        Ok(expanded) => expanded,
-        Err(V3RelayProviderTargetResolution::Selected(_)) => {
-            unreachable!("target candidate expansion cannot return a selected target")
-        }
-        Err(V3RelayProviderTargetResolution::Exhausted {
-            attempted_candidates,
-        }) => {
-            return V3RelayProviderAdmittedTargetResolution::Exhausted {
-                attempted_candidates,
-            }
-        }
-        Err(V3RelayProviderTargetResolution::Failed(source)) => {
-            return V3RelayProviderAdmittedTargetResolution::Failed(source)
-        }
-        Err(V3RelayProviderTargetResolution::OperatorFault(fault)) => {
-            return V3RelayProviderAdmittedTargetResolution::OperatorFault(fault)
-        }
-    };
-    match select_v3_expanded_target_with_admission_rescue(
-        input.manifest,
-        expanded,
-        input.failure_session_scope,
-        input.provider_health,
-        input.request_local_excluded_candidates,
-        input.now_ms,
-        input.deterministic_sample,
-        allow_exhaustion_rescue_probe,
-        preferred_selected,
-    )
-    .await
-    {
-        V3AdmittedTargetSelectionAfterRescue::Selected(selected) => {
-            V3RelayProviderAdmittedTargetResolution::Selected(selected)
-        }
-        V3AdmittedTargetSelectionAfterRescue::Exhausted(exhausted) => {
-            V3RelayProviderAdmittedTargetResolution::Exhausted {
-                attempted_candidates: exhausted.attempted_candidates,
-            }
-        }
-        V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
-            V3RelayProviderAdmittedTargetResolution::Failed(source)
-        }
-        V3AdmittedTargetSelectionAfterRescue::OperatorFault(fault) => {
-            V3RelayProviderAdmittedTargetResolution::OperatorFault(fault)
-        }
-    }
-}
-
-pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
-    manifest: &V3Config05ManifestPublished,
-    expanded: V3Target09CandidateSetExpanded,
-    failure_session_scope: &V3ProviderFailureSessionScope,
-    provider_health: &V3ProviderFailureRuntimeHealth,
-    request_local_excluded_candidates: &BTreeSet<String>,
-    now_ms: u64,
-    deterministic_sample: u64,
-    allow_exhaustion_rescue_probe: bool,
-) -> V3TargetSelectionAfterRescue {
-    let target = V3TargetInterpreter::default();
-    let initial_step = step_v3_target_planning_sync(V3SynchronousTargetPlanningInput {
-        manifest,
-        expanded: expanded.clone(),
-        failure_session_scope,
-        provider_health,
-        request_local_excluded_candidates,
-        now_ms,
-        deterministic_sample,
-        allow_exhaustion_rescue_probe,
-        preferred_selected: None,
-        pre_exhaustion_probes_completed: false,
-        exhaustion_probes_completed: false,
-    });
-    let initial_exhaustion = match initial_step {
-        V3SynchronousTargetPlanningStep::Selected(selected) => {
-            return V3TargetSelectionAfterRescue::Selected(selected);
-        }
-        V3SynchronousTargetPlanningStep::NeedPreExhaustionProbes {
-            rescue_candidates, ..
-        } => {
-            match initiate_v3_target_pre_exhaustion_rescue_probes(
-                provider_health,
-                manifest,
-                &rescue_candidates,
-                now_ms,
-            )
-            .await
-            {
-                Ok(()) => {}
-                Err(Ok(source)) => return V3TargetSelectionAfterRescue::Failed(source),
-                Err(Err(fault)) => return V3TargetSelectionAfterRescue::OperatorFault(fault),
-            }
-            let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
-                Ok(now_ms) => now_ms,
-                Err(error) => {
-                    return match target_resolution_source(
-                        "V3ProviderCooldownRescueProbe",
-                        "target_pre_exhaustion_rescue_clock_failed",
-                        error,
-                    ) {
-                        Ok(source) => V3TargetSelectionAfterRescue::Failed(source),
-                        Err(fault) => V3TargetSelectionAfterRescue::OperatorFault(fault),
-                    };
-                }
-            };
-            return match select_v3_target_with_session_then_global(
-                &target,
-                expanded,
-                &provider_health.session_bound_availability(failure_session_scope),
-                provider_health,
-                request_local_excluded_candidates,
-                retry_now_ms,
-                deterministic_sample,
-            ) {
-                Ok(selected) => V3TargetSelectionAfterRescue::Selected(selected),
-                Err(exhausted) => V3TargetSelectionAfterRescue::Exhausted(exhausted),
-            };
-        }
-        V3SynchronousTargetPlanningStep::NeedExhaustionProbes { exhaustion, .. } => exhaustion,
-        V3SynchronousTargetPlanningStep::Exhausted(exhausted) => {
-            return V3TargetSelectionAfterRescue::Exhausted(exhausted);
-        }
-        V3SynchronousTargetPlanningStep::Failed(source) => {
-            return V3TargetSelectionAfterRescue::Failed(source);
-        }
-        V3SynchronousTargetPlanningStep::OperatorFault(fault) => {
-            return V3TargetSelectionAfterRescue::OperatorFault(fault);
-        }
-    };
-    if !allow_exhaustion_rescue_probe {
-        return V3TargetSelectionAfterRescue::Exhausted(initial_exhaustion);
-    }
-    loop {
-        let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
-            Ok(now_ms) => now_ms,
-            Err(error) => {
-                return match target_resolution_source(
-                    "V3ProviderCooldownRescueProbe",
-                    "target_exhaustion_rescue_clock_failed",
-                    error,
-                ) {
-                    Ok(source) => V3TargetSelectionAfterRescue::Failed(source),
-                    Err(fault) => V3TargetSelectionAfterRescue::OperatorFault(fault),
-                };
-            }
-        };
-        let observed_generation = provider_health.store.availability_generation();
-        let retry_availability = provider_health.session_bound_availability(failure_session_scope);
-        let exhaustion = match select_v3_target_with_session_then_global(
-            &target,
-            expanded.clone(),
-            &retry_availability,
-            provider_health,
-            request_local_excluded_candidates,
-            retry_now_ms,
-            0,
-        ) {
-            Ok(selected) => return V3TargetSelectionAfterRescue::Selected(selected),
-            Err(exhausted) => exhausted,
-        };
-        if provider_health.store.availability_generation() != observed_generation {
-            continue;
-        }
-        if !v3_exhaustion_is_cooldown_only(
-            &expanded,
-            request_local_excluded_candidates,
-            failure_session_scope,
-            provider_health,
-            retry_now_ms,
-        ) {
-            return V3TargetSelectionAfterRescue::Exhausted(exhaustion);
-        }
-        let rescue_probes_completed = match provider_health
-            .run_exhaustion_rescue_probes(manifest, &expanded, retry_now_ms)
-            .await
-        {
-            Ok(completed) => completed,
-            Err(error) => {
-                return match target_resolution_source(
-                    "V3ProviderCooldownRescueProbe",
-                    "target_exhaustion_rescue_probe_failed",
-                    error,
-                ) {
-                    Ok(source) => V3TargetSelectionAfterRescue::Failed(source),
-                    Err(fault) => V3TargetSelectionAfterRescue::OperatorFault(fault),
-                };
-            }
-        };
-        if !rescue_probes_completed {
-            return V3TargetSelectionAfterRescue::Exhausted(exhaustion);
-        }
-        // This request gets one recovery pass. Future scheduled probes own
-        // provider recovery independently; an exhausted request has no business
-        // response and must reach the existing internal exhaustion disposition.
-        let after_probe_ms = match v3_relay_provider_policy_now_epoch_ms() {
-            Ok(now_ms) => now_ms,
-            Err(error) => {
-                return match target_resolution_source(
-                    "V3ProviderCooldownRescueProbe",
-                    "target_exhaustion_rescue_clock_failed",
-                    error,
-                ) {
-                    Ok(source) => V3TargetSelectionAfterRescue::Failed(source),
-                    Err(fault) => V3TargetSelectionAfterRescue::OperatorFault(fault),
-                };
-            }
-        };
-        return match select_v3_target_with_session_then_global(
-            &target,
-            expanded,
-            &provider_health.session_bound_availability(failure_session_scope),
-            provider_health,
-            request_local_excluded_candidates,
-            after_probe_ms,
-            deterministic_sample,
-        ) {
-            Ok(selected) => V3TargetSelectionAfterRescue::Selected(selected),
-            Err(exhausted) => V3TargetSelectionAfterRescue::Exhausted(exhausted),
-        };
     }
 }
 
