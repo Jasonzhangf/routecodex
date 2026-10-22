@@ -28,13 +28,20 @@ For validation-only root builds, disable package version mutation:
 ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
 ```
 
+## Provider config contract
+
+`provider/<id>/config.v2.toml` is the current V3 provider-directory input
+format. The `v2` filename and `V2Provider*` Rust struct names are retained for
+format compatibility; they do not select a V2 runtime, V2 root config reader,
+or migration path. `V3ConfigStore` and `V3UserConfigStore` read only the exact
+referenced Provider file and compile it into the V3 authoring and manifest
+chain. No parse failure falls back to another file or format. The retired V2
+root config compiler and V2 runtime are not supported.
+
 ## Boundary
 
 - `v3/` is active production source.
 - V2 retired source is not present in this repository and must not be restored
   as an active runtime, build, package, or default test surface.
-- V3-owned provider config codec `provider_config.rs` supports the current
-  `provider/<id>/config.v2.toml` directory format. The retired V2 root
-  config compiler and V2 runtime are not supported.
 - Do not add new top-level `src/v2`, `tests/v2`, `scripts/v2-consistency`, or
   `docs/v2-architecture` trees.

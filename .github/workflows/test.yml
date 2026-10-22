@@ -152,6 +152,9 @@ jobs:
       - name: Install built V3 CLI shim
         if: needs.scope.outputs.v3_build == 'true'
         run: npm run fix:cli-shim
+      - name: Allow unprivileged user namespaces for Codex sandbox
+        if: needs.scope.outputs.v3_build == 'true'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Prepare pinned Codex consumer
         if: needs.scope.outputs.v3_build == 'true'
         run: |
@@ -170,7 +173,8 @@ jobs:
           node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs \
             --binary "$HOME/.local/bin/rccv3" \
             --binary-kind installed \
-            --evidence "$RUNNER_TEMP/v3-installed-protocol-matrix"
+            --evidence "$RUNNER_TEMP/v3-installed-protocol-matrix" \
+            --allow-capability-skips
       - name: Upload V3 protocol matrix evidence
         if: ${{ !cancelled() && (steps.v3_protocol_matrix.outcome == 'success' || steps.v3_protocol_matrix.outcome == 'failure') }}
         uses: actions/upload-artifact@v4

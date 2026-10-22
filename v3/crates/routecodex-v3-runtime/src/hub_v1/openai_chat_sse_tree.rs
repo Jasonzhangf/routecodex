@@ -363,7 +363,7 @@ impl V3OpenAiChatSseReducerState {
             if let Some(reason) = choice
                 .finish_reason
                 .as_deref()
-                .filter(|reason| !reason.is_empty())
+                .filter(|reason| !reason.trim().is_empty())
             {
                 let normalized = match reason.to_ascii_lowercase().as_str() {
                     "max_tokens" | "max-tokens" => "length".to_owned(),

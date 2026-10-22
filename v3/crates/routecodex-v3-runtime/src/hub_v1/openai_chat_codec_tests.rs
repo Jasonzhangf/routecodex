@@ -21,6 +21,41 @@ fn source_responses_completed_preserves_tool_handoff_before_normal_stop() {
 }
 
 #[test]
+fn source_responses_normal_stop_terminal_with_tool_calls_prefers_tool_dispatch() {
+    let canonical = json!({"status":"completed","output":[{"type":"function_call","call_id":"call_stop","name":"evaluate","arguments":"{}"}]});
+    let projected =
+        project_v3_openai_chat_client_response_with_source_terminal(&canonical, Some("stop"), true)
+            .unwrap();
+    assert_eq!(projected["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        projected["choices"][0]["message"]["tool_calls"][0]["id"],
+        "call_stop"
+    );
+
+    for (reason, expected) in [
+        ("max_output_tokens", "length"),
+        ("content_filter", "content_filter"),
+        ("opaque_reason", "opaque_reason"),
+    ] {
+        let mut limited = canonical.clone();
+        limited["incomplete_details"] = json!({"reason": reason});
+        let projected =
+            project_v3_openai_chat_client_response_with_source_terminal(&limited, None, false)
+                .unwrap();
+        assert_eq!(
+            projected["choices"][0]["finish_reason"], expected,
+            "non-stop terminal {reason} must survive a tool-call turn"
+        );
+    }
+
+    let text_only = json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}]});
+    let projected =
+        project_v3_openai_chat_client_response_with_source_terminal(&text_only, Some("stop"), true)
+            .unwrap();
+    assert_eq!(projected["choices"][0]["finish_reason"], "stop");
+}
+
+#[test]
 fn anthropic_text_delta_without_block_start_preserves_public_stream() {
     let events = [
         json!({"type":"message_start","message":{"id":"msg_public","type":"message","role":"assistant","content":[],"usage":{"input_tokens":7,"output_tokens":0}}}),

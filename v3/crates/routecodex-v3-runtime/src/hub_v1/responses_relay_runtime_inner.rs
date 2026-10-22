@@ -66,10 +66,9 @@ fn build_v3_responses_relay_exhaustion_observability(
     }
 }
 
-// Compatibility entry for callers that need a single unbounded execution.
-// Runtime's bounded refill loop calls the `_with_refill` owner below so it can
-// observe one typed Chat Process disposition without widening the public
-// output struct.
+// Construct the large Relay state machine outside the caller's poll frame.
+// The owner returns only the heap pointer to every caller, including dry-run.
+#[inline(never)]
 pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport + 'a>(
     manifest: &'a V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,

@@ -1433,6 +1433,7 @@ pub struct V3HubRelayResponseHookRegistry {
     complete_chat_sse:
         fn(
             &[Vec<u8>],
+            Option<usize>,
         ) -> Result<Option<(Vec<Vec<u8>>, usize)>, super::V3RelayCompleteResponseError>,
 }
 
@@ -1469,7 +1470,8 @@ impl V3HubRelayResponseHookRegistry {
         &self,
         builder: &mut crate::execution_control::V3CommittedClientSseBuilder,
     ) -> Result<(), super::V3RelayCompleteResponseError> {
-        builder.rewrite_complete_attempt(self.complete_chat_sse)
+        let source_terminal = builder.last_marked_terminal_frame_index();
+        builder.rewrite_complete_attempt(|frames| (self.complete_chat_sse)(frames, source_terminal))
     }
 }
 

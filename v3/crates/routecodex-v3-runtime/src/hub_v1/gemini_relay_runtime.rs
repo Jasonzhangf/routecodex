@@ -3,8 +3,7 @@ use super::*;
 use crate::nodes::{V3ClientBody, V3Resp15ClientPayload};
 use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
-    v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderFailureRetryPolicy,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailureRetryPolicy,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
@@ -397,10 +396,9 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
                     Ok::<_, String>(frame)
                 }.await;
                 match projected {
-                    Ok(frame) => {
-                        outcome.record_success()?;
-                        Ok(frame)
-                    }
+                    // Provider success is committed by Runtime only after complete
+                    // governance and sealing.
+                    Ok(frame) => Ok(frame),
                     Err(error) => {
                         let recorded = outcome.record_failure(&error).await;
                         Err(recorded.map(|_| error).unwrap_or_else(|error| error))
@@ -751,26 +749,6 @@ impl V3GeminiSseProviderOutcome {
         self.recorded = true;
         Ok(())
     }
-
-    fn record_success(&mut self) -> Result<(), String> {
-        if self.recorded {
-            return Ok(());
-        }
-        let attempt_success_receipt =
-            crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt();
-        self.provider_health
-            .record_provider_success_in_failure_scope_for_interface(
-                &attempt_success_receipt,
-                &self.failure_session_scope,
-                &self.provider_id,
-                &self.interface_id,
-                Some(&self.auth_alias),
-                Some(&self.model_id),
-                v3_relay_provider_policy_now_epoch_ms()?,
-            )?;
-        self.recorded = true;
-        Ok(())
-    }
 }
 
 fn project_sse_stream(
@@ -832,9 +810,8 @@ fn project_sse_stream(
                             .and_then(Err);
                         return Some((result, state));
                     }
-                    if let Err(error) = state.provider_outcome.record_success() {
-                        return Some((Err(error), state));
-                    }
+                    // Provider success is committed by Runtime only after complete
+                    // governance and sealing.
                     return None;
                 };
                 let result = match chunk {

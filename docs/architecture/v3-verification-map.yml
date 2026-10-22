@@ -3205,7 +3205,7 @@ features:
   status: active_skeleton
   change_risk: critical
   owner_kind: rust_project_v3_runtime_direct_skeleton
-  owner_scope: Unified direct main-loop skeleton (same_protocol passthrough); per-protocol V3DirectProtocolCodec impls (responses/chat); hooks thin shell.
+  owner_scope: Unified direct main-loop skeleton (same_protocol passthrough); per-protocol V3DirectProtocolCodec impls (chat/anthropic/gemini); Responses Direct runs through the V3HookRegistry kernel; hooks thin shell.
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
@@ -3392,6 +3392,7 @@ features:
   - The internal empty-attempt 502 keeps its real upstream HTTP status separate from the internal classification, never enters client payload or MetadataCenter, and never fabricates a client HTTP error or empty completion.
   required_gates:
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issuee63d2f2_ -- --nocapture --test-threads=1
+
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issue0ff6700_ -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issuec1090f9_ -- --nocapture --test-threads=1
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox -- --nocapture

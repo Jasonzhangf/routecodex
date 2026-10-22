@@ -124,14 +124,10 @@ features:
   resource_bindings:
   - v3.provider.global_cooldown_persistence
   entry_symbols:
-  - V3ProviderHealthStore::from_manifest_for_listener
   - V3ProviderCooldownCoordinator::load
-  - V3ProviderCooldownCoordinator::record_failure
-  - V3ProviderCooldownCoordinator::acquire_startup_probe
-  - V3ProviderCooldownCoordinator::acquire_due_probe
-  - V3ProviderCooldownCoordinator::apply_probe_success
-  - V3ProviderCooldownCoordinator::apply_probe_failure
-  - V3ProviderCooldownCoordinator::persist
+  - V3ProviderCooldownCoordinator::persisted_entries
+  - V3ProviderCooldownCoordinator::reset_probe_schedule_for_startup
+  - V3ProviderCooldownCoordinator::replace_entries
   allowed_paths:
   - v3/crates/routecodex-v3-server/tests/issued9fd985_port_local_health.rs
   - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
@@ -144,6 +140,7 @@ features:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - docs/architecture
   required_gates:
+  - npm run test:v3-compile-fail
   - npm run test:v3-provider-global-cooldown-persistence
   - npm run test:v3-port-local-provider-health
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue127_disabled_health_persistence_direct_public_blackbox -- --nocapture
@@ -4660,8 +4657,9 @@ features:
   owner_scope: Unified Direct main-loop skeleton. Single lifecycle owner for
     direct passthrough orchestration (same_protocol entry==provider wire);
     protocol differences converge in per-protocol V3DirectProtocolCodec impls
-    (V3ResponsesDirectCodec / V3ChatDirectCodec); hooks remain the projection
-    thin shell (chat_direct_request_projection_hook /
+    (V3ChatDirectCodec; Responses Direct runs through the V3HookRegistry
+    kernel, not a generic codec); hooks remain the projection thin shell (
+    chat_direct_request_projection_hook /
     chat_direct_provider_transport_hook). No provider-specific branches; no
     Hub response conversion; direct response stays same_protocol.
   owner_crates:
@@ -5454,7 +5452,7 @@ features:
   - map_v3_toolreason_stream_event_at_resp03
   - V3DirectSseContentConsumer::take_toolreason_reasoning_projection
   - strip_v3_tool_thinking_fields_from_json_at_resp03
-  - V3ResponsesDirectCodec::prepare_before_send
+  - responses_direct_prepare_before_send
   - V3ChatDirectCodec::prepare_before_send
   - V3ToolThinkingTurnContext
   - compile_v3_tool_thinking_turn_context_at_req04

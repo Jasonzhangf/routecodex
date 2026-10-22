@@ -231,6 +231,64 @@ fn p0_responses_on_connection(stream: &mut TcpStream, port: u16, workdir: &Path)
 }
 
 #[test]
+fn restart_control_idle_and_partial_peers_do_not_block_authenticated_restart() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let provider = P0Provider::start();
+    let config = write_config_with_provider(&root, ports, true, true, Some(provider.port));
+    let _process = p0_start(&root, &state, &config);
+    let owner = single_instance_dir(&state);
+    let control: Value =
+        serde_json::from_slice(&fs::read(owner.join("control.json")).unwrap()).unwrap();
+    let mut wrong_nonce = p0_control_stream(&control);
+    writeln!(
+        wrong_nonce,
+        "{}",
+        serde_json::json!({
+            "schema_version": 1, "instance_id": control["instance_id"],
+            "start_nonce": "wrong-nonce", "operation": "restart"
+        })
+    )
+    .unwrap();
+    wrong_nonce
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let mut response = String::new();
+    BufReader::new(wrong_nonce)
+        .read_line(&mut response)
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&response).unwrap()["accepted"],
+        false
+    );
+    let mut held = Vec::new();
+    for index in 0..10 {
+        let mut peer = p0_control_stream(&control);
+        if index % 2 == 1 {
+            peer.write_all(b"{\"schema_version\":").unwrap();
+        }
+        held.push(peer);
+    }
+    let output = run_top_level(env!("CARGO_BIN_EXE_rccv3"), &state, &config, "restart");
+    drop(held);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let next_control: Value =
+        serde_json::from_slice(&fs::read(owner.join("control.json")).unwrap()).unwrap();
+    assert_ne!(next_control["start_nonce"], control["start_nonce"]);
+    for port in ports {
+        assert_eq!(http_get_json(port, "/health")["status"], "ok");
+        let mut connection = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        p0_responses_on_connection(&mut connection, port, root.path());
+    }
+}
+
+#[test]
 fn p0_restart_repeated_declarations_keep_exact_owner() {
     let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();

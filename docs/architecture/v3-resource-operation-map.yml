@@ -1409,7 +1409,7 @@ resources:
     owner_node: V3ProviderGlobalCooldownPersistence
     listener_scope: [serverId, bind, port]
     identity: [providerId, authAlias, modelId, failureClass, cooldownUntilMs, nextProbeAtMs]
-    allowed_writers: [V3ProviderCooldownCoordinator::load, V3ProviderCooldownCoordinator::record_failure, V3ProviderCooldownCoordinator::replace_entries, V3ProviderCooldownCoordinator::persist]
+    allowed_writers: [V3ProviderCooldownCoordinator::load, V3ProviderCooldownCoordinator::reset_probe_schedule_for_startup, V3ProviderCooldownCoordinator::replace_entries]
     allowed_readers: [V3ProviderHealthStore::from_manifest, V3ProviderHealthStore::from_manifest_for_listener, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys_due]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
     may_enter_provider_body: false

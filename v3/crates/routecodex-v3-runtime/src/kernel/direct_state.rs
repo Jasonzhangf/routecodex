@@ -187,7 +187,8 @@ impl V3ResponsesDirectRuntimeCoreState {
         self.initial_expanded = Some(plan.expanded.clone());
         self.initial_request_local_excluded_candidates =
             plan.request_local_excluded_candidates.clone();
-        self.initial_request_local_busy_candidates = plan.request_local_busy_candidates.clone();
+        self.initial_request_local_busy_candidates =
+            plan.request_local_busy_candidates.clone();
         self.initial_route_policy_scope = plan._route_policy_scope.clone();
         self.initial_route_policy_pending = plan._route_policy_pending.clone();
         self.initial_plan_trace = Some(plan.routing_trace_segment());

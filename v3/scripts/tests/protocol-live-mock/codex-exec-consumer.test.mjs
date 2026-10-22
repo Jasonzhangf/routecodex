@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
-  mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync,
+  chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +12,7 @@ import {
   CURRENT_CODEX_EXEC_COMMAND_DESCRIPTION,
   buildCodexExecConfig,
   executeCodexClient,
+  codexCliAvailability,
   parseCodexExecEvents,
   runCodexRealExec,
   validateCodexCommandExecution,
@@ -21,6 +22,11 @@ const positiveFixture = JSON.parse(readFileSync(
   new URL('../../../fixtures/protocol-live-mock-matrix/cases/issue-3192e71-codex-integer-positive.json', import.meta.url),
   'utf8',
 ));
+
+function systemProbe(name) {
+  const primary = `/bin/${name}`;
+  return existsSync(primary) ? primary : `/usr/bin/${name}`;
+}
 
 test('consumer prepares a real isolated Git repository and exposes a missing executable', async () => {
   const root = mkdtempSync(join(tmpdir(), 'codex-consumer-setup-'));
@@ -56,6 +62,59 @@ test('isolated config targets the current isolated RCC listener with no global a
   assert.match(config, /wire_api = "responses"/u);
   assert.match(config, /requires_openai_auth = false/u);
   assert.doesNotMatch(config, /user_token|auth\.json|chatgpt/iu);
+});
+
+test('explicit missing Codex path is unavailable with an ENOENT reason', () => {
+  const missing = join(tmpdir(), 'routecodex-missing-codex-cli-for-availability-test');
+  const availability = codexCliAvailability(missing);
+  assert.equal(availability.available, false);
+  assert.equal(availability.kind, 'not_found');
+  assert.equal(availability.binary, missing);
+  assert.match(availability.reason, /ENOENT/u);
+});
+
+test('explicit successful Codex probe is available', () => {
+  const binary = systemProbe('true');
+  const availability = codexCliAvailability(binary);
+  assert.deepEqual(availability, { available: true, binary, kind: 'available' });
+});
+
+test('explicit failing Codex probe is unavailable with a non-zero exit reason', () => {
+  const binary = systemProbe('false');
+  const availability = codexCliAvailability(binary);
+  assert.equal(availability.available, false);
+  assert.equal(availability.kind, 'probe_failed');
+  assert.equal(availability.binary, binary);
+  assert.match(availability.reason, /^exit [1-9]\d*$/u);
+});
+
+test('Codex probe spawn error is probe_failed instead of a capability gap', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'routecodex-codex-probe-spawn-error-'));
+  try {
+    const binary = join(directory, 'not-executable-codex');
+    writeFileSync(binary, '#!/bin/sh\nexit 0\n');
+    chmodSync(binary, 0o644);
+    const availability = codexCliAvailability(binary);
+    assert.equal(availability.available, false);
+    assert.equal(availability.kind, 'probe_failed');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Codex probe timeout is probe_failed with an injectable deadline', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'routecodex-codex-probe-timeout-'));
+  try {
+    const binary = join(directory, 'hanging-codex');
+    writeFileSync(binary, `#!${systemProbe('sh')}\nexec ${systemProbe('sleep')} 5\n`);
+    chmodSync(binary, 0o755);
+    const availability = codexCliAvailability(binary, { timeoutMs: 100 });
+    assert.equal(availability.available, false);
+    assert.equal(availability.kind, 'probe_failed');
+    assert.match(availability.reason, /timed out|ETIMEDOUT/iu);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('Codex JSONL parsing retains the real command execution event', () => {

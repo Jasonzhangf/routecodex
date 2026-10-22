@@ -2117,8 +2117,8 @@ chains:
   - step_id: v3-rd-13
     from_node: V3ProviderResp14Raw
     to_node: V3DirectResp14ProviderProjectionPrepared
-    caller_symbol: execute_v3_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: responses_direct_response_projection_hook_with_context
     callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
     status: anchored
@@ -7333,10 +7333,10 @@ chains:
     - step_id: v3-provider-action-gate-37
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionSuccessObserved
-      caller_symbol: project_sse_stream
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-      callee_symbol: V3OpenAiChatSseProviderOutcome::record_success
-      callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+      caller_symbol: execute_v3_relay_runtime_core
+      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
+      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -7353,8 +7353,8 @@ chains:
     - step_id: v3-provider-action-gate-38
       from_node: V3ProviderActionSuccessObserved
       to_node: V3ProviderActionSuccessRecorded
-      caller_symbol: V3OpenAiChatSseProviderOutcome::record_success
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+      caller_symbol: execute_v3_relay_runtime_core
+      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
@@ -7413,10 +7413,10 @@ chains:
     - step_id: v3-provider-action-gate-41
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionSuccessObserved
-      caller_symbol: project_sse_stream
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-      callee_symbol: V3GeminiSseProviderOutcome::record_success
-      callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+      caller_symbol: execute_v3_relay_runtime_core
+      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
+      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -7433,8 +7433,8 @@ chains:
     - step_id: v3-provider-action-gate-42
       from_node: V3ProviderActionSuccessObserved
       to_node: V3ProviderActionSuccessRecorded
-      caller_symbol: V3GeminiSseProviderOutcome::record_success
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+      caller_symbol: execute_v3_relay_runtime_core
+      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored

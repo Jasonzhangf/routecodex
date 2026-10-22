@@ -334,10 +334,12 @@ fn responses_as_chat_finish_reason(
     completed: bool,
     reason: Option<&str>,
 ) -> Option<&str> {
+    if has_tool_calls && matches!(reason, None | Some("stop")) {
+        return Some("tool_calls");
+    }
     match reason {
         Some("max_output_tokens") => Some("length"),
         Some(reason) => Some(reason),
-        None if has_tool_calls => Some("tool_calls"),
         None if completed => Some("stop"),
         None => None,
     }

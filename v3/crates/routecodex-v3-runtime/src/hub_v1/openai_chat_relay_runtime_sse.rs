@@ -70,7 +70,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
             decoder,
             transducer,
             V3RelayToolreasonStreamState::new(),
-            VecDeque::<Vec<u8>>::new(),
+            VecDeque::<(Vec<u8>, bool)>::new(),
             false,
             false,
             compatibility_profile,
@@ -93,7 +93,28 @@ fn project_anthropic_sse_as_openai_chat_stream(
             let session_id = session_id.clone();
             async move {
                 loop {
-                    if let Some(frame) = pending.pop_front() {
+                    if let Some((frame, terminal)) = pending.pop_front() {
+                        if terminal {
+                            if let Err(error) = provider_outcome.response_control.record_semantic_terminal(
+                                V3RuntimeSemanticTerminal::Success,
+                            ) {
+                                return Some((
+                                    Err(error),
+                                    (
+                                        provider,
+                                        decoder,
+                                        transducer,
+                                        toolreason,
+                                        pending,
+                                        done_seen,
+                                        finished,
+                                        compatibility_profile,
+                                        retain_response_cipher,
+                                        provider_outcome,
+                                    ),
+                                ));
+                            }
+                        }
                         return Some((
                             Ok(frame),
                             (
@@ -150,7 +171,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                         // provider-health 失败。
                         if !done_seen {
                             done_seen = true;
-                            pending.push_back(b"data: [DONE]\n\n".to_vec());
+                            pending.push_back((b"data: [DONE]\n\n".to_vec(), false));
                         }
                         crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
                             &toolreason.tool_names,
@@ -161,28 +182,8 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 request_id: Some(request_id.as_str()),
                             },
                         );
-                        match provider_outcome.record_success() {
-                            Ok(()) => {}
-                            Err(error) => {
-                                return Some((
-                                    Err(error),
-                                    (
-                                        provider,
-                                        decoder,
-                                        transducer,
-                                        toolreason,
-                                        pending,
-                                        done_seen,
-                                        finished,
-                                        compatibility_profile,
-                                        retain_response_cipher,
-                                        provider_outcome,
-                                    ),
-                                ));
-                            }
-                        }
                         return match pending.pop_front() {
-                            Some(frame) => Some((
+                            Some((frame, _terminal)) => Some((
                                 Ok(frame),
                                 (
                                     provider,
@@ -250,7 +251,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 if data == "[DONE]" {
                                     transducer.finish()?;
                                     done_seen = true;
-                                    pending.push_back(b"data: [DONE]\n\n".to_vec());
+                                    pending.push_back((b"data: [DONE]\n\n".to_vec(), false));
                                     continue;
                                 }
                                 if done_seen {
@@ -260,6 +261,9 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 }
                                 let event: Value = serde_json::from_str(data)
                                     .map_err(|error| error.to_string())?;
+                                let is_message_stop =
+                                    event.get("type").and_then(Value::as_str) == Some("message_stop");
+                                let mut mark_terminal = is_message_stop;
                                 for mut payload in transducer.push_event(event)? {
                                     let governed = project_sse_event_payload(
                                         request_id.as_str(),
@@ -271,7 +275,11 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                         &provider_outcome.response_control,
                                     )
                                     .map_err(|error| error.to_string())?;
-                                    pending.push_back(format!("data: {governed}\n\n").into_bytes());
+                                    pending.push_back((
+                                        format!("data: {governed}\n\n").into_bytes(),
+                                        mark_terminal,
+                                    ));
+                                    mark_terminal = false;
                                 }
                             }
                             Ok(())
@@ -311,8 +319,8 @@ fn project_anthropic_sse_as_openai_chat_stream(
 /// Gemini wire SSE -> native JSON -> governed OpenAI Chat JSON -> Chat SSE.
 ///
 /// The full attempt stays buffered until materialization and projection finish.
-/// Provider outcome is recorded only after every normal frame is prepared, so a
-/// rejected or unprojectable attempt cannot become a provider success.
+/// The codec reports protocol facts only; Runtime commits provider success after
+/// complete governance and sealing.
 fn project_gemini_sse_as_openai_chat_stream(
     request_id: String,
     session_id: String,
@@ -459,7 +467,6 @@ fn project_gemini_sse_as_openai_chat_stream(
             }
 
             frames.push(b"data: [DONE]\n\n".to_vec());
-            provider_outcome.record_success()?;
             Ok(frames)
         })
         .flat_map(|result: Result<Vec<Vec<u8>>, String>| {
