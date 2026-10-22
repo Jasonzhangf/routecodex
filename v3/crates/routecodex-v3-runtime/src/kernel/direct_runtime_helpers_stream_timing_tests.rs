@@ -1212,6 +1212,37 @@ async fn buffered_with_hooks(chunks: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
     .await
 }
 
+/// Fully buffered reference that reports whether the attempt sealed, so a test
+/// can compare a refused early commit against the buffered verdict.
+async fn buffered_with_hooks_seals(chunks: Vec<Vec<u8>>) -> bool {
+    let registry = crate::hooks::register_responses_direct_hooks();
+    let context = crate::direct_response_hooks::V3DirectDsmlContext::from_request(
+        &serde_json::json!({}),
+        &std::collections::HashMap::new(),
+    );
+    let chunks: Vec<crate::shared::V3DirectSourceResult<Vec<u8>>> =
+        chunks.into_iter().map(Ok).collect();
+    let source: crate::nodes::V3ProviderAttemptSseInnerStream = Box::pin(stream::iter(chunks));
+    let projected = wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(source),
+        V3RuntimeStreamObservation::default(),
+        V3RuntimeTimingState::start(),
+        false,
+        false,
+        V3HubProviderWireProtocol::Responses,
+    );
+    collect_direct_sse_attempt_after_terminal_with_hooks(
+        projected,
+        V3HubProviderWireProtocol::Responses,
+        crate::nodes::V3AttemptBudget::process_default(),
+        None,
+        None,
+        Some((&registry, &context)),
+    )
+    .await
+    .is_ok()
+}
+
 /// Governance regression for the early-commit gap: a passthrough Responses
 /// provider with no declared tools and no ThinkingTags compat block still gets
 /// the unconditional whole-attempt thinking rewrite. The commit probe must
@@ -1308,8 +1339,9 @@ async fn first_frame_commit_invisible_final_never_commits() {
     );
 }
 
-/// A pure reasoning attempt with no explicit final is legal business content.
-/// It must seal normally and never commit early (no visible text).
+/// A pure reasoning attempt with no explicit final is preserved as reasoning,
+/// but reasoning alone never authorizes success. The complete attempt is an
+/// internal empty state, so it never commits early and never reaches the client.
 #[tokio::test]
 async fn first_frame_commit_pure_reasoning_without_final_still_seals() {
     let reasoning = "event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"item_id\":\"rs_0\",\"summary_index\":0,\"delta\":\"plan\"}\n\n";
@@ -1321,12 +1353,12 @@ async fn first_frame_commit_pure_reasoning_without_final_still_seals() {
     .await;
     assert!(!run.committed, "pure reasoning must stay fully buffered");
     assert!(
-        !run.failed,
-        "pure reasoning without a final is deliverable business content"
+        run.failed,
+        "reasoning alone must not authorize a successful complete attempt"
     );
     assert!(
-        !run.frames.is_empty(),
-        "the reasoning payload must still reach the client"
+        run.frames.is_empty(),
+        "the empty attempt must not project any client payload"
     );
 }
 
@@ -1467,7 +1499,9 @@ async fn first_frame_commit_protected_marker_text_is_delivered_after_commit() {
 
 /// A governed marker split across provider frames is one marker in the
 /// streamed text even though neither frame contains it. The commit must stay
-/// closed, otherwise the client receives raw reasoning text.
+/// closed, otherwise the client receives raw reasoning text. After governance
+/// the attempt carries no deliverable business content, so it becomes the same
+/// typed empty attempt the buffered path produces and projects nothing.
 #[tokio::test]
 async fn first_frame_commit_marker_split_across_deltas_never_commits() {
     let full = "<thinking>secret</thinking>";
@@ -1482,11 +1516,18 @@ async fn first_frame_commit_marker_split_across_deltas_never_commits() {
         !streamed.contains("<thinking>") && !streamed.contains("</thinking>"),
         "the split marker must not reach the client as text: {streamed}"
     );
-    let buffered = buffered_with_hooks(chunks).await;
+    let buffered_seals = buffered_with_hooks_seals(chunks).await;
     assert_eq!(
-        streamed,
-        String::from_utf8(buffered.concat()).unwrap(),
-        "a refused commit must keep byte identity with the buffered attempt"
+        run.failed, !buffered_seals,
+        "a refused commit must fail exactly when the buffered attempt does"
+    );
+    assert!(
+        run.failed,
+        "a marker-only attempt is an internal empty state"
+    );
+    assert!(
+        run.frames.is_empty(),
+        "the empty attempt must not project any client payload: {streamed}"
     );
 }
 
