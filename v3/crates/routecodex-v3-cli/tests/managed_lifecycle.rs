@@ -90,9 +90,14 @@ impl P0Provider {
                 let response = serde_json::json!({
                     "id": "resp_p0_live", "object": "response", "created_at": 0,
                     "status": "completed", "model": "wire-test",
+                    // A completed answer that already carries its own reasoning summary is a
+                    // terminal result for the Chat Process continuation policy, so the probe
+                    // stays a single provider attempt.
                     "output": [{"id":"msg_p0_live", "type":"message", "role":"assistant",
                         "status":"completed", "content":[{"type":"output_text",
-                        "text":"uncached connection probe", "annotations":[]}]}],
+                        "text":"uncached connection probe", "annotations":[]}]},
+                        {"id":"rs_p0_live", "type":"reasoning", "summary":[{"type":"summary_text",
+                        "text":"probe complete"}]}],
                     "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
                 })
                 .to_string();
@@ -589,15 +594,19 @@ hooks = [
 ]
 "#;
 
+// The pinned previous release requires `allowed_invocation_sources`, while the
+// current build closes the list to client/refill/dry_run. The same value set is
+// what the current compiler accepts, so the shared fixture stays one-source and
+// both sides load it without a second copy.
 const HUB_V1_TEST_SERVER_EXECUTION: &str = r#"
 [servers.a.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "refill", "dry_run"]
+allowed_invocation_sources = ["client", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [servers.b.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "refill", "dry_run"]
+allowed_invocation_sources = ["client", "dry_run"]
 allowed_transports = ["json", "sse"]
 "#;
 
