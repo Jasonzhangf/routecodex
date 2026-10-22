@@ -49,10 +49,12 @@ compatibility features:
 - the runtime owns a pre-commit attempt buffer. Without first-frame commit
   enabled, no provider business frame may cross the client-frame edge before a
   protocol-valid terminal event; with it enabled, the first committable business
-  frame (text, reasoning, or a name-bearing tool-call frame) crosses at its
-  provider arrival time and delivery is append-only: delivered frames are never
-  rewritten, replaced, suppressed, or re-emitted, and whole-attempt rewrites are
-  excluded by the request-level predicate when early commit is enabled;
+  frame crosses at its provider arrival time and delivery is append-only:
+  delivered frames are never rewritten, replaced, suppressed, or re-emitted. The
+  request-level predicate only filters which attempts carry the Direct content
+  probe; the probe certifies the commit by requiring visible output_text and no
+  governed text marker, so the whole-attempt rewrites stay governed for the whole
+  attempt rather than being assumed away by the predicate;
 - provider failure, malformed event, missing terminal, or transport EOF before
   terminal stays in the Error chain and triggers the existing reselect policy; a
   failure after delivery ends the committed channel silently without switching

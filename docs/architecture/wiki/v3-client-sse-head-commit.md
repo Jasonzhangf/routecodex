@@ -91,9 +91,10 @@ payload.
 - Establishing the channel is not a semantic client commit.
 - Without first-frame commit enabled, no provider payload byte or provider status
   reaches the client before the runtime outcome exists; with it enabled, the
-  first committable business frame (text, reasoning, or a name-bearing tool-call
-  frame) crosses at its provider arrival time and the terminal remainder replays
-  only the undelivered tail.
+  first committable business frame crosses at its provider arrival time and the
+  terminal remainder replays only the undelivered tail. The Direct content probe
+  certifies that frame: it requires visible output_text and no governed text
+  marker, so a reasoning-only or whitespace-only prefix never commits.
 - An outcome that arrives inside one keepalive interval returns the exact runtime
   status, headers, and body. The race adds no framing of its own.
 - A client never receives a provider error payload on the committed channel. The

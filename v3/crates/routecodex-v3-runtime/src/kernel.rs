@@ -1702,9 +1702,33 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             );
                         }
                         Err(Ok(source)) => {
-                            if let Err(error) = runtime_timing.finish_external_if_active() {
+                            let timing_failure = runtime_timing
+                                .finish_external_if_active()
+                                .err()
+                                .map(|error| runtime_source("V3RuntimeTimingExternal", error));
+                            if let Some(timing_failure) = timing_failure {
+                                if client_commit_probe
+                                    .as_ref()
+                                    .is_some_and(|sink| sink.is_committed())
+                                {
+                                    drop(provider_action_permit.take());
+                                    return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
+                                        timing_failure,
+                                        last_external_http.clone(),
+                                        trace,
+                                        &hook_registry,
+                                    );
+                                }
                                 return direct_runtime_helpers_stream::source_failure_output(
-                                    runtime_source("V3RuntimeTimingExternal", error),
+                                    timing_failure,
+                                    last_external_http.clone(),
+                                    trace,
+                                    &hook_registry,
+                                );
+                            }
+                            if let Some(timing_failure) = timing_failure {
+                                return direct_runtime_helpers_stream::source_failure_output(
+                                    timing_failure,
                                     last_external_http.clone(),
                                     trace,
                                     &hook_registry,
