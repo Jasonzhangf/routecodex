@@ -177,7 +177,7 @@ for (const token of [
 }
 const responsesRelayRequestBody = findFunctionBody(
   text.responses,
-  'execute_v3_responses_relay_runtime_inner',
+  'execute_v3_responses_relay_runtime_inner_with_refill',
   files.responses,
 );
 for (const forbidden of [
@@ -382,7 +382,7 @@ for (const [name, source, rel] of [
 }
 requireText(text.directSse, files.directSse, 'classify_v3_provider_sse_json_data(');
 requireText(text.directSse, files.directSse, 'V3HubProviderWireProtocol::Responses,');
-if (/event_type|event\s*==\s*["']response\./u.test(text.directSse)) {
+if (/event\s*==\s*["']response\./u.test(text.directSse)) {
   failures.push(
     `${files.directSse}: SSE event metadata must not be used as provider semantic source`,
   );

@@ -59,7 +59,7 @@ for (const phrase of [
   'async fn execute_responses_relay_websocket_output(',
   'if let Some(handoff) = relay_output.protocol_direct_handoff.take()',
   'send_responses_relay_websocket_output(',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(',
+  'execute_v3_responses_relay_runtime_with_default_transport_health(',
   'send_responses_websocket_committed_sse_stream(',
   'SseIncrementalDecoder::new(SseTransportLimits::default())',
   'client_message = socket.next() =>',
@@ -187,7 +187,7 @@ const directRuntimeCalls = text.directOutcome.match(/execute_v3_responses_direct
 if (directRuntimeCalls.length !== 1) {
   failures.push(files.server + ': expected one existing Direct Runtime entry call, got ' + directRuntimeCalls.length);
 }
-const relayRuntimeCalls = text.websocket.match(/execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state\(/g) ?? [];
+const relayRuntimeCalls = text.websocket.match(/execute_v3_responses_relay_runtime_with_default_transport_health\(/g) ?? [];
 if (relayRuntimeCalls.length !== 2) {
   failures.push(files.server + ': expected planned and unplanned WebSocket Relay Runtime entry calls, got ' + relayRuntimeCalls.length);
 }

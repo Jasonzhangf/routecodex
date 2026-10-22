@@ -31,7 +31,6 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_response_thinking_compat.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_response_thinking_compat_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs',
-  'v3/crates/routecodex-v3-runtime/src/kernel/direct_web_search.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs',
   'v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs',
   'v3/crates/routecodex-v3-runtime/tests/support/openai_chat_relay_runtime_unit.rs',
@@ -513,6 +512,15 @@ const cases = [
       'if matches!(event_type, "response.completed" | "response.incomplete" | "response.done") {',
     ),
     diagnostic: /missing if matches!\(event_type, "response\.completed" \| "response\.incomplete"\)/u,
+  },
+  {
+    name: 'Direct SSE uses frame event metadata as provider semantic source',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs',
+    mutate: (source) => source.replace(
+      'pub(crate) fn inspect_direct_sse_raw_provider(raw: &str) -> V3DirectSseProviderFacts {\n',
+      'pub(crate) fn inspect_direct_sse_raw_provider(raw: &str) -> V3DirectSseProviderFacts {\n    if event == "response.completed" {}\n',
+    ),
+    diagnostic: /SSE event metadata must not be used as provider semantic source/u,
   },
   {
     name: 'Relay target-resolution source errors are swallowed as exhaustion',

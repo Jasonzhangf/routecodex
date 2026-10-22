@@ -6677,7 +6677,7 @@ chains:
     - step_id: v3-provider-action-gate-01
       from_node: ProviderReqCompat06ProviderCompat
       to_node: V3Error05ExecutionDecision
-      caller_symbol: execute_v3_responses_relay_runtime_inner
+      caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
       callee_symbol: handle_v3_responses_relay_provider_failure
       callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
@@ -6697,7 +6697,7 @@ chains:
     - step_id: v3-provider-action-gate-02
       from_node: V3ProviderReqOutbound08WirePayload
       to_node: V3Error05ExecutionDecision
-      caller_symbol: execute_v3_responses_relay_runtime_inner
+      caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
       callee_symbol: handle_v3_responses_relay_provider_failure
       callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
@@ -6833,7 +6833,7 @@ chains:
     - step_id: v3-provider-action-gate-10
       from_node: V3Error05RecoveryWitness
       to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_responses_relay_runtime_inner
+      caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -6993,7 +6993,7 @@ chains:
     - step_id: v3-provider-action-gate-20
       from_node: V3ProviderActionGateAdmission
       to_node: V3ProviderActionPermitInFlight
-      caller_symbol: execute_v3_responses_relay_runtime_inner
+      caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
       callee_symbol: V3ProviderActionAdmission::take_permit
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -7093,7 +7093,7 @@ chains:
     - step_id: v3-provider-action-gate-25
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_responses_relay_runtime_inner
+      caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
       callee_symbol: V3ProviderActionPermit::drop
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -7493,7 +7493,7 @@ chains:
     - step_id: v3-provider-action-gate-45
       from_node: V3ProviderActionPermitInFlight
       to_node: V3ProviderActionSuccessRecorded
-      caller_symbol: execute_v3_responses_relay_runtime_inner
+      caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs

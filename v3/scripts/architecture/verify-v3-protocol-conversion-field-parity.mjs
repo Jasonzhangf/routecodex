@@ -152,7 +152,7 @@ const action = (mainlineMap?.chains ?? []).find((entry) => entry?.chain_id === '
 const compatError = (action?.edges ?? []).find((edge) => edge?.step_id === 'v3-provider-action-gate-01');
 for (const [key, expected] of Object.entries({
   from_node: 'ProviderReqCompat06ProviderCompat', to_node: 'V3Error05ExecutionDecision',
-  caller_symbol: 'execute_v3_responses_relay_runtime_inner',
+  caller_symbol: 'execute_v3_responses_relay_runtime_inner_with_refill',
   caller_file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   callee_symbol: 'handle_v3_responses_relay_provider_failure',
   callee_file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',

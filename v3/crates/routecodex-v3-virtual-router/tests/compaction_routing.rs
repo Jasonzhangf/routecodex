@@ -69,7 +69,7 @@ fn manifest() -> V3Config05ManifestPublished {
                         aliases: Vec::new(),
                         capabilities: vec!["text".into()],
                         web_search_execution_mode: V3WebSearchExecutionMode::None,
-                            supports_streaming: true,
+                        supports_streaming: true,
                         supports_thinking: false,
                         thinking: None,
                         max_tokens: None,

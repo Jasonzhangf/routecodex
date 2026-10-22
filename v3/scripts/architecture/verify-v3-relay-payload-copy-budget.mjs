@@ -18,7 +18,7 @@ const paths = {
   providerResponsesTransport: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
   providerResponsesWebsocketTests: 'v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs',
   providerResponsesWebsocketVerifier: 'v3/scripts/architecture/verify-v3-responses-websocket-v2-transport-hardening.mjs',
-  servertoolHooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
+  toolThinkingHooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/tool_thinking_hooks.rs',
   probes: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_payload_copy_runtime_probes.rs',
   design: 'docs/goals/v3-hub-relay-payload-copy-runtime-probes-test-design.md',
 };
@@ -32,7 +32,7 @@ const runtime = [
   text.responseChatProcess03,
   text.request,
   text.hooks,
-  text.servertoolHooks,
+  text.toolThinkingHooks,
   text.responsesRelayRuntime,
   text.anthropicRelayRuntime,
   text.anthropicRelayCodec,
@@ -103,10 +103,10 @@ requireAll(text.providerResponsesTransport, paths.providerResponsesTransport, [
 ]);
 forbid(runtime, 'Relay runtime source', /\b(?:deep_clone|deepClone)\s*\(/, 'unbounded deep copy');
 forbid(
-  text.servertoolHooks,
-  paths.servertoolHooks,
-  /lift_additional_tools_into_provider_tool_surface|collect_additional_tools_from_responses_input|provider_tool_surface_contains_equivalent_tool/,
-  'tool declaration shape rebuild helper',
+  text.toolThinkingHooks,
+  paths.toolThinkingHooks,
+  /collect_additional_tools_from_responses_input|provider_tool_surface_contains_equivalent_tool/,
+  'removed tool-surface rebuild helper',
 );
 forbid(text.request, paths.request, /fn forbidden_roundtrip/, 'JSON serialization round-trip clone');
 forbid(text.responsesRelayRuntime, paths.responsesRelayRuntime, /fn forbidden_sse_materialize/, 'unowned full SSE materialization');

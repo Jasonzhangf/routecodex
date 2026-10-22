@@ -8,7 +8,7 @@ const SOURCE_DOCS = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/tool_thinking_hooks.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
 ];
@@ -72,7 +72,7 @@ const REQUEST_NODES = [
     kind: 'govern',
     title: 'Req04 Chat Process Governance',
     raw: 'V3HubReqChatProcess04Governed',
-    does: '治理当前请求的工具输出、history、servertool request hook 和请求语义。',
+    does: '治理当前请求的工具输出、history、工具注入和请求语义。',
     logic: 'Req04 是唯一请求侧 Chat Process owner；非空 previous_response_id 已在路由前拒绝，不恢复 continuation context。',
   },
   {
@@ -95,7 +95,7 @@ const REQUEST_NODES = [
     id: 'RQ07',
     kind: 'inject',
     title: 'Inject Current Internal Tools',
-    raw: 'tool-thinking / servertool request hook profile',
+    raw: 'tool-thinking / tool hook profile',
     does: '按当前 turn policy 注入已声明的内部工具和必要 guidance。',
     logic: '最多一次；append/augment 当前 turn，不覆盖客户端工具，不清空 system/developer/user context。',
   },
@@ -124,7 +124,7 @@ const RESPONSE_NODES = [
     title: 'Provider Response Compat',
     raw: 'ProviderRespCompat02ProviderCompat',
     does: '先做 provider-specific response compat，把上游差异映射到 Hub 可解析形状。',
-    logic: 'compat 只处理 provider 协议差异；不得承担 servertool 或普通工具治理。',
+    logic: 'compat 只处理 provider 协议差异；不得承担工具治理。',
   },
   {
     id: 'RS02',
@@ -156,22 +156,22 @@ const RESPONSE_NODES = [
     title: 'Inspect finish_reason',
     raw: 'finish_reason: tool_call | stop | other',
     does: '根据补齐修复后的 finish_reason 选择响应治理路径。',
-    logic: 'tool_call 进入已注册的 servertool hook；stop 保持普通终止响应；两条响应分支在 Resp03 内建模，但不和请求图混合。',
+    logic: 'tool_call 进入已注册的工具 hook；stop 保持普通终止响应；两条响应分支在 Resp03 内建模，但不和请求图混合。',
   },
   {
     id: 'RS06',
-    kind: 'servertool',
-    title: 'Tool-call Servertool Hook',
-    raw: 'servertool hook under finish_reason=tool_call',
-    does: '在 tool_call 分支先判断模型 tool call 是否属于 servertool/内部工具。',
-    logic: 'servertool 拦截优先于普通工具治理；如果被 servertool 接管，就进入 servertool response governance，不再当普通 exec/apply_patch 处理。',
+    kind: 'hook',
+    title: 'Tool-call Hook',
+    raw: 'tool hook under finish_reason=tool_call',
+    does: '在 tool_call 分支先判断模型 tool call 是否属于内部工具。',
+    logic: '工具拦截优先于普通工具治理；如果被内部工具接管，就进入工具 response governance，不再当普通 exec/apply_patch 处理。',
   },
   {
     id: 'RS07',
     kind: 'govern',
     title: 'Ordinary Tool Governance',
     raw: 'exec_command / apply_patch / client tool governance',
-    does: 'servertool 未拦截的 tool_call 进入普通工具治理，例如 exec_command、apply_patch、客户端工具调用治理。',
+    does: '内部工具未拦截的 tool_call 进入普通工具治理，例如 exec_command、apply_patch、客户端工具调用治理。',
     logic: '这里治理普通工具 identity、arguments、call_id、required_action/client projection 输入；不得删除客户端可见工具真相。',
   },
   {
@@ -180,15 +180,15 @@ const RESPONSE_NODES = [
     title: 'Terminal Response Branch',
     raw: 'finish_reason=stop',
     does: '保留 finish_reason=stop 的普通终止响应。',
-    logic: 'terminal stop 不进入 servertool hook、内部续轮或提示词注入；直接与 Resp03 的已治理语义合流。',
+    logic: 'terminal stop 不进入工具 hook、内部续轮或提示词注入；直接与 Resp03 的已治理语义合流。',
   },
   {
     id: 'RS09',
     kind: 'sidechannel',
     title: 'Update Runtime Control Side-Channel',
     raw: 'ServerToolCenterMetadataControl',
-    does: '根据 tool_call 分支治理结果更新 servertool runtime side-channel。',
-    logic: '只写 side-channel；不得把 servertool/debug/control 字段放进 provider body 或 client normal payload。',
+    does: '根据 tool_call 分支治理结果更新 runtime side-channel。',
+    logic: '只写 side-channel；不得把工具/debug/control 字段放进 provider body 或 client normal payload。',
   },
   {
     id: 'RS10',
@@ -220,7 +220,7 @@ const NOTE_CARDS = [
   {
     title: 'Client SSE request lifecycle split from response governance',
     badge: 'split',
-    text: '请求侧从 Client SSE 开始，经过 server accept、ReqInbound normalize、工具输出配对归一、Req04 current-turn merge/governance；响应侧先 compat 再归一化，Resp03 内先文本收割/工具补齐，再按 finish_reason 将 tool_call 送入已注册 servertool hook、将 stop 保持为普通终止响应。两边不能混成一张图。',
+    text: '请求侧从 Client SSE 开始，经过 server accept、ReqInbound normalize、工具输出配对归一、Req04 current-turn merge/governance；响应侧先 compat 再归一化，Resp03 内先文本收割/工具补齐，再按 finish_reason 将 tool_call 送入已注册工具 hook、将 stop 保持为普通终止响应。两边不能混成一张图。',
   },
   {
     title: 'Error feedback is preserved',
@@ -235,7 +235,7 @@ const NOTE_CARDS = [
   {
     title: 'Resp03 owns response governance',
     badge: 'response',
-    text: '响应侧 compat 和归一化之后，文本收割、工具补齐修复、finish_reason 分流、servertool hooks、普通工具治理都只能在 Resp03 做；RespOutbound/handler 不能补第二套治理。',
+    text: '响应侧 compat 和归一化之后，文本收割、工具补齐修复、finish_reason 分流、工具 hooks、普通工具治理都只能在 Resp03 做；RespOutbound/handler 不能补第二套治理。',
   },
   {
     title: 'Responses continuation is retired',
@@ -250,7 +250,7 @@ const NOTE_CARDS = [
   {
     title: 'Diagnostics stay side-channel only',
     badge: 'side-channel',
-    text: 'debug、metadata、servertool runtime control、snapshot 只能走 side-channel carrier；不得混进 provider body 或 client normal payload。',
+    text: 'debug、metadata、runtime control、snapshot 只能走 side-channel carrier；不得混进 provider body 或 client normal payload。',
   },
 ];
 
@@ -261,7 +261,7 @@ const RESOURCE_ROWS = [
   ['Client tool declarations', 'Request data plane / Req04 reader', 'Preserve by default; do not delete because a provider cannot consume the exact shape.'],
   ['additional_tools', 'Codex capability declaration surface / Req04 reader', 'Preserve original Responses input surface; do not flatten or drop it for convenience.'],
   ['Provider response tool calls', 'Resp03 response governance truth', 'Classify and harvest before RespOutbound; do not leave response governance outside Resp03.'],
-  ['Servertool runtime control', 'Metadata side-channel / ServerToolCenter', 'Read/update at the registered servertool hook; never enter provider/client normal payload.'],
+  ['Tool runtime control', 'Metadata side-channel / Runtime side-channel', 'Read/update inside Chat Process; never enter provider/client normal payload.'],
   ['Provider malformed fields', 'ReqOutbound / provider codec owner', 'Fix provider-bound field generation before send; do not delete transcript truth in Req04.'],
 ];
 
@@ -274,7 +274,7 @@ const CHECKLIST_ROWS = [
   ['C6', 'No request-side internal artifact-removal path is declared in this small skeleton.', 'Locks removal of unproven artifact-removal path.'],
   ['C7', 'Error feedback is preserved.', 'Locks parse-error / unknown-tool feedback preservation.'],
   ['C8', 'additional_tools reach provider-visible tools.', 'Locks Codex capability declaration surface.'],
-  ['C9', 'Resp03 owns response-side tool/servertool governance.', 'Locks no handler/RespOutbound duplicate response governance.'],
+  ['C9', 'Resp03 owns response-side tool governance.', 'Locks no handler/RespOutbound duplicate response governance.'],
   ['C10', 'RespOutbound and JSON→SSE happen after Resp03 governance.', 'Locks Chat Process endpoint before outbound/json2sse.'],
   ['C11', 'Provider-specific malformed fields are fixed in ReqOutbound/provider codec.', 'Locks provider codec owner.'],
   ['C12', 'Metadata/debug remains side-channel only.', 'Locks normal payload purity.'],
@@ -288,7 +288,7 @@ const RED_FIXTURE_ROWS = [
   ['Preserve unknown-tool feedback', 'Client rejection stays feedback instead of being silently deleted.'],
   ['Reject one-sided deletion of a paired call/output', 'Call/output adjacency cannot be broken.'],
   ['Preserve additional_tools', 'Codex capability declarations remain visible.'],
-  ['Classify response tool/servertool actions only in Resp03', 'Response governance cannot move to RespInbound, RespOutbound, handler, or SSE.'],
+  ['Classify response tool actions only in Resp03', 'Response governance cannot move to RespInbound, RespOutbound, handler, or SSE.'],
   ['Reject post-Resp03 semantic repair', 'RespOutbound cannot reinterpret tools or fix history after Resp03.'],
   ['Keep provider malformed-field repair in codec/builder', 'Req04 cannot become provider-specific workaround layer.'],
   ['Reject metadata/control leaks into provider/client payload', 'Side-channel remains isolated.'],
@@ -346,8 +346,8 @@ function renderResponseMermaid() {
   lines.push('  RS05 -->|finish_reason=tool_call| RS06');
   lines.push('  RS05 -->|finish_reason=stop| RS08');
   lines.push('  RS05 -->|other terminal / pass-through| RS10');
-  lines.push('  RS06 -->|servertool intercepted| RS09');
-  lines.push('  RS06 -->|not servertool| RS07');
+  lines.push('  RS06 -->|tool intercepted| RS09');
+  lines.push('  RS06 -->|not tool| RS07');
   lines.push('  RS07 -->|ordinary tool governed| RS09');
   lines.push('  RS08 -->|ordinary terminal response| RS10');
   lines.push('  RS09 -->|side-channel state updated only| RS10');
@@ -366,7 +366,7 @@ function renderClassDefs(prefix) {
     '  classDef restore fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,color:#0c4a6e;',
     '  classDef compat fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;',
     '  classDef repair fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;',
-    '  classDef servertool fill:#eef2ff,stroke:#4f46e5,stroke-width:2px,color:#312e81;',,
+    '  classDef hook fill:#eef2ff,stroke:#4f46e5,stroke-width:2px,color:#312e81;',
     '  classDef normalize fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;',
     '  classDef load fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;',
     '  classDef decision fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;',
@@ -380,7 +380,7 @@ function renderClassDefs(prefix) {
     '  classDef emit fill:#f0fdfa,stroke:#0f766e,stroke-width:2px,color:#134e4a;',
     '  classDef frame fill:#f8fafc,stroke:#64748b,stroke-width:2px,color:#0f172a;',
   ];
-  for (const kind of ['boundary', 'restore', 'compat', 'normalize', 'load', 'preserve', 'inject', 'emit', 'frame', 'govern', 'classify', 'harvest', 'repair', 'servertool', 'sidechannel', 'save']) {
+  for (const kind of ['boundary', 'restore', 'compat', 'normalize', 'load', 'preserve', 'inject', 'emit', 'frame', 'govern', 'classify', 'harvest', 'repair', 'hook', 'sidechannel', 'save']) {
     const ids = nodeSet.filter((node) => node.kind === kind).map((node) => node.id);
     if (ids.length) lines.push(`  class ${ids.join(',')} ${kind};`);
   }
@@ -438,7 +438,7 @@ function renderInvariantList() {
     'Responses continuation is retired: non-empty previous_response_id fails before routing or provider transport, and Req04 never restores a saved local context.',
     'This small skeleton does not declare a request-side internal artifact removal path because no confirmed requirement exists.',
     'Error feedback is preserved: parse-error, unknown-tool, unsupported, schema reject, and execution failure outputs remain model correction input.',
-    'Response chain runs provider raw → compat → RespInbound normalization before Resp03. Resp03 first harvests text, completes/repairs tool frames, may correct finish_reason, then sends tool_call through the registered servertool hook while stop remains an ordinary terminal response.',
+    'Response chain runs provider raw → compat → RespInbound normalization before Resp03. Resp03 first harvests text, completes/repairs tool frames, may correct finish_reason, then sends tool_call through the registered tool hook while stop remains an ordinary terminal response.',
     'Provider codec owns malformed provider fields; Req04/Resp03 cannot become provider-specific workaround or error projection layer.',
     'Diagnostics stay side-channel only and must not enter provider body or client normal payload.',
   ];
@@ -641,7 +641,7 @@ export function renderV3Req04ToolGovernanceReviewHtml() {
       <h2>Forbidden action focus</h2>
       <div class="callout">
         <strong>Do not repair tool continuity by deleting request truth or by moving governance to the wrong side.</strong>
-        Request-side current tool output pair normalization belongs before/inside Req04 and must preserve client/model truth. Responses continuation is retired before routing/provider transport. Response-side tool/servertool governance belongs to Resp03; outbound and json2sse happen after that.
+        Request-side current tool output pair normalization belongs before/inside Req04 and must preserve client/model truth. Responses continuation is retired before routing/provider transport. Response-side tool governance belongs to Resp03; outbound and json2sse happen after that.
         Provider malformed fields are fixed at ReqOutbound/provider codec; debug/control facts stay side-channel only.
       </div>
     </section>

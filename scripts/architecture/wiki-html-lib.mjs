@@ -148,7 +148,7 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
     id: 'v3-protocol-normalization-tool-governance-boundary',
     eyebrow: 'normalization boundary review · dedicated surface',
     title: 'V3 Protocol Normalization / Tool Governance Boundary Review',
-    summary: 'Locks the boundary that protocol normalization validates and maps adjacent protocols only, while tool identity pairing, uniqueness, servertool, and current-turn governance stay in Chat Process govern nodes.',
+    summary: 'Locks the boundary that protocol normalization validates and maps adjacent protocols only, while tool identity pairing, uniqueness, and current-turn governance stay in Chat Process govern nodes.',
     requestTitle: 'Request normalization vs Req04 governance',
     responseTitle: 'Response normalization vs Resp03 governance',
     requestEdges: [
@@ -160,13 +160,13 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
     responseEdges: [
       ['ProviderRespInbound01Raw', 'ProviderRespCompat02ProviderCompat', 'provider compat only'],
       ['ProviderRespCompat02ProviderCompat', 'HubRespInbound03Parsed', 'response shape normalization only'],
-      ['HubRespInbound03Parsed', 'HubRespChatProcess04Governed', 'tool/servertool governance'],
+      ['HubRespInbound03Parsed', 'HubRespChatProcess04Governed', 'tool governance'],
       ['HubRespChatProcess04Governed', 'HubRespOutbound06ClientSemantic', 'project after governance'],
     ],
     logicCards: [
       ['Normalization is not governance', 'Codecs map protocols and preserve invalid tool identity shapes for Chat Process rejection or governance.'],
       ['Compat is not fallback', 'Provider compat nodes perform provider micro-adjustments only; no route, model, tool, or fallback policy.'],
-      ['Chat Process owns tool semantics', 'Tool pairing, duplicate identity, orphan output, and servertool belong to Req04/Resp03.'],
+      ['Chat Process owns tool semantics', 'Tool pairing, duplicate identity, orphan output, and current-turn governance belong to Req04/Resp03.'],
     ],
     resources: [
       ['v3.hub.tool_governance_truth', 'Req04 / Resp03 Chat Process', 'Tool identity and governance result.'],
@@ -372,7 +372,7 @@ function v3SopMermaid(kind) {
     '  S0["<b>V3ProviderRespInbound01Raw</b><br/><small>provider raw response/event bytes already received</small>"]',
     '  S1["<b>ProviderRespCompat02ProviderCompat</b><br/><small>provider-specific compat before Hub parse</small>"]',
     '  S2["<b>V3HubRespInbound02Normalized</b><br/><small>Hub response semantic input</small>"]',
-    '  S3["<b>V3HubRespChatProcess03Governed</b><br/><small>response tool/servertool governance owner</small>"]',
+    '  S3["<b>V3HubRespChatProcess03Governed</b><br/><small>response tool governance owner</small>"]',
     '  S4["<b>V3HubRespOutbound05ClientSemantic</b><br/><small>client protocol projection only</small>"]',
     '  S5["<b>V3ServerRespOutbound06ClientFrame</b><br/><small>HTTP/SSE frame handoff only</small>"]',
     '  S0 -->|compat first| S1 -->|normalize| S2 -->|govern at Resp03| S3 -->|project| S4 -->|frame/stream| S5',
@@ -645,7 +645,7 @@ function renderV3MainlineSkeletonSopHtml() {
       <h2>Response node logic</h2>
       <div class="logic-grid">
         ${v3SopNodeCard('ProviderRespCompat02ProviderCompat', 'Compat before RespInbound', 'Provider-specific response shape differences are normalized before Hub response parsing.')}
-        ${v3SopNodeCard('Resp03', 'Response Chat Process owner', 'Text harvest, tool frame repair, finish_reason branch, servertool, and ordinary tool governance live here.')}
+        ${v3SopNodeCard('Resp03', 'Response Chat Process owner', 'Text harvest, tool frame repair, finish_reason branch, and ordinary tool governance live here.')}
         ${v3SopNodeCard('Resp03 / RespOutbound / Server frame', 'Govern then project then frame', 'Resp03 owns response governance; RespOutbound projects client semantic; server/SSE only frames/transports.')}
       </div>
     </section>
@@ -684,7 +684,7 @@ function renderV3MainlineSkeletonSopHtml() {
 
     <section class="panel">
       <h2>SSE Edge SOP</h2>
-      <div class="callout"><strong>SSE is transport only.</strong> It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only. It must not parse event/data JSON, required_action, terminal status, tool calls, continuation, servertool, routing, retry, or error-policy semantics.</div>
+      <div class="callout"><strong>SSE is transport only.</strong> It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only. It must not parse event/data JSON, required_action, terminal status, tool calls, continuation, routing, retry, or error-policy semantics.</div>
     </section>
 
     <section class="panel">

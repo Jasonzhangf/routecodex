@@ -51,7 +51,6 @@ function isForbiddenTrackedPath(p) {
   if (p.startsWith('scripts/test-') && p.endsWith('.mjs')) return true;
   if (p.startsWith('tools/')) return true;
   if (p.startsWith('replay/')) return true;
-  if (p.startsWith('servertool/')) return true;
   if (p.startsWith('verified-configs/')) return true;
   if (p.startsWith('interpreter/')) return true;
   if (p.startsWith('exporters/')) return true;

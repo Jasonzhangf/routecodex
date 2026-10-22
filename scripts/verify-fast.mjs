@@ -152,7 +152,7 @@ function classifyRootPackageScope(entries) {
         if (/(?:session|continuation)/u.test(value)) fineScopes.add('v3_session');
         if (/debug/u.test(value)) fineScopes.add('v3_debug');
         if (/(?:router|route-classifier|classifier)/u.test(value)) fineScopes.add('v3_router');
-        if (/(?:tool|servertool)/u.test(value)) fineScopes.add('v3_tool');
+        if (/tool/u.test(value)) fineScopes.add('v3_tool');
         if (fineScopes.size === before) fineScopes.add('v3_architecture');
       }
       if (v4Marker.test(line)) {
@@ -257,7 +257,7 @@ function classifyV3FineScopes(paths, { workflowScope }) {
     if (isV3Path && /(?:^|[\/_-])session(?:[\/_-]|$)|continuation/iu.test(path)) add('v3_session');
     if (isV3Path && /(?:^|[\/_-])debug(?:[\/_-]|$)/iu.test(path)) add('v3_debug');
     if (isV3Path && /(?:^|[\/_-])router(?:[\/_-]|$)|route-classifier/iu.test(path)) add('v3_router');
-    if (isV3Path && /(?:^|[\/_-])tool(?:[\/_-]|$)|servertool/iu.test(path)) add('v3_tool');
+    if (isV3Path && /(?:^|[\/_-])tool(?:[\/_-]|$)/iu.test(path)) add('v3_tool');
   }
   return scopes;
 }

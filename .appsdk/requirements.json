@@ -539,9 +539,63 @@
         "version": 1
       },
       "version": 20
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "移除 RCC 专用 servertool 注册、CLI projection、内部搜索执行及搜索专用状态，并实现 Chat Process 统一的有界续杯。配置唯一放在 v3/crates/routecodex-v3-config/src/internal.toml 的 [chat_process.refill] max_consecutive_refills = 1，由同 crate 的 internal.rs 解析成 typed 只读策略；0 关闭，N 最多新增 N 次，不含原始执行；不得新增用户 config、server override、环境变量、动态 API 或第二个默认源。Chat Process 对完整治理后的结果统一判断：非工具调用、非真实错误、没有源显式非空 summary，且仍有额度时，才请求续杯；Direct 注册 hook 与 Relay 复用同一策略。原始请求 used=0，真正发起新的 refill execution 时才加 1；计数按请求隔离，不写业务 metadata，不跨会话或端口共享。只删除搜索专用 servertool_followup、Center、sidecar 和 CLI projection；保留通用执行处置、请求来源、延期提交和清理边。中间轮不提前发送客户端完成事件；前轮业务内容必须进入续请求历史和最终标准结果；续杯额度耗尽正常交付，真实错误仍走原 Error 链。",
+          "role": "user",
+          "source": "RouteCodex work item 66301e2 milestone request in the DSH lead session; docs/goals/66301e2-servertool-refill-integrated-{plan,implementation-prompt,dag}.md."
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261021-66301e2-bounded-refill",
+        "requirement_id": "routecodex-v3-chat-process-bounded-refill",
+        "text": "Chat Process 独占统一的有界续杯策略。触发条件只由四项决定：完整治理后的响应已完成、没有真实工具调用、没有真实 typed error、没有源显式非空 summary；summary 只认 Responses output[].reasoning.summary[].text 的非空文本，空白、空数组、缺失不算，请求侧 summary 策略和 RCC 合成的 reasoning/toolreason summary 不算。该策略只有一处实现（decide_v3_chat_process_refill）并被 Relay 与 Direct 复用，不按协议复制，也不新增任务完成度、正文关键词或长度例外。配置唯一真源是 v3/crates/routecodex-v3-config/src/internal.toml 的 [chat_process.refill] max_consecutive_refills，由同 crate internal.rs 解析为 typed 只读策略；默认 1，0 关闭，N 表示最多新增 N 次执行且不含原始执行；不设第二个默认源，不接受用户 config、server override、环境变量或动态 API 覆盖。每次续杯都是 Runtime 正常请求主线上的新执行，静态 DAG 不画回边；原始请求计数为 0，只有真正发起新执行才加 1，同轮 Error 候选恢复不多扣也不重置，新客户端请求重新从 0 开始，计数按请求隔离。中间轮不向客户端发送任何完成事件；前轮业务内容进入续请求历史并合并进最终标准结果；交付时保留真实终态、真实工具调用与配对、真实 finish reason；额度耗尽正常交付，真实错误保留原 Error 链，候选耗尽按原合同中止请求，不得用前轮文本包装成成功。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "移除 RCC 专用 servertool 注册、CLI projection、内部搜索执行及搜索专用状态，并实现 Chat Process 统一的有界续杯。配置唯一放在 v3/crates/routecodex-v3-config/src/internal.toml 的 [chat_process.refill] max_consecutive_refills = 1，由同 crate 的 internal.rs 解析成 typed 只读策略；0 关闭，N 最多新增 N 次，不含原始执行；不得新增用户 config、server override、环境变量、动态 API 或第二个默认源。Chat Process 对完整治理后的结果统一判断：非工具调用、非真实错误、没有源显式非空 summary，且仍有额度时，才请求续杯；Direct 注册 hook 与 Relay 复用同一策略。原始请求 used=0，真正发起新的 refill execution 时才加 1；计数按请求隔离，不写业务 metadata，不跨会话或端口共享。只删除搜索专用 servertool_followup、Center、sidecar 和 CLI projection；保留通用执行处置、请求来源、延期提交和清理边。中间轮不提前发送客户端完成事件；前轮业务内容必须进入续请求历史和最终标准结果；续杯额度耗尽正常交付，真实错误仍走原 Error 链。",
+          "role": "user",
+          "source": "RouteCodex work item 66301e2 milestone request in the DSH lead session; docs/goals/66301e2-servertool-refill-integrated-{plan,implementation-prompt,dag}.md."
+        },
+        "requirement_id": "routecodex-v3-chat-process-bounded-refill",
+        "status": "active",
+        "text": "Chat Process 独占统一的有界续杯策略。触发条件只由四项决定：完整治理后的响应已完成、没有真实工具调用、没有真实 typed error、没有源显式非空 summary；summary 只认 Responses output[].reasoning.summary[].text 的非空文本，空白、空数组、缺失不算，请求侧 summary 策略和 RCC 合成的 reasoning/toolreason summary 不算。该策略只有一处实现（decide_v3_chat_process_refill）并被 Relay 与 Direct 复用，不按协议复制，也不新增任务完成度、正文关键词或长度例外。配置唯一真源是 v3/crates/routecodex-v3-config/src/internal.toml 的 [chat_process.refill] max_consecutive_refills，由同 crate internal.rs 解析为 typed 只读策略；默认 1，0 关闭，N 表示最多新增 N 次执行且不含原始执行；不设第二个默认源，不接受用户 config、server override、环境变量或动态 API 覆盖。每次续杯都是 Runtime 正常请求主线上的新执行，静态 DAG 不画回边；原始请求计数为 0，只有真正发起新执行才加 1，同轮 Error 候选恢复不多扣也不重置，新客户端请求重新从 0 开始，计数按请求隔离。中间轮不向客户端发送任何完成事件；前轮业务内容进入续请求历史并合并进最终标准结果；交付时保留真实终态、真实工具调用与配对、真实 finish reason；额度耗尽正常交付，真实错误保留原 Error 链，候选耗尽按原合同中止请求，不得用前轮文本包装成成功。",
+        "version": 1
+      },
+      "version": 21
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "移除 RCC 专用 servertool 注册、CLI projection、内部搜索执行及搜索专用状态，并实现 Chat Process 统一的有界续杯。配置唯一放在 v3/crates/routecodex-v3-config/src/internal.toml 的 [chat_process.refill] max_consecutive_refills = 1，由同 crate 的 internal.rs 解析成 typed 只读策略；0 关闭，N 最多新增 N 次，不含原始执行；不得新增用户 config、server override、环境变量、动态 API 或第二个默认源。Chat Process 对完整治理后的结果统一判断：非工具调用、非真实错误、没有源显式非空 summary，且仍有额度时，才请求续杯；Direct 注册 hook 与 Relay 复用同一策略。原始请求 used=0，真正发起新的 refill execution 时才加 1；计数按请求隔离，不写业务 metadata，不跨会话或端口共享。只删除搜索专用 servertool_followup、Center、sidecar 和 CLI projection；保留通用执行处置、请求来源、延期提交和清理边。中间轮不提前发送客户端完成事件；前轮业务内容必须进入续请求历史和最终标准结果；续杯额度耗尽正常交付，真实错误仍走原 Error 链。",
+          "role": "user",
+          "source": "RouteCodex work item 66301e2 milestone request in the DSH lead session; docs/goals/66301e2-servertool-refill-integrated-{plan,implementation-prompt,dag}.md."
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261021-66301e2-servertool-removal",
+        "requirement_id": "routecodex-v3-no-rcc-servertool",
+        "text": "RouteCodex 不再持有 RCC 专用 servertool。退役 servertool-core crate、CLI servertool 子命令与 descriptor projection、hooks 的 ExecuteWebSearch 控制动作、web_search_hop/web_search_sidecar/web_search_hook_request、kernel direct_web_search，以及搜索专用的跨轮状态（Center、sidecar plan、servertool_followup 执行来源）。配置层的 metadata_center_local_search 与 servertool_search_backend 在编译期以显式 Validation 拒绝，不再有本地搜索后端。保留普通工具、ToolThinking、custom、apply_patch、namespace、工具身份与历史配对、多模态、真实 finish reason、原 Error 链、取消与清理边、独立的 hooks daemon，以及 Provider 执行的原生 hosted search 与 citations；RCC 内不增加任何搜索兜底。通用 execution_disposition 收敛为 client_commit 与 refill_requested，请求来源为 client、dry_run、refill。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "移除 RCC 专用 servertool 注册、CLI projection、内部搜索执行及搜索专用状态，并实现 Chat Process 统一的有界续杯。配置唯一放在 v3/crates/routecodex-v3-config/src/internal.toml 的 [chat_process.refill] max_consecutive_refills = 1，由同 crate 的 internal.rs 解析成 typed 只读策略；0 关闭，N 最多新增 N 次，不含原始执行；不得新增用户 config、server override、环境变量、动态 API 或第二个默认源。Chat Process 对完整治理后的结果统一判断：非工具调用、非真实错误、没有源显式非空 summary，且仍有额度时，才请求续杯；Direct 注册 hook 与 Relay 复用同一策略。原始请求 used=0，真正发起新的 refill execution 时才加 1；计数按请求隔离，不写业务 metadata，不跨会话或端口共享。只删除搜索专用 servertool_followup、Center、sidecar 和 CLI projection；保留通用执行处置、请求来源、延期提交和清理边。中间轮不提前发送客户端完成事件；前轮业务内容必须进入续请求历史和最终标准结果；续杯额度耗尽正常交付，真实错误仍走原 Error 链。",
+          "role": "user",
+          "source": "RouteCodex work item 66301e2 milestone request in the DSH lead session; docs/goals/66301e2-servertool-refill-integrated-{plan,implementation-prompt,dag}.md."
+        },
+        "requirement_id": "routecodex-v3-no-rcc-servertool",
+        "status": "active",
+        "text": "RouteCodex 不再持有 RCC 专用 servertool。退役 servertool-core crate、CLI servertool 子命令与 descriptor projection、hooks 的 ExecuteWebSearch 控制动作、web_search_hop/web_search_sidecar/web_search_hook_request、kernel direct_web_search，以及搜索专用的跨轮状态（Center、sidecar plan、servertool_followup 执行来源）。配置层的 metadata_center_local_search 与 servertool_search_backend 在编译期以显式 Validation 拒绝，不再有本地搜索后端。保留普通工具、ToolThinking、custom、apply_patch、namespace、工具身份与历史配对、多模态、真实 finish reason、原 Error 链、取消与清理边、独立的 hooks daemon，以及 Provider 执行的原生 hosted search 与 citations；RCC 内不增加任何搜索兜底。通用 execution_disposition 收敛为 client_commit 与 refill_requested，请求来源为 client、dry_run、refill。",
+        "version": 1
+      },
+      "version": 22
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 20
+  "version": 22
 }

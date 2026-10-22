@@ -445,13 +445,11 @@ impl ControlServer {
                     }
                     let core = Arc::clone(&self.core);
                     let running = Arc::clone(&running);
-                    std::thread::spawn(move || {
-                        match serve_connection(&core, &mut stream) {
-                            Ok(true) => {}
-                            Ok(false) => running.store(false, Ordering::Relaxed),
-                            Err(error) => {
-                                eprintln!("rccv3-hooksd control connection failed: {error}")
-                            }
+                    std::thread::spawn(move || match serve_connection(&core, &mut stream) {
+                        Ok(true) => {}
+                        Ok(false) => running.store(false, Ordering::Relaxed),
+                        Err(error) => {
+                            eprintln!("rccv3-hooksd control connection failed: {error}")
                         }
                     });
                 }

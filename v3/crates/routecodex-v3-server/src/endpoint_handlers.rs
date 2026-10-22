@@ -450,7 +450,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             plan.map(|plan| plan.decision.target.clone()),
             plan.map(|plan| plan.expanded.clone()),
             BTreeSet::new(),
-            plan.map_or_else(V3ResponsesRelayRuntimeSeeds::default, |plan| plan.relay_runtime_seeds()),
+            plan.map_or_else(V3ResponsesRelayRuntimeSeeds::default, |plan| {
+                plan.relay_runtime_seeds()
+            }),
         )
         .await
         {
@@ -1069,48 +1071,47 @@ fn execute_v3_provider_request_dry_run_branch<'a>(
             return foundation_output_response(output);
         }
         if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-            let output =
-                match execute_v3_responses_relay_dry_run_orchestration_outcome(
-                    &state.manifest,
-                    V3ResponsesRelayRuntimeInput {
+            let output = match execute_v3_responses_relay_dry_run_orchestration_outcome(
+                &state.manifest,
+                V3ResponsesRelayRuntimeInput {
+                    server_id: state.server.id.clone(),
+                    failure_session_scope: provider_failure_session_scope,
+                    request_id: request_id.clone(),
+                    payload: payload.clone(),
+                },
+            )
+            .await
+            {
+                V3ResponsesRelayDryRunOutcome::Foundation(output) => output,
+                V3ResponsesRelayDryRunOutcome::DirectHandoff(handoff) => {
+                    let fixture = V3DryRunFixture {
+                        fixture_id: request_id.clone(),
                         server_id: state.server.id.clone(),
-                        failure_session_scope: provider_failure_session_scope,
-                        request_id: request_id.clone(),
-                        payload: payload.clone(),
-                    },
-                )
-                .await
-                {
-                    V3ResponsesRelayDryRunOutcome::Foundation(output) => output,
-                    V3ResponsesRelayDryRunOutcome::DirectHandoff(handoff) => {
-                        let fixture = V3DryRunFixture {
-                            fixture_id: request_id.clone(),
-                            server_id: state.server.id.clone(),
-                            method: method.clone(),
-                            path: path.clone(),
-                            request_payload: handoff.request_payload,
-                            response_payload: json!({
-                                "object": "response",
-                                "status": "completed",
-                                "output_text": "routecodex provider-request dry-run stopped before provider send",
-                                "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
-                            }),
-                        };
-                        let mut output =
-                            execute_v3_responses_direct_dry_run_runtime_with_initial_target(
-                                fixture,
-                                &state.manifest,
-                                &state.debug,
-                                &handoff.plan,
-                            )
-                            .await;
-                        prepend_v3_protocol_plan_trace_to_foundation_output(
-                            &mut output,
-                            &handoff.node_trace,
-                        );
-                        output
-                    }
-                };
+                        method: method.clone(),
+                        path: path.clone(),
+                        request_payload: handoff.request_payload,
+                        response_payload: json!({
+                            "object": "response",
+                            "status": "completed",
+                            "output_text": "routecodex provider-request dry-run stopped before provider send",
+                            "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
+                        }),
+                    };
+                    let mut output =
+                        execute_v3_responses_direct_dry_run_runtime_with_initial_target(
+                            fixture,
+                            &state.manifest,
+                            &state.debug,
+                            &handoff.plan,
+                        )
+                        .await;
+                    prepend_v3_protocol_plan_trace_to_foundation_output(
+                        &mut output,
+                        &handoff.node_trace,
+                    );
+                    output
+                }
+            };
             let raw_input_items = payload
                 .get("input")
                 .and_then(Value::as_array)
