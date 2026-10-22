@@ -22,10 +22,6 @@ function endpointLabel(endpoint) {
 }
 
 function statusText(row) {
-  const http = row.meta?.provider_status;
-  if (http != null && Number.isFinite(Number(http))) {
-    return String(http);
-  }
   const errorCode = compactErrorReason(row);
   if (/^\d+$/.test(errorCode)) {
     return errorCode;
@@ -34,6 +30,10 @@ function statusText(row) {
   // identity, never as a fabricated HTTP code.
   if (errorCode === "network") {
     return "network";
+  }
+  const http = row.meta?.provider_status;
+  if (http != null && Number.isFinite(Number(http))) {
+    return String(http);
   }
   const fallback = row.result;
   if (fallback) {

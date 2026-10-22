@@ -954,6 +954,166 @@ async fn observability_records_accept_declared_network_facet_label_from_frontend
     }
 }
 
+/// Local request conversion failure and real upstream HTTP 400 must stay
+/// distinct on the public records API and in the actual WebUI status rendering.
+/// The local row keeps a legacy carrier `provider_status=400`; the typed
+/// `internal_request_lane` category must win so it renders as 598/local and
+/// never shows up as a second 400/local row.
+#[tokio::test]
+async fn observability_local_conversion_and_upstream_400_remain_distinct() {
+    let (base, _state, home) = bind_test_server().await;
+    let local = json!({
+        "request_key": "4444:local-conversion-400",
+        "event_type": "request.failed",
+        "started_epoch_ms": 1,
+        "updated_epoch_ms": 40,
+        "finished_epoch_ms": 40,
+        "duration_ms": 1,
+        "meta": {
+            "request_id": "local-conversion-400",
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses",
+            "provider_status": 400,
+            "error_category": "internal_request_lane",
+            "error_detail": "local request conversion failed",
+            "observed_error": {"source": "error06_projection_not_exposed"}
+        },
+        "scope": {"port": 4444},
+        "result": "error",
+        "attempts": 1,
+        "failed_attempts": 1,
+        "switches": 0,
+        "usage": null
+    });
+    let upstream = json!({
+        "request_key": "4444:upstream-http-400",
+        "event_type": "request.failed",
+        "started_epoch_ms": 2,
+        "updated_epoch_ms": 30,
+        "finished_epoch_ms": 30,
+        "duration_ms": 1,
+        "meta": {
+            "request_id": "upstream-http-400",
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses",
+            "provider_status": 400,
+            "error_category": "provider_http_400",
+            "error_detail": "upstream rejected request shape",
+            "observed_error": {"source": "provider_attempt_failure"}
+        },
+        "scope": {"port": 4444},
+        "result": "error",
+        "attempts": 1,
+        "failed_attempts": 1,
+        "switches": 0,
+        "usage": null
+    });
+    let success = json!({
+        "request_key": "4444:success-control",
+        "event_type": "request.completed",
+        "started_epoch_ms": 3,
+        "updated_epoch_ms": 20,
+        "finished_epoch_ms": 20,
+        "duration_ms": 1,
+        "meta": {
+            "request_id": "success-control",
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses"
+        },
+        "scope": {"port": 4444},
+        "result": "success",
+        "attempts": 1,
+        "failed_attempts": 0,
+        "switches": 0,
+        "usage": null
+    });
+    write_observability_rows(&home, &[local, upstream, success]);
+
+    let harness = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../admin-webui/records-status-origin-smoke.mjs");
+    let output = tokio::process::Command::new("node")
+        .arg(&harness)
+        .arg(&base)
+        .output()
+        .await
+        .expect("frontend status-origin consumer");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "actual usage.js statusText/drilldown must round-trip the local/upstream 400 split: {stdout}\n{stderr}"
+    );
+    assert!(
+        stdout.contains("records-status-origin smoke passed"),
+        "frontend consumer did not report its pass marker: {stdout}"
+    );
+
+    let initial: Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("initial records response")
+        .json()
+        .await
+        .expect("initial records json");
+    assert_eq!(
+        initial["facets"]["error_status_codes"]["598"], 1,
+        "local conversion must keep its typed 598: {initial}"
+    );
+    assert_eq!(
+        initial["facets"]["error_status_codes"]["400"], 1,
+        "only the real upstream 400 contributes the 400 facet: {initial}"
+    );
+    assert_eq!(
+        initial["facets"]["error_status_origins"]["598"]["local"], 1,
+        "598 local facet: {initial}"
+    );
+    assert_eq!(
+        initial["facets"]["error_status_origins"]["400"]["upstream"], 1,
+        "400 upstream facet: {initial}"
+    );
+    assert!(
+        initial["facets"]["error_status_origins"]["400"]["local"].is_null(),
+        "legacy provider_status=400 must not create a local 400 row: {initial}"
+    );
+
+    let local_filtered: Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&status=error&error_status_code=598&error_origin=local"
+        ))
+        .send()
+        .await
+        .expect("local conversion response")
+        .json()
+        .await
+        .expect("local conversion json");
+    assert_eq!(local_filtered["total"], 1);
+    assert_eq!(
+        local_filtered["records"][0]["request_key"],
+        "4444:local-conversion-400"
+    );
+    assert_eq!(local_filtered["records"][0]["error_origin"], "local");
+
+    let upstream_filtered: Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&status=error&error_status_code=400&error_origin=upstream"
+        ))
+        .send()
+        .await
+        .expect("upstream 400 response")
+        .json()
+        .await
+        .expect("upstream 400 json");
+    assert_eq!(upstream_filtered["total"], 1);
+    assert_eq!(
+        upstream_filtered["records"][0]["request_key"],
+        "4444:upstream-http-400"
+    );
+    assert_eq!(upstream_filtered["records"][0]["error_origin"], "upstream");
+}
+
 // ---------------------------------------------------------------------------
 // Manual cooldown actions (add / probe).
 //
