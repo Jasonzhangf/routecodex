@@ -26,6 +26,28 @@ const crateSourceFiles = [
   'v3/crates/routecodex-v3-virtual-router/src/lib.rs',
 ];
 
+// The Responses Direct single-owner boundary reads these two real source
+// files. The minimal fixture stages equivalent declarations so the boundary is
+// present in the GREEN baseline; the negative cases below mutate them.
+const stagedResponsesDirectSources = {
+  'v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs': `pub struct V3ChatDirectCodec;
+
+impl V3DirectProtocolCodec for V3ChatDirectCodec {
+    type Standardized = V3Req04StandardizedChat;
+    const ENTRY_PROTOCOL: &'static str = "openai_chat";
+    const HUB_ENTRY_PROTOCOL: crate::hub_v1::V3HubEntryProtocol = crate::hub_v1::V3HubEntryProtocol::OpenAiChat;
+}
+`,
+  'v3/crates/routecodex-v3-runtime/src/hooks.rs': `pub struct V3HookRegistry;
+pub fn register_responses_direct_hooks() -> V3HookRegistry { V3HookRegistry }
+pub(crate) fn responses_direct_prepare_before_send() {}
+`,
+  'v3/crates/routecodex-v3-runtime/src/kernel.rs': `pub(crate) async fn execute_v3_responses_direct_runtime_kernel_core_resident() {
+    crate::hooks::responses_direct_prepare_before_send();
+}
+`,
+};
+
 // Minimal runtime registry: every staged crate file stays owned exactly once.
 const runtimeRegistry = `version: 1
 status: active
@@ -220,11 +242,44 @@ const fixtures = [
     ),
     diagnostic: /virtual router cannot depend on provider transport, health or availability/,
   },
+  {
+    name: 'renamed Responses Direct codec owner is rejected',
+    insertFile: 'v3/crates/routecodex-v3-runtime/src/kernel/v3_responses_alternate_codec.rs',
+    insertContent: 'pub struct V3AlternateDirectCodec;\nimpl V3DirectProtocolCodec for V3AlternateDirectCodec {\n    type Standardized = V3Req04StandardizedResponses;\n}\n',
+    diagnostic: /Responses Direct alternate codec owner must not exist/,
+  },
+  {
+    name: 'harmless Responses text inside non-Responses codec is not rejected',
+    sourceFile: 'v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs',
+    sourceTransform: (source) => source.replace(
+      'const ENTRY_PROTOCOL: &\'static str = "openai_chat";',
+      'const ENTRY_PROTOCOL: &\'static str = "openai_chat";\n    // type Standardized = V3Req04StandardizedResponses;\n    const NOTE: &str = "type Standardized = V3Req04StandardizedResponses;";',
+    ),
+    expectPass: true,
+  },
+  {
+    name: 'Responses Direct kernel loses its hook owner connection',
+    sourceFile: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    sourceTransform: (source) => source.replace(
+      'crate::hooks::responses_direct_prepare_before_send();',
+      '// disconnected from the single Responses Direct hook owner',
+    ),
+    diagnostic: /does not call/,
+  },
+  {
+    name: 'Responses Direct kernel keeps hook call text only in a comment',
+    sourceFile: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    sourceTransform: (source) => source.replace(
+      'crate::hooks::responses_direct_prepare_before_send();',
+      '// crate::hooks::responses_direct_prepare_before_send();',
+    ),
+    diagnostic: /does not call/,
+  },
 ];
 
 const failures = [];
 
-function stageDeclaredInput(root, { mutate = null } = {}) {
+function stageDeclaredInput(root, { mutate = null, sourceMutate = null } = {}) {
   for (const [relativePath, content] of declaredInputs) {
     const target = join(root, relativePath);
     mkdirSync(dirname(target), { recursive: true });
@@ -237,6 +292,11 @@ function stageDeclaredInput(root, { mutate = null } = {}) {
     const target = join(root, relativePath);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, stagedRust);
+  }
+  for (const [relativePath, content] of Object.entries(stagedResponsesDirectSources)) {
+    const target = join(root, relativePath);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, sourceMutate ? sourceMutate(relativePath, content) : content);
   }
 }
 
@@ -270,16 +330,24 @@ for (const fixture of fixtures) {
       mutate: (relativePath, content) => fixture.transform && relativePath === fixture.file
         ? fixture.transform(content)
         : content,
+      sourceMutate: (relativePath, content) => fixture.sourceFile && relativePath === fixture.sourceFile && fixture.sourceTransform
+        ? fixture.sourceTransform(content)
+        : content,
     });
     if (fixture.insertFile) {
       const target = join(root, fixture.insertFile);
       mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, stagedRust);
+      writeFileSync(target, fixture.insertContent ?? stagedRust);
     }
     const result = runVerifier(root);
     const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
-    if (result.status === 0) failures.push(`${fixture.name}: gate unexpectedly passed`);
-    else if (!fixture.diagnostic.test(output)) failures.push(`${fixture.name}: wrong diagnostic: ${output.slice(-1000)}`);
+    if (fixture.expectPass) {
+      if (result.status !== 0) failures.push(`${fixture.name}: gate unexpectedly failed: ${output.slice(-1000)}`);
+    } else if (result.status === 0) {
+      failures.push(`${fixture.name}: gate unexpectedly passed`);
+    } else if (!fixture.diagnostic.test(output)) {
+      failures.push(`${fixture.name}: wrong diagnostic: ${output.slice(-1000)}`);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -290,4 +358,5 @@ if (failures.length) {
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
-console.log(`[test:v3-source-gate-red-fixtures] ok (${declaredInputs.length + crateSourceFiles.length} declared inputs staged, baseline GREEN, ${fixtures.length} ownership/dependency mutations rejected)`);
+const rejectedCount = fixtures.filter((fixture) => !fixture.expectPass).length;
+console.log(`[test:v3-source-gate-red-fixtures] ok (${declaredInputs.length + crateSourceFiles.length} declared inputs staged, baseline GREEN, ${rejectedCount} ownership/dependency mutations rejected, ${fixtures.length - rejectedCount} harmless-text passthrough retained)`);

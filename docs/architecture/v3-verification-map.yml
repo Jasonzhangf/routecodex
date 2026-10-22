@@ -3335,7 +3335,7 @@ features:
   status: active_skeleton
   change_risk: critical
   owner_kind: rust_project_v3_runtime_direct_skeleton
-  owner_scope: Unified direct main-loop skeleton (same_protocol passthrough); per-protocol V3DirectProtocolCodec impls (responses/chat); hooks thin shell.
+  owner_scope: Unified direct main-loop skeleton (same_protocol passthrough); per-protocol V3DirectProtocolCodec impls (chat/anthropic/gemini); Responses Direct runs through the V3HookRegistry kernel; hooks thin shell.
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs

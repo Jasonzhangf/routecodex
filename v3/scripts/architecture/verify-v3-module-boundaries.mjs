@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+import { attachModuleBoundaryHelpers } from './v3-module-boundaries-lib.mjs';
 
 // Declared-data module boundary gate.
 //
@@ -13,8 +14,12 @@ import YAML from 'yaml';
 // manifests. It deliberately does not scan Rust source text for symbol
 // spelling, function names, call ordering or literal payload strings: those
 // locks asserted source shape rather than independently justified ownership or
-// dependency behavior and have been retired. Runtime behavior, security and
-// consumer guarantees remain owned by the Rust tests under v3/crates.
+// dependency behavior and have been retired. One declared exception remains:
+// the Responses Direct single-owner boundary reads the owner/caller files and
+// binds the registered dispatch owner to its resident kernel caller, because a
+// second generic Responses codec owner is independently forbidden. Runtime
+// behavior, security and consumer guarantees remain owned by the Rust tests
+// under v3/crates.
 
 const installedV3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const explicitSourceRoot = String(process.env.ROUTECODEX_V3_SOURCE_ROOT ?? '').trim();
@@ -29,6 +34,11 @@ const resolveV3Path = (path) => path.startsWith('v3/')
   : resolve(sourceRoot, path);
 
 const failures = [];
+const {
+  findFunctionBody,
+  assertCallerBodyInvokesCallee,
+  findImplBlocks,
+} = attachModuleBoundaryHelpers({ failures });
 
 function files(dir, out = []) {
   const resolvedDir = resolveV3Path(dir);
@@ -228,6 +238,85 @@ for (const contract of declaredDependencyContracts) {
   for (const forbidden of contract.forbiddenDependencies) {
     if (dependencies.includes(forbidden)) {
       fail(`${contract.diagnostic}: ${contract.manifest} ${contract.section} declares ${forbidden}`);
+    }
+  }
+}
+
+// --- Responses Direct single hook/codec owner --------------------------
+
+// This is an ownership boundary, not a symbol-spelling lock. Responses
+// Direct has exactly one dispatch owner: the resident kernel in kernel.rs
+// reaches the Req04 pre-send preparation through hooks.rs. The retired
+// generic V3ResponsesDirectCodec must not come back as an alternate owner,
+// even when renamed, and the pre-send edge must be an executable call inside
+// the resident kernel body, not a file-wide substring match.
+const responsesDirectOwnerFile = 'v3/crates/routecodex-v3-runtime/src/hooks.rs';
+const responsesDirectCallerFile = 'v3/crates/routecodex-v3-runtime/src/kernel.rs';
+const responsesDirectRegistryEntry = 'fn register_responses_direct_hooks';
+const responsesDirectPrepareOwner = 'responses_direct_prepare_before_send';
+const responsesDirectResidentKernel = 'execute_v3_responses_direct_runtime_kernel_core_resident';
+const responsesDirectPrepareCall = 'crate::hooks::responses_direct_prepare_before_send';
+const responsesDirectPrepareCallWitness = /crate::hooks::responses_direct_prepare_before_send\s*\(/u;
+
+let responsesDirectHooksSource = null;
+try {
+  responsesDirectHooksSource = read(responsesDirectOwnerFile);
+} catch (error) {
+  fail(`${responsesDirectOwnerFile}: Responses Direct hook owner is not readable: ${error.message}`);
+}
+let responsesDirectKernelSource = null;
+try {
+  responsesDirectKernelSource = read(responsesDirectCallerFile);
+} catch (error) {
+  fail(`${responsesDirectCallerFile}: Responses Direct caller is not readable: ${error.message}`);
+}
+if (responsesDirectHooksSource !== null) {
+  if (!responsesDirectHooksSource.includes(responsesDirectRegistryEntry)) {
+    fail(`${responsesDirectOwnerFile}: Responses Direct hook registry entry ${responsesDirectRegistryEntry} must be declared`);
+  }
+  findFunctionBody(
+    responsesDirectHooksSource,
+    responsesDirectPrepareOwner,
+    responsesDirectOwnerFile,
+  );
+}
+if (responsesDirectKernelSource !== null) {
+  if (!responsesDirectKernelSource.includes(responsesDirectResidentKernel)) {
+    fail(`${responsesDirectCallerFile}: Responses Direct resident kernel ${responsesDirectResidentKernel} must be declared`);
+  }
+  assertCallerBodyInvokesCallee({
+    step_id: 'v3-module-boundary-responses-direct-owner',
+    callerSource: responsesDirectKernelSource,
+    caller_symbol: responsesDirectResidentKernel,
+    caller_file: responsesDirectCallerFile,
+    calleeSource: responsesDirectHooksSource,
+    callee_symbol: responsesDirectPrepareOwner,
+    callee_file: responsesDirectOwnerFile,
+    call_witness: responsesDirectPrepareCallWitness,
+  });
+}
+const responsesDirectAlternateAssociations = [
+  /type\s+Standardized\s*=\s*V3Req04StandardizedResponses\s*;/u,
+  /(?:HUB_ENTRY_PROTOCOL|ENTRY_PROTOCOL)\b[\s\S]{0,120}V3HubEntryProtocol::Responses/u,
+];
+function declaredResponsesEntryProtocol(maskedBody) {
+  const match = /(?:ENTRY_PROTOCOL|HUB_ENTRY_PROTOCOL)\s*:\s*(?:&'static\s+str\s*=\s*|crate::hub_v1::V3HubEntryProtocol\s*=\s*)?([^,\n;]+)/u.exec(maskedBody);
+  if (!match) return null;
+  return match[1].trim();
+}
+for (const path of all) {
+  if (!path.endsWith('.rs')) continue;
+  const source = readFileSync(path, 'utf8');
+  for (const impl of findImplBlocks(source, 'V3DirectProtocolCodec')) {
+    const maskedBody = impl.maskedBody;
+    const declaredResponsesType = responsesDirectAlternateAssociations.some((pattern) => pattern.test(maskedBody));
+    const entryProtocol = declaredResponsesEntryProtocol(maskedBody);
+    const declaredResponsesEntry = entryProtocol !== null && (
+      /["']responses["']/u.test(entryProtocol)
+      || /V3HubEntryProtocol\s*::\s*Responses\b/u.test(entryProtocol)
+    );
+    if (declaredResponsesType || declaredResponsesEntry) {
+      fail(`Responses Direct alternate codec owner must not exist: ${relative(sourceRoot, path)} declares a Responses Direct codec impl`);
     }
   }
 }
