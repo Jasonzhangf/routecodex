@@ -2134,8 +2134,8 @@ chains:
   - step_id: v3-rd-13
     from_node: V3ProviderResp14Raw
     to_node: V3DirectResp14ProviderProjectionPrepared
-    caller_symbol: execute_v3_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: responses_direct_response_projection_hook_with_context
     callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
     status: anchored
