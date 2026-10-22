@@ -3,8 +3,7 @@ use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 use crate::nodes::{V3ClientBody, V3Resp15ClientPayload};
 use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
-    v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderFailureRetryPolicy,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailureRetryPolicy,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
@@ -600,24 +599,6 @@ impl V3OpenAiChatSseProviderOutcome {
         self.recorded = true;
         Ok(())
     }
-
-    fn record_success(&mut self) -> Result<(), String> {
-        if self.recorded {
-            return Ok(());
-        }
-        self.provider_health
-            .record_provider_success_in_failure_scope_for_interface(
-                &crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt(),
-                &self.failure_session_scope,
-                &self.provider_id,
-                &self.interface_id,
-                Some(&self.auth_alias),
-                Some(&self.model_id),
-                v3_relay_provider_policy_now_epoch_ms()?,
-            )?;
-        self.recorded = true;
-        Ok(())
-    }
 }
 
 fn project_sse_stream(
@@ -709,10 +690,9 @@ fn project_sse_stream(
                         state.seen_done = true;
                         state.pending.push_back(Ok(b"data: [DONE]\n\n".to_vec()));
                     }
-                    return match state.provider_outcome.record_success() {
-                        Ok(()) => state.pending.pop_front().map(|item| (item, state)),
-                        Err(error) => Some((Err(error), state)),
-                    };
+                    // Provider success is committed by Runtime only after complete
+                    // governance and sealing; the codec reports protocol facts.
+                    return state.pending.pop_front().map(|item| (item, state));
                 };
                 let result = match chunk {
                     Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
@@ -1034,29 +1014,9 @@ fn project_responses_sse_as_openai_chat_stream(
                                 request_id: Some(request_id.as_str()),
                             },
                         );
-                        let success = provider_outcome.record_success();
-                        return match success {
-                            Ok(()) => None,
-                            Err(error) => Some((
-                                Err(error),
-                                (
-                                    provider,
-                                    decoder,
-                                    transducer,
-                                    toolreason,
-                                    pending,
-                                    done_seen,
-                                    finished,
-                                    stream_observation,
-                                    compatibility_profile,
-                                    web_search_execution_mode,
-                                    web_search_center_state,
-                                    retain_response_cipher,
-                                    tool_thinking_enabled,
-                                    provider_outcome,
-                                ),
-                            )),
-                        };
+                        // Provider success is committed by Runtime only after
+                        // complete governance and sealing.
+                        return None;
                     };
                     let result = (|| -> Result<(), String> {
                         let raw = match &chunk {

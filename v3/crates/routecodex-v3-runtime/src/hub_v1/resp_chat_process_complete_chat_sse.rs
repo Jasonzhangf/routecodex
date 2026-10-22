@@ -498,10 +498,11 @@ mod tests {
             .expect("the removable standalone marker is rewritten");
         assert_eq!(terminal, 1);
         assert_eq!(text(&governed), "REASONLESS_OK");
-        assert!(
-            projected_sse_has_business_content(V3HubProviderWireProtocol::OpenAiChat, &governed)
-                .expect("governed frames decode")
-        );
+        assert!(projected_sse_has_business_content(
+            V3HubProviderWireProtocol::OpenAiChat,
+            &governed
+        )
+        .expect("governed frames decode"));
     }
 
     #[test]

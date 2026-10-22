@@ -8838,6 +8838,90 @@ async fn issuee63d2f2_reasonless_incomplete_marker_delivers_without_reselection(
     std::env::remove_var(KEY_ENV);
 }
 
+/// Anthropic may close a complete visible response with `message_stop` and no
+/// `stop_reason`. The projected Chat terminal keeps `finish_reason: null`, so
+/// only the typed message_stop witness can keep a removable marker rewrite
+/// from being misclassified as processing damage.
+#[tokio::test]
+async fn issuee63d2f2_anthropic_reasonless_message_stop_marker_delivers_without_reselection() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let provider_wire = format!(
+        "{}{}{}{}{}{}",
+        sse(
+            "message_start",
+            &json!({"type":"message_start","message":{"id":"msg_reasonless","type":"message",
+                "role":"assistant","model":"wire-test","content":[],
+                "stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}})
+        ),
+        sse(
+            "content_block_start",
+            &json!({"type":"content_block_start","index":0,
+                "content_block":{"type":"text","text":""}})
+        ),
+        sse(
+            "content_block_delta",
+            &json!({"type":"content_block_delta","index":0,
+                "delta":{"type":"text_delta","text":"<|end_of_analysis|>\nANTHROPIC_REASONLESS_OK"}})
+        ),
+        sse(
+            "content_block_stop",
+            &json!({"type":"content_block_stop","index":0})
+        ),
+        sse(
+            "message_delta",
+            &json!({"type":"message_delta","delta":{},"usage":{"output_tokens":1}})
+        ),
+        sse("message_stop", &json!({"type":"message_stop"}))
+    );
+    let (endpoint, handle, mut captures, shutdown) = start_entry(
+        "anthropic",
+        "chat",
+        StatusCode::OK,
+        "text/event-stream",
+        provider_wire,
+    )
+    .await;
+    let base = endpoint.trim_end_matches("/v1/responses");
+    let (content_type, body) = successful_transfer(
+        client()
+            .post(format!("{base}/v1/chat/completions"))
+            .json(&json!({
+                "model": "test.test",
+                "messages": [{"role": "user", "content": "anthropic reasonless terminal"}],
+                "stream": true
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    stop_entry(handle, shutdown).await;
+    assert_one_attempt(&mut captures, "wire-test").await;
+    assert!(
+        content_type.starts_with("text/event-stream"),
+        "{content_type}"
+    );
+    assert!(!body.contains("<|end_of_analysis|>"), "{body}");
+    assert_no_error_payload(&body);
+    let payloads = events(&body);
+    assert_eq!(
+        payloads
+            .iter()
+            .filter_map(|event| event["choices"][0]["delta"]["content"].as_str())
+            .collect::<String>(),
+        "ANTHROPIC_REASONLESS_OK",
+        "{body}"
+    );
+    assert!(
+        payloads
+            .iter()
+            .all(|event| event["choices"][0]["finish_reason"].is_null()),
+        "the reason-less Anthropic terminal stays null: {body}"
+    );
+    assert!(body.trim_end().ends_with("data: [DONE]"), "{body}");
+    std::env::remove_var(KEY_ENV);
+}
+
 /// Gemini's normal STOP terminal can carry a function call. The Chat client
 /// must receive `finish_reason: "tool_calls"`, execute the call, and send the
 /// paired result back through the same public entry.
@@ -8995,8 +9079,7 @@ async fn issuee63d2f2_gemini_stop_function_call_public_roundtrip() {
 
         let first_wire = captures.recv().await.expect("first Gemini attempt");
         assert_eq!(
-            first_wire["tools"][0]["functionDeclarations"][0]["name"],
-            "lookup",
+            first_wire["tools"][0]["functionDeclarations"][0]["name"], "lookup",
             "{first_wire}"
         );
         let followup_wire = captures.recv().await.expect("Gemini follow-up attempt");
