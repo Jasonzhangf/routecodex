@@ -16,6 +16,22 @@ pub(crate) use dsml::{
     normalize_v3_direct_dsml_response, rewrite_v3_direct_dsml_attempt, V3DirectDsmlContext,
 };
 
+#[path = "direct_response_hooks_commit_probe.rs"]
+mod commit_probe;
+pub(crate) use commit_probe::V3DirectPrefixCommitProbe;
+
+/// Every text marker that a registered Direct complete-attempt owner can act on
+/// for this attempt. The thinking owner moves `<thinking>` bodies into
+/// synthesized reasoning items; the DSML owner removes the standalone protocol
+/// labels that no tool declaration is needed for. The first-frame commit probe
+/// treats a prefix containing any of them as not yet governed.
+pub(crate) fn v3_direct_governed_text_markers() -> Vec<&'static str> {
+    let mut markers = crate::tool_markup_parser::governed_text_markers();
+    markers.push(crate::shared_direct_thinking_compat::THINKING_OPEN);
+    markers.push(crate::shared_direct_thinking_compat::THINKING_CLOSE);
+    markers
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum V3DirectResponseHookFailure {
     UnharvestableToolMarkup,

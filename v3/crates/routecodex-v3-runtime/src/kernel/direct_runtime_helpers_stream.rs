@@ -293,14 +293,29 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
 /// committable business frame instead of only after the provider terminal.
 ///
 /// The caller passes `Some(sink)` only after proving, at request level, that
-/// every whole-attempt rewrite this attempt could run (memory capture,
-/// DSML/thinking text repair) is a no-op for this request. Reasoning and
-/// native tool-call frames carry business content and are never harvested, so
-/// the channel commit at their arrival is byte-identical to the fully buffered
-/// path. Text/message frames are held until their item completes and then
-/// flushed only when the request-level predicate guarantees they cannot be
-/// rewritten; the existing whole-attempt rewrites remain fully buffered for
-/// requests that do not qualify.
+/// whole-attempt rewrites this request could run are skipped (memory capture)
+/// or scoped elsewhere (the thinking-tags compat profile). That request-level
+/// predicate alone cannot prove the registered complete-attempt Direct
+/// response hook is the identity, because its text governance is content
+/// driven. The frame-level `V3DirectPrefixCommitProbe` closes that gap: the
+/// channel is committed only once the buffered provider prefix carries visible
+/// business text and no marker that the thinking or DSML owner could rewrite.
+///
+/// Consequences of that rule:
+///
+/// - Visible text makes the complete-attempt business content judgment
+///   irrevocably true, so the blank/invisible-final `provider_response_empty`
+///   recovery can never be skipped after a commit. Reasoning-only and
+///   whitespace-only deltas never commit.
+/// - The registered complete-attempt hook still runs after the terminal. The
+///   builder only adopts its result when every already-flushed frame stays
+///   byte-identical; otherwise the committed transport ends without projecting
+///   further frames, which the client detects as a truncated stream.
+/// - A governed marker that arrives after the commit cannot be rewritten in
+///   place. The collector then holds the frame while its text may still become a
+///   marker and ends the transport on a confirmed marker, so raw provider text
+///   that the hook owns never reaches the client.
+/// - Requests that do not qualify keep the fully buffered path unchanged.
 pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
     mut stream: V3SseAttemptStream,
     provider_protocol: V3HubProviderWireProtocol,
@@ -327,6 +342,13 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
     let mut business_decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut has_business_content = false;
     let mut client_committed = false;
+    let mut commit_probe = crate::direct_response_hooks::V3DirectPrefixCommitProbe::new(
+        provider_protocol,
+    );
+    // Frames whose newest text may still complete a governed marker. They stay
+    // out of the append-only client channel until the next observation proves
+    // the text is plain business content.
+    let mut held_client_frames: Vec<Vec<u8>> = Vec::new();
     loop {
         let next = match tokio::time::timeout_at(deadline, stream.next()).await {
             Ok(next) => next,
@@ -370,6 +392,38 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
             &frame,
             &mut business_decoder,
         )?;
+        for value in parse_direct_sse_json_frames(&frame) {
+            commit_probe.observe_event(&value);
+        }
+        let terminal_frame = matches!(
+            disposition,
+            V3SseFrameDisposition::SemanticTerminal | V3SseFrameDisposition::LegalCloseout
+        );
+        if client_committed {
+            // A committed channel is append-only. A governed marker that
+            // arrives after the commit can no longer be rewritten in place, and
+            // flushing it would leak provider text that the registered hook
+            // owns. End the transport instead of projecting it.
+            if commit_probe.confirmed_governed_marker() {
+                return Err(direct_sse_post_commit_governance_break());
+            }
+            // A trailing marker prefix is unresolved: hold the frame until the
+            // next provider frame decides whether it becomes a marker.
+            if !terminal_frame && commit_probe.trailing_marker_prefix() {
+                held_client_frames.push(frame);
+                continue;
+            }
+            for held in std::mem::take(&mut held_client_frames) {
+                committed.push(held).map_err(|error| {
+                    crate::shared::direct_plain_error(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3ExecutionAttemptPayloadStore",
+                        "direct_sse_attempt_store_rejected",
+                        error.to_string(),
+                    )
+                })?;
+            }
+        }
         committed.push(frame).map_err(|error| {
             crate::shared::direct_plain_error(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -378,7 +432,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                 error.to_string(),
             )
         })?;
-        if !client_committed && has_business_content {
+        if !client_committed && commit_probe.is_committable() {
             if let Some(sink) = client_frames.clone() {
                 committed.commit_client_stream(sink);
                 client_committed = true;
@@ -406,7 +460,16 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                 )
             })?;
             if disposition == V3SseFrameDisposition::LegalCloseout {
-                if !client_committed {
+                if client_committed {
+                    apply_complete_response_hook_preserving_client_prefix(
+                        &mut committed,
+                        response_hook,
+                    )?;
+                    has_business_content = direct_sse_frames_have_business_content(
+                        provider_protocol,
+                        committed.frames(),
+                    );
+                } else {
                     let _ = rewrite_direct_sse_memory(&mut committed, manifest, request_id)
                         .map_err(|error| {
                             direct_attempt_store_error_source(
@@ -456,7 +519,13 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                     )
                 })?;
         }
-        if !client_committed {
+        if client_committed {
+            apply_complete_response_hook_preserving_client_prefix(&mut committed, response_hook)?;
+            has_business_content = direct_sse_frames_have_business_content(
+                provider_protocol,
+                committed.frames(),
+            );
+        } else {
             let _ =
                 rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|error| {
                     direct_attempt_store_error_source(
@@ -501,6 +570,32 @@ fn apply_complete_response_hook(
     if let Some((registry, context)) = hook {
         registry
             .project_complete_direct_sse(committed, context)
+            .map_err(|error| match error {
+                crate::hooks::V3DirectCompleteResponseError::Normalization(failure) => {
+                    crate::hooks::direct_complete_response_hook_failure_source(failure)
+                }
+                crate::hooks::V3DirectCompleteResponseError::Store(error) => {
+                    direct_attempt_store_error_source(
+                        error,
+                        "V3DirectResp14ProviderProjectionPrepared",
+                        "direct_response_hook_budget",
+                    )
+                }
+            })?;
+    }
+    Ok(())
+}
+
+fn apply_complete_response_hook_preserving_client_prefix(
+    committed: &mut crate::execution_control::V3CommittedClientSseBuilder,
+    hook: Option<(
+        &crate::hooks::V3HookRegistry,
+        &crate::direct_response_hooks::V3DirectDsmlContext,
+    )>,
+) -> crate::shared::V3DirectSourceResult<()> {
+    if let Some((registry, context)) = hook {
+        registry
+            .project_complete_direct_sse_preserving_client_prefix(committed, context)
             .map_err(|error| match error {
                 crate::hooks::V3DirectCompleteResponseError::Normalization(failure) => {
                     crate::hooks::direct_complete_response_hook_failure_source(failure)
@@ -572,6 +667,19 @@ fn direct_sse_empty_attempt_failure() -> crate::shared::V3DirectSourceError {
         "V3ProviderResp14Raw",
         "provider_response_empty",
         "provider returned a complete response with no deliverable business content",
+    )
+}
+
+/// A governed text marker appeared after the client channel was committed. The
+/// committed prefix cannot be retracted and the provider text it belongs to must
+/// not reach the client, so the transport ends here and the runtime error chain
+/// records the cause.
+fn direct_sse_post_commit_governance_break() -> crate::shared::V3DirectSourceError {
+    crate::shared::direct_plain_error(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3ExecutionAttemptPayloadStore",
+        "direct_sse_post_commit_governance_break",
+        "governed provider text arrived after the client channel was committed",
     )
 }
 

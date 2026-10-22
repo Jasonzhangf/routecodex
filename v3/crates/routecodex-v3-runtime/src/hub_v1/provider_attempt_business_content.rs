@@ -302,6 +302,14 @@ fn v3_anthropic_content_block_has_deliverable_content(block: &Value) -> bool {
     }
 }
 
+/// True when the text carries at least one character a client can display.
+/// This is the same visibility judgment the complete-attempt business content
+/// facts use, exposed so the Direct first-frame commit gate cannot drift from
+/// the blank/invisible-final contract.
+pub(crate) fn v3_text_has_visible_content(text: &str) -> bool {
+    VISIBLE_TEXT_PATTERN.is_match(text)
+}
+
 /// Complete-attempt facts. Reasoning is business content, but cannot mask an
 /// explicit blank assistant final. These facts never rewrite provider payloads.
 #[derive(Default)]

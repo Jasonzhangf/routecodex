@@ -33,6 +33,17 @@ const MINIMAX_PREFIX: &str = "]<]minimax[>[";
 const MINIMAX_OPEN: &str = "]<]minimax[>[<tool_call>";
 const MINIMAX_CLOSE: &str = "]<]minimax[>[</tool_call>";
 
+/// Every standalone text label this owner removes even when no tool is
+/// declared. A client-visible prefix that already contains one of these can
+/// still be rewritten by the complete-attempt DSML owner, so it must never be
+/// flushed ahead of that owner.
+pub(crate) fn governed_text_markers() -> Vec<&'static str> {
+    let mut markers = vec![OPEN, CLOSE, BARE_DSML, ASCII_TOOL_CALLS];
+    markers.extend_from_slice(ANALYSIS_CLOSINGS);
+    markers.extend_from_slice(CLOSING_FRAGMENTS);
+    markers
+}
+
 // Parse the observed invoke child-tag dialects. The error bool identifies
 // an unfinished declared invocation; unknown/opaque envelopes remain business
 // text. Structural prefixes are consumed here, never stripped from values.

@@ -149,21 +149,32 @@ servertool 与 web_search 的内部尝试在请求级已可判定，保持全缓
 
 ## 13 实现状态（P1）
 
-### 13.1 提交判定（请求级谓词）
+### 13.1 提交判定
 
-`kernel.rs` 在调用 collector 前做请求级判定，满足全部条件才把 sink 交给 collector：
+请求级谓词（`kernel.rs`）只负责排除已知会整段改写的请求，满足全部条件才把 sink 交给 collector：
 
 1. `!manifest.memory_raw_capture.enabled`（无 memory envelope 整段回写）；
-2. `direct_dsml_context.has_no_declared_tools()`（DSML 声明为空，整段 DSML 改写是恒等）；
+2. `direct_dsml_context.has_no_declared_tools()`（DSML 声明为空）；
 3. `!compat_plan.has_block(ThinkingTags)`（thinking-tags 流式改写与末帧合成已由该 profile 承担）。
 
-不满足时 sink 为 `None`，尝试保持全缓冲，行为与现状一致。
+该谓词不能证明 complete-attempt hook 是恒等：thinking 改写按内容无条件运行，DSML 也会在无声明时删除
+analysis/label 行。因此真实提交点由帧级内容证明（`V3DirectPrefixCommitProbe`）决定，谓词只保证被排除的
+请求不会进入该路径。
 
 ### 13.2 提交与续发
 
+- 内容证明：缓冲前缀必须同时满足「已出现可见业务文本」且「没有任何 Direct 文本治理 owner 会改写的标记」
+  且「最新文本不以标记前缀结尾」。标记集合由 owner 自己给出（thinking `<thinking>`/`</thinking>`，
+  DSML 无声明即可删除的 standalone label），不在探针里重复硬编码。
+- 可见文本单调为真，因此提交后 `provider_response_empty`（空/空白/不可见 final）判定不可能被跳过；
+  reasoning-only 与纯空白 delta 不提交。
 - `V3CommittedClientSseBuilder` 记录 `flushed_frames`；`commit_client_stream(sink)` 置提交标记并立刻冲出已有帧。
-- 后续 `push` 逐帧冲出；`seal_after_validated_terminal` 只重放 `flushed_frames` 之后的尾部，客户端字节流与全缓冲路径逐字节相同。
-- 提交后 `ensure_fully_buffered` 拒绝整段改写，避免已发帧被回写。
+- 提交后 `push` 逐帧冲出；`seal_after_validated_terminal` 只重放 `flushed_frames` 之后的尾部，客户端字节流与
+  全缓冲路径逐字节相同。
+- 提交后 complete-attempt hook 仍然运行：`rewrite_complete_attempt_preserving_client_prefix` 要求所有已发帧
+  字节不变，否则按无效尝试状态拒绝，不回写已发前缀。
+- 提交后出现治理标记（可能跨帧）：帧先挂起（尾部可能是标记前缀），确认标记后停止投影并以 typed 运行时错误
+  结束通道。已提交通道不可回退，因此宁可有界截断，也不把 hook 拥有的原文发给客户端。
 
 ### 13.3 服务端接线
 
@@ -177,13 +188,14 @@ servertool 与 web_search 的内部尝试在请求级已可判定，保持全缓
 - kernel 在 collector 返回错误时先查 `sink.is_committed()`；已提交则直接走
   `post_commit_client_transport_break_output`：typed 错误进 Error 链、`terminal_disposition = NoResponse`，
   不跑候选策略、不切换、不重试。
+- 提交后治理标记导致的 `direct_sse_post_commit_governance_break` 走同一条提交后失败语义。
 - 服务端把该 terminal 投影成 model transport break；通道层因已有已发帧而静默结束（clean EOF），
   客户端看不到 provider 状态、错误码或错误载荷。
 
 ### 13.5 已知残差
 
-- `rewrite_v3_direct_thinking_attempt` 在末帧无条件运行，当 provider 未声明 thinking-tags profile
-  却在正文里输出字面 `<thinking>` 时，全缓冲路径会合成 reasoning item，而首帧提交路径按原文透传。
-  该差异只在未声明 profile 的 provider 上出现，且方向是更忠实透传，不伪造语义；需要更强约束时
-  再按 provider profile 收口，不为此增加运行时防御分支。
+- 提交后若 provider 才吐出字面治理标记（`<thinking>`、无声明即可删除的 DSML label），已发前缀无法回退。
+  路径选择有界截断：停止投影并以 typed 运行时错误结束，不泄露标记原文，也不做整段回写。未提交前缀内出现
+  标记时仍走全缓冲治理，两条路径字节一致。
+- 标记识别按 owner 给出的精确标记集合，普通 `<`/`>`（比较运算、代码）不算标记，不会触发截断。
 - P2（Relay 逐事件投影）与 P3（工具参数完整性闸）未实现：Relay 路径仍全缓冲，客户端窗口不变。

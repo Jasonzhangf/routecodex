@@ -742,6 +742,45 @@ impl V3CommittedClientSseBuilder {
         let Some((frames, terminal)) = rewrite(&self.frames)? else {
             return Ok(());
         };
+        self.adopt_rewritten_attempt(frames, terminal)
+    }
+
+    /// Whole-attempt response hook invocation that is also allowed after the
+    /// client commit point, provided the registered governance leaves every
+    /// already-flushed client frame byte-identical. Callers use it to keep the
+    /// complete-attempt text governance on the first-frame-commit path instead
+    /// of skipping it. A rewrite that would change a flushed frame cannot be
+    /// retracted, so it is rejected as an invalid attempt state and the caller
+    /// terminates the committed transport without projecting new frames.
+    pub(crate) fn rewrite_complete_attempt_preserving_client_prefix<E>(
+        &mut self,
+        rewrite: impl FnOnce(&[Vec<u8>]) -> Result<Option<(Vec<Vec<u8>>, usize)>, E>,
+    ) -> Result<(), E>
+    where
+        E: From<V3AttemptStoreError>,
+    {
+        let flushed = self.flushed_frames;
+        let flushed_frames = self.frames[..flushed].to_vec();
+        let Some((frames, terminal)) = rewrite(&self.frames)? else {
+            return Ok(());
+        };
+        if frames.len() < flushed || frames[..flushed] != flushed_frames[..] {
+            return Err(V3AttemptStoreError::InvalidAttemptState(format!(
+                "whole-attempt response hook would rewrite {flushed} client frames that were already flushed"
+            ))
+            .into());
+        }
+        self.adopt_rewritten_attempt(frames, terminal)
+    }
+
+    fn adopt_rewritten_attempt<E>(
+        &mut self,
+        frames: Vec<Vec<u8>>,
+        terminal: usize,
+    ) -> Result<(), E>
+    where
+        E: From<V3AttemptStoreError>,
+    {
         let bytes = frames
             .iter()
             .try_fold(0usize, |n, f| n.checked_add(f.len()))

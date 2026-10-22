@@ -1605,9 +1605,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     .clone()
                     .unwrap_or_default();
                 response_projection.stream_observation = Some(stream_observation.clone());
-                // A committed client prefix can never be retracted. Commit the
-                // first real business frame only when every whole-attempt
-                // rewrite is provably the identity for this request.
+                // A committed client prefix can never be retracted. This
+                // request-level predicate only removes the whole-attempt
+                // rewrites that are decided before the stream starts (memory
+                // capture) or are scoped to a declared profile (thinking-tags).
+                // The complete-attempt Direct response hook stays content
+                // driven, so the collector's frame-level commit probe decides
+                // the actual commit and the hook still runs after the terminal.
                 let attempt_client_frame_sink = client_frame_sink
                     .clone()
                     .filter(|_| {
