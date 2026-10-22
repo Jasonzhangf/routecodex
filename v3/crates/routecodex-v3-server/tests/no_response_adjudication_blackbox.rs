@@ -11395,6 +11395,11 @@ async fn db1f482_truncated_openai_chat_sse_relay_keeps_last_candidate_health_neu
 
 #[tokio::test]
 async fn db1f482_relay_client_disconnect_keeps_candidate_health_neutral_at_public_entry() {
+    // Server cancellation coverage: dropping the committed SSE body aborts the
+    // runtime outcome task in V3ClientSseChannelStream::drop. This path does not
+    // feed V3ProviderError::ClientDisconnect through the protocol codec or relay
+    // collector; the typed collector handoff and its untyped counterexample are
+    // covered by the runtime integration test.
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     let partial = format!(

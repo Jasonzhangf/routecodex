@@ -1751,7 +1751,8 @@ features:
   - Server does not commit SSE response headers or frames before the controlled provider attempt reaches a valid terminal
   - Server 429 response exposes Error01-06 and does not wrap success
   - OpenAI Chat Relay has no secondary SSE accept worker and never serializes Error06 JSON as a normal Chat completion data frame
-  - a Relay client disconnect after a partial provider frame stays health-neutral, releases the request-local attempt, reaches the public Server boundary, and starts no additional provider attempt
+  - the Relay collector handoff after a partial provider frame and typed ClientDisconnect retains its typed Error01 ClientDisconnect source, proves the partial frame was observed, keeps the primary health-neutral, and starts no additional provider attempt while a second eligible candidate exists; the untyped-transport counterexample after the same partial frame cools the primary, reselects the eligible secondary, and delivers the secondary payload
+  - the public Server socket-drop path separately aborts the runtime outcome task, releases the request-local attempt, and starts no additional provider attempt; it does not claim to exercise the typed codec-to-collector handoff
   - rejected metadata_center request produces zero upstream captures
   - chat entry pool exhaustion and provider terminals break the client transport for both the same-protocol Direct lane and the cross-protocol Relay lane instead of projecting an error payload
   - a real external upstream status (429/503) never reaches the client on either lane; the client observes a transport break and a healthy later candidate is reselected to serve the request, while the failed request's provider-terminal evidence keeps the real upstream status, headers, and body
@@ -3352,6 +3353,8 @@ features:
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox db1f482_truncated_openai_chat_sse_keeps_last_candidate_health_neutral_at_public_entry -- --exact --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox db1f482_truncated_openai_chat_sse_relay_keeps_last_candidate_health_neutral_at_public_entry -- --exact --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox db1f482_relay_client_disconnect_keeps_candidate_health_neutral_at_public_entry -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration partial_client_disconnect_is_health_neutral_and_never_reselects -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration partial_content_with_untyped_disconnect_cools_and_reselects_counterexample -- --exact --nocapture --test-threads=1
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test provider_account_pool_blackbox
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_status_contract
