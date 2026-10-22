@@ -7680,6 +7680,9 @@ async fn responses_same_listener_same_session_waits_for_release_then_returns_ok(
 async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finishes() {
     let _test_guard = TEST_LOCK.lock().await;
     let _home = TestHomeGuard::new("maintenance-session-waiter");
+    // This case counts upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let (base_url, mut captures, release, shutdown) = start_controlled_held_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-maintenance-session");
     let handle = spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &base_url))
@@ -7764,6 +7767,9 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
 async fn responses_keepalive_next_request_waits_for_maintenance_cancellation() {
     let _test_guard = TEST_LOCK.lock().await;
     let _home = TestHomeGuard::new("maintenance-keepalive");
+    // This case counts upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-maintenance-keepalive");
     let handle = spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &base_url))
@@ -10259,6 +10265,9 @@ async fn responses_direct_followup_preserves_function_strict_presence() {
 async fn responses_direct_declared_namespace_restores_mcp_identity_for_public_consumer() {
     let _test_guard = TEST_LOCK.lock().await;
     let _home_guard = TestHomeGuard::new("direct-namespace-identity");
+    // This case counts provider attempts and pairs the follow-up history, so the
+    // Chat Process continuation must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     std::env::set_var("V3_PROTOCOL_DECISION_KEY", "controlled-namespace-identity");
 
     #[derive(Clone)]
@@ -10856,6 +10865,9 @@ fn namespace_public_client_call(wire: &str, stream: bool, call_id: &str) -> Valu
 async fn namespace_wire_bindings_preserve_plain_calls_colliding_paths_and_native_custom() {
     let _test_guard = TEST_LOCK.lock().await;
     let _home_guard = TestHomeGuard::new("namespace-wire-binding-consumer");
+    // This case counts upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     std::env::set_var(
         "V3_PROTOCOL_DECISION_KEY",
         "namespace-wire-binding-consumer",
@@ -11321,6 +11333,9 @@ async fn responses_direct_namespace_identity_covers_declaration_sources_and_coll
 ) {
     let _test_guard = TEST_LOCK.lock().await;
     let _home_guard = TestHomeGuard::new("direct-namespace-public-sources");
+    // This case counts provider attempts per declared source, so the Chat Process
+    // continuation must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     std::env::set_var(
         "V3_PROTOCOL_DECISION_KEY",
         "controlled-namespace-public-sources",
