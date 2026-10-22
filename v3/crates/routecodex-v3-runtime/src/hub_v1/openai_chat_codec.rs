@@ -166,12 +166,13 @@ fn read_v3_openai_chat_tool_identity(item: &Map<String, Value>) -> &str {
 pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
     canonical: &Value,
 ) -> Result<Value, String> {
-    project_v3_openai_chat_client_response_with_source_terminal(canonical, None)
+    project_v3_openai_chat_client_response_with_source_terminal(canonical, None, false)
 }
 
 pub(crate) fn project_v3_openai_chat_client_response_with_source_terminal(
     canonical: &Value,
     source_terminal_reason: Option<&str>,
+    source_terminal_completed: bool,
 ) -> Result<Value, String> {
     let object = canonical
         .as_object()
@@ -267,15 +268,16 @@ pub(crate) fn project_v3_openai_chat_client_response_with_source_terminal(
     // object, which has no such field.
     let finish_reason = responses_as_chat_finish_reason(
         !tool_calls.is_empty(),
+        source_terminal_completed,
         object
             .get("incomplete_details")
             .and_then(|details| details.get("reason"))
             .and_then(Value::as_str)
             .or_else(|| {
                 source_terminal_reason.map(|reason| match reason {
-                    "end_turn" => "stop",
+                    "end_turn" | "STOP" => "stop",
                     "tool_use" => "tool_calls",
-                    "max_tokens" => "length",
+                    "max_tokens" | "MAX_TOKENS" => "length",
                     "refusal" => "content_filter",
                     reason => reason,
                 })
@@ -327,11 +329,16 @@ pub(crate) fn project_v3_openai_chat_client_response_with_source_terminal(
     Ok(Value::Object(response))
 }
 
-fn responses_as_chat_finish_reason(has_tool_calls: bool, reason: Option<&str>) -> Option<&str> {
+fn responses_as_chat_finish_reason(
+    has_tool_calls: bool,
+    completed: bool,
+    reason: Option<&str>,
+) -> Option<&str> {
     match reason {
         Some("max_output_tokens") => Some("length"),
         Some(reason) => Some(reason),
         None if has_tool_calls => Some("tool_calls"),
+        None if completed => Some("stop"),
         None => None,
     }
 }
@@ -455,6 +462,16 @@ impl V3OpenAiChatAnthropicSseTransducer {
             .and_then(Value::as_str)
             .ok_or_else(|| "Anthropic content block is missing type".to_string())?;
         self.active_blocks.insert(index, kind.to_string());
+        if kind == "text" {
+            return match block.get("text").and_then(Value::as_str) {
+                Some(text) if !text.is_empty() => Ok(vec![self.chunk(
+                    json!({"content": text}),
+                    None,
+                    false,
+                )]),
+                _ => Ok(Vec::new()),
+            };
+        }
         if kind != "tool_use" {
             return Ok(Vec::new());
         }
@@ -904,14 +921,42 @@ impl V3OpenAiChatResponsesSseTransducer {
                 self.completed = true;
                 let response = object.get("response").and_then(Value::as_object);
                 let mut chunks = self.terminal_output_chunks(response)?;
-                let status = response
+                // A response.completed event is the Responses protocol's own
+                // completion witness even when the nested response omits the
+                // repeated status field. An explicit nested non-stop,
+                // incomplete or failure reason still takes precedence.
+                let reason = response
+                    .and_then(|response| response.get("incomplete_details"))
+                    .and_then(Value::as_object)
+                    .and_then(|details| details.get("reason"))
+                    .and_then(Value::as_str)
+                    .or_else(|| {
+                        object
+                            .get("incomplete_details")
+                            .and_then(Value::as_object)
+                            .and_then(|details| details.get("reason"))
+                            .and_then(Value::as_str)
+                    });
+                let failed = response
                     .and_then(|response| response.get("status"))
-                    .and_then(Value::as_str);
-                let finish_reason = if status == Some("completed") {
-                    responses_as_chat_finish_reason(self.emitted_tool_call, None)
-                } else {
-                    None
-                };
+                    .and_then(Value::as_str)
+                    .is_some_and(|status| status == "failed" || status == "cancelled");
+                let explicit_non_stop = response
+                    .and_then(|response| response.get("status"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|status| status == "incomplete");
+                let completed = !failed
+                    && !explicit_non_stop
+                    && (response
+                        .and_then(|response| response.get("status"))
+                        .and_then(Value::as_str)
+                        != Some("in_progress"))
+                    && reason.is_none();
+                let finish_reason = responses_as_chat_finish_reason(
+                    self.emitted_tool_call,
+                    completed,
+                    reason,
+                );
                 chunks.push(self.chunk(json!({}), finish_reason));
                 if let Some(usage) = response.and_then(|response| response.get("usage")) {
                     if let Some(chunk) = self.usage_chunk(usage) {
@@ -938,7 +983,11 @@ impl V3OpenAiChatResponsesSseTransducer {
                             .and_then(Value::as_str)
                     });
                 let mut chunks = self.terminal_output_chunks(response)?;
-                let finish_reason = responses_as_chat_finish_reason(self.emitted_tool_call, reason);
+                let finish_reason = responses_as_chat_finish_reason(
+                    self.emitted_tool_call,
+                    false,
+                    reason,
+                );
                 chunks.push(self.chunk(json!({}), finish_reason));
                 if let Some(usage) = response.and_then(|response| response.get("usage")) {
                     if let Some(chunk) = self.usage_chunk(usage) {

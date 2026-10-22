@@ -3794,7 +3794,7 @@ chains:
   - step_id: v3-de-24
     from_node: V3Error01SourceRaised
     to_node: V3RuntimeProviderFailureObservation
-    caller_symbol: handle_provider_failure
+    caller_symbol: handle_provider_failure_with_response_code
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
     callee_symbol: build_v3_runtime_provider_failure_observation_from_policy_event
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
@@ -7350,9 +7350,9 @@ chains:
     - step_id: v3-provider-action-gate-16
       from_node: V3Error01SourceRaised
       to_node: V3Error05ExecutionDecision
-      caller_symbol: handle_provider_failure
+      caller_symbol: handle_provider_failure_with_response_code
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
-      callee_symbol: run_v3_relay_provider_failure_policy
+      callee_symbol: run_v3_relay_provider_failure_policy_with_response_source
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -10117,7 +10117,7 @@ chains:
         - OpenAI Chat JSON response closeout in v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
         output: compatible-provider-response Value plus original typed compat failure
       - node: normalize_provider_response
-        terminal_contract: 0e129d0 preserves source_terminal_reason in typed normalized response; inverse projection consumes it, observation cannot infer stop, actual errors leave through the separate Error graph.
+        terminal_contract: 0e129d0 preserves source_terminal_reason and a typed source-protocol normal-completion witness in the normalized response. OpenAI Chat JSON inverse projection and the Responses SSE transducer consume it; explicit non-stop reasons keep precedence; a native Chat missing reason stays missing; canonical lifecycle status, payload content and transport end never prove completion; actual errors leave through the separate Error graph.
         operator: routecodex.v3.operation.normalize_provider_response@1
         caller_symbol: build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id
         caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
@@ -10137,6 +10137,9 @@ chains:
         - closeout_anthropic_relay_normalized_response in v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs
         - OpenAI Chat JSON response closeout in v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
         output: governed-response Value plus typed outcome and original typed governance error
+        complete_attempt_contract: Every complete buffered JSON or materialized SSE caller enables post-governance admission; Chat and Gemini codec/core handoff carries V3RelayCoreError::ResponseGovernance without stringifying its source. GovernedAttemptEmpty enters internal502 recovery; UnharvestableToolMarkup retains its registered response-processing code and health-neutral policy through handle_provider_failure_with_response_code.
+        complete_chat_sse_hook: The registered Resp03 govern_complete_chat_sse callback in resp_chat_process_complete_chat_sse.rs governs complete choice text carriers through rewrite_complete_attempt; individual deltas never authorize whole-attempt admission. Runtime classifies the final governed frames with shared business-content facts before seal or provider success.
+        async_error_handoff: V3RuntimeStreamControlState carries the original response_governance_failure in its physically separate typed control Arc; codec projection records the source and Runtime takes it into the existing Error policy. Diagnostic snapshots and string stream errors cannot reconstruct this decision.
       - node: frame_committed_client_response
         operator: routecodex.v3.operation.frame_committed_client_response@1
         caller_symbol: run_json_response_hooks
@@ -10153,6 +10156,14 @@ chains:
         operator: routecodex.v3.operation.inverse_project_client_response@1
         consumer_symbol: try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector
         consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
+        chat_json_consumer:
+          caller_symbol: project_v3_openai_chat_client_response_with_source_terminal
+          caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
+          caller_context: OpenAI Chat JSON response closeout in openai_chat_relay_runtime.rs consumes the typed source terminal reason and source-protocol normal-completion witness.
+        responses_sse_consumer:
+          caller_symbol: V3OpenAiChatResponsesSseTransducer::push_event
+          caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
+          caller_context: A Responses response.completed event is the protocol completion witness; nested incomplete_details reasons take precedence and are never replaced by stop.
         actual_ordinary_caller:
           caller_symbol: closeout_anthropic_relay_normalized_response
           caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs

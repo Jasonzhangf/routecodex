@@ -4784,6 +4784,7 @@ fn error_projection_appends_human_console_failure_line() {
                 }
             })),
             project_path: None,
+            execution_mode: Some("relay"),
             error06_exposed: true,
             error_class: Some("runtime_failure"),
             health_action: None,
@@ -4798,6 +4799,7 @@ fn error_projection_appends_human_console_failure_line() {
         .expect("Error06 projection must create a WebUI request row");
     assert_eq!(row.result.as_deref(), Some("error"));
     assert_eq!(row.meta.provider_status, Some(500));
+    assert_eq!(row.meta.execution_mode.as_deref(), Some("relay"));
     assert_eq!(row.meta.error_category.as_deref(), Some("runtime_error"));
     let observed = row
         .meta

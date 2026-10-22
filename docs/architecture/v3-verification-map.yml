@@ -907,8 +907,10 @@ features:
     additional_command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox issue0e129d0_ -- --nocapture --test-threads=1
     command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox responses_wire_representation_survives_chat_and_anthropic_entries -- --nocapture --test-threads=1
     assertions:
-    - explicit non-stop and opaque terminal reasons never become stop
-    - absent terminal reason is not inferred from completed lifecycle
+    - explicit non-stop, incomplete, opaque, content_filter and length terminal reasons never become stop
+    - a genuine original Responses normal completion maps to Chat stop in JSON and SSE, including when the completed event omits nested status; canonical lifecycle status, payload content, EOF and DONE are not completion witnesses
+    - a native Chat absent or null terminal reason stays absent and is never inferred from completed lifecycle
+    - completed Responses envelopes preserve nested max_output_tokens as length, content_filter as content_filter, and unknown reasons verbatim
     - actual errors retain source cause and status in typed Error recovery and candidate reselection
   status: characterization_source_verified
   change_risk: high
@@ -2091,6 +2093,15 @@ features:
   - responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input
   - issue0e129d0_anthropic_nonstop_reason_public
   - issue0e129d0_actual_error_uses_error_chain_and_switches_provider
+  - issue0e129d0_responses_completed_projects_chat_terminal
+  - issuee63d2f2_chat_json_control_only_recovers_or_terminates
+  - issuee63d2f2_chat_json_orphan_retains_typed_health_neutral_cause
+  - issuee63d2f2_other_json_callers_retain_governance_failure
+  - issuee63d2f2_chat_sse_control_only_recovers_or_terminates
+  - issuee63d2f2_chat_sse_fragmented_orphan_recovers_or_terminates
+  - issuee63d2f2_chat_sse_fragmented_label_preserves_visible_order
+  - issuee63d2f2_chat_sse_literal_marker_context_stays_business
+  - issuee63d2f2_chat_sse_role_usage_native_tools_preserve_terminal
   - responses_wire_representation_survives_chat_and_anthropic_entries
   - genuine_http_and_native_sse_errors_break_transport_without_client_error
   - chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input
@@ -3478,7 +3489,18 @@ features:
   - npm run verify:v3-module-boundaries
   - git diff --check
   runtime_evidence:
-    status: pending_same_entry_public_replay
+    status: installed_mixed_exclusion_verified
+    installed_cases:
+    - issue-745f6e9-provider-concurrency-all-busy-direct
+    - issue-745f6e9-provider-concurrency-all-busy-relay
+    - issue-745f6e9-provider-concurrency-mixed-exclusion-direct
+    - issue-745f6e9-provider-concurrency-mixed-exclusion-relay
+    installed_binary: /Users/fanzhang/.local/bin/rccv3
+    installed_version: rccv3 0.90.4931
+    evidence_path: /private/tmp/rcc-mixed-installed-evidence.md
+    mixed_source_kinds:
+    - direct: target_pool_exhausted / selected_target_exhausted
+    - relay: provider_failure / selected_target_exhausted
     required:
     - Controlled same-entry public /v1/responses replay for Direct and Relay, with pure and mixed subcases, must prove typed source classification, zero extra upstream dispatch, health neutrality, and client transport termination without error payload or fabricated success
   completion_boundary:
