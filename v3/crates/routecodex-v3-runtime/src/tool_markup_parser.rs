@@ -192,9 +192,10 @@ impl ToolMarkupDeclarations {
         self.tools.remove(wire_name);
     }
 
-    /// True when no declared tool can match provider markup. A context with no
-    /// declarations cannot harvest anything, so its attempt rewrite is the
-    /// identity.
+    /// True when no declared tool can match provider markup. An empty
+    /// declaration set is not an identity rewrite: the registered DSML owner
+    /// still removes the standalone protocol labels it owns, so callers must
+    /// keep running that hook instead of treating this state as a no-op.
     pub(crate) fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }
