@@ -247,6 +247,7 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     let mut result = result;
     project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
     normalize_deepseek_tool_choice(&mut result, selected, provider_protocol);
+    drop_glm_unsupported_chat_fields(&mut result, selected, provider_protocol);
     project_provider_declared_output_cap(&mut result, selected, provider_protocol);
     if let Some(effort) = selected.reasoning_effort {
         match provider_protocol {
@@ -286,6 +287,10 @@ mod provider_req_compat_06_deepseek;
 use provider_req_compat_06_deepseek::{
     is_v3_deepseek_v4_compat_model, normalize_deepseek_tool_choice,
 };
+
+#[path = "provider_req_compat_06_glm.rs"]
+mod provider_req_compat_06_glm;
+use provider_req_compat_06_glm::drop_glm_unsupported_chat_fields;
 
 #[cfg(test)]
 mod tests {
@@ -794,6 +799,256 @@ mod tests {
             .provider_semantic_payload()
             .get("reasoning_effort")
             .is_none());
+    }
+
+    #[test]
+    fn nvidia_glm_openai_chat_drops_unsupported_fields() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "prompt_cache_key": "session-1",
+                "text": {"verbosity": "high"},
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_id = "nvidia".to_string();
+        req07.previous.selected_target.model_id = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.wire_model = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.compatibility_profile = None;
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("nvidia GLM OpenAI Chat compat must remain valid");
+        let payload = req_compat.provider_semantic_payload();
+        assert!(
+            payload.get("prompt_cache_key").is_none(),
+            "GLM targets reject prompt_cache_key on OpenAI Chat: {payload}"
+        );
+        assert!(
+            payload.get("verbosity").is_none(),
+            "GLM targets reject verbosity on OpenAI Chat: {payload}"
+        );
+        assert_eq!(payload["model"], "provider-wire-model");
+        assert!(payload.get("messages").is_some());
+    }
+
+    #[test]
+    fn unrelated_glm_host_preserves_unsupported_fields() {
+        for (model_id, wire_model) in [
+            ("nvidia-glm-route-alias", "Z-AI/GLM-5.3-Flash"),
+            ("Z-AI/GLM-5.3-Flash", "provider-wire-alias"),
+        ] {
+            let mut req07 = relay_req07_for_entry(
+                V3HubEntryProtocol::Responses,
+                json!({
+                    "model": "client-route-alias",
+                    "input": "hello",
+                    "prompt_cache_key": "session-1",
+                    "text": {"verbosity": "high"},
+                    "stream": false
+                }),
+                V3HubProviderWireProtocol::OpenAiChat,
+            );
+            req07.previous.selected_target.provider_id = "future-glm-host".to_string();
+            req07.previous.selected_target.model_id = model_id.to_string();
+            req07.previous.selected_target.wire_model = wire_model.to_string();
+            req07.previous.selected_target.compatibility_profile = None;
+
+            let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+                .expect("unrelated GLM host compat must remain valid");
+            let payload = req_compat.provider_semantic_payload();
+            assert_eq!(
+                payload["prompt_cache_key"], "session-1",
+                "model_id={model_id} wire_model={wire_model}: {payload}"
+            );
+            assert_eq!(
+                payload["verbosity"], "high",
+                "model_id={model_id} wire_model={wire_model}: {payload}"
+            );
+        }
+    }
+
+    #[test]
+    fn glm_openai_chat_drops_unsupported_fields_for_xcreate_free() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "prompt_cache_key": "session-1",
+                "text": {"verbosity": "high"},
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_id = "xcreate-free".to_string();
+        req07.previous.selected_target.model_id = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.wire_model = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.compatibility_profile = None;
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("GLM OpenAI Chat compat must remain valid");
+        let payload = req_compat.provider_semantic_payload();
+        assert!(payload.get("prompt_cache_key").is_none(), "{payload}");
+        assert!(payload.get("verbosity").is_none(), "{payload}");
+        assert_eq!(payload["model"], "provider-wire-model");
+        assert!(payload.get("messages").is_some());
+    }
+
+    #[test]
+    fn glm_openai_chat_drops_unsupported_fields_for_xcreate_openai_free() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "prompt_cache_key": "session-1",
+                "text": {"verbosity": "high"},
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_id = "xcreate".to_string();
+        req07.previous.selected_target.interface_id = "openai_free".to_string();
+        req07.previous.selected_target.model_id = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.wire_model = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.compatibility_profile = None;
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("xcreate OpenAI free compat must remain valid");
+        let payload = req_compat.provider_semantic_payload();
+        assert!(payload.get("prompt_cache_key").is_none(), "{payload}");
+        assert!(payload.get("verbosity").is_none(), "{payload}");
+    }
+
+    #[test]
+    fn glm_openai_chat_drops_unsupported_fields_for_xcreate_openai_paid() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "prompt_cache_key": "session-1",
+                "text": {"verbosity": "high"},
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_id = "xcreate".to_string();
+        req07.previous.selected_target.interface_id = "openai_paid".to_string();
+        req07.previous.selected_target.model_id = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.wire_model = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.compatibility_profile = None;
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("xcreate OpenAI paid compatibility must remain valid");
+        let payload = req_compat.provider_semantic_payload();
+        // The paid interface is outside the declared free GLM Chat wire scope.
+        assert_eq!(payload["prompt_cache_key"], "session-1", "{payload}");
+        assert_eq!(payload["verbosity"], "high", "{payload}");
+    }
+
+    #[test]
+    fn nvidia_non_glm_openai_chat_keeps_prompt_cache_key_and_verbosity() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "prompt_cache_key": "session-1",
+                "text": {"verbosity": "high"},
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_id = "nvidia".to_string();
+        req07.previous.selected_target.model_id = "deepseek-ai/deepseek-v4.1-flash".to_string();
+        req07.previous.selected_target.wire_model = "deepseek-ai/deepseek-v4.1-flash".to_string();
+        req07.previous.selected_target.compatibility_profile = None;
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("non-GLM nvidia Chat compatibility must remain valid");
+        let payload = req_compat.provider_semantic_payload();
+        assert_eq!(payload["prompt_cache_key"], "session-1", "{payload}");
+        assert_eq!(payload["verbosity"], "high", "{payload}");
+    }
+
+    #[test]
+    fn explicit_passthrough_glm_profile_preserves_unsupported_fields() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "prompt_cache_key": "session-1",
+                "text": {"verbosity": "high"},
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_id = "xcreate-free".to_string();
+        req07.previous.selected_target.model_id = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.wire_model = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.compatibility_profile =
+            Some("compat:passthrough".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("explicit passthrough compatibility must remain valid");
+        let payload = req_compat.provider_semantic_payload();
+        assert_eq!(payload["prompt_cache_key"], "session-1", "{payload}");
+        assert_eq!(payload["verbosity"], "high", "{payload}");
+    }
+
+    #[test]
+    fn non_glm_openai_chat_keeps_prompt_cache_key_and_verbosity() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "prompt_cache_key": "session-1",
+                "text": {"verbosity": "high"},
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_id = "kdns".to_string();
+        req07.previous.selected_target.model_id = "qwen3.8-max".to_string();
+        req07.previous.selected_target.wire_model = "qwen3.8-max".to_string();
+        req07.previous.selected_target.compatibility_profile = None;
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("non-GLM OpenAI Chat target must preserve the registered fields");
+        let payload = req_compat.provider_semantic_payload();
+        assert_eq!(payload["prompt_cache_key"], "session-1", "{payload}");
+        assert_eq!(payload["verbosity"], "high", "{payload}");
+    }
+
+    #[test]
+    fn glm_responses_wire_keeps_prompt_cache_key() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "prompt_cache_key": "session-1",
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::Responses,
+        );
+        req07.previous.selected_target.provider_id = "xcreate-free".to_string();
+        req07.previous.selected_target.model_id = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.wire_model = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.compatibility_profile = None;
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("GLM Responses compat must preserve the Responses field");
+        assert_eq!(
+            req_compat.provider_semantic_payload()["prompt_cache_key"],
+            "session-1"
+        );
     }
 
     #[test]
