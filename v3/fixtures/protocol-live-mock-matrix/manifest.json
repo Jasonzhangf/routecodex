@@ -48,6 +48,7 @@
     "gemini-unknown-tool-correction-sse",
     "gemini-zero-thinking-to-anthropic-json",
     "issue-3192e71-codex-integer-positive",
+    "issue-3192e71-codex-integer-positive-turn1",
     "issue-3192e71-duplicate-keys-negative",
     "issue-3192e71-fractional-negative",
     "issue-3192e71-missing-optional-preserved",
