@@ -9360,3 +9360,99 @@ async fn responses_direct_unharvestable_tool_markup_exhaustion_json_and_sse() {
     std::env::remove_var(RECOVERY_KEY_ENV);
     std::env::remove_var(KEY_ENV);
 }
+
+/// db1f482 public-entry regression: an HTTP 200 OpenAI Chat SSE head with one
+/// partial business delta and no semantic terminal is a typed provider
+/// transport failure. The last eligible exact identity must cool, an untried
+/// key must stay routable, and the client must see only a detectable
+/// termination with no provider error payload or fabricated success.
+#[tokio::test]
+async fn db1f482_truncated_openai_chat_sse_cools_exact_identity_at_public_entry() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let partial = format!(
+        "data: {}\n\n",
+        json!({
+            "id": "chatcmpl_truncated",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "wire-test",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "partial"},
+                "finish_reason": null
+            }]
+        })
+    );
+    let (endpoint, handle, _captures, _, shutdown) = start_entry_configured(
+        "openai_chat",
+        "chat",
+        StatusCode::OK,
+        "text/event-stream",
+        partial.clone(),
+        EntryOptions {
+            health_enabled: true,
+            attempt_bodies: vec![partial],
+            auth_entries: vec![
+                ("key1".into(), KEY_ENV.into()),
+                ("key2".into(), KEY_ENV.into()),
+            ],
+            pin_key: Some("key1".into()),
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let base = endpoint.trim_end_matches("/v1/responses");
+    let consumed = consume_response(
+        client()
+            .post(format!("{base}/v1/chat/completions"))
+            .json(&json!({
+                "model": "test.test",
+                "messages": [{"role": "user", "content": "db1f482 truncated 200"}],
+                "stream": true
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    assert!(
+        consumed.transport_error.is_some(),
+        "truncated stream must terminate detectably: {consumed:?}"
+    );
+    assert!(
+        consumed.status.is_none() || consumed.status == Some(StatusCode::OK),
+        "no client HTTP error number: {consumed:?}"
+    );
+    assert!(
+        !consumed.body.contains("[DONE]"),
+        "no fabricated terminal: {consumed:?}"
+    );
+    assert!(
+        !consumed.body.contains("\"finish_reason\":\"stop\""),
+        "no fabricated success: {consumed:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+
+    let health: Value = client()
+        .get(format!("{base}/_routecodex/health/cooldown-pool"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let entries = health["entries"].as_array().unwrap();
+    assert!(
+        entries.iter().any(|row| {
+            row["provider_id"] == "test" && row["auth_alias"] == "key1" && row["model_id"] == "test"
+        }),
+        "truncated HTTP 200 must cool the exact failed identity: {health}"
+    );
+    assert!(
+        entries.iter().all(|row| row["auth_alias"] != "key2"),
+        "the untried key must stay routable: {health}"
+    );
+
+    stop_entry(handle, shutdown).await;
+    std::env::remove_var(KEY_ENV);
+}
