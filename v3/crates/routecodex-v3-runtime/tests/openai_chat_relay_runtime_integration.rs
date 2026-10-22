@@ -449,6 +449,63 @@ impl ResponsesTransport for ClientDisconnectTransport {
     }
 }
 
+struct PartialClientDisconnectSseTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for PartialClientDisconnectSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids.lock().unwrap().push(provider_id.clone());
+        let request_id = request.request_id().to_string();
+        if provider_id.ends_with("_primary") {
+            let partial = Ok::<Vec<u8>, V3ProviderError>(
+                br#"data: {"id":"chatcmpl-client-disconnect","object":"chat.completion.chunk","model":"chat-wire-model","choices":[{"index":0,"delta":{"role":"assistant","content":"partial-before-client-disconnect"},"finish_reason":null}]}
+
+"#
+                .to_vec(),
+            );
+            return Ok(V3ProviderResp14Raw::from_sse(
+                request_id.clone(),
+                provider_id.clone(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(futures_util::stream::iter([
+                    partial,
+                    Err(V3ProviderError::ClientDisconnect {
+                        request_id,
+                        provider_id,
+                    }),
+                ])),
+            ));
+        }
+        Ok(V3ProviderResp14Raw::from_sse(
+            request_id,
+            provider_id,
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter([
+                Ok(br#"data: {"id":"chatcmpl-secondary","object":"chat.completion.chunk","model":"chat-wire-model","choices":[{"index":0,"delta":{"content":"secondary-must-not-run"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+"#
+                .to_vec()),
+            ])),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn client_disconnect_is_typed_terminal_and_does_not_mutate_health_or_action_gate() {
     let manifest = manifest();
@@ -493,6 +550,73 @@ async fn client_disconnect_is_typed_terminal_and_does_not_mutate_health_or_actio
     );
     assert!(availability.available);
     assert!(availability.blocked_scopes.is_empty());
+}
+
+#[tokio::test]
+async fn partial_client_disconnect_is_health_neutral_and_never_reselects() {
+    let scope = "openai_chat_partial_client_disconnect";
+    let manifest = manifest_with_two_providers_for_scope(scope, false);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = PartialClientDisconnectSseTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_openai_chat_relay_runtime_with_provider_health(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "partial-client-disconnect",
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-partial-client-disconnect".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"disconnect after partial output"}],
+                "stream":true
+            }),
+        },
+        &transport,
+        provider_health.runtime_health(),
+    )
+    .await
+    .expect("client disconnect must produce a typed terminal projection");
+
+    let primary = format!("{scope}_primary");
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        [primary.as_str()],
+        "a client disconnect after partial content must not reselect another provider"
+    );
+    assert_eq!(output.status, 499);
+    assert_eq!(output.error_chain.as_ref().map(Vec::len), Some(6));
+    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
+    assert!(
+        output.provider_failure_attempts.is_empty(),
+        "client disconnect must not publish a provider failure attempt: {:?}",
+        output.provider_failure_attempts
+    );
+    let client_error = match output.client_body {
+        V3OpenAiChatRelayClientBody::Json(value) => value,
+        V3OpenAiChatRelayClientBody::Sse(_) => {
+            panic!("client disconnect must not commit partial client SSE")
+        }
+    };
+    assert!(client_error.to_string().contains("client disconnected"));
+
+    let availability = provider_health.store().availability(
+        scope,
+        Some(primary.as_str()),
+        Some("chat-wire-model"),
+        u64::MAX,
+    );
+    assert!(
+        availability.available && availability.blocked_scopes.is_empty(),
+        "client disconnect must not cool the provider: {:?}",
+        availability.blocked_scopes
+    );
 }
 
 struct ReselectTransport {

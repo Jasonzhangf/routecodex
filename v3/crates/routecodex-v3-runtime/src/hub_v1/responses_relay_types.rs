@@ -291,6 +291,7 @@ pub enum V3RuntimeSemanticTerminal {
 struct V3RuntimeStreamControlState {
     semantic_terminal: Option<V3RuntimeSemanticTerminal>,
     provider_business_content: bool,
+    client_disconnect: bool,
     /// Attempt-local typed Error handoff, physically separate from snapshots.
     response_governance_failure: Option<super::V3HubRelayResponseError>,
 }
@@ -466,6 +467,20 @@ impl V3RuntimeStreamObservation {
         self.control
             .lock()
             .map(|control| control.provider_business_content)
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn record_client_disconnect(&self) -> Result<(), String> {
+        self.control
+            .lock()
+            .map(|mut control| control.client_disconnect = true)
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn take_client_disconnect(&self) -> Result<bool, String> {
+        self.control
+            .lock()
+            .map(|mut control| std::mem::take(&mut control.client_disconnect))
             .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
     }
 

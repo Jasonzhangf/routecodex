@@ -458,7 +458,7 @@ async fn direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_w
 }
 
 #[tokio::test]
-async fn direct_transport_failure_without_response_cools_exact_last_candidate() {
+async fn direct_transport_failure_without_response_keeps_last_candidate_health_neutral() {
     let routing_group = "direct_transport_last_candidate";
     let manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
     let raw = V3Server03HttpRequestRaw {
@@ -509,14 +509,12 @@ async fn direct_transport_failure_without_response_cools_exact_last_candidate() 
         Some("provider_transport_error"),
         "{failure:?}"
     );
-    assert_ne!(
+    assert_eq!(
         failure.health_state, "last_candidate_terminal",
-        "the response-less transport failure must not use the terminal health-neutral boundary: {failure:?}"
+        "the response-less transport failure must use the terminal health-neutral boundary: {failure:?}"
     );
-    assert!(
-        failure.failure_count > 0 || failure.cooldown_until_ms.is_some(),
-        "the response-less transport failure must record exact-identity health: {failure:?}"
-    );
+    assert_eq!(failure.failure_count, 0);
+    assert_eq!(failure.cooldown_until_ms, None);
 }
 
 #[tokio::test]

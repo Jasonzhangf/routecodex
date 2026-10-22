@@ -277,12 +277,11 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
     );
 }
 
-/// The same truncated HTTP 200 body must cool the exact identity even when the
-/// failed candidate is the request's last eligible one. A single-candidate pool
-/// must not fall back to the health-neutral last-candidate terminal, because a
-/// transport failure describes the provider, not this request.
+/// A truncated HTTP 200 body stays health-neutral when the failed candidate is
+/// the request's last eligible one. The last-candidate terminal boundary owns
+/// every provider failure class and must not mutate provider health.
 #[tokio::test]
-async fn truncated_http_200_cools_exact_identity_when_it_is_the_last_candidate() {
+async fn truncated_http_200_keeps_last_candidate_health_neutral() {
     let server_id = "truncated_200_last_candidate";
     let manifest = single_candidate_manifest(server_id);
     let provider_health =
@@ -326,15 +325,17 @@ async fn truncated_http_200_cools_exact_identity_when_it_is_the_last_candidate()
     let event = &observability.provider_failure_events[0];
     assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
     assert_eq!(event.status, 502);
-    assert_eq!(event.health_state, "cooldown");
+    assert_eq!(event.health_state, "last_candidate_terminal");
+    assert_eq!(event.failure_count, 0);
+    assert_eq!(event.cooldown_until_ms, None);
 
     let now = u64::MAX;
     assert!(
-        !provider_health
+        provider_health
             .store()
             .availability("limited", Some("key1"), Some("gpt-5.5"), now)
             .available,
-        "a last-candidate truncated HTTP 200 body must still cool the exact identity"
+        "a last-candidate truncated HTTP 200 body must stay health-neutral"
     );
 }
 

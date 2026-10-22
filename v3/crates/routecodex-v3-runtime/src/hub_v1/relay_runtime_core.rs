@@ -43,6 +43,7 @@ enum V3RelayAttemptCollectFailure {
     ResponseGovernance(V3HubRelayResponseError),
     ProviderResponseBody(String),
     ProviderTransport(String),
+    ClientDisconnect,
     LocalStore(V3AttemptStoreError),
     Observation(String),
 }
@@ -1696,6 +1697,15 @@ where
                             }
                         }
                         Some(Err(reason)) => {
+                            match stream_observation.take_client_disconnect() {
+                                Ok(true) => {
+                                    break Some(V3RelayAttemptCollectFailure::ClientDisconnect)
+                                }
+                                Ok(false) => {}
+                                Err(error) => {
+                                    break Some(V3RelayAttemptCollectFailure::Observation(error))
+                                }
+                            }
                             if let Some(error) = stream_observation
                                 .take_response_governance_failure()
                                 .map_err(V3RelayCoreError::Target)?
@@ -1808,6 +1818,20 @@ where
                     };
                 }
                 if let Some(failure) = stream_failure {
+                    if matches!(&failure, V3RelayAttemptCollectFailure::ClientDisconnect) {
+                        let failure = provider_runtime_failure(
+                            V3ProviderError::ClientDisconnect {
+                                request_id: request_id.to_string(),
+                                provider_id: selected_target_provider_id.clone(),
+                            },
+                            &selected_target_provider_id,
+                        );
+                        return Ok(C::assemble_failure_output(
+                            failure,
+                            trace,
+                            std::mem::take(failure_events),
+                        ));
+                    }
                     let (mut failure, response_processing_code) = match failure {
                         V3RelayAttemptCollectFailure::ResponseGovernance(error) => {
                             provider_response_governance_failure(
@@ -1851,6 +1875,9 @@ where
                                 &selected_target_provider_id,
                             ),
                             None,
+                        ),
+                        V3RelayAttemptCollectFailure::ClientDisconnect => unreachable!(
+                            "client disconnect must be returned before provider failure policy"
                         ),
                     };
                     failure.provider_status = Some(provider_status);

@@ -654,6 +654,12 @@ fn project_sse_stream(
                 };
                 let result = match chunk {
                     Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
+                        if let Err(observation_error) =
+                            state.stream_observation.record_client_disconnect()
+                        {
+                            state.done = true;
+                            return Some((Err(observation_error), state));
+                        }
                         state.done = true;
                         return Some((Err(error.to_string()), state));
                     }
@@ -1064,6 +1070,29 @@ fn project_responses_sse_as_openai_chat_stream(
                                 // client disconnect 是健康中性事件（客户端断开导致
                                 // provider 流中止）：禁止写 provider 失败/冷却，与
                                 // project_sse_stream / gemini / direct 路径一致。
+                                if let Err(observation_error) =
+                                    stream_observation.record_client_disconnect()
+                                {
+                                    return Some((
+                                        Err(observation_error),
+                                        (
+                                            provider,
+                                            decoder,
+                                            transducer,
+                                            toolreason,
+                                            pending,
+                                            done_seen,
+                                            finished,
+                                            stream_observation,
+                                            compatibility_profile,
+                                            web_search_execution_mode,
+                                            web_search_center_state,
+                                            retain_response_cipher,
+                                            tool_thinking_enabled,
+                                            provider_outcome,
+                                        ),
+                                    ));
+                                }
                                 return Some((
                                     Err(error),
                                     (

@@ -817,6 +817,14 @@ fn project_sse_stream(
                 };
                 let result = match chunk {
                     Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
+                        if let Err(observation_error) = state
+                            .provider_outcome
+                            .response_control
+                            .record_client_disconnect()
+                        {
+                            state.done = true;
+                            return Some((Err(observation_error), state));
+                        }
                         state.done = true;
                         return Some((Err(error.to_string()), state));
                     }

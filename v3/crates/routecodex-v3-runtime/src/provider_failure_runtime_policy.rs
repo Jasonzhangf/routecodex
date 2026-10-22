@@ -171,40 +171,6 @@ pub(crate) fn is_health_neutral_request_compat_failure(
         || error_type == Some("invalid_request_error")
 }
 
-/// A typed provider transport failure: the head arrived, but the connection or
-/// body/stream could not be read to the protocol terminal. `status` is the
-/// internal 502 cause, not an upstream HTTP error, so this class must not share
-/// the terminal or request-local health-neutral boundary.
-pub(crate) fn is_provider_transport_failure(
-    source_stage: &str,
-    status: u16,
-    error_type: Option<&str>,
-    provider_type: Option<&str>,
-    provider_status: Option<u16>,
-    provider_body_read_failure: Option<&str>,
-) -> bool {
-    // Gemini uncommitted-SSE EOF is a health-neutral request-local boundary, so
-    // this semantic protocol discriminator excludes the Gemini wire from
-    // transport-failure cooling; it is not a test-name special case.
-    source_stage == "V3ProviderReqOutbound09TransportRequest"
-        && status == 502
-        // The generic Relay lane names this class `provider_error`; the
-        // Responses Relay lane reports the same typed transport class under
-        // its external code `provider_transport_error`. Accept both so a
-        // truncated HTTP 200 body owns its exact identity in either lane.
-        && matches!(
-            error_type,
-            Some("provider_error") | Some("provider_transport_error")
-        )
-        && provider_type != Some("gemini")
-        // A completed upstream HTTP error is not a transport failure. A
-        // response-less transport, a non-error head with a truncated body, or
-        // an explicit body-read failure keeps the exact-identity
-        // last-candidate health effect.
-        && (provider_status.is_none_or(|status| status < 400)
-            || provider_body_read_failure.is_some())
-}
-
 /// A Relay Error-operator contract failure. This is a typed control resource:
 /// the SDK did not produce a usable Error06, and the original Source remains
 /// available as evidence when it already existed.
@@ -934,14 +900,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&attempt_source);
     let is_request_local_compat_failure = is_response_processing_failure
         || is_health_neutral_request_compat_failure(source_stage, error_type.as_deref());
-    let is_transport_failure = is_provider_transport_failure(
-        source_stage,
-        status,
-        error_type.as_deref(),
-        Some(selected.candidate.provider_type.as_str()),
-        provider_status,
-        provider_body_read_failure,
-    );
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
     let resolution = reselect_from_captured_target_plan(
@@ -954,47 +912,45 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     let has_alternative = matches!(&resolution, V3RelayProviderTargetResolution::Selected(_));
     // Resolve another eligible identity before any health mutation. A terminal
     // attempt publishes diagnostics only; it does not update health or actions.
-    // A typed transport failure still owns its exact health identity when it is
-    // the request's last eligible candidate. Only terminal business/provider
-    // responses keep the health-neutral last-candidate boundary.
-    let health_record =
-        if is_request_local_compat_failure || (!has_alternative && !is_transport_failure) {
-            V3ProviderFailureRecord {
-                scope_label: candidate_key.clone(),
-                provider_key: candidate_key.clone(),
-                state: if is_response_processing_failure {
-                    "request_local_response_processing"
-                } else if is_request_local_compat_failure {
-                    "request_local_provider_compat"
-                } else {
-                    "last_candidate_terminal"
-                }
-                .to_string(),
-                failure_count: 0,
-                cooldown_until_ms: None,
-                reason: reason.map(str::to_string),
+    // The last or only eligible candidate stays health-neutral for every
+    // provider failure class.
+    let health_record = if is_request_local_compat_failure || !has_alternative {
+        V3ProviderFailureRecord {
+            scope_label: candidate_key.clone(),
+            provider_key: candidate_key.clone(),
+            state: if is_response_processing_failure {
+                "request_local_response_processing"
+            } else if is_request_local_compat_failure {
+                "request_local_provider_compat"
+            } else {
+                "last_candidate_terminal"
             }
-        } else {
-            context
-                .provider_health
-                .record_provider_failure_record_with_policy_for_interface(
-                    matched_policy,
-                    context.manifest,
-                    &context.failure_session_scope,
-                    &selected.candidate.provider_id,
-                    &selected.candidate.interface_id,
-                    Some(&selected.candidate.provider_type),
-                    Some(&selected.candidate.auth_alias),
-                    Some(&selected.candidate.model_id),
-                    reason,
-                    source_stage,
-                    status,
-                    error_type.as_deref(),
-                    &message,
-                    v3_relay_provider_policy_now_epoch_ms()
-                        .map_err(v3_relay_provider_policy_ordinary_error)?,
-                )?
-        };
+            .to_string(),
+            failure_count: 0,
+            cooldown_until_ms: None,
+            reason: reason.map(str::to_string),
+        }
+    } else {
+        context
+            .provider_health
+            .record_provider_failure_record_with_policy_for_interface(
+                matched_policy,
+                context.manifest,
+                &context.failure_session_scope,
+                &selected.candidate.provider_id,
+                &selected.candidate.interface_id,
+                Some(&selected.candidate.provider_type),
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+                reason,
+                source_stage,
+                status,
+                error_type.as_deref(),
+                &message,
+                v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(v3_relay_provider_policy_ordinary_error)?,
+            )?
+    };
     let retries_done = state
         .same_candidate_retries
         .get(&candidate_key)

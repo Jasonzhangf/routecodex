@@ -197,7 +197,7 @@ async fn drain(output: &mut routecodex_v3_runtime::V3OpenAiChatRelayRuntimeOutpu
 }
 
 #[tokio::test]
-async fn openai_chat_truncated_200_cools_exact_identity_when_it_is_the_last_candidate() {
+async fn openai_chat_truncated_200_keeps_last_candidate_health_neutral() {
     let scope = "openai_chat_truncated_last";
     let transport = TruncatedSseTransport {
         turn: AtomicUsize::new(0),
@@ -212,8 +212,8 @@ async fn openai_chat_truncated_200_cools_exact_identity_when_it_is_the_last_cand
             .store()
             .availability(scope, Some("key1"), Some("chat-wire-model"), now);
     assert!(
-        !exact.available,
-        "a truncated HTTP 200 SSE body must cool the exact provider identity even without an alternative: attempts={attempts:?} body={body}"
+        exact.available,
+        "a truncated HTTP 200 SSE body must stay health-neutral without an alternative: attempts={attempts:?} body={body}"
     );
     assert!(
         provider_health

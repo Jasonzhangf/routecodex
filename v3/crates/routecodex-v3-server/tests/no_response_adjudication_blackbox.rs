@@ -11229,11 +11229,11 @@ async fn refill_concurrent_cancel_public() {
 
 /// db1f482 public-entry regression: an HTTP 200 OpenAI Chat SSE head with one
 /// partial business delta and no semantic terminal is a typed provider
-/// transport failure. The last eligible exact identity must cool, an untried
-/// key must stay routable, and the client must see only a detectable
-/// termination with no provider error payload or fabricated success.
+/// transport failure. The last eligible exact identity must stay health-neutral,
+/// and the client must see only a detectable termination with no provider error
+/// payload or fabricated success.
 #[tokio::test]
-async fn db1f482_truncated_openai_chat_sse_cools_exact_identity_at_public_entry() {
+async fn db1f482_truncated_openai_chat_sse_keeps_last_candidate_health_neutral_at_public_entry() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     let partial = format!(
@@ -11250,7 +11250,7 @@ async fn db1f482_truncated_openai_chat_sse_cools_exact_identity_at_public_entry(
             }]
         })
     );
-    let (endpoint, handle, _captures, _, shutdown) = start_entry_configured(
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
         "openai_chat",
         "chat",
         StatusCode::OK,
@@ -11259,10 +11259,7 @@ async fn db1f482_truncated_openai_chat_sse_cools_exact_identity_at_public_entry(
         EntryOptions {
             health_enabled: true,
             attempt_bodies: vec![partial],
-            auth_entries: vec![
-                ("key1".into(), KEY_ENV.into()),
-                ("key2".into(), KEY_ENV.into()),
-            ],
+            auth_entries: vec![("key1".into(), KEY_ENV.into())],
             pin_key: Some("key1".into()),
             ..EntryOptions::default()
         },
@@ -11309,16 +11306,21 @@ async fn db1f482_truncated_openai_chat_sse_cools_exact_identity_at_public_entry(
         .unwrap();
     let entries = health["entries"].as_array().unwrap();
     assert!(
-        entries.iter().any(|row| {
+        !entries.iter().any(|row| {
             row["provider_id"] == "test" && row["auth_alias"] == "key1" && row["model_id"] == "test"
         }),
-        "truncated HTTP 200 must cool the exact failed identity: {health}"
+        "last-candidate truncated HTTP 200 must stay health-neutral: {health}"
     );
-    assert!(
-        entries.iter().all(|row| row["auth_alias"] != "key2"),
-        "the untried key must stay routable: {health}"
-    );
-
     stop_entry(handle, shutdown).await;
+    let mut attempts = 0;
+    while let Some(capture) = captures.recv().await {
+        if capture.to_string().contains("db1f482 truncated 200") {
+            attempts += 1;
+        }
+    }
+    assert_eq!(
+        attempts, 1,
+        "the single candidate must be attempted exactly once before terminal"
+    );
     std::env::remove_var(KEY_ENV);
 }
