@@ -15,6 +15,7 @@ HTTP POST /v1/responses
   -> explicit session/conversation scope extraction
   -> V3Server03HttpRequestRaw admission block
      -> overlap: await exact listener-local permit release, then recheck
+     -> deadline: break only this client transport without an error payload
      -> admitted: Runtime/Provider mainline
   -> V3ServerRespOutbound06ClientFrame
   -> response body EOF / stream error / body drop
@@ -57,6 +58,8 @@ owners.
    consuming the only notification for a newly available scope.
 9. The Server caller cannot access a nonblocking admission API and therefore
    cannot turn contention into a client-visible overlap error.
+10. The gate uses the compiled request residence timeout as its wait bound and
+    returns a deadline error without removing the active holder's permit.
 
 ## Module Blackbox Tests
 
@@ -73,6 +76,10 @@ owners.
    assert both upstream requests are admitted.
 7. Drop the first client body before EOF and assert an already-waiting request
    resumes and reaches the provider.
+8. Hold the first body past the compiled residence timeout, assert the waiting
+   same-scope request ends only its own client transport with no error status or
+   payload, and assert a parallel scope still completes. Release the first body
+   and assert a later same-scope request is admitted.
 
 ## SSE Transport Tests
 
@@ -111,7 +118,8 @@ After source gates:
 
 - This does not repair malformed client history in a codec.
 - This does not add client retry or error projection; contention remains inside
-  the listener-local predicate wait owner.
+  the listener-local predicate wait owner, with deadline expiry limited to the
+  waiting request's transport.
 - This does not use provider action gate as request admission.
 - This does not change continuation ownership or save/restore semantics.
 - Requests without an explicit stable session/conversation scope remain

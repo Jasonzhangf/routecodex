@@ -2925,6 +2925,11 @@ features:
   - Same listener plus same explicit session or conversation blocks the second request
     inside the admission owner until the exact active permit releases, then admits it
     without a client-visible overlap error.
+  - A waiter that reaches the compiled request residence deadline terminates only its
+    own client transport without an error status, provider payload, or fabricated
+    success; the active permit remains owned by the first request.
+  - After the active response body releases, a later request with the same scope and a
+    parallel request with another scope both reach terminal outcomes.
   - Different session on one listener and the same session on different listeners remain concurrently admissible.
   - Missing explicit scope does not invent a cross-request key.
   - Response EOF, stream error, and client body drop release only the exact permit.

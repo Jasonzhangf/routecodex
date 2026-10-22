@@ -4387,7 +4387,7 @@ flowchart TD
         <span class="summary-sub">2 edges · <code>v3.responses_session_admission</code> · V3Server03HttpRequestRaw → V3ServerRespOutbound06ClientFrame</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, waits on overlap before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.</p>
+        <p class="chain-summary">The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, bounds overlap waits by the compiled request residence timeout before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.responses_session_inflight_admission</code></span>
           <span>modules: <code>v3-server</code></span>

@@ -117,9 +117,14 @@ requireMatch(
   "Admission permit must be held by the HTTP response body lifetime",
 );
 requireMatch(
+  server,
+  /server\.execution[\s\S]*V3ResponsesSessionAdmissionGate::with_wait_deadline[\s\S]*residence_timeout_ms/,
+  "The listener must construct session admission from the compiled request residence timeout",
+);
+requireMatch(
   admission,
-  /impl V3ResponsesSessionAdmissionGate[\s\S]*pub\(crate\) async fn admit\([\s\S]*let notified = self\.notify\.notified\(\);[\s\S]*tokio::pin!\(notified\);[\s\S]*notified\.as_mut\(\)\.enable\(\);[\s\S]*self\.try_admit\(scope\.clone\(\)\)[\s\S]*notified\.await/,
-  "The session admission gate must uniquely own an async predicate wait with lost-wakeup-safe notification ordering",
+  /impl V3ResponsesSessionAdmissionGate[\s\S]*pub\(crate\) async fn admit\([\s\S]*let notified = self\.notify\.notified\(\);[\s\S]*notified\.as_mut\(\)\.enable\(\);[\s\S]*tokio::time::timeout\(remaining, notified\)\.await/,
+  "The session admission gate must own a bounded async predicate wait with lost-wakeup-safe notification ordering",
 );
 requireMatch(
   admission,

@@ -2690,7 +2690,7 @@ flowchart TD
 
 ## v3.responses_session_admission
 
-The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, waits on overlap before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.
+The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, bounds overlap waits by the compiled request residence timeout before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.
 
 Owner feature: `v3.responses_session_inflight_admission`
 Manifest: `docs/architecture/manifests/v3.responses_session_admission.mainline.yml`

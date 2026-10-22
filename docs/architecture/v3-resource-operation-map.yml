@@ -2252,7 +2252,7 @@ resources:
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, provider_action_gate]
     may_enter_provider_body: false
     may_enter_client_body: false
-    contention_policy: wait_on_listener_local_predicate_without_client_error_projection
+    contention_policy: wait_on_listener_local_predicate_until_request_residence_deadline_without_client_error_projection
     release_point: V3ServerRespOutbound06ClientFrameBodyEofErrorOrDrop
     binding_status: anchored
 

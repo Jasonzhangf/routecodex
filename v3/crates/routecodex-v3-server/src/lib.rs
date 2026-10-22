@@ -643,6 +643,20 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                 ),
             );
             provider_health_handles.push(Arc::clone(&listener_provider_health));
+            let responses_session_admission = {
+                let execution = server.execution.as_ref().ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "V3 business listener {} is missing its compiled request residence timeout",
+                            server.id
+                        ),
+                    )
+                })?;
+                Arc::new(V3ResponsesSessionAdmissionGate::with_wait_deadline(
+                    Duration::from_millis(execution.attempt_store.residence_timeout_ms),
+                ))
+            };
             build_v3_listener_router(V3ListenerState {
                 server,
                 manifest_version: preflight.manifest_version,
@@ -656,7 +670,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                 responses_relay_server_tool_state: responses_relay_server_tool_state.clone(),
                 provider_health: listener_provider_health,
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
-                responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
+                responses_session_admission,
                 request_activity_gate: Arc::clone(&request_activity_gate),
                 front_transport_broker: front_transport_broker.clone(),
                 webui_observability,
@@ -1075,6 +1089,24 @@ async fn admit_v3_responses_session_after_json_parse(
                     resolve_v3_console_project_path(request_headers, payload).as_deref(),
                 ),
             );
+        }
+        Err(V3ResponsesSessionAdmissionError::WaitDeadlineExpired) => {
+            // The holder stayed active past the shared request residence
+            // deadline. This request owns no attempt and no business result, so
+            // it breaks only its own transport. The typed reason stays in the
+            // listener diagnostics; no error status or payload reaches the
+            // client and no success is fabricated.
+            append_v3_human_console_line(
+                state,
+                &format!(
+                    "[{}] V3Server03ResponsesSessionAdmissionBlock path={} code=responses_session_admission_deadline_expired",
+                    state.server.port, path
+                ),
+            );
+            return Err(model_no_response_output(v3_request_wants_sse(
+                request_headers,
+                payload,
+            )));
         }
     };
     Ok(permit)

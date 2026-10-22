@@ -20,7 +20,7 @@ edges:
     status: anchored
 return_path:
   success: V3ServerRespOutbound06ClientFrame body EOF, error, or drop releases the exact permit.
-  contention: A matching explicit session or conversation waits at V3Server03ResponsesSessionAdmissionBlock until the exact active permit releases, then continues on the normal success path.
+  contention: A matching explicit session or conversation waits at V3Server03ResponsesSessionAdmissionBlock until the exact active permit releases and then continues on the normal success path, or until the compiled request residence deadline expires and only the waiting client transport ends.
 canonical_docs:
   - docs/architecture/wiki/v3-responses-session-admission.md
   - docs/goals/v3-responses-session-admission-and-sse-keepalive-test-design.md

@@ -4047,7 +4047,11 @@ features:
   - git diff --check
   semantic_contract:
   - Same listener and explicit session or conversation contention waits inside the
-    listener-local gate until the exact response-body permit releases.
+    listener-local gate until the exact response-body permit releases or the
+    compiled request residence deadline expires.
+  - On that deadline, only the waiting request's client transport ends without an
+    error status, provider payload, or fabricated success; the exact active permit
+    remains with its owner.
   - Contention never enters Error01-06 and never projects request_in_flight or HTTP
     409 to the client.
   - Different scopes and different listener gate instances remain concurrent.

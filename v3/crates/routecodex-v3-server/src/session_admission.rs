@@ -3,6 +3,7 @@ use axum::http::Response;
 use futures_util::{stream, StreamExt};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::Notify;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,20 +19,29 @@ struct V3ResponsesSessionAdmissionState {
     active: BTreeMap<u64, V3ResponsesSessionAdmissionScope>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct V3ResponsesSessionAdmissionGate {
     state: Arc<Mutex<V3ResponsesSessionAdmissionState>>,
     notify: Arc<Notify>,
+    wait_deadline: Duration,
+}
+
+#[cfg(test)]
+impl Default for V3ResponsesSessionAdmissionGate {
+    fn default() -> Self {
+        Self::with_wait_deadline(Duration::from_secs(60))
+    }
 }
 
 /// Failure of the admission gate itself, confined to the affected request.
 ///
 /// Admission is a control gate, so it cannot silently pass a request through.
-/// It can only fail when it cannot hand out a unique token any more; that
-/// failure belongs to the request that asked, not to the listener.
+/// It fails only for the request that cannot receive a unique token or whose
+/// same-scope wait reaches the compiled request residence deadline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum V3ResponsesSessionAdmissionError {
     TokenSpaceExhausted,
+    WaitDeadlineExpired,
 }
 
 impl std::fmt::Display for V3ResponsesSessionAdmissionError {
@@ -39,6 +49,9 @@ impl std::fmt::Display for V3ResponsesSessionAdmissionError {
         match self {
             Self::TokenSpaceExhausted => formatter.write_str(
                 "V3 Responses session admission token space is exhausted for this listener",
+            ),
+            Self::WaitDeadlineExpired => formatter.write_str(
+                "V3 Responses session admission wait exceeded the request residence deadline",
             ),
         }
     }
@@ -240,10 +253,19 @@ pub(crate) fn hold_response_body_admission_permit(
 }
 
 impl V3ResponsesSessionAdmissionGate {
+    pub(crate) fn with_wait_deadline(wait_deadline: Duration) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(V3ResponsesSessionAdmissionState::default())),
+            notify: Arc::new(Notify::new()),
+            wait_deadline,
+        }
+    }
+
     pub(crate) async fn admit(
         &self,
         scope: V3ResponsesSessionAdmissionScope,
     ) -> Result<Option<V3ResponsesSessionAdmissionPermit>, V3ResponsesSessionAdmissionError> {
+        let deadline = tokio::time::Instant::now() + self.wait_deadline;
         loop {
             let notified = self.notify.notified();
             tokio::pin!(notified);
@@ -251,7 +273,26 @@ impl V3ResponsesSessionAdmissionGate {
             match self.try_admit(scope.clone())? {
                 V3ResponsesSessionAdmissionOutcome::Ungated => return Ok(None),
                 V3ResponsesSessionAdmissionOutcome::Admitted(permit) => return Ok(Some(permit)),
-                V3ResponsesSessionAdmissionOutcome::Busy => notified.await,
+                V3ResponsesSessionAdmissionOutcome::Busy => {
+                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    if remaining.is_zero() {
+                        return Err(V3ResponsesSessionAdmissionError::WaitDeadlineExpired);
+                    }
+                    if tokio::time::timeout(remaining, notified).await.is_err() {
+                        // Recheck once: the holder may have released exactly at
+                        // the deadline, in which case this waiter still owns a
+                        // real admission instead of a spurious expiry.
+                        return match self.try_admit(scope.clone())? {
+                            V3ResponsesSessionAdmissionOutcome::Ungated => Ok(None),
+                            V3ResponsesSessionAdmissionOutcome::Admitted(permit) => {
+                                Ok(Some(permit))
+                            }
+                            V3ResponsesSessionAdmissionOutcome::Busy => {
+                                Err(V3ResponsesSessionAdmissionError::WaitDeadlineExpired)
+                            }
+                        };
+                    }
+                }
             }
         }
     }
@@ -533,5 +574,90 @@ mod tests {
             .is_err());
         drop(second);
         drop(timeout(Duration::from_secs(1), queued).await.unwrap());
+    }
+
+    // RED first: the gate must not park a later same-scope request forever when
+    // the active permit never releases.
+    #[tokio::test]
+    async fn same_session_admission_wait_expires_at_the_request_deadline() {
+        let gate = Arc::new(V3ResponsesSessionAdmissionGate::with_wait_deadline(
+            Duration::from_millis(50),
+        ));
+        let first = gate
+            .admit(scope("/v1/responses", Some("session-bounded"), None))
+            .await
+            .expect("admission must stay available")
+            .expect("first request must hold the scope");
+
+        let waiting_gate = Arc::clone(&gate);
+        let waiter = tokio::spawn(async move {
+            waiting_gate
+                .admit(scope("/v1/responses", Some("session-bounded"), None))
+                .await
+        });
+        tokio::task::yield_now().await;
+
+        let outcome = timeout(Duration::from_millis(1000), waiter)
+            .await
+            .expect("same-session admission wait must be bounded")
+            .expect("waiter task must not panic");
+        assert_eq!(
+            outcome.unwrap_err(),
+            V3ResponsesSessionAdmissionError::WaitDeadlineExpired
+        );
+
+        // The timed-out waiter must not release or replace the active holder.
+        assert_eq!(gate.state.lock().unwrap().active.len(), 1);
+        drop(first);
+        let later = timeout(
+            Duration::from_millis(1000),
+            gate.admit(scope("/v1/responses", Some("session-bounded"), None)),
+        )
+        .await
+        .expect("released scope must be admitted")
+        .expect("admission must stay available")
+        .expect("released scope must hand out a permit");
+        drop(later);
+    }
+
+    #[tokio::test]
+    async fn admission_deadline_of_one_scope_leaves_a_parallel_scope_concurrent() {
+        let gate = Arc::new(V3ResponsesSessionAdmissionGate::with_wait_deadline(
+            Duration::from_millis(50),
+        ));
+        let first = gate
+            .admit(scope("/v1/responses", Some("session-a"), None))
+            .await
+            .expect("admission must stay available")
+            .expect("first request must hold the scope");
+
+        let blocked_gate = Arc::clone(&gate);
+        let blocked = tokio::spawn(async move {
+            blocked_gate
+                .admit(scope("/v1/responses", Some("session-a"), None))
+                .await
+        });
+        tokio::task::yield_now().await;
+
+        // A different scope is unaffected by the bounded wait of this scope.
+        let parallel = timeout(
+            Duration::from_millis(100),
+            gate.admit(scope("/v1/responses", Some("session-b"), None)),
+        )
+        .await
+        .expect("unrelated scope must stay concurrent")
+        .expect("admission must stay available")
+        .expect("unrelated scope must receive a permit");
+        drop(parallel);
+
+        let outcome = timeout(Duration::from_millis(1000), blocked)
+            .await
+            .expect("bounded same-scope waiter must terminate")
+            .expect("waiter task must not panic");
+        assert_eq!(
+            outcome.unwrap_err(),
+            V3ResponsesSessionAdmissionError::WaitDeadlineExpired
+        );
+        drop(first);
     }
 }
