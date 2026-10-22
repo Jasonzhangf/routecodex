@@ -2131,6 +2131,8 @@ features:
   - fe1ec4b-responses-tool-cipher-json-sse-followup
   - fe1ec4b-responses-anthropic-signature-json
   - fe1ec4b-responses-anthropic-signature-sse
+  - fe1ec4b-chat-wire-reasoning-cipher-relay-json
+  - fe1ec4b-responses-source-cipher-relay-json
   - responses_function_call_history_keeps_mcp_namespace_on_openai_chat_provider_wire
   - native_tool_search_first_discovery_round_trip_through_anthropic
   - non_client_tool_search_controls_preserve_function_call_json_and_sse

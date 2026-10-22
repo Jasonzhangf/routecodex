@@ -75,9 +75,9 @@ function upstreamToolCall(upstream) {
       .find((call) => call?.function?.arguments);
 }
 
-test('real corpus loads 75 fixtures sorted with exact identities', () => {
+test('real corpus loads 77 fixtures sorted with exact identities', () => {
   const loaded = loadFixtures(realFixtureRoot);
-  assert.equal(loaded.length, 75);
+  assert.equal(loaded.length, 77);
   const ids = loaded.map((entry) => entry.value.case_id);
   assert.equal(ids.length, new Set(ids).size);
   assert.equal(ids[0], 'anthropic-to-anthropic-json');
@@ -85,12 +85,12 @@ test('real corpus loads 75 fixtures sorted with exact identities', () => {
   assert.deepEqual(loaded.map((entry) => entry.relative), [...loaded.map((entry) => entry.relative)].sort());
   const report = inspectCorpus(realFixtureRoot);
   assert.equal(report.ok, true, report.findings.join('\n'));
-  assert.equal(report.case_count, 75);
+  assert.equal(report.case_count, 77);
   assert.deepEqual(report.findings, []);
   assert.equal(report.coverage.base_cells, 16);
   assert.equal(report.coverage.base_cells_covered, 16);
   assert.equal(report.coverage.base_variants_covered, 32);
-  assert.equal(report.extensions.length, 43);
+  assert.equal(report.extensions.length, 45);
   assert.equal(report.source_refs.checked, false);
   assert.deepEqual(report.source_refs.stale_files, []);
   assert.deepEqual(report.source_refs.stale_tests, []);
@@ -152,6 +152,22 @@ test('fe1ec4b fixtures bind public JSON/SSE evidence and typed countercases', ()
         ? 'redacted-anthropic-fe1ec4b-json'
         : 'redacted-anthropic-fe1ec4b-sse');
   }
+
+  const chatWireCipher = byId.get('fe1ec4b-chat-wire-reasoning-cipher-relay-json');
+  assert.ok(chatWireCipher);
+  assert.equal(chatWireCipher.cell.entry_protocol, 'responses');
+  assert.equal(chatWireCipher.cell.provider_protocol, 'openai_chat');
+  assert.equal(chatWireCipher.upstream_response.body.choices[0].message.reasoning.encrypted_content, 'opaque-chat-business-cipher');
+  assert.equal(chatWireCipher.upstream_response.body.choices[1].message.reasoning.encrypted_content, 'rsn_CODEX_LOCAL_CIPHER');
+  assert.equal(chatWireCipher.expected_client.body_must['output.0.encrypted_content'], 'opaque-chat-business-cipher');
+  assert.ok(chatWireCipher.expected_client.body_must_not.includes('rsn_CODEX_LOCAL_CIPHER'));
+
+  const responsesSourceCipher = byId.get('fe1ec4b-responses-source-cipher-relay-json');
+  assert.ok(responsesSourceCipher);
+  assert.equal(responsesSourceCipher.cell.entry_protocol, 'openai_chat');
+  assert.equal(responsesSourceCipher.cell.provider_protocol, 'responses');
+  assert.equal(responsesSourceCipher.upstream_response.body.output[0].encrypted_content, '411bd3dd-47a6-49c0-8eef-6a826f349bf6-source');
+  assert.ok(responsesSourceCipher.expected_client.body_must_not.includes('411bd3dd-47a6-49c0-8eef-6a826f349bf6-source'));
 });
 
 test('provider concurrency replay fixtures bind both execution modes and exact all-busy evidence', () => {
