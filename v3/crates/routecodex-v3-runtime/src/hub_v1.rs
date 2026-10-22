@@ -115,7 +115,9 @@ pub(crate) use provider_sse_json_codec::*;
 mod provider_attempt_business_content;
 pub(crate) use provider_attempt_business_content::*;
 mod resp_chat_process_complete_chat_sse;
-pub(crate) use resp_chat_process_complete_chat_sse::{V3RelayCompleteResponseError, projected_sse_has_business_content};
+pub(crate) use resp_chat_process_complete_chat_sse::{
+    projected_sse_has_business_content, V3RelayCompleteResponseError,
+};
 #[cfg(test)]
 mod provider_sse_json_codec_mcp_namespace_tests;
 mod resp_inbound_02_normalized;

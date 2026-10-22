@@ -706,7 +706,10 @@ pub struct V3Error06ClientProjected {
 fn internal_client_status(source: &V3Error01SourceRaised) -> u16 {
     if is_v3_recoverable_response_processing_source(source)
         && source.internal_error.as_ref().is_some_and(|error| {
-            error.internal_code != V3InternalErrorCode::V3HubRelayResp03Processing.registry_entry().code
+            error.internal_code
+                != V3InternalErrorCode::V3HubRelayResp03Processing
+                    .registry_entry()
+                    .code
         })
     {
         return 502;

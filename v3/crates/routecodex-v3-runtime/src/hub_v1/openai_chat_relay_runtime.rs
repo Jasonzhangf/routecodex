@@ -287,7 +287,9 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
             } => V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
                 attempted_candidates,
             },
-            V3RelayCoreError::ResponseGovernance(error) => V3OpenAiChatRelayRuntimeError::Response(error),
+            V3RelayCoreError::ResponseGovernance(error) => {
+                V3OpenAiChatRelayRuntimeError::Response(error)
+            }
             // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
             V3RelayCoreError::Target(message)
             | V3RelayCoreError::StaticRegistry(message)
@@ -1433,7 +1435,9 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
                     "openai_chat web-search intercepted but no projection path".to_string(),
                 )
             }
-            V3OpenAiChatRelayRuntimeError::Response(error) => V3RelayCoreError::ResponseGovernance(error),
+            V3OpenAiChatRelayRuntimeError::Response(error) => {
+                V3RelayCoreError::ResponseGovernance(error)
+            }
             other => V3RelayCoreError::Target(other.to_string()),
         })
     }

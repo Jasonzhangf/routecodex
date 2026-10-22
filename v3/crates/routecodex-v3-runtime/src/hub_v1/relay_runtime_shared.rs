@@ -16,9 +16,10 @@ use crate::hub_v1::{
 };
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,
-    run_v3_relay_provider_failure_policy_with_response_source, v3_relay_provider_candidate_key_parts,
-    V3RelayErrorOperatorFault, V3RelayProviderFailurePolicyContext,
-    V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
+    run_v3_relay_provider_failure_policy_with_response_source,
+    v3_relay_provider_candidate_key_parts, V3RelayErrorOperatorFault,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
+    V3RelayProviderFailurePolicyState,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -337,8 +338,17 @@ pub async fn handle_provider_failure(
     pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
     provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
-    handle_provider_failure_with_response_code(context, selected, failure, state, retry_selected,
-        pending_recovery, provider_failure_events, None).await
+    handle_provider_failure_with_response_code(
+        context,
+        selected,
+        failure,
+        state,
+        retry_selected,
+        pending_recovery,
+        provider_failure_events,
+        None,
+    )
+    .await
 }
 
 pub(crate) async fn handle_provider_failure_with_response_code(
@@ -784,7 +794,10 @@ pub(crate) fn provider_response_governance_failure(
     error: V3RelayCoreError,
     request_id: &str,
     provider_id: &str,
-) -> (V3RelayProviderFailure, Option<routecodex_v3_error::V3InternalErrorCode>) {
+) -> (
+    V3RelayProviderFailure,
+    Option<routecodex_v3_error::V3InternalErrorCode>,
+) {
     match error {
         V3RelayCoreError::ResponseGovernance(super::V3HubRelayResponseError::GovernedAttemptEmpty) => (
             provider_request_failure("V3HubRespChatProcess03Governed", "provider_response_empty", "provider response contained no deliverable business content after Relay governance"), None,

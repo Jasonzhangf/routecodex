@@ -1,5 +1,7 @@
+use super::relay_runtime_shared::{
+    handle_provider_failure_with_response_code, provider_response_governance_failure,
+};
 use super::*;
-use super::relay_runtime_shared::{handle_provider_failure_with_response_code, provider_response_governance_failure};
 use crate::operation_runner::plan_execution::{
     run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
     V3PlanExecutionTargetSource,
@@ -1264,31 +1266,39 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             if is_v3_anthropic_request_local_projection_failure(&error) {
                                 return Err(error);
                             }
-                            let (mut failure, response_processing_code) = if let V3AnthropicRelayRuntimeError::Response(governance) = &error {
-                                provider_response_governance_failure(V3RelayCoreError::ResponseGovernance(governance.clone()), &input.request_id, &selected_target_provider_id)
-                            } else if let Some(failure) =
-                                anthropic_provider_stream_failure_from_closeout_error(
-                                    &error,
-                                    chunks.clone(),
-                                    &input.request_id,
-                                    &selected_target_provider_id,
-                                    provider_wire_protocol,
-                                )
-                                .await
-                            {
-                                (failure, None)
-                            } else {
-                                (provider_runtime_failure(
-                                    V3ProviderError::ResponseBody {
-                                        request_id: input.request_id.clone(),
-                                        provider_id: selected_target_provider_id.clone(),
-                                        reason: format!(
-                                            "provider response governance failed: {error}"
+                            let (mut failure, response_processing_code) =
+                                if let V3AnthropicRelayRuntimeError::Response(governance) = &error {
+                                    provider_response_governance_failure(
+                                        V3RelayCoreError::ResponseGovernance(governance.clone()),
+                                        &input.request_id,
+                                        &selected_target_provider_id,
+                                    )
+                                } else if let Some(failure) =
+                                    anthropic_provider_stream_failure_from_closeout_error(
+                                        &error,
+                                        chunks.clone(),
+                                        &input.request_id,
+                                        &selected_target_provider_id,
+                                        provider_wire_protocol,
+                                    )
+                                    .await
+                                {
+                                    (failure, None)
+                                } else {
+                                    (
+                                        provider_runtime_failure(
+                                            V3ProviderError::ResponseBody {
+                                                request_id: input.request_id.clone(),
+                                                provider_id: selected_target_provider_id.clone(),
+                                                reason: format!(
+                                                    "provider response governance failed: {error}"
+                                                ),
+                                            },
+                                            &selected_target_provider_id,
                                         ),
-                                    },
-                                    &selected_target_provider_id,
-                                ), None)
-                            };
+                                        None,
+                                    )
+                                };
                             failure.provider_status = Some(provider_status);
                             drop(_provider_action_permit.take());
                             if let Some(failure) = handle_provider_failure_with_response_code(
@@ -1356,7 +1366,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     Some(runtime_timing.finish_runtime().map_err(|timing_error| {
                         V3AnthropicRelayRuntimeError::Target(timing_error)
                     })?);
-                observability.provider_failure_events = std::mem::take(&mut provider_failure_events);
+                observability.provider_failure_events =
+                    std::mem::take(&mut provider_failure_events);
                 return Ok(V3AnthropicRelayRuntimeOutput {
                     status: 200,
                     terminal_disposition: None,
@@ -1517,29 +1528,40 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             if is_v3_anthropic_request_local_projection_failure(&error) {
                                 return Err(error);
                             }
-                            let (mut failure, response_processing_code) = if let V3AnthropicRelayRuntimeError::Response(governance) = &error {
-                                provider_response_governance_failure(V3RelayCoreError::ResponseGovernance(governance.clone()), &input.request_id, &selected_target_provider_id)
-                            } else if matches!(
-                                error,
-                                V3AnthropicRelayRuntimeError::ProviderResponseEmpty
-                            ) {
-                                (provider_request_failure(
-                                    "V3ProviderRespInbound01Raw",
-                                    "provider_response_empty",
+                            let (mut failure, response_processing_code) =
+                                if let V3AnthropicRelayRuntimeError::Response(governance) = &error {
+                                    provider_response_governance_failure(
+                                        V3RelayCoreError::ResponseGovernance(governance.clone()),
+                                        &input.request_id,
+                                        &selected_target_provider_id,
+                                    )
+                                } else if matches!(
                                     error,
-                                ), None)
-                            } else {
-                                (provider_runtime_failure(
-                                    V3ProviderError::ResponseBody {
-                                        request_id: input.request_id.clone(),
-                                        provider_id: selected_target_provider_id.clone(),
-                                        reason: format!(
-                                            "provider response governance failed: {error}"
+                                    V3AnthropicRelayRuntimeError::ProviderResponseEmpty
+                                ) {
+                                    (
+                                        provider_request_failure(
+                                            "V3ProviderRespInbound01Raw",
+                                            "provider_response_empty",
+                                            error,
                                         ),
-                                    },
-                                    &selected_target_provider_id,
-                                ), None)
-                            };
+                                        None,
+                                    )
+                                } else {
+                                    (
+                                        provider_runtime_failure(
+                                            V3ProviderError::ResponseBody {
+                                                request_id: input.request_id.clone(),
+                                                provider_id: selected_target_provider_id.clone(),
+                                                reason: format!(
+                                                    "provider response governance failed: {error}"
+                                                ),
+                                            },
+                                            &selected_target_provider_id,
+                                        ),
+                                        None,
+                                    )
+                                };
                             failure.provider_status = Some(provider_status);
                             drop(_provider_action_permit.take());
                             if let Some(failure) = handle_provider_failure_with_response_code(
@@ -1607,7 +1629,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     Some(runtime_timing.finish_runtime().map_err(|timing_error| {
                         V3AnthropicRelayRuntimeError::Target(timing_error)
                     })?);
-                observability.provider_failure_events = std::mem::take(&mut provider_failure_events);
+                observability.provider_failure_events =
+                    std::mem::take(&mut provider_failure_events);
                 return Ok(V3AnthropicRelayRuntimeOutput {
                     status: 200,
                     terminal_disposition: None,

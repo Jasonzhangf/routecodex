@@ -83,7 +83,9 @@ where
         response_hook_profile.toolreason_expected_model_id(),
     )
     .map_err(V3AnthropicRelayRuntimeError::Target)?;
-    let complete_profile = response_hook_profile.clone().with_complete_provider_attempt(true);
+    let complete_profile = response_hook_profile
+        .clone()
+        .with_complete_provider_attempt(true);
     let resp03 = hooks.govern(resp02, &complete_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
     let (resp03, web_search_transition, _web_search_hook_outcome) = resp03.into_parts();

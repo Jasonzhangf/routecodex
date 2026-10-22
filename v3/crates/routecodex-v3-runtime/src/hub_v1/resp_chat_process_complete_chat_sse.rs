@@ -1,5 +1,5 @@
 //! Complete Chat text-carrier governance. Runtime owns admission and storage.
-use super::{V3HubRelayResponseError, V3ProviderAttemptBusinessContent, V3HubProviderWireProtocol};
+use super::{V3HubProviderWireProtocol, V3HubRelayResponseError, V3ProviderAttemptBusinessContent};
 use crate::tool_markup_parser::{scan_tool_markup, ToolMarkupDeclarations, ToolMarkupSegment};
 use routecodex_v3_sse::*;
 use serde_json::Value;
@@ -16,20 +16,36 @@ pub(crate) enum V3RelayCompleteResponseError {
 }
 
 impl From<crate::nodes::V3AttemptStoreError> for V3RelayCompleteResponseError {
-    fn from(error: crate::nodes::V3AttemptStoreError) -> Self { Self::Store(error) }
+    fn from(error: crate::nodes::V3AttemptStoreError) -> Self {
+        Self::Store(error)
+    }
 }
 
-fn decode(frames: &[Vec<u8>]) -> Result<Vec<(V3SseTransportIn03ValidatedFrameStream, Option<Value>)>, String> {
+fn decode(
+    frames: &[Vec<u8>],
+) -> Result<Vec<(V3SseTransportIn03ValidatedFrameStream, Option<Value>)>, String> {
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut events = Vec::new();
     for bytes in frames {
-        for frame in decoder.push(build_v3_sse_transport_in_01_raw_chunk(bytes)).map_err(|e| e.to_string())? {
-            let data = frame.frame().fields().iter().filter_map(|field| match field {
-                SseField::Named { name, value } if name == "data" => Some(value.as_str()),
-                _ => None,
-            }).collect::<Vec<_>>().join("\n");
-            let value = if data.trim().is_empty() || data.trim() == "[DONE]" { None }
-                else { Some(serde_json::from_str(&data).map_err(|e| format!("projected SSE JSON: {e}"))?) };
+        for frame in decoder
+            .push(build_v3_sse_transport_in_01_raw_chunk(bytes))
+            .map_err(|e| e.to_string())?
+        {
+            let data = frame
+                .frame()
+                .fields()
+                .iter()
+                .filter_map(|field| match field {
+                    SseField::Named { name, value } if name == "data" => Some(value.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let value = if data.trim().is_empty() || data.trim() == "[DONE]" {
+                None
+            } else {
+                Some(serde_json::from_str(&data).map_err(|e| format!("projected SSE JSON: {e}"))?)
+            };
             events.push((frame, value));
         }
     }
@@ -37,39 +53,81 @@ fn decode(frames: &[Vec<u8>]) -> Result<Vec<(V3SseTransportIn03ValidatedFrameStr
     Ok(events)
 }
 
-pub(crate) fn projected_sse_has_business_content(protocol: V3HubProviderWireProtocol, frames: &[Vec<u8>]) -> Result<bool, String> {
+pub(crate) fn projected_sse_has_business_content(
+    protocol: V3HubProviderWireProtocol,
+    frames: &[Vec<u8>],
+) -> Result<bool, String> {
     let mut facts = V3ProviderAttemptBusinessContent::default();
     for (_, value) in decode(frames)? {
-        if let Some(value) = value { facts.observe_event(protocol, &value); }
+        if let Some(value) = value {
+            facts.observe_event(protocol, &value);
+        }
     }
     Ok(facts.has_deliverable_business_content())
 }
 
 /// Keep exact surviving source spans, including literal/code contexts and
 /// opaque invocations. Never synthesize text or touch native tool arguments.
-pub(crate) fn govern_complete_chat_sse(frames: &[Vec<u8>]) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError> {
+pub(crate) fn govern_complete_chat_sse(
+    frames: &[Vec<u8>],
+) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError> {
     let mut events = decode(frames).map_err(V3RelayCompleteResponseError::Processing)?;
-    let mut carriers: BTreeMap<(String, String), (String, Vec<(usize, String, usize, usize)>)> = BTreeMap::new();
+    let mut carriers: BTreeMap<(String, String), (String, Vec<(usize, String, usize, usize)>)> =
+        BTreeMap::new();
     let mut terminal = None;
     for (event_index, (_, value)) in events.iter().enumerate() {
-        let Some(choices) = value.as_ref().and_then(|v| v.get("choices")).and_then(Value::as_array) else { continue };
+        let Some(choices) = value
+            .as_ref()
+            .and_then(|v| v.get("choices"))
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
         for (choice_index, choice) in choices.iter().enumerate() {
-            if choice.get("finish_reason").is_some_and(Value::is_string) { terminal = Some(event_index); }
-            let identity = choice.get("index").cloned().unwrap_or_else(|| choice_index.into()).to_string();
+            if choice.get("finish_reason").is_some_and(Value::is_string) {
+                terminal = Some(event_index);
+            }
+            let identity = choice
+                .get("index")
+                .cloned()
+                .unwrap_or_else(|| choice_index.into())
+                .to_string();
             for field in ["message", "delta"] {
-                let Some(content) = choice.get(field).and_then(|v| v.get("content")) else { continue };
+                let Some(content) = choice.get(field).and_then(|v| v.get("content")) else {
+                    continue;
+                };
                 let texts: Vec<(String, &str)> = if let Some(text) = content.as_str() {
                     vec![(format!("/choices/{choice_index}/{field}/content"), text)]
                 } else if let Some(parts) = content.as_array() {
-                    parts.iter().enumerate().filter_map(|(i, part)| {
-                        matches!(part.get("type").and_then(Value::as_str), Some("text" | "output_text"))
-                            .then(|| part.get("text").and_then(Value::as_str).map(|text| (format!("/choices/{choice_index}/{field}/content/{i}/text"), text))).flatten()
-                    }).collect()
-                } else { Vec::new() };
+                    parts
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, part)| {
+                            matches!(
+                                part.get("type").and_then(Value::as_str),
+                                Some("text" | "output_text")
+                            )
+                            .then(|| {
+                                part.get("text").and_then(Value::as_str).map(|text| {
+                                    (
+                                        format!("/choices/{choice_index}/{field}/content/{i}/text"),
+                                        text,
+                                    )
+                                })
+                            })
+                            .flatten()
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 for (path, text) in texts {
                     let carrier_path = path.splitn(4, '/').nth(3).unwrap_or_default().to_string();
-                    let carrier = carriers.entry((identity.clone(), carrier_path)).or_default();
-                    let start = carrier.0.len(); carrier.0.push_str(text);
+                    let carrier = carriers
+                        .entry((identity.clone(), carrier_path))
+                        .or_default();
+                    let start = carrier.0.len();
+                    carrier.0.push_str(text);
                     carrier.1.push((event_index, path, start, carrier.0.len()));
                 }
             }
@@ -78,48 +136,86 @@ pub(crate) fn govern_complete_chat_sse(frames: &[Vec<u8>]) -> Result<Option<(Vec
     let mut changed = BTreeSet::new();
     for (_, (text, pieces)) in carriers {
         let scan = scan_tool_markup(&text, &ToolMarkupDeclarations::default());
-        if scan.incomplete_tool_invocation { return Err(V3HubRelayResponseError::UnharvestableToolMarkup.into()); }
-        if !scan.removed_label { continue; }
+        if scan.incomplete_tool_invocation {
+            return Err(V3HubRelayResponseError::UnharvestableToolMarkup.into());
+        }
+        if !scan.removed_label {
+            continue;
+        }
         let base = text.as_ptr() as usize;
         let mut spans = BTreeSet::new();
         for segment in scan.segments {
             match segment {
-                ToolMarkupSegment::Text(value) => { spans.insert((value.as_ptr() as usize - base, value.len())); }
-                ToolMarkupSegment::Calls(calls) => for call in calls {
-                    spans.insert((call.envelope.as_ptr() as usize - base, call.envelope.len()));
-                },
+                ToolMarkupSegment::Text(value) => {
+                    spans.insert((value.as_ptr() as usize - base, value.len()));
+                }
+                ToolMarkupSegment::Calls(calls) => {
+                    for call in calls {
+                        spans.insert((call.envelope.as_ptr() as usize - base, call.envelope.len()));
+                    }
+                }
             }
         }
         for (event, path, start, end) in pieces {
             let mut kept = String::new();
             for (offset, length) in &spans {
-                let left = start.max(*offset); let right = end.min(offset + length);
-                if left < right { kept.push_str(&text[left..right]); }
+                let left = start.max(*offset);
+                let right = end.min(offset + length);
+                if left < right {
+                    kept.push_str(&text[left..right]);
+                }
             }
             if kept != text[start..end] {
-                let target = events[event].1.as_mut().and_then(|value| value.pointer_mut(&path))
-                    .ok_or_else(|| V3RelayCompleteResponseError::Processing("text carrier identity disappeared".into()))?;
-                *target = kept.into(); changed.insert(event);
+                let target = events[event]
+                    .1
+                    .as_mut()
+                    .and_then(|value| value.pointer_mut(&path))
+                    .ok_or_else(|| {
+                        V3RelayCompleteResponseError::Processing(
+                            "text carrier identity disappeared".into(),
+                        )
+                    })?;
+                *target = kept.into();
+                changed.insert(event);
             }
         }
     }
-    if changed.is_empty() { return Ok(None); }
-    let terminal = terminal.ok_or_else(|| V3RelayCompleteResponseError::Processing("governed Chat SSE has no source terminal".into()))?;
+    if changed.is_empty() {
+        return Ok(None);
+    }
+    let terminal = terminal.ok_or_else(|| {
+        V3RelayCompleteResponseError::Processing("governed Chat SSE has no source terminal".into())
+    })?;
     let mut output = Vec::with_capacity(events.len());
     for (index, (frame, value)) in events.into_iter().enumerate() {
         if !changed.contains(&index) {
-            output.push(frame.frame().raw_bytes().map(Vec::from).unwrap_or_else(|| build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame).into_bytes()));
+            output.push(frame.frame().raw_bytes().map(Vec::from).unwrap_or_else(|| {
+                build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame).into_bytes()
+            }));
             continue;
         }
-        let mut fields = Vec::new(); let mut written = false;
+        let mut fields = Vec::new();
+        let mut written = false;
         for field in frame.frame().fields() {
             if matches!(field, SseField::Named { name, .. } if name == "data") {
-                if !written { fields.push(SseField::Named { name: "data".into(), value: value.as_ref().unwrap().to_string() }); written = true; }
-            } else { fields.push(field.clone()); }
+                if !written {
+                    fields.push(SseField::Named {
+                        name: "data".into(),
+                        value: value.as_ref().unwrap().to_string(),
+                    });
+                    written = true;
+                }
+            } else {
+                fields.push(field.clone());
+            }
         }
-        let decoded = build_v3_sse_transport_in_02_from_fields(fields).map_err(|e| V3RelayCompleteResponseError::Processing(e.to_string()))?;
-        let validated = build_v3_sse_transport_in_03_from_v3_sse_transport_in_02(decoded).map_err(|e| V3RelayCompleteResponseError::Processing(e.to_string()))?;
-        output.push(build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&validated).into_bytes());
+        let decoded = build_v3_sse_transport_in_02_from_fields(fields)
+            .map_err(|e| V3RelayCompleteResponseError::Processing(e.to_string()))?;
+        let validated = build_v3_sse_transport_in_03_from_v3_sse_transport_in_02(decoded)
+            .map_err(|e| V3RelayCompleteResponseError::Processing(e.to_string()))?;
+        output.push(
+            build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&validated).into_bytes(),
+        );
     }
     Ok(Some((output, terminal)))
 }
@@ -185,7 +281,10 @@ mod tests {
     #[test]
     fn issuee63d2f2_fragmented_control_label_is_stripped_across_delta_events() {
         let frames = vec![
-            chunk(serde_json::json!({"content": "alpha\n<|end_of_"}), Value::Null),
+            chunk(
+                serde_json::json!({"content": "alpha\n<|end_of_"}),
+                Value::Null,
+            ),
             chunk(
                 serde_json::json!({"content": "analysis|>\nomega"}),
                 Value::Null,
@@ -241,11 +340,10 @@ mod tests {
             "literal markers are not standalone control labels"
         );
         assert_eq!(text(&frames), literal);
-        assert!(projected_sse_has_business_content(
-            V3HubProviderWireProtocol::OpenAiChat,
-            &frames
-        )
-        .expect("literal frames decode"));
+        assert!(
+            projected_sse_has_business_content(V3HubProviderWireProtocol::OpenAiChat, &frames)
+                .expect("literal frames decode")
+        );
     }
 
     #[test]
@@ -328,13 +426,11 @@ mod tests {
             chunk(serde_json::json!({}), serde_json::json!("stop")),
             done(),
         ];
-        assert!(
-            !projected_sse_has_business_content(
-                V3HubProviderWireProtocol::OpenAiChat,
-                &envelope_only
-            )
-            .expect("envelope-only frames decode")
-        );
+        assert!(!projected_sse_has_business_content(
+            V3HubProviderWireProtocol::OpenAiChat,
+            &envelope_only
+        )
+        .expect("envelope-only frames decode"));
         assert!(govern_complete_chat_sse(&envelope_only)
             .expect("ungoverned frames pass")
             .is_none());
@@ -360,13 +456,11 @@ mod tests {
             chunk(serde_json::json!({}), serde_json::json!("stop")),
             done(),
         ];
-        assert!(
-            !projected_sse_has_business_content(
-                V3HubProviderWireProtocol::OpenAiChat,
-                &frames
-            )
-            .expect("reasoning frames decode")
-        );
+        assert!(!projected_sse_has_business_content(
+            V3HubProviderWireProtocol::OpenAiChat,
+            &frames
+        )
+        .expect("reasoning frames decode"));
         assert!(govern_complete_chat_sse(&frames)
             .expect("reasoning alone is not processing damage")
             .is_none());
@@ -386,11 +480,8 @@ mod tests {
             .expect("label governance itself succeeds")
             .expect("label carrier is rewritten");
         assert!(
-            !projected_sse_has_business_content(
-                V3HubProviderWireProtocol::OpenAiChat,
-                &governed
-            )
-            .expect("rewritten frames decode"),
+            !projected_sse_has_business_content(V3HubProviderWireProtocol::OpenAiChat, &governed)
+                .expect("rewritten frames decode"),
             "a label-only attempt is governed-empty (502), not processing damage (599)"
         );
     }
