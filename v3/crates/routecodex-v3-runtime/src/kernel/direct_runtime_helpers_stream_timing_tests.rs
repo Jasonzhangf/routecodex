@@ -1625,6 +1625,10 @@ async fn first_frame_commit_orphan_tool_close_label_never_reaches_the_client() {
     let full = format!("hello\n{label}\n");
     let chunks = responses_split_delta_sequence(&["hello", "\n", label, "\n"], &full);
     let run = run_early_commit_attempt(chunks.clone()).await;
+    assert!(
+        run.committed,
+        "the clean visible prefix must commit before the label arrives"
+    );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     assert!(
         !streamed.contains(label),
@@ -1633,5 +1637,27 @@ async fn first_frame_commit_orphan_tool_close_label_never_reaches_the_client() {
     assert!(
         run.failed,
         "an unharvestable tool invocation must end the attempt detectably"
+    );
+}
+
+/// A bare `>` residue line that ends with a newline is still removed together
+/// with the close label that follows it. A committed prefix must not carry the
+/// `>` byte to the client ahead of that owner.
+#[tokio::test]
+async fn first_frame_commit_bare_gt_residue_with_newline_never_leaks() {
+    let close = "</\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C} calls>";
+    let full = format!("hello\n>\n{close}");
+    let chunks = responses_split_delta_sequence(&["hello\n>\n", close], &full);
+    let run = run_early_commit_attempt(chunks.clone()).await;
+    let streamed = String::from_utf8(run.frames.concat()).unwrap();
+    assert!(
+        !streamed.contains('>'),
+        "the bare close residue must never reach the client: {streamed}"
+    );
+    let buffered = buffered_with_hooks(chunks).await;
+    assert_eq!(
+        streamed,
+        String::from_utf8(buffered.concat()).unwrap(),
+        "the committed attempt must stay byte-identical with the buffered attempt"
     );
 }

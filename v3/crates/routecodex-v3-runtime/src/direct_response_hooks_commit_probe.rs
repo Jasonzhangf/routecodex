@@ -269,7 +269,20 @@ impl V3DirectPrefixCommitProbe {
             .next()
             .unwrap_or_default()
             .trim_end_matches('\r');
-        if last_line == ">" {
+        // A bare `>` line stays a residue candidate whether or not its newline
+        // has already arrived: the owner reads whole lines, so `>\n<close>` is
+        // the same residue as `><close>` for its line scan. Complete marker
+        // prefixes are line-scoped by contrast, so they must keep matching the
+        // final line only and never a line a newline already terminated.
+        let completed_line = self
+            .text_tail
+            .strip_suffix('\n')
+            .unwrap_or(&self.text_tail)
+            .rsplit('\n')
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches('\r');
+        if last_line == ">" || completed_line == ">" {
             return true;
         }
         self.markers

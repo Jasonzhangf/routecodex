@@ -171,14 +171,14 @@ analysis/label 行。因此真实提交点由帧级内容证明（`V3DirectPrefi
   且「最新文本不以标记前缀结尾」。标记集合由 owner 自己给出（thinking `<thinking>`/`</thinking>`，
   DSML 无声明即可删除的 standalone label），不在探针里重复硬编码。
 - 标记集合带匹配范围，与 owner 的匹配方式一致：thinking 标记按整段文本内联匹配，DSML label 只按整行匹配，
-  因此普通行内 ` calls>` 不会误判，而末行等于标记前缀（含只有空白的末行）时仍然挂起。
+  因此普通行内 ` calls>` 不会误判，而末行等于某个标记的合法前缀（标记首字符到倒数第二字符之间）时仍然挂起。
+- 独占一行的 `>` 残渣无论其换行是否已经到达都算未决：owner 按整行扫描，`>\n<close>` 与 `><close>` 是同一种残渣，
+  因此探针同时检查最后一行和去掉一个尾随换行后的最后一行。
 - delta 是唯一增量载体，探针保留滚动文本尾部再判定，因此跨两个 provider 帧拆开的标记（例如 `<thin` 与
   `king>secret`）同样被看见并阻止提交；`response.completed`/`response.incomplete` 的终态快照也参与扫描，
   因为 complete-attempt owner 读取的正是这段文本。
 - 可见文本单调为真，因此提交后 `provider_response_empty`（空/空白/不可见 final）判定不可能被跳过；
   reasoning-only 与纯空白 delta 不提交。
-- DSML close 残渣（独占一行的 `>` 后紧跟 close label）在缓冲路径会被一并删除，因此探针把独占一行的 `>`
-  也当作未决文本，等下一帧决定是否成为标记。
 - `V3CommittedClientSseBuilder` 记录 `flushed_frames`；`commit_client_stream(sink)` 置提交标记并立刻冲出已有帧。
 - 提交后 `push` 逐帧冲出；`seal_after_validated_terminal` 只重放 `flushed_frames` 之后的尾部，客户端字节流与
   全缓冲路径逐字节相同。

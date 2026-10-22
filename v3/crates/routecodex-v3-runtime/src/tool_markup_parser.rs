@@ -39,9 +39,10 @@ const MINIMAX_CLOSE: &str = "]<]minimax[>[</tool_call>";
 /// still be rewritten by the complete-attempt DSML owner, so it must never be
 /// flushed ahead of that owner.
 ///
-/// This is the single source for the commit probe's governed-marker set. The
-/// probe must never hold a second copy of these labels, because a label added
-/// here without the probe would reach a committed client prefix untouched.
+/// This is the single source for the DSML part of the commit probe's
+/// governed-marker set; the probe adds its own thinking markers separately. The
+/// two must not drift, because a label the owner removes but the probe ignores
+/// would reach a committed client prefix untouched.
 pub(crate) fn governed_text_markers() -> Vec<&'static str> {
     let mut markers = vec![OPEN, CLOSE, BARE_DSML, ASCII_TOOL_CALLS, ORPHAN_TOOL_CLOSE];
     markers.extend_from_slice(ANALYSIS_CLOSINGS);
