@@ -205,7 +205,8 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
         phase = 'rcc_start';
         rcc = await startRcc(binary, generated, rccPort, setup, {
           startupTimeoutMs: options.startupTimeoutMs,
-          snapshotAll: isProviderConcurrencyReplay(fixture),
+          snapshotAll: isProviderConcurrencyReplay(fixture)
+            || fixture.tool_followup?.consumer === 'codex-real-exec',
         });
         if (!rcc.ready) throw new Error(setup.infra_failure?.diagnostic ?? 'RCC did not become ready');
         setup.health = rcc.health;

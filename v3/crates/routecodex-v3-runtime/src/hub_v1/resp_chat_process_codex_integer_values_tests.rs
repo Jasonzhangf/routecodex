@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 fn resp03_restores_registered_codex_integer_argument_values() {
     let request = json!({"tools": [{
         "type": "function", "name": "exec_command", "strict": false,
-        "description": "Runs a command in a PTY, returning output or a session ID.",
+        "description": "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
         "parameters": {"type": "object", "additionalProperties": false,
             "properties": {
                 "cmd": {"type": "string"}, "justification": {"type": "string"},

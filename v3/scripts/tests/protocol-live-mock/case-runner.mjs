@@ -962,7 +962,8 @@ function isCandidateRow(row, attempt, listenerPort, started, settled) {
   if (row.endpoint !== attempt.endpoint) return false;
   if (row.entry_protocol !== attempt.entry_protocol) return false;
   if (row.started_epoch_ms === null) return false;
-  return row.started_epoch_ms >= started && row.started_epoch_ms <= settled;
+  return row.started_epoch_ms <= settled
+    && (row.finished_epoch_ms === null || row.finished_epoch_ms >= started);
 }
 
 function isBusinessCapture(capture, attempt, caseId, started, settled) {

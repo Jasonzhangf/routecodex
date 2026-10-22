@@ -102,7 +102,7 @@
     "auth_required": true,
     "body_must": {
       "model": "chat-model",
-      "messages.0.role": "user",
+      "messages.0.role": "system",
       "tools.0.function.name": "exec_command",
       "tools.0.function.description": "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
       "tools.0.function.parameters.properties.max_output_tokens.type": "integer",

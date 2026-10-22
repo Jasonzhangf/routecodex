@@ -359,7 +359,7 @@ fn responses_inbound_restores_codex_integer_tool_schema_types() {
             {
                 "type": "function",
                 "name": "exec_command",
-                "description": "Runs a command in a PTY, returning output or a session ID.",
+                "description": "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
                 "strict": false,
                 "parameters": {
                     "type": "object",

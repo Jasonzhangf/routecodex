@@ -109,7 +109,7 @@ test('runCase dispatches codex-real-exec through the injected real-client execut
         captured_at_epoch_ms: 10,
         body: {
           model: 'chat-model',
-          messages: [{ role: 'user', content: 'run pwd' }],
+          messages: [{ role: 'system', content: 'run pwd' }],
           tools: [{
             type: 'function',
             function: {
@@ -132,7 +132,7 @@ test('runCase dispatches codex-real-exec through the injected real-client execut
         body: {
           model: 'chat-model',
           messages: [
-            { role: 'user', content: 'run pwd' },
+            { role: 'system', content: 'run pwd' },
             {
               role: 'assistant',
               tool_calls: [{
@@ -444,8 +444,8 @@ test('execution-mode collector reports ambiguous candidate ids instead of choosi
   try {
     const storePath = join(root, 'server-v3-4555.request-records.jsonl');
     writePersistedStore(storePath, [
-      persistedRow({ request_key: '4555:a', started_epoch_ms: 1200, meta: { request_id: 'a', execution_mode: 'direct' } }),
-      persistedRow({ request_key: '4555:b', started_epoch_ms: 1210, meta: { request_id: 'b', execution_mode: 'relay' } }),
+      persistedRow({ request_key: '4555:a', started_epoch_ms: 1200, finished_epoch_ms: 1230, meta: { request_id: 'a', execution_mode: 'direct' } }),
+      persistedRow({ request_key: '4555:b', started_epoch_ms: 1210, finished_epoch_ms: 1240, meta: { request_id: 'b', execution_mode: 'relay' } }),
     ]);
     const result = collectExecutionModeEvidence({
       caseId: 'anthropic-to-anthropic-json',

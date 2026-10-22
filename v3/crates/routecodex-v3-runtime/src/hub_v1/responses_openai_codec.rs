@@ -1530,7 +1530,9 @@ pub(crate) fn is_registered_codex_tool_schema(
 ) -> bool {
     let tool_name = tool.get("name").and_then(Value::as_str);
     let expected_description = match tool_name {
-        Some("exec_command") => Some("Runs a command in a PTY, returning output or a session ID."),
+        Some("exec_command") => Some(
+            "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+        ),
         Some("write_stdin") => {
             Some("Writes characters to an existing unified exec session and returns recent output.")
         }
