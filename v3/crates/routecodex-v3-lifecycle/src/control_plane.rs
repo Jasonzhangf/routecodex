@@ -413,6 +413,40 @@ fn cleanup_rejected_restart_handoff(
     V3LifecycleError::Validation(detail)
 }
 
+// Collect framing concurrently; authenticated lifecycle operations remain serialized
+// by run_managed_control_loop. An unfinished peer must not hold the accept loop.
+type ControlFrame = (
+    UnixStream,
+    String,
+    Result<std::io::Result<usize>, tokio::time::error::Elapsed>,
+);
+
+async fn next_control_frame(
+    listener: &UnixListener,
+    frames: &mut tokio::task::JoinSet<ControlFrame>,
+) -> Result<ControlFrame, V3LifecycleError> {
+    loop {
+        tokio::select! {
+            accepted = listener.accept() => {
+                let (mut stream, _) = accepted?;
+                frames.spawn(async move {
+                    let mut line = String::new();
+                    let read = tokio::time::timeout(
+                        CONTROL_TIMEOUT,
+                        BufReader::new(&mut stream).read_line(&mut line),
+                    ).await;
+                    (stream, line, read)
+                });
+            }
+            frame = frames.join_next(), if !frames.is_empty() => {
+                return frame.expect("nonempty control framing tasks").map_err(|error| {
+                    V3LifecycleError::Validation(format!("control framing task failed: {error}"))
+                });
+            }
+        }
+    }
+}
+
 pub(crate) async fn run_managed_control_loop(
     instance_dir: &Path,
     declaration: &V3ManagedInstanceDeclaration,
@@ -474,6 +508,7 @@ pub(crate) async fn run_managed_control_loop(
     #[cfg(unix)]
     tokio::pin!(orphan_watchdog);
     let mut handle = handle;
+    let mut frames = tokio::task::JoinSet::new();
     loop {
         #[cfg(unix)]
         let accepted = match tokio::select! {
@@ -529,7 +564,7 @@ pub(crate) async fn run_managed_control_loop(
                 };
                 return shutdown_managed_runtime(instance_dir, &declaration.instance_id, socket_path, handle, hooks_sidecar).await;
             }
-            accepted = listener.accept() => accepted.map_err(V3LifecycleError::from),
+            accepted = next_control_frame(&listener, &mut frames) => accepted,
         } {
             Ok(accepted) => accepted,
             Err(error) => match classify_control_accept_failure(error).await {
@@ -573,7 +608,7 @@ pub(crate) async fn run_managed_control_loop(
                 };
                 return shutdown_managed_runtime(instance_dir, &declaration.instance_id, socket_path, handle, hooks_sidecar).await;
             }
-            accepted = listener.accept() => accepted.map_err(V3LifecycleError::from),
+            accepted = next_control_frame(&listener, &mut frames) => accepted,
         } {
             Ok(accepted) => accepted,
             Err(error) => match classify_control_accept_failure(error).await {
@@ -590,14 +625,8 @@ pub(crate) async fn run_managed_control_loop(
                 }
             },
         };
-        let (mut stream, _) = accepted;
-        let mut line = String::new();
-        match tokio::time::timeout(
-            CONTROL_TIMEOUT,
-            BufReader::new(&mut stream).read_line(&mut line),
-        )
-        .await
-        {
+        let (mut stream, line, read) = accepted;
+        match read {
             Err(_) => continue,
             Ok(Ok(0)) => continue,
             Ok(Ok(_)) => {}
