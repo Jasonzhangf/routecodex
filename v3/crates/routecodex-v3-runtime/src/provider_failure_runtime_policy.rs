@@ -186,7 +186,14 @@ pub(crate) fn is_provider_transport_failure(
     // transport-failure cooling; it is not a test-name special case.
     source_stage == "V3ProviderReqOutbound09TransportRequest"
         && status == 502
-        && error_type == Some("provider_error")
+        // The generic Relay lane names this class `provider_error`; the
+        // Responses Relay lane reports the same typed transport class under
+        // its external code `provider_transport_error`. Accept both so a
+        // truncated HTTP 200 body owns its exact identity in either lane.
+        && matches!(
+            error_type,
+            Some("provider_error") | Some("provider_transport_error")
+        )
         && provider_type != Some("gemini")
 }
 

@@ -76,6 +76,51 @@ targets = [
     .unwrap()
 }
 
+/// Same provider as `manifest`, but with one eligible candidate. This forces the
+/// failure policy into the last-candidate branch.
+fn single_candidate_manifest(scope: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "__SCOPE__"
+endpoints = ["responses"]
+[servers.__SCOPE__.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+attempt_store = {}
+[providers.limited]
+type = "responses"
+base_url = "http://limited.invalid/v1"
+default_model = "gpt-5.5"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "LIMITED_KEY" }] }
+concurrency = { max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
+[providers.limited.models."gpt-5.5"]
+wire_name = "gpt-5.5"
+supports_streaming = true
+supports_thinking = true
+max_context_tokens = 200000
+capabilities = ["text", "tools", "reasoning"]
+[route_groups.__SCOPE__.pools.client_responses]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
+targets = [
+  { kind = "provider_model", provider = "limited", model = "gpt-5.5", key = "key1", priority = 2 }
+]
+[route_groups.__SCOPE__.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "limited", model = "gpt-5.5", key = "key1", priority = 2 }
+]
+"#;
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&source.replace("__SCOPE__", scope)).unwrap(),
+    )
+    .unwrap()
+}
+
 struct TruncatedLimitedThenSuccessTransport {
     captures: Mutex<Vec<String>>,
     turn: AtomicUsize,
@@ -208,5 +253,66 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
             .availability("minimax", Some("key1"), Some("MiniMax-M3"), now)
             .available,
         "the untried secondary provider must stay routable"
+    );
+}
+
+/// The same truncated HTTP 200 body must cool the exact identity even when the
+/// failed candidate is the request's last eligible one. A single-candidate pool
+/// must not fall back to the health-neutral last-candidate terminal, because a
+/// transport failure describes the provider, not this request.
+#[tokio::test]
+async fn truncated_http_200_cools_exact_identity_when_it_is_the_last_candidate() {
+    let server_id = "truncated_200_last_candidate";
+    let manifest = single_candidate_manifest(server_id);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = TruncatedLimitedThenSuccessTransport {
+        captures: Mutex::new(Vec::new()),
+        turn: AtomicUsize::new(0),
+    };
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "truncated-200-last-candidate-session",
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-truncated-200-last".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"truncated provider body",
+                "stream":false
+            }),
+        },
+        &transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 0,
+        },
+    )
+    .await
+    .expect("a last-candidate transport failure still projects a typed terminal");
+
+    assert_eq!(output.status, 502);
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("console observability");
+    assert_eq!(observability.provider_failure_events.len(), 1);
+    let event = &observability.provider_failure_events[0];
+    assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
+    assert_eq!(event.status, 502);
+    assert_eq!(event.health_state, "cooldown");
+
+    let now = u64::MAX;
+    assert!(
+        !provider_health
+            .store()
+            .availability("limited", Some("key1"), Some("gpt-5.5"), now)
+            .available,
+        "a last-candidate truncated HTTP 200 body must still cool the exact identity"
     );
 }
