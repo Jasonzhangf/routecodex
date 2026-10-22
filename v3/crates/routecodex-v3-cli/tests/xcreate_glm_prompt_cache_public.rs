@@ -5,8 +5,8 @@
 //! HTTP 400 because `prompt_cache_key` is unsupported. RouteCodex then switched
 //! providers, so the later 200 did not prove request-shape compatibility.
 //!
-//! This test starts the real server aggregate, sends the client request through
-//! `/v1/responses`, and points the selected xcreate-free GLM Chat target at a
+//! The affected-scope tests start the real server aggregate, send the client
+//! request through `/v1/responses`, and point the selected GLM Chat target at a
 //! controlled loopback upstream. That upstream rejects `prompt_cache_key` with
 //! HTTP 400 and otherwise returns a Chat completion. The test drives the full
 //! client tool round trip: the first provider turn returns a tool call, the
@@ -15,6 +15,11 @@
 //! It requires exactly one accepted attempt per turn, the selected GLM wire
 //! model, removal of only the unsupported field, preservation of supported
 //! fields, and the final client-visible Responses text.
+//!
+//! The unrelated-host control uses a provider outside the affected free GLM
+//! Chat scope and an upstream that accepts both fields. That upstream must see
+//! `prompt_cache_key` and `verbosity` unchanged, so removal outside the scope
+//! fails the public entry.
 
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
@@ -34,6 +39,10 @@ const CLIENT_MODEL: &str = "xcreate-glm-client";
 const NVIDIA_WIRE_MODEL: &str = "z-ai/glm-5.3-flash";
 const NVIDIA_CLIENT_MODEL: &str = "nvidia-glm-client";
 const NVIDIA_KEY_ENV: &str = "V3_NVIDIA_GLM_PUBLIC_KEY";
+const UNRELATED_WIRE_MODEL: &str = "z-ai/glm-5.3-flash";
+const UNRELATED_CLIENT_MODEL: &str = "unrelated-glm-client";
+const UNRELATED_KEY_ENV: &str = "V3_UNRELATED_GLM_PUBLIC_KEY";
+const UNRELATED_MARKER: &str = "UNRELATED_GLM_PUBLIC_OK";
 const CLIENT_MARKER: &str = "XCREATE_GLM_PUBLIC_OK";
 const TOOL_NAME: &str = "lookup";
 const TOOL_CALL_ID: &str = "call_xcreate_lookup_1";
@@ -120,6 +129,27 @@ async fn controlled_glm_upstream(
                 "finish_reason": "tool_calls"
             }],
             "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
+        })),
+    )
+}
+
+async fn controlled_preserving_glm_upstream(
+    State(state): State<Upstream>,
+    Json(body): Json<Value>,
+) -> (StatusCode, Json<Value>) {
+    state.captures.lock().await.push(body);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "id": "chatcmpl-unrelated-glm-public-1",
+            "object": "chat.completion",
+            "model": UNRELATED_WIRE_MODEL,
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": UNRELATED_MARKER},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9}
         })),
     )
 }
@@ -493,6 +523,97 @@ async fn nvidia_glm_chat_public_entry_omits_prompt_cache_key_and_verbosity() {
     handle.shutdown().await;
     let _ = shutdown_tx.send(());
     std::env::remove_var(NVIDIA_KEY_ENV);
+}
+
+#[tokio::test]
+async fn unrelated_glm_chat_public_entry_preserves_prompt_cache_key_and_verbosity() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(UNRELATED_KEY_ENV, "controlled-unrelated-glm-secret");
+
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("controlled unrelated GLM upstream socket");
+    let upstream_addr = upstream
+        .local_addr()
+        .expect("controlled unrelated GLM upstream address");
+    let captures = Arc::new(Mutex::new(Vec::new()));
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/chat/completions",
+            post(controlled_preserving_glm_upstream),
+        )
+        .with_state(Upstream {
+            captures: captures.clone(),
+        });
+    tokio::spawn(async move {
+        axum::serve(upstream, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .expect("serve controlled preserving GLM upstream");
+    });
+
+    let handle = spawn_v3_server_aggregate(manifest(
+        free_port(),
+        upstream_addr.port(),
+        "unrelated-glm-host",
+        UNRELATED_WIRE_MODEL,
+        UNRELATED_CLIENT_MODEL,
+        UNRELATED_KEY_ENV,
+    ))
+    .await
+    .expect("real unrelated GLM server aggregate must start");
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+
+    let request = json!({
+        "model": UNRELATED_CLIENT_MODEL,
+        "input": [{"role": "user", "content": "hello from unrelated host"}],
+        "prompt_cache_key": "session-unrelated",
+        "text": {"verbosity": "high"},
+        "stream": false
+    });
+    let (status, body) = send_public(&client, &endpoint, &request, &captures).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "unrelated GLM Chat target must accept the public-entry request: {body}"
+    );
+    assert_eq!(body["status"], "completed");
+
+    let observed = captures.lock().await;
+    assert_eq!(
+        observed.len(),
+        1,
+        "exactly one accepted unrelated attempt expected: {observed:?}"
+    );
+    let wire = &observed[0];
+    assert_eq!(
+        wire["model"], UNRELATED_WIRE_MODEL,
+        "unrelated host wire must bind the selected GLM model: {wire}"
+    );
+    assert_eq!(
+        wire["prompt_cache_key"], "session-unrelated",
+        "unrelated GLM Chat target must preserve prompt_cache_key: {wire}"
+    );
+    assert_eq!(
+        wire["verbosity"], "high",
+        "unrelated GLM Chat target must preserve verbosity: {wire}"
+    );
+    assert!(
+        wire.get("messages").is_some(),
+        "supported messages lost: {wire}"
+    );
+
+    drop(observed);
+    handle.shutdown().await;
+    let _ = shutdown_tx.send(());
+    std::env::remove_var(UNRELATED_KEY_ENV);
 }
 
 fn free_port() -> u16 {

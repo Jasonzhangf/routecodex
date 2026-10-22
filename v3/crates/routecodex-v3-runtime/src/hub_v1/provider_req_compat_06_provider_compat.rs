@@ -835,7 +835,7 @@ mod tests {
     }
 
     #[test]
-    fn glm_model_scope_checks_model_id_or_wire_model_basename_case_insensitively() {
+    fn unrelated_glm_host_preserves_unsupported_fields() {
         for (model_id, wire_model) in [
             ("nvidia-glm-route-alias", "Z-AI/GLM-5.3-Flash"),
             ("Z-AI/GLM-5.3-Flash", "provider-wire-alias"),
@@ -857,14 +857,14 @@ mod tests {
             req07.previous.selected_target.compatibility_profile = None;
 
             let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-                .expect("GLM model-scope compat must remain valid");
+                .expect("unrelated GLM host compat must remain valid");
             let payload = req_compat.provider_semantic_payload();
-            assert!(
-                payload.get("prompt_cache_key").is_none(),
+            assert_eq!(
+                payload["prompt_cache_key"], "session-1",
                 "model_id={model_id} wire_model={wire_model}: {payload}"
             );
-            assert!(
-                payload.get("verbosity").is_none(),
+            assert_eq!(
+                payload["verbosity"], "high",
                 "model_id={model_id} wire_model={wire_model}: {payload}"
             );
         }
@@ -945,8 +945,9 @@ mod tests {
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("xcreate OpenAI paid compatibility must remain valid");
         let payload = req_compat.provider_semantic_payload();
-        assert!(payload.get("prompt_cache_key").is_none(), "{payload}");
-        assert!(payload.get("verbosity").is_none(), "{payload}");
+        // The paid interface is outside the declared free GLM Chat wire scope.
+        assert_eq!(payload["prompt_cache_key"], "session-1", "{payload}");
+        assert_eq!(payload["verbosity"], "high", "{payload}");
     }
 
     #[test]
@@ -975,7 +976,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_glm_profile_keeps_declared_semantics() {
+    fn explicit_passthrough_glm_profile_preserves_unsupported_fields() {
         let mut req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Responses,
             json!({
@@ -987,17 +988,17 @@ mod tests {
             }),
             V3HubProviderWireProtocol::OpenAiChat,
         );
-        req07.previous.selected_target.provider_id = "kdns".to_string();
+        req07.previous.selected_target.provider_id = "xcreate-free".to_string();
         req07.previous.selected_target.model_id = "z-ai/glm-5.3-flash".to_string();
         req07.previous.selected_target.wire_model = "z-ai/glm-5.3-flash".to_string();
         req07.previous.selected_target.compatibility_profile =
-            Some("chat:glm-unsupported-prompt-cache-key-verbosity".to_string());
+            Some("compat:passthrough".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect("explicit GLM compatibility must remain valid");
+            .expect("explicit passthrough compatibility must remain valid");
         let payload = req_compat.provider_semantic_payload();
-        assert!(payload.get("prompt_cache_key").is_none(), "{payload}");
-        assert!(payload.get("verbosity").is_none(), "{payload}");
+        assert_eq!(payload["prompt_cache_key"], "session-1", "{payload}");
+        assert_eq!(payload["verbosity"], "high", "{payload}");
     }
 
     #[test]
