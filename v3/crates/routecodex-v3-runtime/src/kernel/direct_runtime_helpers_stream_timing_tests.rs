@@ -1615,3 +1615,23 @@ async fn first_frame_commit_plain_angle_bracket_text_streams_normally() {
         "plain angle brackets must keep byte identity with the buffered attempt"
     );
 }
+
+/// A standalone orphan tool close label is a removable DSML label, so the
+/// complete attempt drops it and flags an unharvestable tool invocation. A
+/// committed prefix must never carry it to the client.
+#[tokio::test]
+async fn first_frame_commit_orphan_tool_close_label_never_reaches_the_client() {
+    let label = "</\u{FF5C}DSML\u{FF5C}tool_calls>";
+    let full = format!("hello\n{label}\n");
+    let chunks = responses_split_delta_sequence(&["hello", "\n", label, "\n"], &full);
+    let run = run_early_commit_attempt(chunks.clone()).await;
+    let streamed = String::from_utf8(run.frames.concat()).unwrap();
+    assert!(
+        !streamed.contains(label),
+        "the orphan tool close label must never reach the client: {streamed}"
+    );
+    assert!(
+        run.failed,
+        "an unharvestable tool invocation must end the attempt detectably"
+    );
+}

@@ -1775,14 +1775,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     &hook_registry,
                                 );
                             }
-                            if let Some(timing_failure) = timing_failure {
-                                return direct_runtime_helpers_stream::source_failure_output(
-                                    timing_failure,
-                                    last_external_http.clone(),
-                                    trace,
-                                    &hook_registry,
-                                );
-                            }
                             if client_commit_probe
                                 .as_ref()
                                 .is_some_and(|sink| sink.is_committed())

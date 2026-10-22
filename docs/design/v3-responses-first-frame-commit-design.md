@@ -59,9 +59,11 @@
 
 ## 5 定义
 
-- 可提交业务帧：通过该协议投影与已验证 hook 之后，客户协议上的首个 `text` 或 `reasoning` 非空增量，
-  或带名字的 tool-call 起始帧。DSH 只认这三类为首 token（`packages/llm/llm/src/assistant-stream.ts:250-260`）。
-  `response.created` 这类状态帧不算，单独提前发它不能修复窗口。
+- 可提交业务帧：通过该协议投影与已验证 hook 之后，客户协议上的首个可见 `output_text` 非空增量。
+  DSH 以首 token 度量窗口，状态帧 `response.created` 不算。
+- P1 实际提交条件只有「可见 output_text」。`reasoning` 增量保真但不授权成功，也不设置可见标记，
+  因此 reasoning-only 尝试从不提前提交（见 §13.1）。带名字的 tool-call 起始帧、tool_thinking 与
+  toolreason 投影属于 P2/P3 计划，P1 未实现，实际由逐帧投影承担。
 - 提交点：首个可提交业务帧写入客户端通道的时刻。此刻起该尝试不可再被替换。
 - 续发账本：记录每个 block 已发出的文本长度、已发出的参数长度、已发出的 item 集合。
   末尾投影只发账本未覆盖的部分。
@@ -100,12 +102,13 @@ Direct SSE 已经在逐帧消费 provider 流：`collect_direct_sse_attempt_afte
 | 文本/推理增量投影 | `responses_sse_tree.rs` / `anthropic_sse_tree.rs` | 部分前缀 | 可流式 |
 | custom tool 参数改写 | `shared_custom_tool_function_sse.rs:48` | 完整参数 JSON | 完整性闸 |
 | `strip_client_response_id` | `kernel.rs:1167` | 最终响应字段 | 完整性闸（末帧） |
-| `tool_thinking` / `toolreason_client_projection` | `hooks.rs:338,674-701` | 最终响应载荷 | 首帧前判定，命中则不提前提交 |
+| `tool_thinking` / `toolreason_client_projection` | `hooks.rs:338,674-701` | 最终响应载荷 | P1 未进入提交谓词；由逐帧投影承担 |
 | 工具/历史配对绑定 | `find_responses_tool_output_ids` | 整段响应 | 只影响控制侧账本，不影响已发帧 |
 | servertool followup | `servertool_hooks.rs` | 整段响应，且内容需丢弃 | 不提前提交 |
 | web_search 结果注入 | `web_search_sidecar.rs`, `web_search_hop.rs` | 整段响应 | 不提前提交 |
 
-待补：上表每一行的调用点复核与红测绑定（设计定稿前完成）。
+P1 的提交谓词只依赖帧级内容证明（`V3DirectPrefixCommitProbe`），上表其余行的调用点复核与红测绑定
+是 P2/P3 的输入，不阻塞 P1。已落地的红测见 §13.2 与提交探针的单元测试。
 
 ## 8 不提前提交的尝试
 
