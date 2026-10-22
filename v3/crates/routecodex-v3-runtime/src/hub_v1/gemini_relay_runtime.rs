@@ -1039,6 +1039,7 @@ mod tests {
                 V3RelayProviderFailure {
                     status: 502,
                     provider_status: None,
+                    provider_body_read_failure: None,
                     client_response: Value::Null,
                     source_stage: "V3Error06ClientProjected",
                     terminal_projection: None,

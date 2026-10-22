@@ -329,6 +329,10 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
     /// received (network/transport failure or an internally synthesized failure).
     /// Never the client-facing projection status.
     pub(crate) provider_status: Option<u16>,
+    /// A typed body-read failure for an HTTP response whose status and headers
+    /// really arrived. `None` for a response-less transport failure and for a
+    /// completely received upstream HTTP error.
+    pub(crate) provider_body_read_failure: Option<String>,
     pub(crate) policy_error_type: String,
     pub(crate) policy_error_message: String,
     pub(crate) provider_id: String,
@@ -349,6 +353,7 @@ impl From<V3RelayErrorOperatorFault> for V3ResponsesRelayProviderFailure {
             attempt_source: None,
             status: 599,
             provider_status: None,
+            provider_body_read_failure: None,
             policy_error_type: fault.policy_failure.code.clone(),
             policy_error_message: fault.policy_failure.message.clone(),
             provider_id: "none".to_string(),

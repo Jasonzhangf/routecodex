@@ -180,6 +180,8 @@ pub(crate) fn is_provider_transport_failure(
     status: u16,
     error_type: Option<&str>,
     provider_type: Option<&str>,
+    provider_status: Option<u16>,
+    provider_body_read_failure: Option<&str>,
 ) -> bool {
     // Gemini uncommitted-SSE EOF is a health-neutral request-local boundary, so
     // this semantic protocol discriminator excludes the Gemini wire from
@@ -195,6 +197,12 @@ pub(crate) fn is_provider_transport_failure(
             Some("provider_error") | Some("provider_transport_error")
         )
         && provider_type != Some("gemini")
+        // A completed upstream HTTP error is not a transport failure. A
+        // response-less transport, a non-error head with a truncated body, or
+        // an explicit body-read failure keeps the exact-identity
+        // last-candidate health effect.
+        && (provider_status.is_none_or(|status| status < 400)
+            || provider_body_read_failure.is_some())
 }
 
 /// A Relay Error-operator contract failure. This is a typed control resource:
@@ -853,6 +861,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         state,
         None,
         None,
+        None,
+        None,
     )
     .await
 }
@@ -868,6 +878,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
     attempt_source: Option<V3Error01SourceRaised>,
+    provider_status: Option<u16>,
+    provider_body_read_failure: Option<&str>,
 ) -> Result<V3RelayProviderFailurePolicyResult, Result<String, V3RelayErrorOperatorFault>> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
     // Request-local provider failure exclusion is monotonic. Record it before
@@ -927,6 +939,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
         status,
         error_type.as_deref(),
         Some(selected.candidate.provider_type.as_str()),
+        provider_status,
+        provider_body_read_failure,
     );
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());

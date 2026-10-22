@@ -806,6 +806,82 @@ async fn refill_direct_sse_first_frame_delivery_keeps_item_identity_public() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// db1f482 last-candidate regression at the real public HTTP entry: a
+/// completely received upstream HTTP 502 with an HTML error body is an
+/// ordinary provider error, not a typed transport failure. It must terminate
+/// the request transport without creating provider health cooldown.
+#[tokio::test]
+async fn db1f482_complete_upstream_http_502_keeps_last_candidate_health_neutral() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _headers, shutdown) = start_entry_configured(
+        "responses",
+        "relay",
+        StatusCode::BAD_GATEWAY,
+        "text/html",
+        "<html><body>upstream gateway failure</body></html>".to_string(),
+        EntryOptions {
+            health_enabled: true,
+            attempt_statuses: vec![StatusCode::BAD_GATEWAY],
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let base = endpoint.trim_end_matches("/v1/responses");
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model":"test.test",
+                "input":"db1f482 complete upstream HTTP 502",
+                "stream":false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    assert_no_error_payload(&consumed.body);
+    assert!(
+        consumed.transport_error.is_some(),
+        "a complete upstream HTTP error must terminate only the request transport: {consumed:?}"
+    );
+    assert!(
+        !consumed.body.contains("response.completed"),
+        "no fabricated business completion is allowed: {consumed:?}"
+    );
+    let health: Value = client()
+        .get(format!("{base}/_routecodex/health/cooldown-pool"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        health["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["provider_id"] != "test"),
+        "complete upstream HTTP 502 must not cool the last candidate: {health}"
+    );
+    stop_entry(handle, shutdown).await;
+    let mut attempts = 0;
+    while let Some(capture) = captures.recv().await {
+        if capture
+            .to_string()
+            .contains("db1f482 complete upstream HTTP 502")
+        {
+            attempts += 1;
+        }
+    }
+    assert_eq!(
+        attempts, 1,
+        "a complete upstream HTTP error must not retry the last candidate"
+    );
+    std::env::remove_var(KEY_ENV);
+}
+
 /// Stable public ID: a coalesced CRLF provider chunk must keep every event when
 /// the refill live sink shifts request-wide output indexes.
 #[tokio::test]
@@ -2079,6 +2155,7 @@ async fn issue0ff6700_independent_business_controls_survive() {
 struct ProviderState {
     kind: String,
     health_enabled: bool,
+    status_override: Option<StatusCode>,
     status: StatusCode,
     content_type: &'static str,
     body: String,
@@ -2086,6 +2163,7 @@ struct ProviderState {
     mixed: Option<MixedRoundtrip>,
     attempt_bodies: Vec<String>,
     attempts: std::sync::atomic::AtomicUsize,
+    attempt_statuses: Vec<StatusCode>,
     header_captures: Option<mpsc::UnboundedSender<String>>,
     live_forward: Option<LiveForward>,
 }
@@ -4769,8 +4847,13 @@ async fn controlled_upstream(
             .get(attempt)
             .cloned()
             .unwrap_or_else(|| state.body.clone());
+        let status = state
+            .attempt_statuses
+            .get(attempt)
+            .copied()
+            .unwrap_or_else(|| state.status_override.unwrap_or(state.status));
         return Response::builder()
-            .status(StatusCode::OK)
+            .status(status)
             .header("content-type", state.content_type)
             .body(Body::from(wire))
             .unwrap();
@@ -5044,8 +5127,10 @@ async fn consume_response(result: Result<reqwest::Response, reqwest::Error>) -> 
 struct EntryOptions {
     memory_project_root: Option<std::path::PathBuf>,
     health_enabled: bool,
+    status_override: Option<StatusCode>,
     mixed: Option<MixedRoundtrip>,
     attempt_bodies: Vec<String>,
+    attempt_statuses: Vec<StatusCode>,
     auth_entries: Vec<(String, String)>,
     pin_key: Option<String>,
     capture_headers: bool,
@@ -5067,8 +5152,10 @@ impl Default for EntryOptions {
         Self {
             memory_project_root: None,
             health_enabled: false,
+            status_override: None,
             mixed: None,
             attempt_bodies: Vec::new(),
+            attempt_statuses: Vec::new(),
             auth_entries: Vec::new(),
             pin_key: None,
             capture_headers: false,
@@ -5180,7 +5267,9 @@ async fn start_entry_configured(
     let EntryOptions {
         memory_project_root,
         health_enabled,
+        status_override,
         attempt_bodies,
+        attempt_statuses,
         auth_entries,
         pin_key,
         capture_headers,
@@ -5206,12 +5295,14 @@ async fn start_entry_configured(
         .with_state(Arc::new(ProviderState {
             kind: kind.to_string(),
             health_enabled,
+            status_override,
             status,
             content_type,
             body,
             captures: captures_tx,
             attempt_bodies,
             attempts: std::sync::atomic::AtomicUsize::new(0),
+            attempt_statuses,
             header_captures: capture_headers.then_some(header_tx),
             mixed,
             live_forward,

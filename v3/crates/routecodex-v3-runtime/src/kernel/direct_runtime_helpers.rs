@@ -576,6 +576,14 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         .and_then(|error| error.status)
         .filter(|external_status| *external_status >= 400)
         .unwrap_or(status);
+    // A provider HTTP error that really arrived carries an upstream status and
+    // must not be classified as a transport failure. Only a response-less
+    // transport failure keeps the exact-identity last-candidate health effect.
+    let has_completed_upstream_http_error = source
+        .external_error
+        .as_ref()
+        .and_then(|error| error.status)
+        .is_some_and(|external_status| external_status >= 400);
     let is_response_processing_failure =
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&source);
     let is_health_neutral_failure = is_response_processing_failure
@@ -591,6 +599,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     // suppress its exact-identity health effect.
     let is_transport_failure = source.source_kind == V3ErrorSourceKind::ProviderFailure
         && source.code == "provider_transport_error"
+        && !has_completed_upstream_http_error
         && observed_status == 502;
     let failed_key = candidate_key(&selected.candidate);
     let expanded_candidates = match (context.expanded, context.provider_pinned) {

@@ -247,6 +247,7 @@ fn provider_http_failure(status: u16, body: &[u8], _provider_id: &str) -> V3Rela
     V3RelayProviderFailure {
         status,
         provider_status: Some(status),
+        provider_body_read_failure: None,
         client_response: project_v3_responses_error_as_anthropic_error(body),
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
@@ -267,6 +268,7 @@ fn provider_request_failure(
         status: 502,
         // Request-construction failure: no upstream HTTP response exists.
         provider_status: None,
+        provider_body_read_failure: None,
         client_response: json!({"type":"error","error":{"type":error_type,"message":error.to_string()}}),
         source_stage,
         terminal_projection: None,
@@ -311,6 +313,7 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
             status,
             // Internal transport handoff failure: no upstream HTTP response exists.
             provider_status: None,
+            provider_body_read_failure: None,
             client_response: json!({
                 "type": "error",
                 "error": {
@@ -357,6 +360,10 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
         // Only a real upstream HTTP status may be recorded here.
         provider_status: match &error {
             V3ProviderError::HttpStatus { response } => Some(response.status),
+            _ => None,
+        },
+        provider_body_read_failure: match &error {
+            V3ProviderError::ResponseBodyUnreadable { reason, .. } => Some(reason.clone()),
             _ => None,
         },
         client_response: json!({"type":"error","error":{"type":error_type,"message":error.to_string()}}),
@@ -815,6 +822,7 @@ mod tests {
                 V3RelayProviderFailure {
                     status: 502,
                     provider_status: None,
+                    provider_body_read_failure: None,
                     client_response: Value::Null,
                     source_stage: "V3Error06ClientProjected",
                     terminal_projection: None,
@@ -929,6 +937,7 @@ mod tests {
             V3RelayProviderFailure {
                 status: 599,
                 provider_status: None,
+                provider_body_read_failure: None,
                 client_response: Value::Null,
                 source_stage: "ProviderRespCompat02ProviderCompat",
                 terminal_projection: None,

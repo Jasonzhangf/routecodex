@@ -1151,6 +1151,7 @@ fn openai_chat_provider_http_failure(
     V3RelayProviderFailure {
         status,
         provider_status: Some(status),
+        provider_body_read_failure: None,
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
@@ -1219,6 +1220,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             status: 502,
             // Request-construction failure: no upstream HTTP response exists.
             provider_status: None,
+            provider_body_read_failure: None,
             client_response: json!({"error":{"type":error_type,"message":error.to_string()}}),
             source_stage,
             terminal_projection: None,

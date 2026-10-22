@@ -5,8 +5,8 @@
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{
-    ResponsesTransport, V3ProviderAvailabilityReader, V3ProviderError, V3ProviderResp14Raw,
-    V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
+    ResponsesTransport, V3ProviderAvailabilityReader, V3ProviderError, V3ProviderHttpFailure,
+    V3ProviderResp14Raw, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
     execute_v3_responses_relay_runtime_with_health_and_retry_policy, V3ResponsesRelayClientBody,
@@ -126,6 +126,8 @@ struct TruncatedLimitedThenSuccessTransport {
     turn: AtomicUsize,
 }
 
+struct CompleteHttp502Transport;
+
 #[async_trait]
 impl ResponsesTransport for TruncatedLimitedThenSuccessTransport {
     async fn send(
@@ -168,6 +170,25 @@ impl ResponsesTransport for TruncatedLimitedThenSuccessTransport {
             }))
             .unwrap(),
         ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for CompleteHttp502Transport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Err(V3ProviderError::HttpStatus {
+            response: Box::new(V3ProviderHttpFailure {
+                request_id: request.request_id().to_string(),
+                provider_id: request.provider_id().to_string(),
+                status: 502,
+                headers: vec![],
+                body: b"upstream gateway failure".to_vec(),
+                body_read_failure: None,
+            }),
+        })
     }
 }
 
@@ -314,5 +335,62 @@ async fn truncated_http_200_cools_exact_identity_when_it_is_the_last_candidate()
             .availability("limited", Some("key1"), Some("gpt-5.5"), now)
             .available,
         "a last-candidate truncated HTTP 200 body must still cool the exact identity"
+    );
+}
+
+/// A completely received upstream HTTP 502 is an ordinary provider error,
+/// even when its body is not JSON. It must keep the last-candidate terminal
+/// boundary and must not create provider health cooldown.
+#[tokio::test]
+async fn complete_http_502_is_health_neutral_when_it_is_the_last_candidate() {
+    let server_id = "complete_http_502_last_candidate";
+    let manifest = single_candidate_manifest(server_id);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "complete-http-502-last-candidate-session",
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-complete-http-502-last".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"complete upstream HTTP error",
+                "stream":false
+            }),
+        },
+        &CompleteHttp502Transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 0,
+        },
+    )
+    .await
+    .expect("a last-candidate HTTP error must project a typed terminal");
+
+    assert_eq!(output.status, 502);
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("console observability");
+    assert_eq!(observability.provider_failure_events.len(), 1);
+    let event = &observability.provider_failure_events[0];
+    assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
+    assert_eq!(event.external_error_status, Some(502));
+    assert_eq!(event.health_state, "last_candidate_terminal");
+    assert_eq!(event.failure_count, 0);
+    assert_eq!(event.cooldown_until_ms, None);
+
+    assert!(
+        provider_health
+            .store()
+            .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
+            .available,
+        "a complete upstream HTTP 502 must not cool the last candidate"
     );
 }
