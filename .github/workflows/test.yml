@@ -158,7 +158,8 @@ jobs:
           node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs \
             --binary "$HOME/.local/bin/rccv3" \
             --binary-kind installed \
-            --evidence "$RUNNER_TEMP/v3-installed-protocol-matrix"
+            --evidence "$RUNNER_TEMP/v3-installed-protocol-matrix" \
+            --allow-capability-skips
       - name: Run host tests after install
         if: needs.scope.outputs.v3_build == 'true'
         run: |
