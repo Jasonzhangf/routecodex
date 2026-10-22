@@ -3868,15 +3868,17 @@ fn response_console_rejects_missing_terminal_summary_instead_of_showing_unreport
     );
 
     observability.response_status = Some("in_progress".to_string());
-    let missing_finish_error = emit_v3_request_complete_console_line(
+    let missing_finish_result = emit_v3_request_complete_console_line(
         &context,
         200,
         &["V3Resp15ClientPayload"],
         &observability,
         std::time::Duration::from_millis(1),
-    )
-    .expect_err("finish_reason missing with non-inferrable response_status must fail");
-    assert!(missing_finish_error.contains("missing finish_reason"));
+    );
+    assert!(
+        missing_finish_result.is_ok(),
+        "unreported reason is diagnostic absence, not a request failure"
+    );
 
     let _ = std::fs::remove_file(&log_file);
 }
@@ -3885,7 +3887,7 @@ fn response_console_rejects_missing_terminal_summary_instead_of_showing_unreport
 fn response_console_treats_incomplete_terminal_as_success_with_length_finish_reason() {
     assert_eq!(
         infer_v3_console_finish_reason_from_response_status(Some("incomplete")),
-        Some("length".to_string())
+        None
     );
     let mut observability = test_direct_observability(Vec::new());
     observability.response_status = Some("incomplete".to_string());
@@ -3943,10 +3945,10 @@ fn direct_frame_console_infers_stop_finish_reason_from_completed_json_status() {
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
     assert!(log.contains("event=completed"), "{log}");
     assert!(log.contains("responseStatus=completed"), "{log}");
-    assert!(log.contains("finish_reason=stop"), "{log}");
+    assert!(log.contains("finish_reason=unreported"), "{log}");
     assert!(log.contains("usage_in=41 usage_out=38"), "{log}");
     assert!(log.contains("usage_total=79"), "{log}");
-    assert!(!log.contains("finish_reason=unreported"), "{log}");
+    assert!(log.contains("finish_reason=unreported"), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
 
@@ -4011,12 +4013,12 @@ async fn direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_a
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
     assert!(log.contains("event=completed"), "{log}");
     assert!(log.contains("responseStatus=completed"), "{log}");
-    assert!(log.contains("finish_reason=stop"), "{log}");
+    assert!(log.contains("finish_reason=unreported"), "{log}");
     assert!(log.contains("usage_in=17 usage_out=3"), "{log}");
     assert!(log.contains("usage_cache=5/17(29.4%)"), "{log}");
     assert!(log.contains("usage_total=20"), "{log}");
     assert!(!log.contains("usage=unreported"), "{log}");
-    assert!(!log.contains("finish_reason=unreported"), "{log}");
+    assert!(!log.contains("finish_reason=stop"), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
 
@@ -4782,6 +4784,7 @@ fn error_projection_appends_human_console_failure_line() {
                 }
             })),
             project_path: None,
+            execution_mode: Some("relay"),
             error06_exposed: true,
             error_class: Some("runtime_failure"),
             health_action: None,
@@ -4796,6 +4799,7 @@ fn error_projection_appends_human_console_failure_line() {
         .expect("Error06 projection must create a WebUI request row");
     assert_eq!(row.result.as_deref(), Some("error"));
     assert_eq!(row.meta.provider_status, Some(500));
+    assert_eq!(row.meta.execution_mode.as_deref(), Some("relay"));
     assert_eq!(row.meta.error_category.as_deref(), Some("runtime_error"));
     let observed = row
         .meta

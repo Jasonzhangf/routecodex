@@ -6,7 +6,7 @@
 
 ### 0ff6700：显式空白 assistant final
 
-完整 attempt 完成所有注册响应治理后，由共享业务内容 owner 汇总判定，再进入唯一响应处置出口。存在显式 assistant final 且最终文本只有空白、没有工具/refusal/content_filter/其他可表示独立业务结果时，整次响应丢弃并产生内部 provider_response_empty/502；此前非空 reasoning 不覆盖此规则。没有 assistant final 的纯 reasoning 保持合法。单个空白 delta、added 占位或尚未完成的片段不能触发该判定。
+完整 attempt 完成所有注册响应过滤和工具收割后，由共享业务内容 owner 汇总判定，再进入唯一响应处置出口。最终没有可显示正文、完整工具/refusal/content_filter/其他可表示独立业务结果时，整次响应丢弃并产生内部 provider_response_empty/502；此前非空正文、纯 reasoning 或 stop/completed 终态均不能覆盖此规则。已识别工具泄露却不能完整收割时，整次 attempt 进入内部502。空白、不可见字符及已识别协议残留不算正文；不按自然语言含义拒绝普通非空文本。单个空白 delta、added 占位或尚未完成的片段不能触发完整尝试判定。需求真源：routecodex-post-filter-attempt-deliverability，issue e63d2f2。
 
 可交付结果沿原投影到 Runtime client commit；空白 final 走独立 Error01–06 图，Runtime 仅在图外创建下一未尝试候选的 attempt。最后候选没有替代时终止传输，不添加健康、冷却、等待或同候选循环。响应与 Error 的既有 SESE 拓扑保持；此处修改的是完整尝试处置条件。
 
@@ -91,7 +91,7 @@ flowchart TD
 
 入口 ARC 是上游成功响应及同一请求的类型化模式/协议引用；唯一出口 ARC 是**响应处理结果**。业务可交付、内部跟随、内部 502 空尝试和内部 599 响应处理失败都只在出口汇合，不增加第二个对象源或第二个响应出口。失败结果由生命周期送入独立错误图，不在响应图内伪装成成功。Direct 和 Relay 的既有模式/协议引用选择同一响应源内的已声明改写 owner，不改变对象源或出口。
 
-整次尝试的判空发生在全部已声明响应改写完成之后，不依赖 usage、输出 token 或最后一帧。普通文本、仅工具调用、reasoning、refusal 和 `content_filter` 都是可交付业务结果。仅移除 `memory_raw_capture` 等非客户端内部控制包络后为空，映射为 `ProviderFailure` / `provider_response_empty` / 内部 502。真实可表示业务内容在改写、投影或成帧中丢失、损坏或报错，映射为响应处理阶段 `RuntimeFailure` / 内部 599，不归因给上游。
+整次尝试的判空发生在全部已声明响应改写完成之后，不依赖 usage、输出 token 或最后一帧。普通可显示文本、完整工具调用、refusal 和 `content_filter` 等独立结果可交付；reasoning 继续保真，但不能单独授权成功。移除 `memory_raw_capture` 等内部包络或过滤标记后无独立结果，映射为 `ProviderFailure` / `provider_response_empty` / 内部 502；已识别但不能完整收割的工具泄露也进入内部502。真实可表示业务内容在改写、投影或成帧中丢失、损坏或报错，仍映射为响应处理阶段 `RuntimeFailure` / 内部 599，不全局改写处理错误分类。
 
 Provider 尝试在提交客户端响应前完整缓冲。SSE 是客户端传输边界，按确定的客户端语义成帧，不从 SSE 字节重建路由、错误或 continuation 控制状态。Direct 不进入 Relay Chat Process；Relay 的 continuation 保存只接受已完成响应。
 

@@ -676,6 +676,47 @@ impl ResponsesTransport for ProviderConcurrencyRecordingTransport {
     }
 }
 
+struct PostTransportConcurrencyTransport {
+    busy_providers: BTreeSet<String>,
+    sends: Mutex<Vec<String>>,
+}
+
+impl PostTransportConcurrencyTransport {
+    fn new(busy_providers: &[&str]) -> Self {
+        Self {
+            busy_providers: busy_providers.iter().map(|id| (*id).to_string()).collect(),
+            sends: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for PostTransportConcurrencyTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.sends.lock().unwrap().push(provider_id.clone());
+        if self.busy_providers.contains(&provider_id) {
+            return Err(V3ProviderError::ConcurrencyBusy {
+                request_id: request.request_id().to_string(),
+                provider_id,
+            });
+        }
+        Err(V3ProviderError::HttpStatus {
+            response: Box::new(V3ProviderHttpFailure {
+                request_id: request.request_id().to_string(),
+                provider_id,
+                status: 400,
+                headers: Vec::new(),
+                body: br#"{"error":{"type":"invalid_request_error","message":"mixed provider failure"}}"#.to_vec(),
+                body_read_failure: None,
+            }),
+        })
+    }
+}
+
 #[tokio::test]
 async fn direct_sse_strip_client_response_id_empties_nested_response_id() {
     let observation = V3RuntimeStreamObservation::default();
@@ -929,7 +970,7 @@ async fn direct_json_response_strips_encrypted_content_for_multi_provider_route(
                     name: "content-type".to_string(),
                     value: b"application/json".to_vec(),
                 }],
-                br#"{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"rsn_MULTI","summary":[{"type":"summary_text","text":"plain"}]}]}"#.to_vec(),
+                br#"{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"rsn_MULTI","summary":[{"type":"summary_text","text":"plain"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Visible answer"}]}]}"#.to_vec(),
             ))
         }
     }
@@ -2607,6 +2648,138 @@ async fn provider_concurrency_saturated_candidates_exhaust_without_send() {
             .availability(second, Some("key"), Some("test"), 50)
             .available
     );
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("all-busy exhaustion must retain its typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+    );
+    assert_eq!(source.code, "provider_concurrency_busy");
+}
+
+#[tokio::test]
+async fn provider_concurrency_post_transport_busy_exhausts_with_typed_source() {
+    let first = "conc_post_busy_first";
+    let second = "conc_post_busy_second";
+    let manifest = provider_concurrency_two_provider_manifest(first, second, 5_000);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = PostTransportConcurrencyTransport::new(&[first, second]);
+    let raw = test_responses_raw(
+        "default",
+        "req-post-busy",
+        "exec-post-busy",
+        json!({"model":"client-model","input":"hello"}),
+    );
+
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health.clone())
+            .with_now_epoch_ms(10),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 502, "{output:?}");
+    assert_eq!(
+        output.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::NoResponse)
+    );
+    assert_eq!(
+        transport
+            .sends
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([first.to_string(), second.to_string()]),
+        "each capacity-busy candidate must be attempted exactly once"
+    );
+    for provider in [first, second] {
+        assert!(
+            provider_health
+                .availability(provider, Some("key"), Some("test"), 50)
+                .available,
+            "post-transport capacity busy must stay health-neutral for {provider}"
+        );
+    }
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("post-transport all-busy exhaustion must retain its typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+    );
+    assert_eq!(source.code, "provider_concurrency_busy");
+}
+
+#[tokio::test]
+async fn provider_concurrency_post_transport_mixed_exhaustion_stays_generic() {
+    let first = "conc_post_mixed_first";
+    let second = "conc_post_mixed_second";
+    let manifest = provider_concurrency_two_provider_manifest(first, second, 5_000);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = PostTransportConcurrencyTransport::new(&[first]);
+    provider_health
+        .store()
+        .record_provider_cooldown_failure(
+            second,
+            Some("key"),
+            Some("test"),
+            "mixed non-busy exclusion",
+            0,
+            60_000,
+        )
+        .expect("mixed cooldown setup");
+    let raw = test_responses_raw(
+        "default",
+        "req-post-mixed",
+        "exec-post-mixed",
+        json!({"model":"client-model","input":"hello"}),
+    );
+
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health.clone())
+            .with_now_epoch_ms(10),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 502, "{output:?}");
+    assert_eq!(
+        output.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::NoResponse)
+    );
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[first.to_string()],
+        "the cooled candidate must not be sent and mixed exhaustion must add no extra send"
+    );
+    assert!(
+        provider_health
+            .availability(first, Some("key"), Some("test"), 50)
+            .available,
+        "the capacity-busy candidate must stay health-neutral"
+    );
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("mixed exhaustion must keep a typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+    );
+    assert_eq!(source.code, "selected_target_exhausted");
 }
 
 #[tokio::test]
@@ -2908,6 +3081,121 @@ async fn provider_concurrency_relay_saturated_candidates_exhaust_without_send() 
             "relay busy timeout must not cool provider {provider}"
         );
     }
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("relay all-busy exhaustion must retain its typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+    );
+    assert_eq!(source.code, "provider_concurrency_busy");
+}
+
+#[tokio::test]
+async fn provider_concurrency_relay_post_transport_busy_exhausts_with_typed_source() {
+    let first = "conc_relay_post_busy_first";
+    let second = "conc_relay_post_busy_second";
+    let manifest = provider_concurrency_two_provider_relay_manifest(first, second, 5_000);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = PostTransportConcurrencyTransport::new(&[first, second]);
+
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        provider_concurrency_relay_input("req-conc-relay-post-busy"),
+        &transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
+    )
+    .await
+    .expect("Relay must project typed pool exhaustion");
+
+    assert_eq!(output.status, 502, "{output:?}");
+    assert_eq!(
+        transport
+            .sends
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([first.to_string(), second.to_string()]),
+        "each capacity-busy relay candidate must be attempted exactly once"
+    );
+    for provider in [first, second] {
+        assert!(
+            provider_health
+                .runtime_health()
+                .availability(provider, Some("key"), Some("test"), 40)
+                .available,
+            "relay post-transport capacity busy must stay health-neutral for {provider}"
+        );
+    }
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("relay post-transport all-busy exhaustion must retain its typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+    );
+    assert_eq!(source.code, "provider_concurrency_busy");
+}
+
+#[tokio::test]
+async fn provider_concurrency_relay_post_transport_mixed_exhaustion_stays_generic() {
+    let first = "conc_relay_post_mixed_first";
+    let second = "conc_relay_post_mixed_second";
+    let manifest = provider_concurrency_two_provider_relay_manifest(first, second, 5_000);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = PostTransportConcurrencyTransport::new(&[first]);
+    provider_health
+        .runtime_health()
+        .store()
+        .record_provider_cooldown_failure(
+            second,
+            Some("key"),
+            Some("test"),
+            "mixed non-busy relay exclusion",
+            0,
+            60_000,
+        )
+        .expect("mixed relay cooldown setup");
+
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        provider_concurrency_relay_input("req-conc-relay-post-mixed"),
+        &transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
+    )
+    .await
+    .expect("Relay must project mixed exhaustion");
+
+    assert_eq!(output.status, 502, "{output:?}");
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[first.to_string()],
+        "the cooled relay candidate must not be sent and mixed exhaustion must add no extra send"
+    );
+    assert!(
+        provider_health
+            .runtime_health()
+            .availability(first, Some("key"), Some("test"), 40)
+            .available,
+        "the relay capacity-busy candidate must stay health-neutral"
+    );
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("relay mixed exhaustion must keep a typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
+    );
+    assert_eq!(source.code, "selected_target_exhausted");
 }
 
 #[tokio::test]

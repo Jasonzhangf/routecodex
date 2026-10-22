@@ -21,6 +21,10 @@ const HOLDER_BODY = [
   '',
 ].join('\n');
 
+const REUSE_BODY = HOLDER_BODY.replaceAll('held response released', 'capacity reused')
+  .replaceAll('resp-held', 'resp-reused')
+  .replaceAll('msg_held', 'msg_reused');
+
 function fixture(overrides = {}) {
   return {
     case_id: 'issue-745f6e9-provider-concurrency-all-busy-direct',
@@ -70,6 +74,61 @@ function fixture(overrides = {}) {
   };
 }
 
+function mixedFixture() {
+  const value = fixture({
+    case_id: 'issue-745f6e9-provider-concurrency-mixed-exclusion-direct',
+    runtime_setup: {
+      provider_id: 'mock-responses-busy',
+      model: 'mock.responses-model',
+      wire_model: 'responses-model',
+      candidate_ids: [
+        'mock-responses-busy/mock.responses-model',
+        'mock-responses-excluded/mock.responses-model',
+      ],
+      provider_concurrency: {
+        maxInFlight: 1,
+        acquireTimeoutMs: 60000,
+        staleLeaseMs: 300000,
+      },
+    },
+  });
+  value.concurrency_replay = {
+    ...value.concurrency_replay,
+    shape: 'mixed_exclusion',
+    expected_source_kind: 'target_pool_exhausted',
+    expected_source_stage: null,
+    expected_attempts_empty: true,
+    capacity_reuse_client_request: {
+      method: 'POST',
+      path: '/v1/responses',
+      headers: { 'content-type': 'application/json', 'session-id': 'reuse', 'thread-id': 'reuse' },
+      body: { model: 'mock.responses-model', input: 'reuse', stream: true },
+    },
+    expected_capacity_reuse_client: {
+      transport: 'complete',
+      status: 200,
+      body_must: { text: 'capacity reused', status: 'completed' },
+      semantic_terminal_required: true,
+    },
+    typed_error_codes: ['selected_target_exhausted'],
+    typed_error_codes_must_not: ['provider_concurrency_busy'],
+    mixed_exclusion: {
+      excluded_provider_id: 'mock-responses-excluded',
+      expected_holder_business_sends: 1,
+      expected_reuse_business_sends: 1,
+      expected_probe_sends: 1,
+      expected_health_entry_count: 2,
+      cooldown_identity: {
+        interface_id: 'default',
+        auth_alias: 'key1',
+        kind: 'auth_key',
+        duration_ms: 60000,
+      },
+    },
+  };
+  return value;
+}
+
 function completeClient(bodyText = HOLDER_BODY) {
   return {
     status: 200,
@@ -82,6 +141,103 @@ function completeClient(bodyText = HOLDER_BODY) {
     error: null,
     error_detail: null,
     elapsed_ms: 25,
+  };
+}
+
+const MIXED_HEALTH_ENTRIES = [
+  {
+    provider_id: 'mock-responses-excluded',
+    interface_id: 'default',
+    auth_alias: 'key1',
+    model_id: null,
+    kind: 'auth_key',
+    state: 'auth_key_cooldown',
+  },
+  {
+    provider_id: 'mock-responses-excluded',
+    interface_id: 'default',
+    auth_alias: 'key1',
+    model_id: null,
+    kind: 'probe',
+    state: 'waiting',
+  },
+];
+
+function fakeMixedHarness() {
+  let resolveHolder;
+  let released = 0;
+  const captures = [];
+  const mock = {
+    setActiveCase() {},
+    getCaptures() { return captures; },
+    async waitForHeld() {},
+    async releaseHeld() {
+      released += 1;
+      resolveHolder?.(completeClient());
+      return 1;
+    },
+  };
+  const sendHttp = async (url, options) => {
+    if (url.endsWith('/_routecodex/debug/status')) {
+      return { status: 200, body: { status: 'ok' }, bodyText: '{"status":"ok"}' };
+    }
+    if (url.endsWith('/_routecodex/health/cooldown-pool/add')) {
+      return { status: 200, body: { ok: true }, bodyText: '{"ok":true}' };
+    }
+    if (url.endsWith('/_routecodex/health/cooldown-pool')) {
+      return {
+        status: 200,
+        body: { entries: MIXED_HEALTH_ENTRIES },
+        bodyText: JSON.stringify({ entries: MIXED_HEALTH_ENTRIES }),
+      };
+    }
+    const body = JSON.parse(options.body);
+    if (body.input === 'hold') {
+      captures.push({
+        attempt_kind: 'business',
+        captured_at_epoch_ms: Date.now(),
+        case_id: mixedFixture().case_id,
+        turn: 0,
+        method: 'POST',
+        path: '/v1/responses',
+        headers: { authorization: 'Bearer holder-token' },
+        body: { ...body, model: 'responses-model' },
+      });
+      return new Promise((resolve) => { resolveHolder = resolve; });
+    }
+    if (body.input === 'no-capacity') {
+      captures.push({
+        attempt_kind: 'business',
+        captured_at_epoch_ms: Date.now(),
+        case_id: mixedFixture().case_id,
+        turn: 0,
+        method: 'POST',
+        path: '/v1/responses',
+        headers: { authorization: 'Bearer excluded-token' },
+        body: { model: 'responses-model', input: 'ping; reply pong' },
+        raw_body: '{"model":"responses-model","input":"ping; reply pong"}',
+      });
+      return CLOSED_BY_PRODUCT;
+    }
+    if (body.input === 'reuse') {
+      captures.push({
+        attempt_kind: 'business',
+        captured_at_epoch_ms: Date.now(),
+        case_id: mixedFixture().case_id,
+        turn: 0,
+        method: 'POST',
+        path: '/v1/responses',
+        headers: { authorization: 'Bearer holder-token' },
+        body: { ...body, model: 'responses-model' },
+      });
+      return completeClient(REUSE_BODY);
+    }
+    throw new Error(`unexpected mixed harness request: ${url} ${options.body}`);
+  };
+  return {
+    mock,
+    sendHttp,
+    get released() { return released; },
   };
 }
 
@@ -253,6 +409,29 @@ test('concurrent replay holds one business send, closes the second request, then
   }
 });
 
+test('mixed exclusion probes the excluded identity once, reuses released capacity, and preserves health', async () => {
+  const evidenceRoot = mkdtempSync(join(tmpdir(), 'provider-concurrency-mixed-'));
+  const harness = fakeMixedHarness();
+  try {
+    const result = await runProviderConcurrencyReplay({
+      fixture: mixedFixture(),
+      mock: harness.mock,
+      rccUrl: 'http://127.0.0.1:12345',
+      sendHttp: harness.sendHttp,
+      evidenceRoot,
+      timeoutMs: 1000,
+    });
+    assert.equal(result.status, 'passed', result.diagnostic);
+    assert.equal(result.provider_attempt_count, 2);
+    assert.equal(result.observations.provider_concurrency.holder_business_sends, 1);
+    assert.equal(result.observations.provider_concurrency.probe_sends, 1);
+    assert.equal(result.observations.provider_concurrency.reuse_business_sends, 1);
+    assert.equal(harness.released, 1);
+  } finally {
+    rmSync(evidenceRoot, { recursive: true, force: true });
+  }
+});
+
 test('concurrent replay accepts SSE headers with comment-only keepalive before transport close', async () => {
   const evidenceRoot = mkdtempSync(join(tmpdir(), 'provider-concurrency-keepalive-'));
   const harness = fakeHarness({ secondClient: KEEPALIVE_THEN_CLOSED_BY_PRODUCT });
@@ -398,6 +577,55 @@ test('typed evidence collector binds the exhausted window to request.failed and 
   }
 });
 
+test('mixed evidence accepts a generic exhausted source with no recorded attempts', () => {
+  const root = mkdtempSync(join(tmpdir(), 'provider-concurrency-mixed-evidence-'));
+  const storePath = join(root, 'records.jsonl');
+  const sampleRoot = writeTypedSource(root, {
+    code: 'selected_target_exhausted',
+    sourceKind: 'target_pool_exhausted',
+    attempts: [],
+  });
+  writeFileSync(storePath, [
+    JSON.stringify({ schema_version: 1, row: routeSelectedRow() }),
+    JSON.stringify({
+      schema_version: 1,
+      row: {
+        request_key: '12345:req-exhausted',
+        event_type: 'request.failed',
+        scope: { port: 12345 },
+        started_epoch_ms: 110,
+        updated_epoch_ms: 120,
+        finished_epoch_ms: 120,
+        attempts: 0,
+        meta: {
+          request_id: 'req-exhausted',
+          endpoint: '/v1/responses',
+          execution_mode: null,
+          observed_error: { chain: COMPLETE_ERROR_CHAIN },
+        },
+      },
+    }),
+    '',
+  ].join('\n'));
+  try {
+    const result = collectProviderConcurrencyEvidence({
+      fixture: mixedFixture(),
+      caseRoot: root,
+      storePath,
+      sampleRoot,
+      listenerPort: 12345,
+      exhaustedWindow: { started_epoch_ms: 100, settled_epoch_ms: 130 },
+      collectionPhase: 'post_stop_complete',
+      stopReceipt: { complete: true },
+    });
+    assert.equal(result.status, 'pass', result.findings.join('; '));
+    assert.equal(result.typed_source.terminal_source.source_kind, 'target_pool_exhausted');
+    assert.deepEqual(result.typed_error_codes, ['selected_target_exhausted']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('typed evidence collector classifies a flushed store with no terminal row as product mismatch', () => {
   const root = mkdtempSync(join(tmpdir(), 'provider-concurrency-missing-terminal-'));
   const storePath = join(root, 'records.jsonl');
@@ -427,7 +655,7 @@ test('typed evidence collector classifies a flushed store with no terminal row a
       stopReceipt: { complete: true },
     });
     assert.equal(result.status, 'mismatch');
-    assert.match(result.findings.join('; '), /no typed provider_concurrency_busy source/);
+    assert.match(result.findings.join('; '), /no typed concurrency source/);
     assert.equal(result.artifacts.evidence_written, true);
   } finally {
     rmSync(root, { recursive: true, force: true });

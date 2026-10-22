@@ -900,6 +900,18 @@ features:
     forbidden_claim: Do not claim H6 hook registration, Hub v1 runtime integration, Server exposure, Provider transport, Gemini/OpenAI Chat, live Anthropic compatibility, global install, restart, or production
       replacement.
 - feature_id: v3.protocol_openai_chat_codec_characterization
+  terminal_fidelity_gate:
+    issue_id: 0e129d0
+    public_test: responses_wire_representation_survives_chat_and_anthropic_entries
+    additional_public_test: issue0e129d0_anthropic_nonstop_reason_public
+    additional_command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox issue0e129d0_ -- --nocapture --test-threads=1
+    command: cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox responses_wire_representation_survives_chat_and_anthropic_entries -- --nocapture --test-threads=1
+    assertions:
+    - explicit non-stop, incomplete, opaque, content_filter and length terminal reasons never become stop
+    - a genuine original Responses normal completion maps to Chat stop in JSON and SSE, including when the completed event omits nested status; canonical lifecycle status, payload content, EOF and DONE are not completion witnesses
+    - a native Chat absent or null terminal reason stays absent and is never inferred from completed lifecycle
+    - completed Responses envelopes preserve nested max_output_tokens as length, content_filter as content_filter, and unknown reasons verbatim
+    - actual errors retain source cause and status in typed Error recovery and candidate reselection
   status: characterization_source_verified
   change_risk: high
   owner_kind: rust_project_v3_protocol_codec_characterization
@@ -1181,7 +1193,7 @@ features:
   - Direct provider errors enter the shared Error01-06/provider-health policy; success payload semantics remain provider-owned while client transport projection follows the client stream intent
   - Direct provider raw response decode/projection errors enter the same Error01-06 provider failure policy and reselect before Error06 while alternatives remain
   - Direct target-local reselection uses the full captured Target09 candidate set; if the newly selected Target10 requires Hub Relay and no Direct-owned previous_response_id is active, Direct returns a
-    typed relay handoff side-channel carrying the complete request-local failed-candidate exclusion set so Relay cannot retry an already-failed Direct target
+    typed relay handoff side-channel carrying both the complete request-local failed-candidate exclusion set and the exact request-local capacity-busy candidate set, without inferring busy provenance from exclusions, so Relay cannot retry an already-failed Direct target
   - Direct server execution passes the server-scoped provider health store so cross-request cooldown affects subsequent selection
   - Direct server observability derives JSON finish_reason from parsed response status only for log/usage output; non-stream JSON client bodies are not mutated, while stream requests may project valid provider
     JSON as client SSE without treating provider inbound transport as client protocol truth
@@ -1309,8 +1321,9 @@ features:
   - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
   - 'Adaptive provider concurrency is keyed by providerId plus authAlias: admission is atomic and a full candidate is skipped immediately for this request'
   - 'Configured maxInFlight bounds business admission without queuing; Direct and Relay select the next eligible candidate and all-full pools exhaust immediately'
+  - 'Pure all-busy exhaustion retains TargetPoolExhausted/provider_concurrency_busy only when every captured Target09 candidate key was proven capacity-busy; mixed exhaustion remains selected_target_exhausted'
   - 'Concurrency exclusions remain request-local and never mutate provider failure health or cooldown; scheduled probes remain separately bounded'
-  - 'WebSocketV2 preserves a granted lease for an available session slot, releases it before an actual slot wait, and returns typed ConcurrencyBusy on a losing readmission race for Runtime reselect'
+  - 'WebSocketV2 preserves a granted lease for an available session slot, releases it before an actual slot wait, and returns typed ConcurrencyBusy on a losing readmission race for Runtime reselect; the exact candidate busy provenance survives subsequent request-local exhaustion'
   - 'When a cooled preceding-tier candidate already has a rescue probe in flight, selection skips it without waiting and continues to an eligible later tier; probe success can restore it for subsequent requests'
   - 'Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini preserve the target-specific acquireTimeoutMs; they do not fall back to the builder default when a typed target is available'
   - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
@@ -1355,7 +1368,7 @@ features:
   owner_kind: rust_project_v3
   owner_scope: P3 global Debug plus P4 global Error and Provider-owned session-isolated health/availability foundation
   recovery_delta_contract:
-  - Only exact typed Direct V3DirectResp14UnharvestableToolMarkup (500-211) or Relay V3HubRelayResp03UnharvestableToolMarkup (500-231), RuntimeFailure/internal599, gain health-neutral request-local Error02-05 reselection; the actual upstream status remains a separate witness.
+  - Only exact typed Direct V3DirectResp14UnharvestableToolMarkup (500-211) or Relay V3HubRelayResp03UnharvestableToolMarkup (500-231), RuntimeFailure/internal502, gain health-neutral request-local Error02-05 reselection; the actual upstream status remains a separate witness. Other response-processing damage remains internal599.
   - Other RuntimeFailure codes remain terminal. Native model-generated invalid arguments remain business content. Direct never excludes candidates outside the existing Error05-authorized recovery path.
   owner_modules:
   - v3/crates/routecodex-v3-debug
@@ -2078,6 +2091,19 @@ features:
   - responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect
   - responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect
   - responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input
+  - issue0e129d0_anthropic_nonstop_reason_public
+  - issue0e129d0_actual_error_uses_error_chain_and_switches_provider
+  - issue0e129d0_responses_completed_projects_chat_terminal
+  - issuee63d2f2_chat_json_control_only_recovers_or_terminates
+  - issuee63d2f2_chat_json_orphan_retains_typed_health_neutral_cause
+  - issuee63d2f2_other_json_callers_retain_governance_failure
+  - issuee63d2f2_chat_sse_control_only_recovers_or_terminates
+  - issuee63d2f2_chat_sse_fragmented_orphan_recovers_or_terminates
+  - issuee63d2f2_chat_sse_fragmented_label_preserves_visible_order
+  - issuee63d2f2_chat_sse_literal_marker_context_stays_business
+  - issuee63d2f2_chat_sse_role_usage_native_tools_preserve_terminal
+  - responses_wire_representation_survives_chat_and_anthropic_entries
+  - genuine_http_and_native_sse_errors_break_transport_without_client_error
   - chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input
   - anthropic_malformed_function_wrapper_restores_exact_raw_arguments
   - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
@@ -3372,6 +3398,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_recovery_isolation.rs
@@ -3381,8 +3408,10 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   required_symbols:
-  - select_v3_expanded_target_with_admission_rescue
-  - resolve_v3_relay_target_outcome_with_admission_rescue
+  - run_v3_plan_execution_operator_with_probes
+  - PlanExecutionOperator::execute_plan
+  - step_v3_target_planning_with_admission_sync
+  - try_admit_v3_selected_target
   required_positive:
   - issue231_responses_relay_stale_probe_public_blackbox proves current Responses Relay delivers the real healthy later-tier payload while a preferred probe is held, then both stale completion branches preserve newer failure state and release their owner; exhausted requests close transport without an empty success while a healthy sibling continues
   - issue245_permission_11128_search_continuation_public_blackbox proves genuine HTTP400 permission_error cools the exact identity, preserves paired function-search and executed nonce history through Relay, remains excluded beyond the original deadline after a failed probe, restores only after a matching successful probe, and closes exhausted transport while explicit current-turn native hosted search continues; it does not replay or resolve the historical upstream/channel cause
@@ -3408,6 +3437,10 @@ features:
   - a provider-declared terminal that carries a legal business result is forwarded as-is and never becomes a provider failure even without visible text: Responses incomplete content_filter, Anthropic refusal, and the OpenAI Chat empty-content content_filter finish; a complete attempt with no deliverable business content at all (empty end_turn/stop terminal with no text/tool/refusal/reasoning) is instead classified as an internal typed 502 for the Error chain
   - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
   - Public `/v1/responses` switches to a spare provider while the first provider remains held; all-full pools terminate promptly without an extra upstream request
+  - provider_concurrency_saturated_candidates_exhaust_without_send and provider_concurrency_relay_saturated_candidates_exhaust_without_send prove pure all-busy exhaustion retains TargetPoolExhausted/provider_concurrency_busy
+  - The async admission and WebSocket readmission paths preserve exact capacity-busy keys until the final direct or relay terminal source is built
+  - all_busy_async_admission_preserves_provider_concurrency_busy_source proves async pre-admission rejects every captured candidate as capacity-busy without waiting and returns TargetPoolExhausted/provider_concurrency_busy
+  - mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhausted proves a non-busy request-local exclusion prevents all-busy source relabeling and leaves generic selected_target_exhausted
   - Concurrency exclusions are request-local and health-neutral; reselect stays inside the captured Target09 candidate set without Router reentry
   - A full preferred candidate does not disable the caller-authorized semantic recovery of another eligible cooled candidate in Direct or Relay
   - Business leases remain bounded and release after completion, error, cancellation, or stream drop; due scheduled probes retain their separate bounded admission
@@ -3419,6 +3452,7 @@ features:
   - automatic model-less cooldown state never blocks other complete identities or enters provider/client payload or MetadataCenter; explicit manual administration retains its declared scope
   - Crossing the adaptive budget cannot record provider failure health, auth-key cooldown, model cooldown, MetadataCenter state, or provider/client payload truth
   - Capacity saturation cannot trigger health rescue probes for the full candidate, provider-action waits, oversubscription, or escape from an explicit provider.model pin
+  - Mixed exhaustion with a cooldown, capability exclusion, prior provider failure, or initial request-local exclusion cannot be relabeled provider_concurrency_busy
   - WebSocketV2 session-slot contention cannot retain provider capacity, starve another request that owns the session, or leak its session slot or provider lease on cancellation
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue231_responses_relay_stale_probe_public_blackbox -- --nocapture
@@ -3442,6 +3476,8 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::cooldown_exhaustion::all_busy_async_admission_preserves_provider_concurrency_busy_source -- --exact --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::cooldown_exhaustion::mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhausted -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admission -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
@@ -3452,6 +3488,21 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
+  runtime_evidence:
+    status: installed_mixed_exclusion_verified
+    installed_cases:
+    - issue-745f6e9-provider-concurrency-all-busy-direct
+    - issue-745f6e9-provider-concurrency-all-busy-relay
+    - issue-745f6e9-provider-concurrency-mixed-exclusion-direct
+    - issue-745f6e9-provider-concurrency-mixed-exclusion-relay
+    installed_binary: /Users/fanzhang/.local/bin/rccv3
+    installed_version: rccv3 0.90.4931
+    evidence_path: /private/tmp/rcc-mixed-installed-evidence.md
+    mixed_source_kinds:
+    - direct: target_pool_exhausted / selected_target_exhausted
+    - relay: provider_failure / selected_target_exhausted
+    required:
+    - Controlled same-entry public /v1/responses replay for Direct and Relay, with pure and mixed subcases, must prove typed source classification, zero extra upstream dispatch, health neutrality, and client transport termination without error payload or fabricated success
   completion_boundary:
     source_controlled: true
     live_cutover: required
@@ -3476,7 +3527,7 @@ features:
   required_positive:
   - Provider-local full path compiles into the unified provider error action manifest with injected provider scope while legacy action remains compatible.
   - Genuine Chat, Anthropic and Responses errors retain their typed source through recovery and transport termination.
-  - issue0ff6700 public HTTP cases reject a complete reasoning-plus-explicit-blank-assistant-final attempt before commit, recover through the next candidate, and preserve independent business results and reasoning-only output
+  - issue0ff6700 and issuee63d2f2 public HTTP cases reject post-filter empty or reasoning-only attempts before commit, recover through the next candidate, and preserve reasoning alongside independent business results
   - issuec1090f9 public HTTP cases reject reasoning-plus-explicit-final attempts whose final contains only nonrendering U+200B or FEFF code points, recover through the next candidate, and never project the source attempt or internal error
   - Configured backoff is a minimum combined with provider-action-gate delay by max rather than addition.
   - A complete provider attempt with no deliverable business content is classified as an internal typed 502 (provider_response_empty) that enters the existing Error chain retry/reselect and never reaches the client as an empty completion; the judgment reads the whole accumulated attempt, not the last terminal frame or usage.
@@ -3485,8 +3536,8 @@ features:
   - direct_sse_memory_item_part_sequences_never_authorize_completion covers normal output_item/content_part added/done snapshots at both sealing exits, with candidate recovery and request-local exhaustion. Captured memory envelopes are removed by the same memory owner before whole-attempt adjudication; visible business siblings remain deliverable. Run CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox direct_sse_memory_item_part_sequences_never_authorize_completion -- --exact --nocapture --test-threads=1.
   - Successful provider responses reach client commit without content, refusal, incomplete, zero-usage or tool-argument adjudication; the empty-attempt 502 is the single exception and is never projected to the client.
   - Responses incomplete reasons, Chat content_filter and refusal, tool-call-only, reasoning, and Anthropic refusal remain representable provider output on Direct and Relay paths and are not reclassified as empty.
-  - Structured Chat reasoning, reasoning_text and Gemini filtering finishReason or promptFeedback remain business results; candidate-less Gemini prompt filtering is a real JSON/SSE terminal and seals typed control without inventing payload fields.
-  - b878f6c_compact_responses_message_fields_are_business_content preserves compact message text and reasoning-only output exactly for JSON and SSE, makes one business attempt without provider cooldown, and retains true-empty JSON/SSE transport-abort controls.
+  - Structured Chat reasoning and reasoning_text remain preserved alongside deliverable output but do not authorize success alone. Gemini filtering finishReason or promptFeedback remain business results; candidate-less Gemini prompt filtering is a real JSON/SSE terminal and seals typed control without inventing payload fields.
+  - b878f6c_compact_responses_message_fields_are_business_content preserves compact message text with optional reasoning exactly for JSON and SSE, makes one business attempt without provider cooldown, and retains true-empty JSON/SSE transport-abort controls; issuee63d2f2 separately locks reasoning-only failure.
   - b878f6c_compact_responses_reach_real_chat_consumer projects Responses compact text, reasoning_content, reasoning_text and mixed message shapes through the public Chat JSON/SSE consumer on the first attempt without cooldown or duplicate text; compact_chat_message_projection_preserves_text_and_reasoning_once binds the same mapping and unchanged source extensions without loopback.
   required_negative:
   - Id model and metadata strings cannot trigger content matching.
@@ -3496,6 +3547,8 @@ features:
   - Genuine provider HTTP or native SSE errors cannot reach the client as HTTP errors, protocol error events or fabricated successful completion.
   - The internal empty-attempt 502 keeps its real upstream HTTP status separate from the internal classification, never enters client payload or MetadataCenter, and never fabricates a client HTTP error or empty completion.
   required_gates:
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issuee63d2f2_ -- --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test responses_relay_mode_b_web_search_integration -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issue0ff6700_ -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issuec1090f9_ -- --nocapture --test-threads=1
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox -- --nocapture
@@ -4038,7 +4091,7 @@ features:
   - semantic matrix partial/declared statuses are preserved, not relabeled as covered
   - canonical error_err02_classified classifies the typed source before error_err03_target_local_action; retired HostCaptured-era labels are not the executable chain
   - recoverable Error05 decisions skip Error06 and launch a new attempt outside the static DAG after attempt-only cleanup; Error06 accepts terminal decisions only
-  - after all declared response rewrites, the whole attempt must retain text, tools, reasoning, refusal, or content_filter before client commit; deliberate non-client envelope removal leaving no business content enters typed Error01 as provider_response_empty internal 502
+  - after all declared response rewrites, the whole attempt must retain visible text, tools, refusal, content_filter, or another independent business result before client commit; reasoning alone or deliberate non-client envelope removal leaving no deliverable content enters typed Error01 as provider_response_empty internal 502
   - loss or processing failure of representable business content enters typed Error01 as internal 599; servertool_followup remains internal continuation and is not an empty client success or provider failure
   - Direct/Relay, ToolThinking, inverse context, attempt projection, and response binding have one writer and declared readers
   - servertool hop re-enters the same runner before client commit

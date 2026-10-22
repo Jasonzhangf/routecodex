@@ -18,6 +18,13 @@ pub struct V3HubRespInbound02Normalized {
     pub(crate) previous: ProviderRespCompat02ProviderCompat,
     pub(crate) normalized_kind: V3HubResponseNormalizedKind,
     pub(crate) semantic_protocol: V3HubProviderWireProtocol,
+    pub(crate) source_terminal_reason: Option<String>,
+    /// A genuine original Responses `status=completed` carries the source
+    /// protocol's normal completion fact. It is typed provenance only, never
+    /// written into client or provider payload. A canonical `completed`
+    /// produced from a native Chat or Anthropic missing terminal does not set
+    /// this witness.
+    pub(crate) source_terminal_completed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,6 +136,13 @@ pub fn build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_reque
         custom_tool_function_binding: input.raw().custom_tool_function_binding.clone(),
     };
     let profile = input.profile.clone();
+    let source_terminal_reason = input
+        .raw()
+        .payload
+        .0
+        .get("stop_reason")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let payload = run_v3_single_node_operator(
         V3OperationGraph::Response,
         "normalize_provider_response",
@@ -148,7 +162,25 @@ pub fn build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_reque
         .take()
         .ok_or_else(|| "response normalization operator produced no typed output".to_string())?;
     input.raw_mut().payload.0 = Arc::new(payload);
+    let source_terminal_reason = source_terminal_reason.or_else(|| {
+        (input.raw().provider_protocol == V3HubProviderWireProtocol::Gemini)
+            .then(|| {
+                input
+                    .raw()
+                    .payload
+                    .0
+                    .get("finishReason")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .flatten()
+    });
+    let source_terminal_completed = input.raw().provider_protocol
+        == V3HubProviderWireProtocol::Responses
+        && input.raw().payload.0.get("status").and_then(Value::as_str) == Some("completed");
     Ok(V3HubRespInbound02Normalized {
+        source_terminal_reason,
+        source_terminal_completed,
         previous: input,
         normalized_kind: output.normalized_kind,
         semantic_protocol: output.semantic_protocol,
@@ -159,6 +191,16 @@ fn normalize_provider_response_with_context(
     mut input: ProviderRespCompat02ProviderCompat,
     projection_context: Option<&V3AnthropicResponsesProjectionContext>,
 ) -> Result<V3HubRespInbound02Normalized, String> {
+    let source_terminal_reason = input
+        .raw()
+        .payload
+        .0
+        .get("stop_reason")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let source_terminal_completed = input.raw().provider_protocol
+        == V3HubProviderWireProtocol::Responses
+        && input.raw().payload.0.get("status").and_then(Value::as_str) == Some("completed");
     let mut semantic_protocol = input.raw().provider_protocol;
     if input.raw().provider_protocol == V3HubProviderWireProtocol::Anthropic {
         match input.raw().transport_intent {
@@ -192,6 +234,8 @@ fn normalize_provider_response_with_context(
         V3HubTransportIntent::Sse => V3HubResponseNormalizedKind::Sse,
     };
     Ok(V3HubRespInbound02Normalized {
+        source_terminal_reason,
+        source_terminal_completed,
         previous: input,
         normalized_kind,
         semantic_protocol,
@@ -375,6 +419,7 @@ mod tests {
             V3HubTransportIntent::Json
         );
         assert_eq!(normalized.provider_payload()["object"], "response");
+        assert_eq!(normalized.source_terminal_reason.as_deref(), Some("STOP"));
         assert_eq!(
             normalized.provider_payload()["output"][0]["content"][0]["text"],
             "gemini sdk"

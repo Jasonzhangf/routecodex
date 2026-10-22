@@ -1,6 +1,7 @@
 {
   "id": "v3.dsh_responses_function_call_terminal",
   "version": "2",
+  "description": "0e129d0: completed plus function_call means a complete tool handoff, never inferred stop. Preserve explicit source terminal reason and complete tool identity/arguments/results. Real errors enter the separate Error graph unchanged before provider reselection; no failed response becomes a completed tool response.",
   "inputs": [
     { "id": "provider-response", "schema": "Object", "schema_ref": "v3.operation_runner.arc.canonical_response" }
   ],
