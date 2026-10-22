@@ -30,10 +30,33 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     pub(crate) tool_thinking_turn_context: &'a V3ToolThinkingTurnContext,
 }
 
+/// Compatibility entry for callers that do not need refill facts. The typed
+/// invocation source stays `Client`; Runtime-launched refills call the
+/// `_with_invocation_source` owner directly.
 pub(crate) fn run_json_response_hooks(
     input: V3ResponsesRelayJsonResponseHookInput<'_>,
     trace: &mut Vec<&'static str>,
 ) -> Result<(Value, Option<V3WebSearchCenterState>), V3ResponsesRelayRuntimeError> {
+    let (payload, state, _facts) = run_json_response_hooks_with_invocation_source(
+        input,
+        V3HubInvocationSource::Client,
+        trace,
+    )?;
+    Ok((payload, state))
+}
+
+pub(crate) fn run_json_response_hooks_with_invocation_source(
+    input: V3ResponsesRelayJsonResponseHookInput<'_>,
+    invocation_source: V3HubInvocationSource,
+    trace: &mut Vec<&'static str>,
+) -> Result<
+    (
+        Value,
+        Option<V3WebSearchCenterState>,
+        super::resp_chat_process_03_governed::V3ChatProcessGovernedFacts,
+    ),
+    V3ResponsesRelayRuntimeError,
+> {
     let normalized_provider_value = match input.provider_protocol {
         V3HubProviderWireProtocol::Responses => {
             normalize_v3_responses_json_document(input.provider_value, "Responses")?
@@ -58,7 +81,7 @@ pub(crate) fn run_json_response_hooks(
             V3HubEntryProtocol::Responses,
             input.provider_protocol,
             V3HubExecutionMode::Relay,
-            V3HubInvocationSource::Client,
+            invocation_source,
             input.provider_response_transport_intent,
         )
         .with_source_provider_protocol(source_provider_protocol)
@@ -81,6 +104,12 @@ pub(crate) fn run_json_response_hooks(
         )?);
     }
     trace.push("V3HubRespInbound02Normalized");
+    // Capture the provider's own summary fact before `govern` can synthesize
+    // RCC reasoning/toolreason summary content.
+    let has_source_summary =
+        super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
+            resp02.provider_payload(),
+        );
     let response_hook_profile = responses_relay_response_hook_profile(
         input.manifest,
         input.server_id,
@@ -116,6 +145,7 @@ pub(crate) fn run_json_response_hooks(
     let (resp03, response_web_search_state, _response_web_search_hook_outcome) =
         resp03.into_parts();
     let mut resp03 = resp03;
+    let tool_calls = resp03.tool_calls.clone();
     if input.source_provider_protocol == V3HubProviderWireProtocol::Gemini {
         super::gemini_responses_codec::restore_gemini_tool_kinds(
             std::sync::Arc::make_mut(resp03.previous.provider_payload_mut()),
@@ -144,7 +174,14 @@ pub(crate) fn run_json_response_hooks(
     )
     .map_err(V3ResponsesRelayRuntimeError::ExecutionControlResponse)?;
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok((resp06.into_client_payload(), response_web_search_state))
+    Ok((
+        resp06.into_client_payload(),
+        response_web_search_state,
+        super::resp_chat_process_03_governed::V3ChatProcessGovernedFacts {
+            tool_calls,
+            has_source_summary,
+        },
+    ))
 }
 
 fn normalize_v3_responses_json_document(

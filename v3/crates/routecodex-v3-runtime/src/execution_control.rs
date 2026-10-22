@@ -1,7 +1,7 @@
 use futures_util::Stream;
 use std::fmt;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
@@ -130,6 +130,44 @@ impl V3RequestExecutionControl {
         self.attempt_budget.clone()
     }
 
+    pub fn refill_used(&self) -> u32 {
+        self.attempt_budget
+            .inner
+            .refill_used
+            .load(Ordering::Acquire)
+    }
+
+    /// Consume one refill execution slot. Returns true only when a slot was
+    /// available (used < max) and was incremented atomically.
+    pub(crate) fn try_admit_refill(&self, max_consecutive_refills: u32) -> bool {
+        if max_consecutive_refills == 0 {
+            return false;
+        }
+        self.attempt_budget
+            .inner
+            .refill_used
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                (current < max_consecutive_refills).then_some(current + 1)
+            })
+            .is_ok()
+    }
+
+    /// Open one more execution of the same request.
+    ///
+    /// A bounded refill is a new execution of the Runtime mainline, so it owns
+    /// its own provider transport attempt allowance; the request-scoped refill
+    /// budget, residence deadline and resident-byte accounting stay unchanged.
+    pub(crate) fn begin_refill_execution(&self) {
+        self.attempt_budget
+            .inner
+            .transport_attempts
+            .store(0, Ordering::Release);
+        self.attempt_budget
+            .inner
+            .transport_attempt_limit
+            .store(0, Ordering::Release);
+    }
+
     pub fn deadline_unix_ms(&self) -> Result<u64, V3AttemptStoreError> {
         let now = Instant::now();
         if now >= self.attempt_budget.inner.deadline {
@@ -170,6 +208,7 @@ struct V3AttemptBudgetInner {
     limits: V3AttemptStoreLimits,
     transport_attempt_limit: AtomicUsize,
     transport_attempts: AtomicUsize,
+    refill_used: AtomicU32,
     request_resident_bytes: AtomicUsize,
     process_resident_bytes: V3ProcessResidentBytes,
     deadline: Instant,
@@ -241,6 +280,7 @@ impl V3AttemptBudget {
                 // admission then uses the configured request ceiling.
                 transport_attempt_limit: AtomicUsize::new(0),
                 transport_attempts: AtomicUsize::new(0),
+                refill_used: AtomicU32::new(0),
                 request_resident_bytes: AtomicUsize::new(0),
                 process_resident_bytes,
                 deadline: Instant::now() + limits.residence_timeout,

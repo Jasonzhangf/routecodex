@@ -733,6 +733,165 @@ fn parse_direct_sse_json_segment(segment: &str) -> Option<(serde_json::Value, St
     Some((value, segment[..data_start].to_owned()))
 }
 
+/// One delimited client-facing SSE segment. `value` is populated only when the
+/// segment carried a single parseable JSON `data:` line, so callers can filter
+/// by event type without hand-rolling another SSE decoder.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct V3DirectSseFrameSegment {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) value: Option<serde_json::Value>,
+}
+
+/// Split committed client SSE chunks back into individual event segments.
+///
+/// This is only for refill delivery assembly: intermediate rounds are re-cut
+/// so their terminal events can be dropped while their content frames are kept.
+/// The committed stream already validated each chunk, so a chunk that is not
+/// valid UTF-8 is preserved verbatim as an opaque non-JSON segment.
+pub(crate) fn split_direct_sse_committed_chunks(
+    chunks: &[Vec<u8>],
+) -> Vec<V3DirectSseFrameSegment> {
+    let mut segments = Vec::new();
+    for chunk in chunks {
+        let Ok(text) = std::str::from_utf8(chunk) else {
+            segments.push(V3DirectSseFrameSegment {
+                bytes: chunk.clone(),
+                value: None,
+            });
+            continue;
+        };
+        for segment in text.split_inclusive("\n\n") {
+            if segment.is_empty() {
+                continue;
+            }
+            let value = parse_direct_sse_json_segment(segment).map(|(value, _)| value);
+            segments.push(V3DirectSseFrameSegment {
+                bytes: segment.as_bytes().to_vec(),
+                value,
+            });
+        }
+    }
+    segments
+}
+
+/// Encode one synthesized `response.output_item.done` frame for a round whose
+/// provider terminal carried the only copy of its business content.
+pub(crate) fn build_direct_sse_output_item_done_frame(
+    output_index: usize,
+    item: &serde_json::Value,
+) -> Option<Vec<u8>> {
+    let event = serde_json::json!({
+        "type": "response.output_item.done",
+        "output_index": output_index,
+        "item": item,
+    });
+    let data = serde_json::to_string(&event).ok()?;
+    crate::sse_object_pipeline::SseObjectFrame::from_event_json(
+        Some("response.output_item.done".to_string()),
+        data,
+    )
+    .ok()?
+    .encode_sse()
+    .ok()
+}
+
+/// Rewrite the terminal frame's `response.usage` with the accumulated summary
+/// while leaving every other segment byte-for-byte unchanged.
+pub(crate) fn rewrite_direct_sse_terminal_usage(
+    segment: &[u8],
+    usage: &crate::hub_v1::V3RuntimeUsageSummary,
+) -> Vec<u8> {
+    rewrite_direct_sse_frame(segment, |mut value| {
+        let is_terminal = matches!(
+            value.get("type").and_then(serde_json::Value::as_str),
+            Some(
+                "response.completed" | "response.incomplete" | "response.done" | "response.failed"
+            )
+        );
+        if is_terminal {
+            if let Some(response) = value.get_mut("response") {
+                if response.is_object() {
+                    let mut response_value = std::mem::replace(response, serde_json::Value::Null);
+                    crate::hub_v1::write_v3_chat_process_refill_usage(&mut response_value, usage);
+                    *response = response_value;
+                }
+            }
+        }
+        value
+    })
+}
+
+/// Raw-provider facts for the Direct SSE refill decision.
+///
+/// These come from the buffered raw provider attempt bytes recorded before any
+/// Direct client rewrite or RCC reasoning/toolreason synthesis. The raw SSE is
+/// the only SSE source-summary provenance seam; client frames may already
+/// carry synthesized reasoning summaries and must not be used for this fact.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct V3DirectSseProviderFacts {
+    pub(crate) has_source_summary: bool,
+    pub(crate) response_completed: bool,
+    pub(crate) tool_calls: Vec<crate::hub_v1::V3HubResponseToolCall>,
+    pub(crate) finalized_response: Option<Value>,
+}
+
+/// Inspect buffered raw provider SSE frames for the Direct refill facts.
+pub(crate) fn inspect_direct_sse_raw_provider(raw: &str) -> V3DirectSseProviderFacts {
+    let mut facts = V3DirectSseProviderFacts::default();
+    let mut output_items = Vec::new();
+    for segment in raw.split_inclusive("\n\n") {
+        let Some((value, _)) = parse_direct_sse_json_segment(segment) else {
+            continue;
+        };
+        let Some(event_type) = value.get("type").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        match event_type {
+            "response.output_item.added" | "response.output_item.done" => {
+                if let Some(item) = value.get("item") {
+                    facts.has_source_summary |=
+                        crate::hub_v1::has_v3_source_explicit_nonempty_summary(
+                            &json!({"output": [item]}),
+                        );
+                    output_items.push(item.clone());
+                }
+            }
+            "response.completed" | "response.incomplete" | "response.done" | "response.failed" => {
+                let status = value
+                    .get("response")
+                    .and_then(|response| response.get("status"))
+                    .and_then(serde_json::Value::as_str);
+                // The event type is authoritative for `response.completed`; a
+                // legacy/late `response.done` must still carry the real final
+                // status. `incomplete` and `failed` are never refillable.
+                facts.response_completed = match event_type {
+                    "response.completed" => {
+                        matches!(status, None | Some("completed") | Some("done"))
+                    }
+                    "response.done" => matches!(status, Some("completed") | Some("done")),
+                    _ => false,
+                };
+                if let Some(response) = value.get("response") {
+                    facts.has_source_summary |=
+                        crate::hub_v1::has_v3_source_explicit_nonempty_summary(response);
+                    facts.finalized_response = Some(response.clone());
+                    if let Some(output) =
+                        response.get("output").and_then(serde_json::Value::as_array)
+                    {
+                        for item in output {
+                            output_items.push(item.clone());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    facts.tool_calls =
+        crate::hub_v1::collect_v3_governed_response_tool_calls(&json!({"output": output_items}));
+    facts
+}
+
 fn materialize_direct_responses_terminal_usage(frame: &[u8]) -> Vec<u8> {
     rewrite_direct_sse_frame(frame, |mut value| {
         if !matches!(
@@ -2269,4 +2428,187 @@ fn validate_initial_direct_plan(
         return Err("preselected direct target requires an initial protocol execution decision");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod refill_tests {
+    use super::*;
+    use crate::hub_v1::V3RuntimeUsageSummary;
+    use serde_json::{json, Value};
+
+    fn sse_frame(event: &str, value: &Value) -> String {
+        format!("event: {event}\ndata: {value}\n\n")
+    }
+
+    #[test]
+    fn refill_sse_raw_facts_read_source_summary_before_client_synthesis() {
+        let raw = format!(
+            "{}{}",
+            sse_frame(
+                "response.output_item.added",
+                &json!({
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": {
+                        "type": "reasoning",
+                        "summary": [{"type": "summary_text", "text": "SOURCE_SUMMARY"}]
+                    }
+                }),
+            ),
+            sse_frame(
+                "response.completed",
+                &json!({
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [{
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "BUSINESS"}]
+                        }]
+                    }
+                }),
+            ),
+        );
+        let facts = inspect_direct_sse_raw_provider(&raw);
+        assert!(facts.has_source_summary, "raw provider summary must count");
+        assert!(facts.response_completed);
+        assert!(facts.tool_calls.is_empty());
+        assert!(facts.finalized_response.is_some());
+    }
+
+    #[test]
+    fn refill_sse_raw_facts_only_refill_a_completed_terminal() {
+        for (event, status) in [
+            ("response.incomplete", "incomplete"),
+            ("response.failed", "failed"),
+        ] {
+            let raw = sse_frame(
+                event,
+                &json!({"type": event, "response": {"status": status, "output": []}}),
+            );
+            let facts = inspect_direct_sse_raw_provider(&raw);
+            assert!(!facts.response_completed, "{event} must not refill");
+        }
+
+        let raw = sse_frame(
+            "response.done",
+            &json!({
+                "type": "response.done",
+                "response": {"status": "completed", "output": []}
+            }),
+        );
+        assert!(inspect_direct_sse_raw_provider(&raw).response_completed);
+    }
+
+    #[test]
+    fn refill_sse_raw_facts_count_call_shaped_output_items() {
+        let raw = sse_frame(
+            "response.completed",
+            &json!({
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "output": [{
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "echo",
+                        "arguments": "{}"
+                    }]
+                }
+            }),
+        );
+        let facts = inspect_direct_sse_raw_provider(&raw);
+        assert_eq!(facts.tool_calls.len(), 1);
+        assert!(facts.response_completed);
+    }
+
+    #[test]
+    fn refill_sse_delivery_splits_frames_for_intermediate_content() {
+        let created =
+            sse_frame("response.created", &json!({"type": "response.created"})).into_bytes();
+        let item = sse_frame(
+            "response.output_item.done",
+            &json!({
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {"type": "message"}
+            }),
+        )
+        .into_bytes();
+        let completed = sse_frame(
+            "response.completed",
+            &json!({"type": "response.completed", "response": {"status": "completed"}}),
+        )
+        .into_bytes();
+        let segments = split_direct_sse_committed_chunks(&[created, item, completed]);
+        assert_eq!(segments.len(), 3);
+        assert_eq!(
+            segments[1]
+                .value
+                .as_ref()
+                .and_then(|value| value.get("type"))
+                .and_then(Value::as_str),
+            Some("response.output_item.done")
+        );
+    }
+
+    #[test]
+    fn refill_sse_terminal_usage_rewrite_updates_only_the_terminal_frame() {
+        let terminal = sse_frame(
+            "response.completed",
+            &json!({
+                "type": "response.completed",
+                "response": {"status": "completed", "usage": {"input_tokens": 1}}
+            }),
+        )
+        .into_bytes();
+        let usage = V3RuntimeUsageSummary {
+            input_tokens: Some(7),
+            output_tokens: Some(3),
+            ..V3RuntimeUsageSummary::default()
+        };
+        let rewritten = rewrite_direct_sse_terminal_usage(&terminal, &usage);
+        let text = String::from_utf8(rewritten).expect("rewritten SSE is UTF-8");
+        let data = text
+            .split_once("data: ")
+            .map(|(_, data)| data.trim())
+            .expect("terminal frame carries data");
+        let value: Value = serde_json::from_str(data).expect("terminal frame stays valid JSON");
+        assert_eq!(
+            value
+                .pointer("/response/usage/input_tokens")
+                .and_then(Value::as_u64),
+            Some(7)
+        );
+        assert_eq!(
+            value
+                .pointer("/response/usage/output_tokens")
+                .and_then(Value::as_u64),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn refill_sse_synthesized_content_frame_is_a_valid_event() {
+        let frame = build_direct_sse_output_item_done_frame(
+            2,
+            &json!({
+                "type": "message",
+                "content": [{"type": "output_text", "text": "FIRST_ROUND"}]
+            }),
+        )
+        .expect("synthesized content frame");
+        let text = String::from_utf8(frame).expect("synthesized SSE is UTF-8");
+        let (value, _) = parse_direct_sse_json_segment(&text).expect("synthesized SSE parses");
+        assert_eq!(
+            value.get("type").and_then(Value::as_str),
+            Some("response.output_item.done")
+        );
+        assert_eq!(
+            value
+                .pointer("/item/content/0/text")
+                .and_then(Value::as_str),
+            Some("FIRST_ROUND")
+        );
+    }
 }

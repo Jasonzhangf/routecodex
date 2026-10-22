@@ -34,6 +34,8 @@ struct InternalConfig {
     error_handling: ErrorHandling,
     #[serde(default)]
     observability: Observability,
+    #[serde(default)]
+    chat_process: ChatProcess,
 }
 
 pub fn v3_internal_user_config_authoring() -> crate::V3Config02AuthoringParsed {
@@ -99,6 +101,25 @@ pub struct V3InternalErrorHandlingPolicy {
     pub unrecoverable_failure_threshold: u32,
     pub unrecoverable_cooldown_ms: u64,
     pub unrecoverable_probe_interval_ms: u64,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChatProcess {
+    #[serde(default)]
+    refill: ChatProcessRefill,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChatProcessRefill {
+    #[serde(default)]
+    max_consecutive_refills: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct V3InternalChatProcessRefillPolicy {
+    pub max_consecutive_refills: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -205,6 +226,40 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
         }
     });
     &POLICY
+}
+
+pub fn v3_internal_chat_process_refill_policy() -> &'static V3InternalChatProcessRefillPolicy {
+    static POLICY: LazyLock<V3InternalChatProcessRefillPolicy> =
+        LazyLock::new(|| V3InternalChatProcessRefillPolicy {
+            max_consecutive_refills: INTERNAL_CONFIG.chat_process.refill.max_consecutive_refills,
+        });
+    &POLICY
+}
+
+static CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
+
+/// Test-only injection of the typed refill limit. Production reading goes
+/// through the compiled `internal.toml` value below; this hook exists so public
+/// entry tests can exercise 0/1/3 without a second production config source.
+/// `u32::MAX` means "no override".
+#[doc(hidden)]
+pub fn v3_test_only_set_chat_process_refill_max_override(value: Option<u32>) {
+    CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE.store(
+        value.unwrap_or(u32::MAX),
+        std::sync::atomic::Ordering::SeqCst,
+    );
+}
+
+/// Effective compiled limit. Only a test-injected override may change it.
+pub fn v3_effective_chat_process_refill_max() -> u32 {
+    let override_value =
+        CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE.load(std::sync::atomic::Ordering::SeqCst);
+    if override_value == u32::MAX {
+        v3_internal_chat_process_refill_policy().max_consecutive_refills
+    } else {
+        override_value
+    }
 }
 
 pub fn classify_v3_internal_provider_error(
@@ -594,5 +649,84 @@ mod tests {
             ),
             V3InternalErrorCategory::Recoverable
         );
+    }
+
+    #[test]
+    fn chat_process_refill_policy_parses_shipped_internal_toml() {
+        let config: InternalConfig =
+            toml::from_str(INTERNAL_CONFIG_TOML).expect("embedded internal.toml must parse");
+        assert_eq!(config.chat_process.refill.max_consecutive_refills, 1);
+        assert_eq!(
+            v3_internal_chat_process_refill_policy().max_consecutive_refills,
+            1
+        );
+    }
+
+    #[test]
+    fn chat_process_refill_rejects_negative_float_and_string_values() {
+        for raw in [
+            "[chat_process.refill]\nmax_consecutive_refills = -1\n",
+            "[chat_process.refill]\nmax_consecutive_refills = 1.5\n",
+            "[chat_process.refill]\nmax_consecutive_refills = \"1\"\n",
+        ] {
+            assert!(
+                toml::from_str::<InternalConfig>(raw).is_err(),
+                "invalid refill value must fail deserialization: {raw}"
+            );
+        }
+    }
+
+    static REFILL_OVERRIDE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct RefillOverrideGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl RefillOverrideGuard {
+        fn acquire() -> Self {
+            let lock = REFILL_OVERRIDE_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            v3_test_only_set_chat_process_refill_max_override(None);
+            Self { _lock: lock }
+        }
+
+        fn set(&self, value: Option<u32>) {
+            v3_test_only_set_chat_process_refill_max_override(value);
+        }
+    }
+
+    impl Drop for RefillOverrideGuard {
+        fn drop(&mut self) {
+            v3_test_only_set_chat_process_refill_max_override(None);
+        }
+    }
+
+    #[test]
+    fn effective_refill_max_defaults_to_compiled_policy() {
+        let _guard = RefillOverrideGuard::acquire();
+        assert_eq!(v3_effective_chat_process_refill_max(), 1);
+        assert_eq!(
+            v3_effective_chat_process_refill_max(),
+            v3_internal_chat_process_refill_policy().max_consecutive_refills
+        );
+    }
+
+    #[test]
+    fn effective_refill_max_honors_test_override_zero_and_three() {
+        let guard = RefillOverrideGuard::acquire();
+        guard.set(Some(0));
+        assert_eq!(v3_effective_chat_process_refill_max(), 0);
+        guard.set(Some(3));
+        assert_eq!(v3_effective_chat_process_refill_max(), 3);
+    }
+
+    #[test]
+    fn effective_refill_max_clearing_override_restores_compiled_policy() {
+        let guard = RefillOverrideGuard::acquire();
+        guard.set(Some(3));
+        assert_eq!(v3_effective_chat_process_refill_max(), 3);
+        guard.set(None);
+        assert_eq!(v3_effective_chat_process_refill_max(), 1);
     }
 }

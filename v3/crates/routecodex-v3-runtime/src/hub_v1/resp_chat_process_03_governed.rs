@@ -1,3 +1,4 @@
+pub(crate) use super::common::V3ChatProcessRefillDisposition;
 use super::*;
 use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 use crate::operation_runner::{
@@ -828,6 +829,360 @@ impl Deref for V3HubRespChatProcess03Outcome {
 
     fn deref(&self) -> &Self::Target {
         &self.data
+    }
+}
+
+/// Source-explicit non-empty summary fact for refill gating.
+///
+/// Provenance contract: only a provider-mapped explicit summary field counts.
+/// For the Responses canonical payload this is `output[]` items of type
+/// `reasoning` whose `summary[]` entries carry a non-empty `text`. RCC-synthesized
+/// reasoning/toolreason content, ordinary assistant body text (`output_text`,
+/// `content[].text`, `reasoning_content`, provider `thinking`) and request-side
+/// summary policy never count.
+pub(crate) fn has_v3_source_explicit_nonempty_summary(payload: &Value) -> bool {
+    payload
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items.iter().any(|item| {
+                if item.get("type").and_then(Value::as_str) != Some("reasoning") {
+                    return false;
+                }
+                item.get("summary")
+                    .and_then(Value::as_array)
+                    .map(|summaries| {
+                        summaries.iter().any(|summary| {
+                            summary
+                                .get("text")
+                                .and_then(Value::as_str)
+                                .map(|text| !text.trim().is_empty())
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// The single shared refill policy for Direct-registered hooks and Relay.
+/// Contract: no governed tool call AND no source-explicit non-empty summary AND
+/// a remaining consecutive-refill budget ask for one more execution. A real
+/// error never reaches this decision (it is handled by the Error chain first).
+/// 0 disables refill; N allows at most N new executions beyond the original.
+pub(crate) fn decide_v3_chat_process_refill(
+    tool_calls: &[V3HubResponseToolCall],
+    has_source_summary: bool,
+    response_completed: bool,
+    refill_used: u32,
+    max_consecutive_refills: u32,
+) -> V3ChatProcessRefillDisposition {
+    if !response_completed
+        || !tool_calls.is_empty()
+        || has_source_summary
+        || refill_used >= max_consecutive_refills
+    {
+        V3ChatProcessRefillDisposition::Deliver
+    } else {
+        V3ChatProcessRefillDisposition::RequestRefill
+    }
+}
+
+/// Map a Responses canonical output item type to its governed tool-call kind.
+///
+/// This is the single structural classifier used by the Direct refill fact
+/// extractor. It accepts the complete call item types produced by the
+/// Responses wire contract and the `*_call` suffix for opaque hosted call
+/// shapes. Output items (`*_output`) are explicitly rejected even when they
+/// carry a `call_id`, because an output is not a new tool call.
+fn v3_governed_tool_call_kind(item_type: &str) -> Option<V3HubRelayToolKind> {
+    match item_type {
+        "function_call" | "function" => Some(V3HubRelayToolKind::Function),
+        "custom_tool_call" | "custom" => Some(V3HubRelayToolKind::Custom),
+        "tool_search_call" | "tool_search" | "web_search_call" | "web_search" => {
+            Some(V3HubRelayToolKind::Servertool)
+        }
+        "mcp_call" | "mcp" => Some(V3HubRelayToolKind::Mcp),
+        "computer_call"
+        | "computer"
+        | "code_interpreter_call"
+        | "code_interpreter"
+        | "local_shell_call"
+        | "local_shell"
+        | "image_generation_call"
+        | "image_generation" => Some(V3HubRelayToolKind::Native),
+        other if other.ends_with("_call") => Some(V3HubRelayToolKind::Native),
+        _ => None,
+    }
+}
+
+/// Structural tool-call facts for Direct response payloads.
+///
+/// Direct does not run the Relay `Resp03` governance stage, so the refill
+/// decision still needs one source for "has a real tool call". Only emptiness
+/// is consumed by the policy; call identity fields are populated for the
+/// shared `V3HubResponseToolCall` shape and must not be projected into any
+/// business payload.
+pub(crate) fn collect_v3_governed_response_tool_calls(
+    payload: &Value,
+) -> Vec<V3HubResponseToolCall> {
+    payload
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let item_type = item.get("type").and_then(Value::as_str)?;
+                    if item_type.ends_with("_output") {
+                        return None;
+                    }
+                    let kind = v3_governed_tool_call_kind(item_type)?;
+                    let call_id = item
+                        .get("call_id")
+                        .or_else(|| item.get("id"))
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_default()
+                        .to_string();
+                    let name = item
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or(item_type)
+                        .to_string();
+                    Some(V3HubResponseToolCall {
+                        call_id,
+                        name,
+                        kind,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The explicit continuation instruction appended as the last user turn of a
+/// bounded refill request. It asks the model to keep going and to call a tool
+/// when the task still needs one, so a silent stop can recover without the
+/// proxy inventing any business content.
+pub(crate) const V3_CHAT_PROCESS_REFILL_INSTRUCTION: &str =
+    "继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。";
+
+/// Compiled request-local refill budget. This is the single runtime accessor so
+/// the selection decision and the launch decision cannot drift. The compiled
+/// `internal.toml` value is the only production source; the config crate's
+/// effective accessor exists so public-entry tests can inject the same typed
+/// policy input.
+pub(crate) fn v3_chat_process_refill_max_consecutive() -> u32 {
+    routecodex_v3_config::internal::v3_effective_chat_process_refill_max()
+}
+
+/// Facts the Chat Process owner hands back to the Relay response-hook caller so
+/// Runtime can apply the shared refill policy without re-reading the governed
+/// payload or duplicating a decision.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct V3ChatProcessGovernedFacts {
+    pub(crate) tool_calls: Vec<V3HubResponseToolCall>,
+    /// Source-explicit non-empty summary captured BEFORE governance could
+    /// synthesize RCC reasoning/toolreason summary content.
+    pub(crate) has_source_summary: bool,
+}
+
+/// Build the standard continuation request for one refill execution.
+///
+/// The original payload is cloned and every field other than `input` is kept
+/// verbatim (model, instructions, tools, tool_choice, reasoning, parallel
+/// tool calls and unknown business extensions). Each collected business item of
+/// the just-finished execution is appended as an assistant message, then the
+/// refill instruction is appended as a new user turn. No counter, state or
+/// control field ever enters the payload.
+pub(crate) fn build_v3_chat_process_refill_continuation_request(
+    original_request_payload: &Value,
+    current_execution_finalized_response: &Value,
+) -> Result<Value, String> {
+    let mut payload = original_request_payload.clone();
+    let Some(payload_object) = payload.as_object_mut() else {
+        return Err("refill continuation requires an object request payload".to_string());
+    };
+    let mut input = match payload_object.get("input") {
+        Some(Value::Array(_)) => payload_object
+            .get("input")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+        Some(Value::String(text)) => json!([{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": text}],
+        }]),
+        None => Value::Array(Vec::new()),
+        Some(_) => {
+            return Err("refill continuation input must be a string or an input array".to_string())
+        }
+    };
+    let input_array = input
+        .as_array_mut()
+        .ok_or_else(|| "refill continuation input must normalize to an array".to_string())?;
+    for item in collect_v3_chat_process_business_output_items(current_execution_finalized_response)
+    {
+        if item.get("type").and_then(Value::as_str) != Some("message") {
+            // Non-message items (tool calls, hosted search calls) are already
+            // carried by the request's declared tool surface and history; a
+            // refill round only replays assistant message content.
+            continue;
+        }
+        let Some(content) = item
+            .get("content")
+            .filter(|value| value.is_array())
+            .cloned()
+        else {
+            continue;
+        };
+        input_array.push(json!({
+            "type": "message",
+            "role": "assistant",
+            "content": content,
+        }));
+    }
+    input_array.push(json!({
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": V3_CHAT_PROCESS_REFILL_INSTRUCTION}],
+    }));
+    payload_object.insert("input".to_string(), input);
+    Ok(payload)
+}
+
+/// Collect the business output items of one execution response, in order.
+///
+/// Reasoning items are deliberately excluded: they are not re-sent as history
+/// (the next turn regenerates its own reasoning) and they must not be
+/// duplicated into the delivered business list. Every other item shape,
+/// including message content images/audio and hosted items, is kept verbatim.
+pub(crate) fn collect_v3_chat_process_business_output_items(
+    finalized_response: &Value,
+) -> Vec<Value> {
+    finalized_response
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| item.get("type").and_then(Value::as_str) != Some("reasoning"))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Merge prior-round business items in front of the last execution's output.
+///
+/// The last execution stays authoritative for its own item order, ids, status
+/// and terminal fields; accumulated items only extend the front of `output`.
+/// A missing or non-array `output` is left untouched.
+pub(crate) fn merge_v3_chat_process_refill_output_items(
+    finalized_response: &mut Value,
+    accumulated: &[Value],
+) {
+    let Some(output) = finalized_response
+        .get_mut("output")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    if accumulated.is_empty() {
+        return;
+    }
+    let existing = std::mem::take(output);
+    output.extend(accumulated.iter().cloned());
+    output.extend(existing);
+}
+
+/// Accumulate one completed refill round's usage into the running summary.
+///
+/// Missing stays missing: a field absent in any merged round becomes `None`
+/// and is never fabricated as 0. A `None` accumulator means no completed round
+/// has been merged yet, so the first round's summary is adopted as-is.
+pub(crate) fn accumulate_v3_chat_process_refill_usage(
+    accumulated: &mut Option<V3RuntimeUsageSummary>,
+    round: Option<V3RuntimeUsageSummary>,
+) {
+    let Some(round) = round else {
+        if let Some(accumulated) = accumulated.as_mut() {
+            // A completed round with no usage evidence at all means no field
+            // was observed for the whole chain; missing must stay missing.
+            *accumulated = V3RuntimeUsageSummary::default();
+        }
+        return;
+    };
+    let Some(accumulated) = accumulated.as_mut() else {
+        *accumulated = Some(round);
+        return;
+    };
+    for (current, value) in [
+        (&mut accumulated.input_tokens, round.input_tokens),
+        (&mut accumulated.output_tokens, round.output_tokens),
+        (&mut accumulated.total_tokens, round.total_tokens),
+        (&mut accumulated.cached_tokens, round.cached_tokens),
+        (
+            &mut accumulated.cache_read_input_tokens,
+            round.cache_read_input_tokens,
+        ),
+        (
+            &mut accumulated.cache_creation_input_tokens,
+            round.cache_creation_input_tokens,
+        ),
+    ] {
+        *current = match (*current, value) {
+            (Some(current), Some(value)) => Some(current.saturating_add(value)),
+            _ => None,
+        };
+    }
+}
+
+/// Write an accumulated usage summary into a finalized response.
+///
+/// Only fields that are actually `Some` are written. The object is rebuilt from
+/// the accumulated evidence so a field missing in any round never reappears
+/// from the last round's usage.
+pub(crate) fn write_v3_chat_process_refill_usage(
+    finalized_response: &mut Value,
+    usage: &V3RuntimeUsageSummary,
+) {
+    let Some(response_object) = finalized_response.as_object_mut() else {
+        return;
+    };
+    let mut usage_object = Map::new();
+    if let Some(value) = usage.input_tokens {
+        usage_object.insert("input_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = usage.output_tokens {
+        usage_object.insert("output_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = usage.total_tokens {
+        usage_object.insert("total_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = usage.cached_tokens {
+        usage_object.insert(
+            "input_tokens_details".to_string(),
+            json!({"cached_tokens": value}),
+        );
+    }
+    if let Some(value) = usage.cache_read_input_tokens {
+        usage_object.insert("cache_read_input_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = usage.cache_creation_input_tokens {
+        usage_object.insert(
+            "cache_creation_input_tokens".to_string(),
+            Value::from(value),
+        );
+    }
+    if usage_object.is_empty() {
+        // No observed field: keep usage absent rather than fabricating 0s.
+        response_object.remove("usage");
+    } else {
+        response_object.insert("usage".to_string(), Value::Object(usage_object));
     }
 }
 

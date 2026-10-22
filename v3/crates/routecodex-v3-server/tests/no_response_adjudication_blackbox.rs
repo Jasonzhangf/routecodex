@@ -197,6 +197,357 @@ async fn issuee63d2f2_review_orphan_without_tools_recovers_or_exhausts() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// One complete governed refill round. SSE ends at the terminal seal.
+fn refill_round_wire(stream: bool, text: &str) -> String {
+    let response = text_response(text);
+    if stream {
+        response_sse(&response)
+    } else {
+        response.to_string()
+    }
+}
+
+/// Source-explicit summary fixture. It bounds an unexpected extra refill so a
+/// regression fails by attempt count instead of looping to the transport cap.
+fn source_summary_wire(stream: bool, text: &str) -> String {
+    let response = json!({
+        "id":"resp_source_summary",
+        "object":"response",
+        "status":"completed",
+        "model":"wire-test",
+        "output":[
+            {
+                "id":"rs_source_summary",
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":text}]
+            },
+            {
+                "id":"msg_source_summary",
+                "type":"message",
+                "role":"assistant",
+                "status":"completed",
+                "content":[{"type":"output_text","text":text,"annotations":[]}]
+            }
+        ]
+    });
+    if stream {
+        response_sse(&response)
+    } else {
+        response.to_string()
+    }
+}
+
+async fn refill_public_chain(
+    process: &str,
+    stream: bool,
+    fallback_body: String,
+    attempt_bodies: Vec<String>,
+    auth_entries: Vec<(String, String)>,
+    refill_max: Option<u32>,
+) -> (ConsumedResponse, usize) {
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        process,
+        StatusCode::OK,
+        if stream {
+            "text/event-stream"
+        } else {
+            "application/json"
+        },
+        fallback_body,
+        EntryOptions {
+            attempt_bodies,
+            auth_entries,
+            refill_max,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model":"test.test",
+                "input":"controlled refill regression",
+                "stream":stream
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    stop_entry(handle, shutdown).await;
+    (consumed, attempts)
+}
+
+/// Stable public ID: limit 0 delivers the original governed response exactly
+/// once on JSON for both Chat Process and Direct.
+#[tokio::test]
+async fn refill_limit_zero_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["chat", "direct"] {
+        let wire = refill_round_wire(false, "ZERO_BUSINESS");
+        let (consumed, attempts) = refill_public_chain(
+            process,
+            false,
+            source_summary_wire(false, "ZERO_UNEXPECTED_REFILL"),
+            vec![wire],
+            Vec::new(),
+            Some(0),
+        )
+        .await;
+        assert_eq!(
+            attempts, 1,
+            "{process}: limit 0 must not refill: {consumed:?}"
+        );
+        assert!(
+            consumed.transport_error.is_none(),
+            "{process}: original response must deliver: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains("ZERO_BUSINESS"),
+            "{process}: original business text must reach the client: {consumed:?}"
+        );
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: the default limit is exactly one refill. A third attempt
+/// would receive the source-summary fallback and fail the attempt count.
+#[tokio::test]
+async fn refill_default_exactly_two_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["chat", "direct"] {
+        for stream in [false, true] {
+            let (consumed, attempts) = refill_public_chain(
+                process,
+                stream,
+                source_summary_wire(stream, "UNEXPECTED_THIRD_ROUND"),
+                vec![
+                    refill_round_wire(stream, "ROUND_ONE"),
+                    refill_round_wire(stream, "ROUND_TWO"),
+                ],
+                Vec::new(),
+                None,
+            )
+            .await;
+            assert_eq!(
+                attempts, 2,
+                "{process}/{stream}: default limit must stop after one refill: {consumed:?}"
+            );
+            assert!(
+                consumed.transport_error.is_none(),
+                "{process}/{stream}: refill chain must deliver normally: {consumed:?}"
+            );
+            assert!(
+                consumed.body.contains("ROUND_ONE") && consumed.body.contains("ROUND_TWO"),
+                "{process}/{stream}: both rounds must be preserved: {consumed:?}"
+            );
+            assert_no_error_payload(&consumed.body);
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: limit 3 allows exactly three new executions beyond the
+/// original. The plain fallback answers the fourth attempt; a fifth attempt
+/// means the budget was not honored.
+#[tokio::test]
+async fn refill_limit_three_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (consumed, attempts) = refill_public_chain(
+        "chat",
+        false,
+        refill_round_wire(false, "R4_FALLBACK"),
+        vec![
+            refill_round_wire(false, "R1"),
+            refill_round_wire(false, "R2"),
+            refill_round_wire(false, "R3"),
+        ],
+        Vec::new(),
+        Some(3),
+    )
+    .await;
+    assert_eq!(
+        attempts, 4,
+        "limit 3 must allow original plus three refills: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "refill chain must deliver normally: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("R1")
+            && consumed.body.contains("R2")
+            && consumed.body.contains("R3"),
+        "each refill round must be preserved: {consumed:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: reasoning `content`/`text` without a `summary` array is
+/// RCC synthesis input, not a source summary. It must not stop refill.
+#[tokio::test]
+async fn refill_synthesized_summary_does_not_stop_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let synthesized = json!({
+        "id":"resp_synth",
+        "object":"response",
+        "status":"completed",
+        "model":"wire-test",
+        "output":[
+            {
+                "id":"rs_synth",
+                "type":"reasoning",
+                "content":[{"type":"reasoning_text","text":"SYNTH_CONTENT"}],
+                "text":"SYNTH_TEXT"
+            },
+            {
+                "id":"msg_synth",
+                "type":"message",
+                "role":"assistant",
+                "status":"completed",
+                "content":[{"type":"output_text","text":"SYNTH_BUSINESS","annotations":[]}]
+            }
+        ]
+    });
+    let (consumed, attempts) = refill_public_chain(
+        "chat",
+        false,
+        source_summary_wire(false, "SYNTH_STOP"),
+        vec![synthesized.to_string()],
+        Vec::new(),
+        None,
+    )
+    .await;
+    assert_eq!(
+        attempts, 2,
+        "synthesized reasoning text must not count as a source summary: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "synthesized round must deliver normally: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("SYNTH_BUSINESS"),
+        "synthesized business text must reach the client: {consumed:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: an empty completed attempt enters the existing Error
+/// chain, reselects the remaining key, then refills from the recovered
+/// governed result. The empty provider body never reaches the client.
+#[tokio::test]
+async fn refill_error_chain_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret");
+    let empty_attempt_body = json!({
+        "id":"resp_empty",
+        "object":"response",
+        "status":"completed",
+        "model":"wire-test",
+        "output":[]
+    })
+    .to_string();
+    let auth_entries = vec![
+        ("empty-key".to_string(), KEY_ENV.to_string()),
+        ("recovery-key".to_string(), RECOVERY_KEY_ENV.to_string()),
+    ];
+    let (consumed, attempts) = refill_public_chain(
+        "chat",
+        false,
+        refill_round_wire(false, "REFILL_FALLBACK"),
+        vec![
+            empty_attempt_body,
+            refill_round_wire(false, "AFTER_RECOVERY"),
+        ],
+        auth_entries,
+        None,
+    )
+    .await;
+    assert!(
+        attempts >= 3,
+        "empty recovery, governed success and refill must all execute: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "recovered refill chain must complete: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("AFTER_RECOVERY"),
+        "recovered business text must reach the client: {consumed:?}"
+    );
+    assert!(
+        !consumed.body.contains("resp_empty"),
+        "empty provider body must not leak: {consumed:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(RECOVERY_KEY_ENV);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: Relay and Direct share the same policy and preserve both
+/// rounds. SSE emits one completed event and no error event.
+#[tokio::test]
+async fn refill_direct_relay_content_parity_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["chat", "direct"] {
+        for stream in [false, true] {
+            let (consumed, attempts) = refill_public_chain(
+                process,
+                stream,
+                source_summary_wire(stream, "PARITY_STOP"),
+                vec![
+                    refill_round_wire(stream, "PARITY_FIRST"),
+                    refill_round_wire(stream, "PARITY_SECOND"),
+                ],
+                Vec::new(),
+                None,
+            )
+            .await;
+            assert_eq!(
+                attempts, 2,
+                "{process}/{stream}: both paths must stop after one default refill: {consumed:?}"
+            );
+            assert!(
+                consumed.transport_error.is_none(),
+                "{process}/{stream}: parity chain must deliver normally: {consumed:?}"
+            );
+            assert!(
+                consumed.body.contains("PARITY_FIRST") && consumed.body.contains("PARITY_SECOND"),
+                "{process}/{stream}: both round texts must survive: {consumed:?}"
+            );
+            assert_no_error_payload(&consumed.body);
+            if stream {
+                let payloads = events(&consumed.body);
+                assert_eq!(
+                    payloads
+                        .iter()
+                        .filter(|event| event["type"] == "response.completed")
+                        .count(),
+                    1,
+                    "{process}: exactly one completed event: {consumed:?}"
+                );
+                assert!(
+                    !payloads.iter().any(|event| event["type"] == "error"),
+                    "{process}: no error event may reach the client: {consumed:?}"
+                );
+            }
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 #[tokio::test]
 async fn issuee63d2f2_review_signed_gemini_thought_is_not_a_result() {
     let _guard = TEST_LOCK.lock().await;
@@ -3815,7 +4166,6 @@ async fn consume_response(result: Result<reqwest::Response, reqwest::Error>) -> 
     }
 }
 
-#[derive(Default)]
 struct EntryOptions {
     memory_project_root: Option<std::path::PathBuf>,
     health_enabled: bool,
@@ -3827,6 +4177,31 @@ struct EntryOptions {
     wire_model: Option<String>,
     live_forward: Option<LiveForward>,
     two_provider_route: bool,
+    /// Test-only injection of the typed Chat Process refill limit.
+    ///
+    /// The harness default pins `Some(0)` so a test whose subject is not
+    /// refill keeps single-attempt accounting. Pass `None` to run the compiled
+    /// policy (`max_consecutive_refills = 1`), which is the real default; pass
+    /// `Some(n)` to pin a different typed limit.
+    refill_max: Option<u32>,
+}
+
+impl Default for EntryOptions {
+    fn default() -> Self {
+        Self {
+            memory_project_root: None,
+            health_enabled: false,
+            mixed: None,
+            attempt_bodies: Vec::new(),
+            auth_entries: Vec::new(),
+            pin_key: None,
+            capture_headers: false,
+            wire_model: None,
+            live_forward: None,
+            two_provider_route: false,
+            refill_max: Some(0),
+        }
+    }
 }
 
 async fn start_entry(
@@ -3936,7 +4311,11 @@ async fn start_entry_configured(
         wire_model,
         live_forward,
         two_provider_route,
+        refill_max,
     } = options;
+    // Apply the typed refill policy for this entry. `None` clears the injection
+    // so the compiled `internal.toml` value is the only active source.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(refill_max);
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("public regression requires loopback sockets");
@@ -9023,5 +9402,188 @@ async fn responses_direct_unharvestable_tool_markup_exhaustion_json_and_sse() {
         stop_entry(handle, shutdown).await;
     }
     std::env::remove_var(RECOVERY_KEY_ENV);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// One controlled upstream body per entry: the fallback repeats the same
+/// fixture so a refill request is still answered by a valid business response.
+async fn refill_public_attempt(
+    process: &str,
+    stream: bool,
+    wire: &str,
+    request: Value,
+) -> (ConsumedResponse, usize) {
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        process,
+        StatusCode::OK,
+        if stream {
+            "text/event-stream"
+        } else {
+            "application/json"
+        },
+        wire.to_string(),
+        EntryOptions {
+            attempt_bodies: vec![wire.to_string()],
+            // These tests assert the compiled default behavior.
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(client().post(&endpoint).json(&request).send().await).await;
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    stop_entry(handle, shutdown).await;
+    (consumed, attempts)
+}
+
+/// RED evidence for the bounded Chat Process refill: a complete governed
+/// response with non-empty business text, no tool call and no source summary
+/// must issue one automatic continuation (original plus refill).
+#[tokio::test]
+async fn refill_default_one_second_request_red() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for (process, stream) in [
+        ("chat", false),
+        ("chat", true),
+        ("direct", false),
+        ("direct", true),
+    ] {
+        let response = text_response("FIRST_BUSINESS");
+        let wire = if stream {
+            response_sse(&response)
+        } else {
+            response.to_string()
+        };
+        let (consumed, attempts) = refill_public_attempt(
+            process,
+            stream,
+            &wire,
+            json!({"model":"test.test","input":"refill trigger","stream":stream}),
+        )
+        .await;
+        assert_eq!(
+            attempts, 2,
+            "{process}/{stream}: unsummarized business text must issue exactly one refill: {consumed:?}"
+        );
+        assert!(
+            consumed.transport_error.is_none(),
+            "{process}/{stream}: refill chain must deliver normally: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains("FIRST_BUSINESS"),
+            "{process}/{stream}: first business text must reach the client: {consumed:?}"
+        );
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Green guard: an explicit non-empty source reasoning summary stops refill.
+#[tokio::test]
+async fn refill_summary_stops_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let response = json!({
+        "id":"resp_summary",
+        "object":"response",
+        "status":"completed",
+        "model":"wire-test",
+        "output":[
+            {
+                "id":"rs_summary",
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"SOURCE_SUMMARY"}]
+            },
+            {
+                "id":"msg_summary",
+                "type":"message",
+                "role":"assistant",
+                "status":"completed",
+                "content":[{"type":"output_text","text":"SUMMARY_BUSINESS","annotations":[]}]
+            }
+        ]
+    });
+    for process in ["chat", "direct"] {
+        let (consumed, attempts) = refill_public_attempt(
+            process,
+            false,
+            &response.to_string(),
+            json!({"model":"test.test","input":"refill summary guard","stream":false}),
+        )
+        .await;
+        assert_eq!(
+            attempts, 1,
+            "{process}: a non-empty source summary must stop refill: {consumed:?}"
+        );
+        assert!(
+            consumed.transport_error.is_none(),
+            "{process}: summary business must deliver normally: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains("SUMMARY_BUSINESS"),
+            "{process}: summary business text must reach the client: {consumed:?}"
+        );
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Green guard: a real tool call is a terminal business result, not refill.
+#[tokio::test]
+async fn refill_tool_call_stops_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let response = json!({
+        "id":"resp_tool",
+        "object":"response",
+        "status":"completed",
+        "model":"wire-test",
+        "output":[
+            {
+                "id":"fc_echo",
+                "type":"function_call",
+                "call_id":"call_1",
+                "name":"echo",
+                "arguments":"{}",
+                "status":"completed"
+            }
+        ]
+    });
+    for process in ["chat", "direct"] {
+        for stream in [false, true] {
+            let wire = if stream {
+                response_sse(&response)
+            } else {
+                response.to_string()
+            };
+            let (consumed, attempts) = refill_public_attempt(
+                process,
+                stream,
+                &wire,
+                json!({
+                    "model":"test.test",
+                    "input":"refill tool guard",
+                    "stream":stream,
+                    "tools":[{"type":"function","name":"echo","parameters":{"type":"object","properties":{}}}]
+                }),
+            )
+            .await;
+            assert_eq!(
+                attempts, 1,
+                "{process}/{stream}: a real tool call must stop refill: {consumed:?}"
+            );
+            assert!(
+                consumed.transport_error.is_none(),
+                "{process}/{stream}: tool-call business must deliver normally: {consumed:?}"
+            );
+            assert!(
+                consumed.body.contains("call_1") && consumed.body.contains("echo"),
+                "{process}/{stream}: tool identity must reach the client: {consumed:?}"
+            );
+            assert_no_error_payload(&consumed.body);
+        }
+    }
     std::env::remove_var(KEY_ENV);
 }

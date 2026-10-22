@@ -73,6 +73,10 @@ pub enum V3HubTargetResolution {
 pub enum V3HubInvocationSource {
     Client,
     ServertoolFollowup,
+    /// A Runtime-launched bounded Chat Process refill execution. The original
+    /// client execution stays `Client`; only an actually launched continuation
+    /// carries this typed origin.
+    Refill,
     DryRun,
 }
 
@@ -136,6 +140,15 @@ pub enum V3HubResponseTerminality {
 pub enum V3HubServertoolResponseAction {
     None,
     FollowupRequired,
+}
+
+/// Chat Process per-complete-execution outcome for bounded automatic refill.
+/// Deliver ends the automatic chain; RequestRefill asks Runtime to launch one
+/// more normal request-mainline execution when the request-local budget allows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3ChatProcessRefillDisposition {
+    Deliver,
+    RequestRefill,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

@@ -2,6 +2,70 @@ use crate::hub_v1::{
     V3ServerToolCenter, V3ServerToolCenterKey, V3ServerToolInstanceState, V3ServerToolName,
 };
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
+
+/// Facts the Direct execution hands to the bounded refill decision.
+///
+/// The tool-call list comes from the single shared structural extractor in the
+/// Chat Process owner. `has_source_summary` is captured from the raw provider
+/// attempt (JSON snapshot or raw SSE frames) before any RCC synthesis.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct V3ResponsesDirectRefillFacts {
+    pub(crate) tool_calls: Vec<crate::hub_v1::V3HubResponseToolCall>,
+    pub(crate) has_source_summary: bool,
+    pub(crate) response_completed: bool,
+}
+
+/// Internal per-execution signal used by the Direct bounded refill loop.
+///
+/// Mirrors the Relay refill signal: it carries only the Chat Process
+/// disposition and is never projected into a business payload. The Direct
+/// output struct stays unchanged so its many construction sites keep working.
+#[derive(Clone, Default)]
+pub(crate) struct V3ResponsesDirectRefillSignal {
+    value: std::sync::Arc<AtomicU8>,
+}
+
+impl V3ResponsesDirectRefillSignal {
+    const NONE: u8 = 0;
+    const DELIVER: u8 = 1;
+    const REQUEST_REFILL: u8 = 2;
+
+    pub(crate) fn set(&self, disposition: crate::hub_v1::V3ChatProcessRefillDisposition) {
+        let value = match disposition {
+            crate::hub_v1::V3ChatProcessRefillDisposition::Deliver => Self::DELIVER,
+            crate::hub_v1::V3ChatProcessRefillDisposition::RequestRefill => Self::REQUEST_REFILL,
+        };
+        self.value.store(value, Ordering::Release);
+    }
+
+    pub(crate) fn take(&self) -> Option<crate::hub_v1::V3ChatProcessRefillDisposition> {
+        match self.value.swap(Self::NONE, Ordering::AcqRel) {
+            Self::DELIVER => Some(crate::hub_v1::V3ChatProcessRefillDisposition::Deliver),
+            Self::REQUEST_REFILL => {
+                Some(crate::hub_v1::V3ChatProcessRefillDisposition::RequestRefill)
+            }
+            _ => None,
+        }
+    }
+
+    /// Publish the one shared disposition for this Direct execution.
+    pub(crate) fn publish(
+        &self,
+        facts: &V3ResponsesDirectRefillFacts,
+        refill_used: u32,
+    ) -> crate::hub_v1::V3ChatProcessRefillDisposition {
+        let disposition = crate::hub_v1::decide_v3_chat_process_refill(
+            &facts.tool_calls,
+            facts.has_source_summary,
+            facts.response_completed,
+            refill_used,
+            crate::hub_v1::v3_chat_process_refill_max_consecutive(),
+        );
+        self.set(disposition);
+        disposition
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ResponsesDirectServerToolScope {
@@ -285,8 +349,7 @@ impl V3ResponsesDirectRuntimeCoreState {
         self.initial_expanded = Some(plan.expanded.clone());
         self.initial_request_local_excluded_candidates =
             plan.request_local_excluded_candidates.clone();
-        self.initial_request_local_busy_candidates =
-            plan.request_local_busy_candidates.clone();
+        self.initial_request_local_busy_candidates = plan.request_local_busy_candidates.clone();
         self.initial_route_policy_scope = plan._route_policy_scope.clone();
         self.initial_route_policy_pending = plan._route_policy_pending.clone();
         self.initial_plan_trace = Some(plan.routing_trace_segment());
