@@ -1652,18 +1652,65 @@ where
                             }
                         }
                         Some(Err(reason)) => {
-                            break Some(V3RelayAttemptCollectFailure::ProviderResponseBody(reason))
+                            // Governance interception is a control-plane decision,
+                            // not a provider body failure; keep it on its own lane.
+                            if reason.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
+                                break Some(V3RelayAttemptCollectFailure::ProviderResponseBody(
+                                    reason,
+                                ));
+                            }
+                            // A projected stream that yielded partial business
+                            // content and then failed before its semantic terminal
+                            // is a truncated provider body, not a local codec
+                            // failure. Keep the provider-transport class so the
+                            // exact identity receives its declared health effect;
+                            // local governance and client-disconnect lanes stay
+                            // on the response-body lane above.
+                            let truncated_body = match (
+                                stream_observation.has_provider_business_content(),
+                                stream_observation.has_semantic_terminal(),
+                            ) {
+                                (Ok(true), Ok(false)) => true,
+                                (Ok(_), Ok(_)) => false,
+                                (Err(error), _) | (_, Err(error)) => {
+                                    break Some(V3RelayAttemptCollectFailure::Observation(error))
+                                }
+                            };
+                            break Some(if truncated_body {
+                                V3RelayAttemptCollectFailure::ProviderTransport(reason)
+                            } else {
+                                V3RelayAttemptCollectFailure::ProviderResponseBody(reason)
+                            });
                         }
                         None => {
                             break match stream_observation.has_provider_business_content() {
-                                Ok(true) => None,
+                                Ok(true) => {
+                                    match stream_observation.has_semantic_terminal() {
+                                        Ok(true) => None,
+                                        // A truncated HTTP 200 stream that delivered
+                                        // partial content but never reached a semantic
+                                        // terminal is a provider transport failure, not
+                                        // a local payload-store error. It must enter the
+                                        // provider failure policy so the exact identity
+                                        // is cooled and a candidate can be reselected.
+                                        Ok(false) => {
+                                            Some(V3RelayAttemptCollectFailure::ProviderTransport(
+                                                "provider SSE stream ended before a semantic terminal"
+                                                    .to_string(),
+                                            ))
+                                        }
+                                        Err(error) => {
+                                            Some(V3RelayAttemptCollectFailure::Observation(error))
+                                        }
+                                    }
+                                }
                                 Ok(false) => {
                                     Some(V3RelayAttemptCollectFailure::EmptyProviderAttempt)
                                 }
                                 Err(error) => {
                                     Some(V3RelayAttemptCollectFailure::Observation(error))
                                 }
-                            }
+                            };
                         }
                     }
                 };
