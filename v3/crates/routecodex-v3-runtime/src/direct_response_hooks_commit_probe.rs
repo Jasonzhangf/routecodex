@@ -23,10 +23,13 @@
 //! not end with a marker prefix; a marker split across two provider frames is
 //! therefore never committed half-way.
 //!
-//! The same probe stays active after the commit. The collector stops
-//! projecting further frames when a marker appears, because a committed
-//! append-only channel cannot retract them, and holds a frame whose tail may
-//! still become a marker until the next observation resolves it.
+//! The same probe stays active after the commit, but only as a hold signal.
+//! The collector suspends projection while the newest text may still be
+//! governed, keeps the frames inside the attempt, and lets the registered
+//! complete-attempt owner decide at the terminal. The probe cannot know the
+//! owners' protected ranges (fenced and inline code, quoted text), so it must
+//! never end a committed transport by itself: that would truncate valid
+//! business text which merely contains a marker-like token.
 
 use serde_json::Value;
 
@@ -160,6 +163,12 @@ impl V3DirectPrefixCommitProbe {
         let Some(item) = item else {
             return;
         };
+        // The complete-attempt thinking owner also rewrites a top-level
+        // `output_text` output item, not only a message item.
+        if item.get("type").and_then(Value::as_str) == Some("output_text") {
+            self.observe_text(item.get("text"), TextCarrier::Complete);
+            return;
+        }
         // Reasoning and tool-call items are never text-governed, so only
         // assistant message carriers can move bytes between `output_text` and
         // synthesized reasoning.
@@ -198,17 +207,26 @@ impl V3DirectPrefixCommitProbe {
         // Append incremental text so a marker split across two provider frames
         // stays one string. A complete carrier repeats text the deltas already
         // delivered, so it replaces the tail instead of duplicating it.
+        let scan = match carrier {
+            TextCarrier::Incremental => {
+                // Scan the joined text before bounding it: a marker that
+                // straddles the junction is only visible while both halves are
+                // still adjacent, and the completing delta can be far longer
+                // than the tail window.
+                self.text_tail.push_str(text);
+                self.text_tail.clone()
+            }
+            TextCarrier::Complete => text.to_string(),
+        };
+        self.confirmed_marker |= contains_governed_marker(&self.markers, &scan);
         match carrier {
             TextCarrier::Incremental => {
-                self.text_tail.push_str(text);
-                self.text_tail = tail_chars(&self.text_tail).to_string();
+                self.text_tail = tail_chars(&scan).to_string();
             }
             TextCarrier::Complete => {
-                self.text_tail = tail_chars(text).to_string();
+                self.text_tail = tail_chars(&scan).to_string();
             }
         }
-        self.confirmed_marker |= contains_governed_marker(&self.markers, text);
-        self.confirmed_marker |= contains_governed_marker(&self.markers, &self.text_tail);
     }
 
     /// True only while the whole buffered prefix is governed business content:
@@ -219,10 +237,22 @@ impl V3DirectPrefixCommitProbe {
         self.visible_text && !self.confirmed_marker && !self.trailing_marker_prefix()
     }
 
-    /// A complete governed marker was observed. A committed channel cannot
-    /// retract the frames that carry it, so the attempt must stop projecting.
+    /// A complete governed marker was observed. Production code uses
+    /// [`Self::governed_text_pending`] because only the registered owner may
+    /// decide a committed tail; the probe's own tests check this state directly.
+    #[cfg(test)]
     pub(crate) fn confirmed_governed_marker(&self) -> bool {
         self.confirmed_marker
+    }
+
+    /// The committed prefix contains, or may still end with, text that a
+    /// text-governance owner could rewrite. A committed channel must not project
+    /// new frames while this holds: only the registered owner knows its
+    /// protected ranges (fenced/inline code, quoted text), so it alone decides
+    /// the complete attempt after the terminal, and nothing the owner could
+    /// still remove reaches the client prematurely.
+    pub(crate) fn governed_text_pending(&self) -> bool {
+        self.confirmed_marker || self.trailing_marker_prefix()
     }
 
     /// The observed text ends with a proper prefix of a governed marker, or with
@@ -332,6 +362,46 @@ mod tests {
             probe.confirmed_governed_marker(),
             "the split marker must be seen in the accumulated text"
         );
+        assert!(!probe.is_committable());
+    }
+
+    /// A marker split across deltas is only visible while both halves are still
+    /// adjacent, so the joined text is scanned before the tail is bounded. A
+    /// completing delta far longer than the tail window must not hide it.
+    #[test]
+    fn marker_split_across_deltas_with_a_long_completing_delta_is_confirmed() {
+        let mut probe = probe();
+        probe.observe_event(&delta("visible "));
+        assert!(probe.is_committable());
+        probe.observe_event(&delta("<thin"));
+        assert!(!probe.is_committable());
+        let body = "x".repeat(200);
+        let completing = format!("king>{body}");
+        probe.observe_event(&delta(&completing));
+        assert!(
+            probe.confirmed_governed_marker(),
+            "the joined text must reveal the split marker"
+        );
+        assert!(!probe.is_committable());
+    }
+
+    /// A top-level `output_text` output item is rewritten by the thinking owner,
+    /// so its snapshot text also governs the attempt.
+    #[test]
+    fn output_text_item_text_is_governed() {
+        let mut probe = probe();
+        probe.observe_event(&delta("clean text"));
+        assert!(probe.is_committable());
+        probe.observe_event(&json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {
+                "type": "output_text",
+                "id": "m1",
+                "text": "clean text <thinking>secret"
+            }
+        }));
+        assert!(probe.confirmed_governed_marker());
         assert!(!probe.is_committable());
     }
 

@@ -115,7 +115,8 @@ servertool 与 web_search 的内部尝试在请求级已可判定，保持全缓
 ## 9 失败语义
 
 - 首帧前失败：维持现状，typed error 进链，按候选策略重试或切换，按 P0 记录健康与冷却。
-- 首帧后失败：不切换 provider，不冷却其它 key，静默结束该请求的客户端传输（沿用已声明的
+- 首帧后失败：不切换 candidate、不重试、不冷却其它 key；被尝试的 `provider.model.key` 仍按 post-commit
+  provider stream failure 记录健康（与 Relay 提交后路径一致）。静默结束该请求的客户端传输（沿用已声明的
   `client_transport_break` 语义），由客户端重发请求。
 - 两种情况下客户端都收不到 provider 状态、错误码或错误载荷。
 
@@ -180,8 +181,11 @@ analysis/label 行。因此真实提交点由帧级内容证明（`V3DirectPrefi
   全缓冲路径逐字节相同。
 - 提交后 complete-attempt hook 仍然运行：`rewrite_complete_attempt_preserving_client_prefix` 要求所有已发帧
   字节不变，否则按无效尝试状态拒绝，不回写已发前缀。
-- 提交后出现治理标记（可能跨帧）：帧先挂起（尾部可能是标记前缀），确认标记后停止投影并以 typed 运行时错误
-  结束通道。已提交通道不可回退，因此宁可有界截断，也不把 hook 拥有的原文发给客户端。
+- 提交后探针只作为挂起信号：一旦观察到治理标记或最新文本以标记前缀结尾，`hold_client_flush()` 暂停投影，
+  后续帧继续留在 attempt 内；到 terminal 时由 registered owner 决定整段。owner 返回恒等（标记位于其保护范围，
+  例如代码块、行内代码、引号文本）时 `release_client_flush()` 原样续发；owner 改写且已发帧不变时采用改写后的
+  尾部。已发前缀永不被改写。
+- 探针不知道 owner 的保护范围，因此不得单独用探针结束已提交通道：那会把包含标记字样的合法业务文本截断。
 
 ### 13.3 服务端接线
 
@@ -195,15 +199,19 @@ analysis/label 行。因此真实提交点由帧级内容证明（`V3DirectPrefi
 - kernel 在 collector 返回错误时先查 `sink.is_committed()`；已提交则直接走
   `post_commit_client_transport_break_output`：typed 错误进 Error 链、`terminal_disposition = NoResponse`，
   不跑候选策略、不切换、不重试。
-- 提交后治理标记导致的 `direct_sse_post_commit_governance_break` 走同一条提交后失败语义。
-- 服务端把该 terminal 投影成 model transport break；通道层因已有已发帧而静默结束（clean EOF），
-  客户端看不到 provider 状态、错误码或错误载荷。
+- 已提交的 provider 失败仍是 provider-health 事件：kernel 按被尝试的 `provider.model.key` 记录 post-commit
+  provider stream failure 并冷却该身份（与 Relay 提交后路径一致），该记录不改变本请求的候选顺序。
+- 提交后治理标记导致的 `direct_sse_post_commit_governance_break` 只在一种情况下出现：owner 无法在不改写
+  已发帧的前提下投影尾部。它走同一条提交后失败语义。
+- 服务端把该 terminal 投影成 200 SSE 传输中断：通道层因已有已发帧而不发错误帧、不发 keepalive，也不写正常
+  分块结束符（`0\r\n\r\n`）；客户端因缺少 terminal 检测到截断并自行重试，看不到 provider 状态、错误码或
+  错误载荷。
 
 ### 13.5 已知残差
 
-- 提交后若 provider 才吐出字面治理标记（`<thinking>`、无声明即可删除的 DSML label），已发前缀无法回退。
-  路径选择有界截断：停止投影并以 typed 运行时错误结束，不泄露标记原文，也不做整段回写。未提交前缀内出现
-  标记时仍走全缓冲治理，两条路径字节一致。
-- 标记识别按 owner 给出的精确标记集合与匹配范围，普通 `<`/`>`（比较运算、代码、行内 label 字样）不算
-  未决标记，不会触发挂起或截断；只有独占一行的 `>` 会被挂起一帧。
+- 提交后若 provider 才吐出会被 owner 改写的字面治理标记（`<thinking>`、无声明即可删除的 DSML label），
+  collector 挂起尾部并交给 owner 在 terminal 决定：owner 能保留已发帧时采用改写后的尾部，不能时才有界截断
+  （typed 运行时错误结束通道，不泄露标记原文）。未提交前缀内出现标记时仍走全缓冲治理，两条路径字节一致。
+- 探针不知道 owner 的保护范围（代码块、行内代码、引号文本）。保护范围内的标记字样只让探针挂起尾部，
+  不会单独结束通道；owner 返回恒等时原样续发，合法响应不被截断。
 - P2（Relay 逐事件投影）与 P3（工具参数完整性闸）未实现：Relay 路径仍全缓冲，客户端窗口不变。

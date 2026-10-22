@@ -98,6 +98,32 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     )
     .await
 }
+/// A provider failure after the client commit cannot switch candidate or retry,
+/// but it is still a provider-health event. Record it for the exact attempted
+/// identity so a provider that breaks mid-stream cools down like it does on the
+/// Relay post-commit path. Returns a trace node when the bookkeeping itself
+/// fails, so the record attempt is never silently dropped.
+fn record_post_commit_direct_provider_failure(
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    failure_session_scope: &V3ProviderFailureSessionScope,
+    selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    source: &V3Error01SourceRaised,
+) -> Result<(), &'static str> {
+    if source.source_kind != V3ErrorSourceKind::ProviderFailure {
+        return Ok(());
+    }
+    provider_health
+        .record_post_commit_provider_stream_failure_from_source_for_interface(
+            failure_session_scope,
+            &selected.candidate.provider_id,
+            &selected.candidate.interface_id,
+            Some(&selected.candidate.auth_alias),
+            Some(&selected.candidate.model_id),
+            source,
+        )
+        .map_err(|_| "V3DirectPostCommitProviderHealthRecord")
+}
+
 async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     T: ResponsesTransport + ?Sized,
 >(
@@ -1739,6 +1765,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 .is_some_and(|sink| sink.is_committed())
                             {
                                 drop(provider_action_permit.take());
+                                if let Err(node) = record_post_commit_direct_provider_failure(
+                                    &provider_health,
+                                    &direct_failure_session_scope,
+                                    &policy.target,
+                                    &source,
+                                ) {
+                                    trace.push(node);
+                                }
                                 return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
                                     Ok(source),
                                     last_external_http.clone(),

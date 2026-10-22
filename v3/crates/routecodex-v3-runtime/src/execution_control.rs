@@ -85,6 +85,10 @@ pub(crate) enum V3AttemptStoreError {
     ResidenceDeadlineExceeded(String),
     LocalResourceExhausted(String),
     InvalidAttemptState(String),
+    /// The complete-attempt text governance must decide a committed tail, but
+    /// the registered owner refused to project it as business content. The
+    /// transport ends detectably without projecting further frames.
+    PostCommitGovernedTail(String),
 }
 
 impl fmt::Display for V3AttemptStoreError {
@@ -92,7 +96,8 @@ impl fmt::Display for V3AttemptStoreError {
         match self {
             Self::ResidenceDeadlineExceeded(message)
             | Self::LocalResourceExhausted(message)
-            | Self::InvalidAttemptState(message) => formatter.write_str(message),
+            | Self::InvalidAttemptState(message)
+            | Self::PostCommitGovernedTail(message) => formatter.write_str(message),
         }
     }
 }
@@ -554,6 +559,10 @@ pub(crate) struct V3CommittedClientSseBuilder {
     /// buffered, which is the only state that may run a whole-attempt rewrite.
     flushed_frames: usize,
     client_sink: Option<V3CommittedClientFrameSink>,
+    /// Suspends live projection while the newest committed text may still be
+    /// governed. `push` keeps appending to `frames` but does not hand them to
+    /// the sink, so the complete-attempt hook can still decide them.
+    flush_held: bool,
 }
 
 /// Runtime-owned sink for client frames that already crossed the commit point.
@@ -612,6 +621,7 @@ impl V3CommittedClientSseBuilder {
             reservation: V3AttemptReservation { budget, bytes: 0 },
             flushed_frames: 0,
             client_sink: None,
+            flush_held: false,
         })
     }
 
@@ -654,11 +664,33 @@ impl V3CommittedClientSseBuilder {
         self.flush_client_frames();
     }
 
+    /// Flushed frame count, used by the builder's own tests to prove that a
+    /// hold keeps frames buffered while projection is suspended.
+    #[cfg(test)]
     pub(crate) fn client_frames_flushed(&self) -> usize {
         self.flushed_frames
     }
 
+    /// Stop projecting new frames while provider text may still be governed.
+    /// The frames keep accumulating in the attempt, so the registered
+    /// complete-attempt hook still sees and may rewrite them. Nothing that was
+    /// already flushed is affected.
+    pub(crate) fn hold_client_flush(&mut self) {
+        self.flush_held = true;
+    }
+
+    /// Resume projection. The registered hook (or the attempt's own decision not
+    /// to run one) has already disposed of the held frames, so they are handed
+    /// to the sink in order.
+    pub(crate) fn release_client_flush(&mut self) {
+        self.flush_held = false;
+        self.flush_client_frames();
+    }
+
     pub(crate) fn flush_client_frames(&mut self) {
+        if self.flush_held {
+            return;
+        }
         let Some(sink) = self.client_sink.as_ref() else {
             return;
         };
@@ -749,8 +781,9 @@ impl V3CommittedClientSseBuilder {
     /// already-flushed client frame byte-identical. Callers use it to keep the
     /// complete-attempt text governance on the first-frame-commit path instead
     /// of skipping it. A rewrite that would change a flushed frame cannot be
-    /// retracted, so it is rejected as an invalid attempt state and the caller
-    /// terminates the committed transport without projecting new frames.
+    /// retracted, so it is rejected with [`V3AttemptStoreError::PostCommitGovernedTail`]
+    /// and the caller terminates the committed transport without projecting
+    /// new frames.
     pub(crate) fn rewrite_complete_attempt_preserving_client_prefix<E>(
         &mut self,
         rewrite: impl FnOnce(&[Vec<u8>]) -> Result<Option<(Vec<Vec<u8>>, usize)>, E>,
@@ -764,7 +797,7 @@ impl V3CommittedClientSseBuilder {
             return Ok(());
         };
         if frames.len() < flushed || frames[..flushed] != flushed_frames[..] {
-            return Err(V3AttemptStoreError::InvalidAttemptState(format!(
+            return Err(V3AttemptStoreError::PostCommitGovernedTail(format!(
                 "whole-attempt response hook would rewrite {flushed} client frames that were already flushed"
             ))
             .into());

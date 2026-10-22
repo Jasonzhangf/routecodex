@@ -344,10 +344,6 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
     let mut client_committed = false;
     let mut commit_probe =
         crate::direct_response_hooks::V3DirectPrefixCommitProbe::new(provider_protocol);
-    // Frames whose newest text may still complete a governed marker. They stay
-    // out of the append-only client channel until the next observation proves
-    // the text is plain business content.
-    let mut held_client_frames: Vec<Vec<u8>> = Vec::new();
     loop {
         let next = match tokio::time::timeout_at(deadline, stream.next()).await {
             Ok(next) => next,
@@ -394,33 +390,19 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
         for value in parse_direct_sse_json_frames(&frame) {
             commit_probe.observe_event(&value);
         }
-        let terminal_frame = matches!(
-            disposition,
-            V3SseFrameDisposition::SemanticTerminal | V3SseFrameDisposition::LegalCloseout
-        );
         if client_committed {
-            // A committed channel is append-only. A governed marker that
-            // arrives after the commit can no longer be rewritten in place, and
-            // flushing it would leak provider text that the registered hook
-            // owns. End the transport instead of projecting it.
-            if commit_probe.confirmed_governed_marker() {
-                return Err(direct_sse_post_commit_governance_break());
-            }
-            // A trailing marker prefix is unresolved: hold the frame until the
-            // next provider frame decides whether it becomes a marker.
-            if !terminal_frame && commit_probe.trailing_marker_prefix() {
-                held_client_frames.push(frame);
-                continue;
-            }
-            for held in std::mem::take(&mut held_client_frames) {
-                committed.push(held).map_err(|error| {
-                    crate::shared::direct_plain_error(
-                        V3ErrorSourceKind::RuntimeFailure,
-                        "V3ExecutionAttemptPayloadStore",
-                        "direct_sse_attempt_store_rejected",
-                        error.to_string(),
-                    )
-                })?;
+            // A committed channel is append-only, so provider text that a
+            // text-governance owner could still rewrite must not reach it.
+            // Only the registered owner knows its protected ranges (fenced and
+            // inline code, quoted text), so the collector projects nothing
+            // while the probe reports possible governed text and lets the
+            // owner decide the complete attempt at the terminal. Protected
+            // business text is then replayed unchanged instead of truncating a
+            // valid response, and a real marker is rewritten before projection.
+            if commit_probe.governed_text_pending() {
+                committed.hold_client_flush();
+            } else {
+                committed.release_client_flush();
             }
         }
         committed.push(frame).map_err(|error| {
@@ -486,6 +468,9 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                 if !has_business_content {
                     return Err(direct_sse_empty_attempt_failure());
                 }
+                // The owner disposed of every buffered frame, so the projection
+                // may resume only now, on the path that actually seals.
+                committed.release_client_flush();
                 let sealed = committed.seal_after_validated_terminal();
                 let sealed = sealed.map_err(|error| {
                     crate::shared::direct_plain_error(
@@ -539,6 +524,9 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
         if !has_business_content {
             return Err(direct_sse_empty_attempt_failure());
         }
+        // The owner disposed of every buffered frame, so the projection may
+        // resume only now, on the path that actually seals.
+        committed.release_client_flush();
         let sealed = committed.seal_after_validated_terminal();
         let sealed = sealed.map_err(|error| {
             crate::shared::direct_plain_error(
@@ -598,13 +586,16 @@ fn apply_complete_response_hook_preserving_client_prefix(
                 crate::hooks::V3DirectCompleteResponseError::Normalization(failure) => {
                     crate::hooks::direct_complete_response_hook_failure_source(failure)
                 }
-                crate::hooks::V3DirectCompleteResponseError::Store(error) => {
-                    direct_attempt_store_error_source(
+                crate::hooks::V3DirectCompleteResponseError::Store(error) => match error {
+                    crate::nodes::V3AttemptStoreError::PostCommitGovernedTail(message) => {
+                        direct_sse_post_commit_governance_break(message)
+                    }
+                    error => direct_attempt_store_error_source(
                         error,
                         "V3DirectResp14ProviderProjectionPrepared",
                         "direct_response_hook_budget",
-                    )
-                }
+                    ),
+                },
             })?;
     }
     Ok(())
@@ -668,16 +659,17 @@ fn direct_sse_empty_attempt_failure() -> crate::shared::V3DirectSourceError {
     )
 }
 
-/// A governed text marker appeared after the client channel was committed. The
-/// committed prefix cannot be retracted and the provider text it belongs to must
-/// not reach the client, so the transport ends here and the runtime error chain
-/// records the cause.
-fn direct_sse_post_commit_governance_break() -> crate::shared::V3DirectSourceError {
+/// A governed text tail arrived after the client channel was committed and the
+/// registered complete-attempt owner could not project it without rewriting a
+/// frame that was already delivered. The committed prefix cannot be retracted
+/// and the provider text it belongs to must not reach the client, so the
+/// transport ends here and the runtime error chain records the cause.
+fn direct_sse_post_commit_governance_break(detail: String) -> crate::shared::V3DirectSourceError {
     crate::shared::direct_plain_error(
         V3ErrorSourceKind::RuntimeFailure,
         "V3ExecutionAttemptPayloadStore",
         "direct_sse_post_commit_governance_break",
-        "governed provider text arrived after the client channel was committed",
+        format!("governed provider text arrived after the client channel was committed: {detail}"),
     )
 }
 

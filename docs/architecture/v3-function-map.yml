@@ -5412,6 +5412,7 @@ features:
   owner_crate: routecodex-v3-runtime
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks_commit_probe.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
@@ -5426,6 +5427,7 @@ features:
   - accept_v3_client_sse_transport
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks_commit_probe.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs

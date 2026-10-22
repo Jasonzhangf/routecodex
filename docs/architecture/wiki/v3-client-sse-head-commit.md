@@ -95,6 +95,14 @@ payload.
   terminal remainder replays only the undelivered tail. The Direct content probe
   certifies that frame: it requires visible output_text and no governed text
   marker, so a reasoning-only or whitespace-only prefix never commits.
+- After the commit the probe is only a hold signal: while the newest text may
+  still be governed, the collector suspends projection, keeps those frames in the
+  attempt, and the registered complete-attempt owner decides the whole attempt at
+  the terminal. Protected business text (fenced or inline code, quoted text) is
+  delivered unchanged and governed text is never projected.
+- A post-commit provider failure records provider health for the attempted
+  identity and ends the transport as a 200 SSE body break: no error frame, no
+  keepalive, and no normal chunked terminator.
 - An outcome that arrives inside one keepalive interval returns the exact runtime
   status, headers, and body. The race adds no framing of its own.
 - A client never receives a provider error payload on the committed channel. The

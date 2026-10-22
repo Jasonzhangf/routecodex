@@ -1430,6 +1430,41 @@ async fn first_frame_commit_marker_after_commit_breaks_visibly_without_leaking()
     );
 }
 
+/// A marker-like token inside a protected range is business text. The probe
+/// cannot know that (only the registered owner knows fenced and inline code),
+/// so the committed channel must hold the tail and let the owner decide: the
+/// owner protects the fenced text, the tail is replayed unchanged, and the
+/// response is not truncated into a transport break.
+#[tokio::test]
+async fn first_frame_commit_protected_marker_text_is_delivered_after_commit() {
+    let deltas = ["example:\n```\n", "<thinking>literal</thinking>\n```\ndone"];
+    let full = deltas.concat();
+    let chunks = responses_split_delta_sequence(&deltas, &full);
+    let run = run_early_commit_attempt(chunks.clone()).await;
+    assert!(
+        run.committed,
+        "the clean first delta must commit so the tail is decided post-commit"
+    );
+    assert!(
+        !run.failed,
+        "protected business text must not truncate a committed response"
+    );
+    let streamed = String::from_utf8(run.frames.concat()).unwrap();
+    assert!(
+        streamed.contains("<thinking>literal</thinking>"),
+        "protected fenced text must reach the client unchanged: {streamed}"
+    );
+    assert!(
+        streamed.contains("done"),
+        "the tail after the protected range must reach the client: {streamed}"
+    );
+    let buffered = buffered_with_hooks(chunks).await;
+    assert_eq!(
+        run.frames, buffered,
+        "the committed stream must carry exactly the buffered bytes"
+    );
+}
+
 /// A governed marker split across provider frames is one marker in the
 /// streamed text even though neither frame contains it. The commit must stay
 /// closed, otherwise the client receives raw reasoning text.
