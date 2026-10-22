@@ -359,7 +359,7 @@ impl NamespaceToolIdentityRegistry {
             };
             if protocol == "openai-chat" {
                 openai_chat_namespace_wire_name(&name)
-            } else if protocol == "anthropic" {
+            } else if protocol == "anthropic" && identity.kind == ToolKind::Custom {
                 truncate_wire_name(&anthropic_wire_name(&name), limit)
             } else {
                 name
@@ -378,7 +378,9 @@ impl NamespaceToolIdentityRegistry {
             } else {
                 let head = match protocol {
                     "openai-chat" => openai_chat_namespace_wire_name(&base),
-                    "anthropic" => truncate_wire_name(&anthropic_wire_name(&base), limit),
+                    "anthropic" if identity.kind == ToolKind::Custom => {
+                        truncate_wire_name(&anthropic_wire_name(&base), limit)
+                    }
                     _ => base.clone(),
                 };
                 let mut index = 1;
