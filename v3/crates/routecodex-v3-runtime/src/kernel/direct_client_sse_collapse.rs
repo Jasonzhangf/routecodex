@@ -160,10 +160,10 @@ mod tests {
     async fn collapse_failure_executes_error01_sdk_and_preserves_typed_cause() {
         use crate::operation_runner::err01_execution_count_for_test;
 
-        // Malformed chunk: the reducer rejects an unknown `finish_reason` value,
+        // Malformed chunk: choices is not an array and has no usable choice,
         // so the reduce path fails inside the collapse owner.
         let bad_reduce = sealed_replay(&[
-            "data: {\"id\":\"chatcmpl_bad\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"x\"},\"finish_reason\":\"not_a_real_reason\"}]}\n\n",
+            "data: {\"id\":\"chatcmpl_bad\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"m\",\"choices\":42}\n\n",
             "data: [DONE]\n\n",
         ]);
         let before = err01_execution_count_for_test();

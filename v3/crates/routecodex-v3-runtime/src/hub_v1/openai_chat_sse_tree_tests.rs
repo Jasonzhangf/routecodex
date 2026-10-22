@@ -678,17 +678,19 @@ fn chat_reducer_keeps_tool_call_when_terminal_delta_also_has_empty_content() {
 }
 
 #[test]
-fn chat_reducer_rejects_unknown_finish_reason() {
-    let error = V3OpenAiChatSseReducerState::default()
+fn chat_reducer_preserves_unknown_finish_reason() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
         .apply_chunk(&json!({
             "object":"chat.completion.chunk",
             "choices":[{"index":0,"delta":{},"finish_reason":"future_reason"}]
         }))
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        V3OpenAiChatSseTreeError::UnknownFinishReason { .. }
-    ));
+        .unwrap();
+    assert_eq!(reducer.terminal, Some(V3OpenAiChatSseTerminalState::Opaque));
+    assert_eq!(
+        reducer.materialize_completion().unwrap()["choices"][0]["finish_reason"],
+        "future_reason"
+    );
 }
 
 #[test]
@@ -733,6 +735,28 @@ fn chat_reducer_treats_empty_sse_finish_reason_as_nonterminal() {
         reducer.choices[0].to_normalized_value()["finish_reason"],
         ""
     );
+    reducer
+        .apply_chunk(&json!({
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{},"finish_reason":"stop"}]
+        }))
+        .unwrap();
+    assert_eq!(
+        reducer.materialize_completion().unwrap()["choices"][0]["finish_reason"],
+        "stop"
+    );
+}
+
+#[test]
+fn chat_reducer_treats_blank_sse_finish_reason_as_nonterminal() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"  "}]
+        }))
+        .unwrap();
+    assert!(reducer.terminal.is_none());
     reducer
         .apply_chunk(&json!({
             "object":"chat.completion.chunk",

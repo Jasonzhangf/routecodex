@@ -6,10 +6,9 @@ use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
-    provider_runtime_failure_stage, resolve_v3_relay_target_outcome_with_admission_rescue,
-    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderAdmittedTargetResolution, V3RelayProviderFailurePolicyContext,
+    provider_runtime_failure_stage, run_v3_relay_provider_failure_policy,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
     V3RelayProviderTargetResolutionInput, V3RuntimeProviderAdmission,
 };
@@ -501,6 +500,8 @@ pub(crate) fn read_v3_runtime_finish_reason(value: &Value) -> Option<String> {
         .or_else(|| read_v3_runtime_string_path(value, &["finishReason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["stop_reason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["stopReason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["delta", "stop_reason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["message", "stop_reason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["response", "finish_reason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["response", "finishReason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["response", "stop_reason"]))
@@ -524,18 +525,12 @@ fn infer_v3_runtime_response_status_from_provider_event_type(
 }
 
 fn infer_v3_runtime_finish_reason_from_provider_event_json(
-    event_type: Option<&str>,
+    _event_type: Option<&str>,
     response_status: Option<&str>,
 ) -> Option<String> {
     match response_status.map(str::trim) {
         Some(status) if status.eq_ignore_ascii_case("requires_action") => {
             Some("tool_calls".to_string())
-        }
-        Some(status)
-            if status.eq_ignore_ascii_case("completed")
-                && matches!(event_type, Some("response.completed")) =>
-        {
-            Some("stop".to_string())
         }
         _ => None,
     }

@@ -283,6 +283,40 @@ for (const fixture of [
   }
 }
 
+{
+  const root = fixtureRoot('routecodex-v3-provider-cooldown-single-owner-');
+  const sourceDir = join(root, 'src');
+  try {
+    mkdirSync(sourceDir);
+    writeFileSync(
+      join(root, 'Cargo.toml'),
+      `[package]\nname = "v3-provider-cooldown-single-owner-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-provider-responses = { path = "${resolve(v3Root, 'crates/routecodex-v3-provider-responses')}" }\n\n[patch.crates-io]\nhyper = { path = ${JSON.stringify(resolve(v3Root, 'vendor/hyper'))} }\n\n[workspace]\n`,
+    );
+    writeFileSync(
+      join(sourceDir, 'main.rs'),
+      'use routecodex_v3_provider_responses::V3ProviderCooldownCoordinator;\nfn main() {\n    let mut coordinator = V3ProviderCooldownCoordinator::new("x".into());\n    let _ = coordinator.availability("p", None, None, 0);\n}\n',
+    );
+    const result = spawnSync(
+      'cargo',
+      ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, CARGO_TARGET_DIR: compileFailTarget },
+      },
+    );
+    const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+    if (result.status === 0) {
+      fail('Provider cooldown coordinator availability fixture unexpectedly compiled');
+    } else if (!/no method named .availability|E0599/.test(diagnostic)) {
+      fail(
+        `Provider cooldown coordinator availability fixture failed for wrong reason: ${diagnostic.slice(-600)}`,
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 if (failures.length) {
   console.error('[test:v3-compile-fail] failed');
   for (const failure of failures) console.error('- ' + failure);

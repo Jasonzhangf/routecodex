@@ -19,7 +19,6 @@ pub mod wire;
 pub use error::{V3ProviderError, V3ProviderHttpFailure, V3ProviderInternalTransportLane};
 pub use global_cooldown::{
     V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass, V3ProviderCooldownKey,
-    V3ProviderCooldownObservation, V3ProviderCooldownProbePermit,
 };
 pub use health::{
     V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,

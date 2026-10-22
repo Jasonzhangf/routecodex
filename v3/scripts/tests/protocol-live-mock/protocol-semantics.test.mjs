@@ -268,6 +268,13 @@ test('raw [DONE] alone never proves a semantic terminal', () => {
   assert.equal(parseClientBody('openai_chat', text, '').kind, 'sse');
 });
 
+test('null Chat finish_reason is never a semantic terminal even with content, JSON completion or DONE', () => {
+  const body = { object: 'chat.completion', choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: null }] };
+  assert.equal(findSemanticTerminal('openai_chat', body, JSON.stringify(body)), false);
+  const text = frame('chunk', { choices: [{ delta: { content: 'ok' }, finish_reason: null }] }) + frame('message', '[DONE]');
+  assert.equal(findSemanticTerminal('openai_chat', null, text), false);
+});
+
 test('unknown protocol and unknown content type have no semantic fallback', () => {
   assert.equal(findSemanticTerminal('unknown_protocol', { status: 'completed' }, '{"status":"completed"}'), false);
   assert.equal(parseClientBody('anthropic', '{"stop_reason":"end_turn"}', 'application/x-something').kind, 'unknown');

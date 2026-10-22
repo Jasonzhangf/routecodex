@@ -86,6 +86,7 @@ pub(crate) fn record_v3_webui_error_projection(
         request_id: request_id.to_string(),
         endpoint: endpoint.to_string(),
         entry_protocol: Some(entry_protocol.to_string()),
+        execution_mode: typed.execution_mode.map(str::to_string),
         provider_status: Some(status),
         response_status: Some("error".to_string()),
         finish_reason: Some("error".to_string()),
@@ -331,6 +332,7 @@ pub(crate) struct V3ObsHealthAction {
 /// caller's lane did not expose that fact; the projection never re-derives it.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct V3ObsErrorProjection<'a> {
+    pub execution_mode: Option<&'a str>,
     /// `true` when the caller's lane holds the typed `V3Error06ClientProjected`.
     /// `false` records an explicit "not exposed on this lane" marker instead of
     /// silently writing an empty chain.

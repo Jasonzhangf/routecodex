@@ -30,7 +30,7 @@
   "expected_client": {
     "transport": "complete",
     "status": 200,
-    "body_must": {"text": "ok", "usage.prompt_tokens": 7},
+    "body_must": {"text": "ok", "finish_reason": "stop", "usage.prompt_tokens": 7},
     "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
     "semantic_terminal_required": true
   },

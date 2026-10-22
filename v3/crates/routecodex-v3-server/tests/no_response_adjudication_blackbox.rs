@@ -41,6 +41,380 @@ fn issue0ff6700_blank_final() -> Value {
     response
 }
 
+fn e63_review_wire(kind: &str, value: &Value, stream: bool) -> String {
+    if !stream {
+        return value.to_string();
+    }
+    match kind {
+        "responses" => response_sse(value),
+        "gemini" => format!("data: {value}\n\n"),
+        "openai_chat" => format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({"id":"review-chat","object":"chat.completion.chunk","model":"wire-test","choices":[{"index":0,"delta":value["choices"][0]["message"],"finish_reason":null}]}),
+            json!({"id":"review-chat","object":"chat.completion.chunk","model":"wire-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]})
+        ),
+        "anthropic" => {
+            let text = &value["content"][0]["text"];
+            let frames = [
+                json!({"type":"message_start","message":{"id":"review-message","type":"message","role":"assistant","model":"wire-test","content":[]}}),
+                json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+                json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}}),
+                json!({"type":"content_block_stop","index":0}),
+                json!({"type":"message_delta","delta":{"stop_reason":"end_turn"}}),
+                json!({"type":"message_stop"}),
+            ];
+            frames
+                .iter()
+                .map(|event| {
+                    format!(
+                        "event: {}\ndata: {event}\n\n",
+                        event["type"].as_str().unwrap()
+                    )
+                })
+                .collect()
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum E63ReviewOutcome {
+    Accept,
+    Recover,
+    Exhaust,
+}
+
+async fn e63_review_attempt(
+    kind: &str,
+    process: &str,
+    native_entry: bool,
+    stream: bool,
+    first: Value,
+    recovered: Value,
+    expected: E63ReviewOutcome,
+) -> String {
+    let recovery = matches!(expected, E63ReviewOutcome::Recover);
+    let mut bodies = vec![e63_review_wire(kind, &first, stream)];
+    if recovery {
+        bodies.push(e63_review_wire(kind, &recovered, stream));
+    }
+    let auth_entries = if recovery {
+        vec![
+            ("first".into(), KEY_ENV.into()),
+            ("second".into(), RECOVERY_KEY_ENV.into()),
+        ]
+    } else {
+        vec![("first".into(), KEY_ENV.into())]
+    };
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        kind,
+        process,
+        StatusCode::OK,
+        if stream {
+            "text/event-stream"
+        } else {
+            "application/json"
+        },
+        String::new(),
+        EntryOptions {
+            attempt_bodies: bodies,
+            auth_entries,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let base = endpoint.trim_end_matches("/v1/responses");
+    let (endpoint, request) = match (native_entry, kind) {
+        (true, "gemini") => (
+            format!("{base}/v1beta/models/test.test/generateContent"),
+            json!({"contents":[{"role":"user","parts":[{"text":"review-contract"}]}],"stream":stream}),
+        ),
+        (true, "anthropic") => (
+            format!("{base}/v1/messages"),
+            json!({"model":"test.test","max_tokens":128,"messages":[{"role":"user","content":"review-contract"}],"stream":stream}),
+        ),
+        (true, "openai_chat") => (
+            format!("{base}/v1/chat/completions"),
+            json!({"model":"test.test","messages":[{"role":"user","content":"review-contract"}],"stream":stream}),
+        ),
+        _ => (
+            endpoint,
+            json!({"model":"test.test","input":"review-contract","stream":stream}),
+        ),
+    };
+    let consumed = consume_response(client().post(endpoint).json(&request).send().await).await;
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        attempts,
+        if recovery { 2 } else { 1 },
+        "{kind}/{process}/{stream}: {consumed:?}"
+    );
+    if matches!(expected, E63ReviewOutcome::Exhaust) {
+        assert!(
+            consumed.transport_error.is_some(),
+            "empty attempt must interrupt transport: {consumed:?}"
+        );
+        assert!(
+            !consumed.body.contains("response.completed"),
+            "{consumed:?}"
+        );
+    } else {
+        assert!(
+            consumed.transport_error.is_none(),
+            "{kind}/{process}/{stream}: {consumed:?}"
+        );
+        assert!(consumed.body.contains("REVIEW_BUSINESS"), "{consumed:?}");
+    }
+    assert_no_error_payload(&consumed.body);
+    consumed.body
+}
+
+#[tokio::test]
+async fn issuee63d2f2_review_orphan_without_tools_recovers_or_exhausts() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret");
+    for stream in [false, true] {
+        for expected in [E63ReviewOutcome::Recover, E63ReviewOutcome::Exhaust] {
+            let body = e63_review_attempt(
+                "responses",
+                "chat",
+                false,
+                stream,
+                text_response("Must not escape.\n</｜DSML｜tool_calls>"),
+                text_response("REVIEW_BUSINESS"),
+                expected,
+            )
+            .await;
+            assert!(
+                !body.contains("Must not escape.") && !body.contains("DSML"),
+                "{body}"
+            );
+        }
+    }
+    std::env::remove_var(RECOVERY_KEY_ENV);
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn issuee63d2f2_review_signed_gemini_thought_is_not_a_result() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret");
+    let thought = json!({"thought":true,"text":"PRIVATE_REVIEW_THOUGHT","thoughtSignature":"REVIEW_SIGNATURE"});
+    let bad = json!({"candidates":[{"content":{"role":"model","parts":[thought]},"finishReason":"STOP"}]});
+    let good = json!({"candidates":[{"content":{"role":"model","parts":[{"text":"REVIEW_BUSINESS"}]},"finishReason":"STOP"}]});
+    for native in [true, false] {
+        for stream in [false, true] {
+            for expected in [E63ReviewOutcome::Recover, E63ReviewOutcome::Exhaust] {
+                let body = e63_review_attempt(
+                    "gemini",
+                    if native { "direct" } else { "chat" },
+                    native,
+                    stream,
+                    bad.clone(),
+                    good.clone(),
+                    expected,
+                )
+                .await;
+                assert!(!body.contains("PRIVATE_REVIEW_THOUGHT"), "{body}");
+            }
+            for result in [
+                json!({"text":"REVIEW_BUSINESS"}),
+                json!({"inlineData":{"mimeType":"application/octet-stream","data":"REVIEW_BUSINESS"}}),
+            ] {
+                let mixed = json!({"candidates":[{"content":{"role":"model","parts":[thought.clone(),result]},"finishReason":"STOP"}]});
+                let body = e63_review_attempt(
+                    "gemini",
+                    if native { "direct" } else { "chat" },
+                    native,
+                    stream,
+                    mixed.clone(),
+                    mixed,
+                    E63ReviewOutcome::Accept,
+                )
+                .await;
+                assert!(
+                    body.contains("PRIVATE_REVIEW_THOUGHT") && body.contains("REVIEW_SIGNATURE"),
+                    "{body}"
+                );
+            }
+        }
+    }
+    std::env::remove_var(RECOVERY_KEY_ENV);
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn issuee63d2f2_review_anthropic_invisible_sse_is_empty() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret");
+    let response = |text: &str| json!({"id":"review-message","type":"message","role":"assistant","model":"wire-test","content":[{"type":"text","text":text}],"stop_reason":"end_turn"});
+    for text in ["   ", "\u{200b}"] {
+        for expected in [E63ReviewOutcome::Recover, E63ReviewOutcome::Exhaust] {
+            e63_review_attempt(
+                "anthropic",
+                "direct",
+                true,
+                true,
+                response(text),
+                response("REVIEW_BUSINESS"),
+                expected,
+            )
+            .await;
+        }
+    }
+    e63_review_attempt(
+        "anthropic",
+        "direct",
+        true,
+        true,
+        response("REVIEW_BUSINESS"),
+        response("REVIEW_BUSINESS"),
+        E63ReviewOutcome::Accept,
+    )
+    .await;
+    std::env::remove_var(RECOVERY_KEY_ENV);
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn issuee63d2f2_review_structured_chat_text_stays_business() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let text = json!({"answer":"REVIEW_BUSINESS","nested":[1,true,{"opaque":"preserved"}]});
+    let value = json!({"id":"review-chat","object":"chat.completion","model":"wire-test","choices":[{"index":0,"message":{"role":"assistant","content":[{"type":"text","text":text}]},"finish_reason":"stop"}]});
+    for stream in [false, true] {
+        let body = e63_review_attempt(
+            "openai_chat",
+            "direct",
+            true,
+            stream,
+            value.clone(),
+            value.clone(),
+            E63ReviewOutcome::Accept,
+        )
+        .await;
+        let frames = if stream {
+            events(&body)
+        } else {
+            vec![serde_json::from_str::<Value>(&body).unwrap()]
+        };
+        assert!(
+            frames.iter().any(|frame| {
+                frame["choices"][0]
+                    .get(if stream { "delta" } else { "message" })
+                    .and_then(|message| message.get("content"))
+                    .and_then(Value::as_array)
+                    .is_some_and(|parts| {
+                        parts.iter().any(|part| {
+                            part["text"] == text
+                                || part["text"]
+                                    .as_str()
+                                    .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                                    .as_ref()
+                                    == Some(&text)
+                        })
+                    })
+            }),
+            "structured value must remain complete: {body}"
+        );
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// e63d2f2: reasoning survives alongside a result, but cannot authorize an
+/// otherwise empty complete attempt after response governance.
+#[tokio::test]
+async fn issuee63d2f2_direct_reasoning_only_recovers_json_and_sse() {
+    for stream in [false, true] {
+        let mut body = issue0ff6700_blank_final();
+        body["output"].as_array_mut().unwrap().pop();
+        let wire = if stream {
+            response_sse(&body)
+        } else {
+            body.to_string()
+        };
+        issue0ff6700_run_body("direct", stream, true, Some(wire)).await;
+    }
+}
+
+#[tokio::test]
+async fn issuee63d2f2_relay_reasoning_only_recovers_json_and_sse() {
+    for stream in [false, true] {
+        let mut body = issue0ff6700_blank_final();
+        body["output"].as_array_mut().unwrap().pop();
+        let wire = if stream {
+            response_sse(&body)
+        } else {
+            body.to_string()
+        };
+        issue0ff6700_run_body("chat", stream, true, Some(wire)).await;
+    }
+}
+
+#[tokio::test]
+async fn issuee63d2f2_reasoning_only_exhaustion_interrupts_transport() {
+    for process in ["direct", "chat"] {
+        for stream in [false, true] {
+            let mut body = issue0ff6700_blank_final();
+            body["output"].as_array_mut().unwrap().pop();
+            let wire = if stream {
+                response_sse(&body)
+            } else {
+                body.to_string()
+            };
+            issue0ff6700_run_body(process, stream, false, Some(wire)).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn issuee63d2f2_chat_provider_reasoning_only_never_completes_empty() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for stream in [false, true] {
+        let upstream = if stream {
+            format!(
+                "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({"id":"chat-e63","object":"chat.completion.chunk","model":"wire-test","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"PRIVATE_REASONING_E63"},"finish_reason":null}]}),
+                json!({"id":"chat-e63","object":"chat.completion.chunk","model":"wire-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]})
+            )
+        } else {
+            json!({"id":"chat-e63","object":"chat.completion","model":"wire-test","choices":[{"index":0,"message":{"role":"assistant","content":null,"reasoning_content":"PRIVATE_REASONING_E63"},"finish_reason":"stop"}]}).to_string()
+        };
+        let (endpoint, handle, mut captures, shutdown) = start_entry(
+            "openai_chat",
+            "chat",
+            StatusCode::OK,
+            if stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+            upstream,
+        )
+        .await;
+        let consumed = consume_response(client().post(&endpoint)
+            .json(&json!({"model":"test.test","input":"reasoning-only provider control","stream":stream}))
+            .send().await).await;
+        stop_entry(handle, shutdown).await;
+        assert!(consumed.transport_error.is_some(), "{consumed:?}");
+        assert!(
+            !consumed.body.contains("response.completed"),
+            "{consumed:?}"
+        );
+        assert!(
+            !consumed.body.contains("PRIVATE_REASONING_E63"),
+            "{consumed:?}"
+        );
+        assert_one_attempt(&mut captures, "wire-test").await;
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 async fn issue0ff6700_run(process: &str, stream: bool, recover: bool) {
     issue0ff6700_run_body(process, stream, recover, None).await;
 }
@@ -410,6 +784,10 @@ async fn issue0ff6700_independent_business_controls_survive() {
     let blank = issue0ff6700_blank_final();
     let mut reasoning = blank.clone();
     reasoning["output"].as_array_mut().unwrap().pop();
+    reasoning["output"]
+        .as_array_mut()
+        .unwrap()
+        .push(text_response("visible answer alongside reasoning")["output"][0].clone());
     let mut tool = blank.clone();
     tool["output"].as_array_mut().unwrap().push(json!({"type":"function_call","id":"tool_0ff","call_id":"call_0ff","name":"lookup","arguments":"{invalid model arguments"}));
     let mut refusal = blank.clone();
@@ -1025,7 +1403,7 @@ async fn direct_sse_memory_rewrite_preserves_business_results() {
         ("filter", None, "content_filter"),
     ];
     for (kind, extra, expected) in cases {
-        let text = if kind == "text" {
+        let text = if kind == "text" || kind == "reasoning" {
             format!("Visible answer. {envelope}")
         } else {
             envelope.into()
@@ -3778,7 +4156,7 @@ fn anthropic_tool_input_partial_json(frames: &[Value], index: u64) -> String {
         .collect()
 }
 
-/// b878f6c review regression: existing reasoning representations remain business.
+/// Reasoning representations remain lossless alongside deliverable body text.
 #[tokio::test]
 async fn b878f6c_chat_reasoning_business_shapes_survive_json_admission() {
     let _guard = TEST_LOCK.lock().await;
@@ -3806,7 +4184,7 @@ async fn b878f6c_chat_reasoning_business_shapes_survive_json_admission() {
         ("openai_chat", "chat"),
     ] {
         for (field, reasoning) in &shapes {
-            let mut upstream = json!({"id":"reasoning-control","object":"chat.completion","model":"wire-test","choices":[{"index":0,"message":{"role":"assistant","content":null},"finish_reason":"stop"}]});
+            let mut upstream = json!({"id":"reasoning-control","object":"chat.completion","model":"wire-test","choices":[{"index":0,"message":{"role":"assistant","content":"visible reasoning control"},"finish_reason":"stop"}]});
             upstream["choices"][0]["message"][field] = reasoning.clone();
             let (endpoint, handle, mut captures, shutdown) = start_entry_with_health(
                 "openai_chat",
@@ -4146,13 +4524,13 @@ async fn b878f6c_compact_responses_message_fields_are_business_content() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     for streaming in [false, true] {
-        for reasoning_only in [false, true] {
+        for with_reasoning in [false, true] {
             eprintln!(
-                "compact message control: stream={streaming} reasoning_only={reasoning_only}"
+                "compact message control: stream={streaming} with_reasoning={with_reasoning}"
             );
-            let item = if reasoning_only {
+            let item = if with_reasoning {
                 json!({"id":"compact-message","type":"message","role":"assistant",
-                    "text":"","reasoning_content":"compact reasoning"})
+                    "text":"compact answer","reasoning_content":"compact reasoning"})
             } else {
                 json!({"id":"compact-message","type":"message","role":"assistant",
                     "text":"compact answer"})
@@ -4278,28 +4656,28 @@ async fn b878f6c_compact_responses_reach_real_chat_consumer() {
                 "",
             ),
             (
-                json!({"type":"message","role":"assistant","reasoning_content":"  compact reasoning\n"}),
-                "",
+                json!({"type":"message","role":"assistant","text":"compact answer","reasoning_content":"  compact reasoning\n"}),
+                "compact answer",
                 "  compact reasoning\n",
             ),
             (
-                json!({"type":"message","role":"assistant","reasoning":"  compact reasoning\n"}),
-                "",
+                json!({"type":"message","role":"assistant","text":"compact answer","reasoning":"  compact reasoning\n"}),
+                "compact answer",
                 "  compact reasoning\n",
             ),
             (
-                json!({"type":"message","role":"assistant","reasoning":{"summary":[{"type":"summary_text","text":"  compact reasoning\n"}]}}),
-                "",
+                json!({"type":"message","role":"assistant","text":"compact answer","reasoning":{"summary":[{"type":"summary_text","text":"  compact reasoning\n"}]}}),
+                "compact answer",
                 "  compact reasoning\n",
             ),
             (
-                json!({"type":"message","role":"assistant","reasoning":{"content":[{"type":"reasoning_text","text":"  compact reasoning\n"}]}}),
-                "",
+                json!({"type":"message","role":"assistant","text":"compact answer","reasoning":{"content":[{"type":"reasoning_text","text":"  compact reasoning\n"}]}}),
+                "compact answer",
                 "  compact reasoning\n",
             ),
             (
-                json!({"type":"message","role":"assistant","reasoning_text":"  compact reasoning\n"}),
-                "",
+                json!({"type":"message","role":"assistant","text":"compact answer","reasoning_text":"  compact reasoning\n"}),
+                "compact answer",
                 "  compact reasoning\n",
             ),
             (
@@ -4999,12 +5377,15 @@ async fn responses_wire_representation_survives_chat_and_anthropic_entries() {
                         "NATIVE_OK"
                     };
                     let expected_finish = match (entry, case) {
-                        ("openai_chat", "content_filter") => "content_filter",
-                        ("openai_chat", "max_output_tokens") => "length",
-                        ("openai_chat", _) => "stop",
-                        (_, "content_filter") => "refusal",
-                        (_, "max_output_tokens") => "max_tokens",
-                        _ => "end_turn",
+                        ("openai_chat", "plain" | "refusal") => json!("stop"),
+                        ("openai_chat", "max_output_tokens") => json!("length"),
+                        ("openai_chat", _) => expected["incomplete_details"]["reason"]
+                            .as_str()
+                            .map(|reason| json!(reason))
+                            .unwrap_or(Value::Null),
+                        (_, "content_filter") => json!("refusal"),
+                        (_, "max_output_tokens") => json!("max_tokens"),
+                        _ => json!("end_turn"),
                     };
                     if content_type.starts_with("application/json") {
                         let payload: Value = serde_json::from_str(&body).unwrap();
@@ -5067,6 +5448,264 @@ async fn responses_wire_representation_survives_chat_and_anthropic_entries() {
                         }
                     }
                 }
+            }
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// 0e129d0: public conversion must not turn provider pause or exhaustion into stop.
+#[tokio::test]
+async fn issue0e129d0_actual_error_uses_error_chain_and_switches_provider() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["direct", "relay"] {
+        let first = sse(
+            "response.failed",
+            &json!({"type":"response.failed","response":{"id":"failed-exact","status":"failed","error":{"code":"EXACT_UPSTREAM_CAUSE_0E129D0","message":"exact upstream failure, preserve me"},"output":[]}}),
+        );
+        let second = response_sse(&text_response("RECOVERED_AFTER_REAL_ERROR_0E129D0"));
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "text/event-stream",
+            first.clone(),
+            EntryOptions {
+                attempt_bodies: vec![first, second],
+                two_provider_route: true,
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let consumed = consume_response(client().post(endpoint).json(&json!({"model":"router-test","input":"recover actual provider error","stream":true})).send().await).await;
+        let attempts: Vec<_> = std::iter::from_fn(|| captures.try_recv().ok()).collect();
+        stop_entry(handle, shutdown).await;
+        assert_eq!(attempts.len(), 2, "{process}: {consumed:?}");
+        assert_eq!(attempts[0]["model"], "wire-test");
+        assert_eq!(attempts[1]["model"], "wire-independent");
+        assert!(consumed.transport_error.is_none(), "{consumed:?}");
+        assert!(
+            consumed.body.contains("RECOVERED_AFTER_REAL_ERROR_0E129D0"),
+            "{consumed:?}"
+        );
+        assert!(
+            !consumed.body.contains("EXACT_UPSTREAM_CAUSE_0E129D0"),
+            "error payload must remain internal"
+        );
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// 0e129d0 non-stop business terminals remain business responses.
+#[tokio::test]
+async fn issue0e129d0_anthropic_nonstop_reason_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for reason in [
+        "pause_turn",
+        "model_context_window_exceeded",
+        "stop_sequence",
+    ] {
+        for streaming in [false, true] {
+            eprintln!("0e129d0 public case reason={reason} streaming={streaming}");
+            let mut response = json!({"id":"terminal-fidelity","type":"message","role":"assistant","model":"wire-test","content":[{"type":"text","text":"NATIVE_OK"}],"stop_reason":reason,"usage":{"input_tokens":3,"output_tokens":2}});
+            if reason == "stop_sequence" {
+                response["stop_sequence"] = json!("END");
+            }
+            let wire = if streaming {
+                sse(
+                    "message_start",
+                    &json!({"type":"message_start","message":{"id":"terminal-fidelity","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":3,"output_tokens":0}}}),
+                ) + &sse(
+                    "content_block_start",
+                    &json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":"NATIVE_OK"}}),
+                ) + &sse(
+                    "content_block_stop",
+                    &json!({"type":"content_block_stop","index":0}),
+                ) + &sse(
+                    "message_delta",
+                    &json!({"type":"message_delta","delta":{"stop_reason":reason,"stop_sequence":response["stop_sequence"]},"usage":{"output_tokens":2}}),
+                ) + &sse("message_stop", &json!({"type":"message_stop"}))
+            } else {
+                response.to_string()
+            };
+            let (endpoint, handle, mut captures, shutdown) = start_entry(
+                "anthropic",
+                "chat",
+                StatusCode::OK,
+                if streaming {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+                wire,
+            )
+            .await;
+            let result = client().post(endpoint.replace("/v1/responses", "/v1/chat/completions"))
+                .json(&json!({"model":"test.test","messages":[{"role":"user","content":"terminal fidelity"}],"stream":streaming})).send().await;
+            let (media, body) = successful_transfer(result).await;
+            stop_entry(handle, shutdown).await;
+            assert_one_attempt(&mut captures, "wire-test").await;
+            if media.starts_with("application/json") {
+                let payload: Value = serde_json::from_str(&body).unwrap();
+                assert_eq!(
+                    payload["choices"][0]["message"]["content"], "NATIVE_OK",
+                    "{body}"
+                );
+                assert_eq!(payload["choices"][0]["finish_reason"], reason, "{body}");
+            } else {
+                let text: String = events(&body)
+                    .iter()
+                    .filter_map(|event| event["choices"][0]["delta"]["content"].as_str())
+                    .collect();
+                assert_eq!(text, "NATIVE_OK", "{body}");
+                assert!(
+                    events(&body)
+                        .iter()
+                        .any(|event| event["choices"][0]["finish_reason"] == reason),
+                    "{reason}: {body}"
+                );
+                assert!(
+                    !events(&body)
+                        .iter()
+                        .any(|event| event["choices"][0]["finish_reason"] == "stop"),
+                    "{body}"
+                );
+            }
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// 0e129d0: a genuine original Responses normal completion is a valid
+/// protocol equivalent that must project to the Chat normal terminal in
+/// JSON and SSE. An explicit non-stop nested reason still takes precedence.
+#[tokio::test]
+async fn issue0e129d0_responses_completed_projects_chat_terminal() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for streaming in [false, true] {
+        let mut normal = text_response("COMPLETED_NORMAL_0E129D0");
+        normal["usage"] = json!({"input_tokens":3,"output_tokens":2,"total_tokens":5});
+        let upstream = if streaming {
+            response_sse(&normal)
+        } else {
+            normal.to_string()
+        };
+        let (endpoint, handle, mut captures, shutdown) = start_entry(
+            "responses",
+            "chat",
+            StatusCode::OK,
+            if streaming {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+            upstream,
+        )
+        .await;
+        let chat_endpoint = endpoint.replace("/v1/responses", "/v1/chat/completions");
+        let request = if streaming {
+            json!({"model":"test.test","messages":[{"role":"user","content":"completed terminal"}],"stream":true,"stream_options":{"include_usage":true}})
+        } else {
+            json!({"model":"test.test","messages":[{"role":"user","content":"completed terminal"}],"stream":false})
+        };
+        let (content_type, body) =
+            successful_transfer(client().post(chat_endpoint).json(&request).send().await).await;
+        stop_entry(handle, shutdown).await;
+        assert_one_attempt(&mut captures, "wire-test").await;
+        if streaming {
+            assert!(content_type.starts_with("text/event-stream"));
+            let payloads = events(&body);
+            assert_eq!(
+                payloads
+                    .iter()
+                    .filter_map(|event| event["choices"][0]["delta"]["content"].as_str())
+                    .collect::<String>(),
+                "COMPLETED_NORMAL_0E129D0",
+                "{body}"
+            );
+            assert!(payloads
+                .iter()
+                .any(|event| event["choices"][0]["finish_reason"] == "stop"));
+            assert!(body.contains("data: [DONE]"));
+        } else {
+            assert!(content_type.starts_with("application/json"));
+            let payload: Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(
+                payload["choices"][0]["message"]["content"],
+                "COMPLETED_NORMAL_0E129D0"
+            );
+            assert_eq!(payload["choices"][0]["finish_reason"], "stop");
+        }
+    }
+
+    // A completed envelope carrying a nested explicit non-stop reason must
+    // never become stop. Length and content_filter keep their mapping.
+    for (reason, expected) in [
+        ("max_output_tokens", "length"),
+        ("content_filter", "content_filter"),
+        ("opaque_reason", "opaque_reason"),
+    ] {
+        for streaming in [false, true] {
+            let mut nested = text_response("NESTED_REASON_0E129D0");
+            nested["status"] = json!("completed");
+            nested["incomplete_details"] = json!({"reason":reason});
+            let upstream = if streaming {
+                response_sse(&nested)
+            } else {
+                nested.to_string()
+            };
+            let (endpoint, handle, mut captures, shutdown) = start_entry(
+                "responses",
+                "chat",
+                StatusCode::OK,
+                if streaming {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+                upstream,
+            )
+            .await;
+            let chat_endpoint = endpoint.replace("/v1/responses", "/v1/chat/completions");
+            let request = if streaming {
+                json!({"model":"test.test","messages":[{"role":"user","content":"nested reason"}],"stream":true})
+            } else {
+                json!({"model":"test.test","messages":[{"role":"user","content":"nested reason"}],"stream":false})
+            };
+            let (content_type, body) =
+                successful_transfer(client().post(chat_endpoint).json(&request).send().await).await;
+            stop_entry(handle, shutdown).await;
+            assert_one_attempt(&mut captures, "wire-test").await;
+            if streaming {
+                assert!(
+                    content_type.starts_with("text/event-stream"),
+                    "{content_type}"
+                );
+                let payloads = events(&body);
+                let terminal = payloads
+                    .iter()
+                    .find(|event| event["choices"][0]["finish_reason"].is_string())
+                    .unwrap_or_else(|| panic!("missing terminal chunk: {body}"));
+                assert_eq!(terminal["choices"][0]["finish_reason"], expected, "{body}");
+                assert_ne!(
+                    terminal["choices"][0]["finish_reason"], "stop",
+                    "nested reason must not become stop: {body}"
+                );
+            } else {
+                assert!(
+                    content_type.starts_with("application/json"),
+                    "{content_type}"
+                );
+                let payload: Value = serde_json::from_str(&body).unwrap();
+                assert_eq!(payload["choices"][0]["finish_reason"], expected, "{body}");
+                assert_ne!(
+                    payload["choices"][0]["finish_reason"], "stop",
+                    "nested reason must not become stop: {body}"
+                );
             }
         }
     }
@@ -5563,7 +6202,7 @@ async fn chat_incomplete_tools_preserve_terminal_reason_and_full_calls() {
                     .to_str()
                     .unwrap()
                     .to_owned();
-                let body = response.text().await.expect("Chat response must complete");
+                let body = response.text().await.unwrap_or_else(|error| panic!("Chat response must complete: reason={reason:?} tool_count={tool_count} mode={mode}: {error}"));
                 stop_entry(handle, shutdown).await;
                 assert_one_attempt(&mut captures, "wire-test").await;
                 let finish_reason = match reason {
@@ -7278,7 +7917,11 @@ async fn chat_sse_preserves_each_responses_output_item_without_repetition() {
             frames
                 .iter()
                 .any(|frame| frame["choices"][0]["finish_reason"]
-                    == if has_tool { "tool_calls" } else { "stop" }),
+                    == if has_tool {
+                        json!("tool_calls")
+                    } else {
+                        Value::Null
+                    }),
             "{body}"
         );
         assert!(
@@ -7296,11 +7939,16 @@ async fn chat_sse_multiple_reasoning_summary_parts_are_returned_once() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     let item = json!({"type":"reasoning","summary":[{"type":"summary_text","text":"A"},{"type":"summary_text","text":"B"}]});
+    let mut completed = text_response("visible summary control");
+    completed["output"]
+        .as_array_mut()
+        .unwrap()
+        .insert(0, item.clone());
     let upstream = [
         sse("response.reasoning_summary_text.delta", &json!({"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"A"})),
         sse("response.reasoning_summary_text.delta", &json!({"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":1,"delta":"B"})),
         sse("response.output_item.done", &json!({"type":"response.output_item.done","output_index":0,"item":item})),
-        response_sse(&json!({"status":"completed","output":[item]})),
+        response_sse(&completed),
     ].concat();
     let (endpoint, handle, mut captures, shutdown) = start_entry(
         "responses",
@@ -7637,6 +8285,16 @@ async fn assert_direct_recovery(
     forbidden: &[&str],
     red_id: &str,
 ) {
+    assert_markup_recovery("direct", first_text, recovered_text, forbidden, red_id).await;
+}
+
+async fn assert_markup_recovery(
+    mode: &str,
+    first_text: &str,
+    recovered_text: &str,
+    forbidden: &[&str],
+    red_id: &str,
+) {
     std::env::set_var(RECOVERY_KEY_ENV, "recovery-secret-b");
     for (content_type, closeout) in [("application/json", false), ("text/event-stream", true)] {
         let options = EntryOptions {
@@ -7653,7 +8311,7 @@ async fn assert_direct_recovery(
         };
         let (endpoint, handle, mut captures, headers, shutdown) = start_entry_configured(
             "responses",
-            "direct",
+            mode,
             StatusCode::OK,
             content_type,
             String::new(),
@@ -7721,6 +8379,876 @@ async fn responses_direct_unharvestable_tool_markup_recovers_json_and_sse() {
         "responses_direct_unharvestable_tool_markup_recovers_json_and_sse",
     )
     .await;
+    std::env::remove_var(KEY_ENV);
+}
+
+/// AppSDK master 4444 sample at 2026-10-20 21:27:27: visible prose followed
+/// by an orphan DSML tool close is not a completed tool execution turn.
+async fn assert_chat_json_governance_failure(
+    text: &str,
+    markup: bool,
+    entry: &str,
+    streaming: bool,
+) {
+    for recovery in [false, true] {
+        let log = std::env::temp_dir().join(format!(
+            "rcc-chat-governance-{}-{entry}-{streaming}-{markup}-{recovery}.log",
+            std::process::id()
+        ));
+        std::env::set_var("V3_NO_RESPONSE_TEST_LOG_FILE", &log);
+        let mut options = EntryOptions {
+            health_enabled: true,
+            attempt_bodies: vec![if streaming {
+                response_sse(&text_response(text))
+            } else {
+                text_response(text).to_string()
+            }],
+            ..EntryOptions::default()
+        };
+        if recovery {
+            options.auth_entries = vec![
+                ("first".into(), KEY_ENV.into()),
+                ("second".into(), RECOVERY_KEY_ENV.into()),
+            ];
+            options.attempt_bodies.push(if streaming {
+                response_sse(&text_response("CHAT_GOVERNANCE_RECOVERED"))
+            } else {
+                text_response("CHAT_GOVERNANCE_RECOVERED").to_string()
+            });
+        }
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            "chat",
+            StatusCode::OK,
+            if streaming {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+            String::new(),
+            options,
+        )
+        .await;
+        let base = endpoint.trim_end_matches("/v1/responses");
+        let (path, request) = match entry {
+            "anthropic" => (
+                "/v1/messages",
+                json!({"model":"test.test","max_tokens":64,"messages":[{"role":"user","content":"Chat review fixture"}],"stream":false}),
+            ),
+            "gemini" => (
+                "/v1beta/models/test.test/generateContent",
+                json!({"contents":[{"role":"user","parts":[{"text":"Chat review fixture"}]}]}),
+            ),
+            _ => (
+                "/v1/chat/completions",
+                json!({"model":"test.test","messages":[{"role":"user","content":"Chat review fixture"}],"stream":streaming}),
+            ),
+        };
+        let consumed = consume_response(
+            client()
+                .post(format!("{base}{path}"))
+                .json(&request)
+                .send()
+                .await,
+        )
+        .await;
+        let health: Value = client()
+            .get(format!("{base}/_routecodex/health/cooldown-pool"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        stop_entry(handle, shutdown).await;
+        if recovery {
+            assert!(consumed.transport_error.is_none(), "{consumed:?}");
+            assert!(
+                consumed.body.contains("CHAT_GOVERNANCE_RECOVERED"),
+                "{consumed:?}"
+            );
+        } else {
+            assert!(
+                consumed.transport_error.is_some(),
+                "must terminate without empty success: {consumed:?}"
+            );
+        }
+        assert!(!consumed.body.contains("must-not-leak"), "{consumed:?}");
+        assert_no_error_payload(&consumed.body);
+        if markup {
+            assert!(
+                health["entries"].as_array().unwrap().is_empty(),
+                "markup failure must be health neutral: {health}"
+            );
+        }
+        let mut attempts = 0;
+        while let Some(capture) = captures.recv().await {
+            if capture.to_string().contains("Chat review fixture") {
+                attempts += 1;
+            }
+        }
+        assert_eq!(attempts, if recovery { 2 } else { 1 });
+        if markup && recovery {
+            let observed = std::fs::read_to_string(&log).unwrap();
+            assert!(
+                observed.contains("relay_unharvestable_tool_markup")
+                    || observed.contains("V3HubRelayResp03UnharvestableToolMarkup"),
+                "dedicated typed markup source missing"
+            );
+        }
+        std::env::remove_var("V3_NO_RESPONSE_TEST_LOG_FILE");
+    }
+}
+
+#[tokio::test]
+async fn issuee63d2f2_chat_json_control_only_recovers_or_terminates() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "controlled-recovery");
+    assert_chat_json_governance_failure("<|end_of_analysis|>", false, "chat", false).await;
+    std::env::remove_var(KEY_ENV);
+    std::env::remove_var(RECOVERY_KEY_ENV);
+}
+
+#[tokio::test]
+async fn issuee63d2f2_chat_json_orphan_retains_typed_health_neutral_cause() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "controlled-recovery");
+    assert_chat_json_governance_failure(
+        "must-not-leak\n\n</｜DSML｜tool_calls>",
+        true,
+        "chat",
+        false,
+    )
+    .await;
+    std::env::remove_var(KEY_ENV);
+    std::env::remove_var(RECOVERY_KEY_ENV);
+}
+
+#[tokio::test]
+async fn issuee63d2f2_other_json_callers_retain_governance_failure() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "controlled-recovery");
+    for entry in ["anthropic", "gemini"] {
+        assert_chat_json_governance_failure("<|end_of_analysis|>", false, entry, false).await;
+        assert_chat_json_governance_failure(
+            "must-not-leak\n\n</｜DSML｜tool_calls>",
+            true,
+            entry,
+            false,
+        )
+        .await;
+    }
+    std::env::remove_var(KEY_ENV);
+    std::env::remove_var(RECOVERY_KEY_ENV);
+}
+
+#[tokio::test]
+async fn issuee63d2f2_chat_sse_control_only_recovers_or_terminates() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "controlled-recovery");
+    assert_chat_json_governance_failure("<|end_of_analysis|>", false, "chat", true).await;
+    std::env::remove_var(KEY_ENV);
+    std::env::remove_var(RECOVERY_KEY_ENV);
+}
+
+fn chat_sse_responses_deltas(deltas: &[&str], response: Value) -> String {
+    let mut upstream = String::new();
+    for delta in deltas {
+        upstream.push_str(&sse(
+            "response.output_text.delta",
+            &json!({
+                "type": "response.output_text.delta",
+                "item_id": "msg_fragmented",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": delta
+            }),
+        ));
+    }
+    upstream.push_str(&response_sse(&response));
+    upstream
+}
+
+fn completed_empty_response() -> Value {
+    json!({
+        "id": "resp_fragmented",
+        "object": "response",
+        "status": "completed",
+        "model": "wire-test",
+        "output": []
+    })
+}
+
+fn chat_sse_chunk(delta: Value, finish_reason: Value) -> String {
+    format!(
+        "data: {}\n\n",
+        json!({
+            "id": "chatcmpl_fragmented",
+            "object": "chat.completion.chunk",
+            "model": "wire-test",
+            "choices": [{
+                "index": 0,
+                "delta": delta,
+                "finish_reason": finish_reason
+            }]
+        })
+    )
+}
+
+/// The first candidate closes an orphan tool envelope across two Responses
+/// delta events. Per-event projection must not reject the unfinished first
+/// fragment as an orphan. The complete callback aggregates the exact carrier
+/// and discards the whole attempt with the registered health-neutral typed
+/// cause; only the next candidate's business output may reach the client.
+#[tokio::test]
+async fn issuee63d2f2_chat_sse_fragmented_orphan_recovers_or_terminates() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    std::env::set_var(RECOVERY_KEY_ENV, "controlled-recovery");
+    let first_upstream = chat_sse_responses_deltas(
+        &["must-not-leak\n\n</｜DSML｜tool_", "calls>"],
+        completed_empty_response(),
+    );
+    for recovery in [false, true] {
+        let log = std::env::temp_dir().join(format!(
+            "rcc-chat-sse-fragmented-orphan-{}-{recovery}.log",
+            std::process::id()
+        ));
+        std::env::set_var("V3_NO_RESPONSE_TEST_LOG_FILE", &log);
+        let mut options = EntryOptions {
+            health_enabled: true,
+            attempt_bodies: vec![first_upstream.clone()],
+            ..EntryOptions::default()
+        };
+        if recovery {
+            options.auth_entries = vec![
+                ("first".into(), KEY_ENV.into()),
+                ("second".into(), RECOVERY_KEY_ENV.into()),
+            ];
+            options
+                .attempt_bodies
+                .push(response_sse(&text_response("CHAT_FRAGMENTED_RECOVERED")));
+        }
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            "chat",
+            StatusCode::OK,
+            "text/event-stream",
+            String::new(),
+            options,
+        )
+        .await;
+        let base = endpoint.trim_end_matches("/v1/responses");
+        let consumed = consume_response(
+            client()
+                .post(format!("{base}/v1/chat/completions"))
+                .json(&json!({
+                    "model": "test.test",
+                    "messages": [{"role": "user", "content": "fragmented orphan"}],
+                    "stream": true
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let health: Value = client()
+            .get(format!("{base}/_routecodex/health/cooldown-pool"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        stop_entry(handle, shutdown).await;
+        if recovery {
+            assert!(
+                consumed.transport_error.is_none(),
+                "the next candidate must recover: {consumed:?}"
+            );
+            assert!(
+                consumed.body.contains("CHAT_FRAGMENTED_RECOVERED"),
+                "{consumed:?}"
+            );
+        } else {
+            assert!(
+                consumed.transport_error.is_some(),
+                "fragmented orphan exhaustion must terminate transport: {consumed:?}"
+            );
+            assert!(
+                !consumed.body.contains("response.completed") && !consumed.body.contains("[DONE]"),
+                "no normal empty completion may reach the client: {consumed:?}"
+            );
+        }
+        assert!(!consumed.body.contains("must-not-leak"), "{consumed:?}");
+        assert!(!consumed.body.contains("DSML"), "{consumed:?}");
+        assert_no_error_payload(&consumed.body);
+        assert!(
+            health["entries"].as_array().unwrap().is_empty(),
+            "the fragmented orphan is a health-neutral response-governance failure: {health}"
+        );
+        let mut attempts = 0;
+        while let Some(capture) = captures.recv().await {
+            if capture.to_string().contains("fragmented orphan") {
+                attempts += 1;
+            }
+        }
+        assert_eq!(attempts, if recovery { 2 } else { 1 });
+        if recovery {
+            let observed = std::fs::read_to_string(&log).unwrap();
+            assert!(
+                observed.contains("relay_unharvestable_tool_markup")
+                    || observed.contains("V3HubRelayResp03UnharvestableToolMarkup"),
+                "the original typed orphan cause must remain observable: {observed}"
+            );
+        }
+        std::env::remove_var("V3_NO_RESPONSE_TEST_LOG_FILE");
+    }
+    std::env::remove_var(KEY_ENV);
+    std::env::remove_var(RECOVERY_KEY_ENV);
+}
+
+/// A standalone control label split across two Responses deltas is removed
+/// only after the exact Chat carrier is complete. Visible text around it stays
+/// in byte order and the source terminal remains stop.
+#[tokio::test]
+async fn issuee63d2f2_chat_sse_fragmented_label_preserves_visible_order() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let upstream = chat_sse_responses_deltas(
+        &["alpha\n<|end_of_", "analysis|>\nomega"],
+        completed_empty_response(),
+    );
+    let (endpoint, handle, mut captures, shutdown) = start_entry(
+        "responses",
+        "chat",
+        StatusCode::OK,
+        "text/event-stream",
+        upstream,
+    )
+    .await;
+    let base = endpoint.trim_end_matches("/v1/responses");
+    let (content_type, body) = successful_transfer(
+        client()
+            .post(format!("{base}/v1/chat/completions"))
+            .json(&json!({
+                "model": "test.test",
+                "messages": [{"role": "user", "content": "fragmented label"}],
+                "stream": true
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    stop_entry(handle, shutdown).await;
+    assert_one_attempt(&mut captures, "wire-test").await;
+    assert!(content_type.starts_with("text/event-stream"));
+    let payloads = events(&body);
+    assert_eq!(
+        payloads
+            .iter()
+            .filter_map(|event| event["choices"][0]["delta"]["content"].as_str())
+            .collect::<String>(),
+        "alpha\nomega",
+        "{body}"
+    );
+    assert!(!body.contains("end_of_analysis"), "{body}");
+    assert!(
+        payloads
+            .iter()
+            .any(|event| event["choices"][0]["finish_reason"] == "stop"),
+        "the original normal terminal is preserved: {body}"
+    );
+    std::env::remove_var(KEY_ENV);
+}
+
+/// A valid Responses `response.incomplete` with no `incomplete_details.reason`
+/// projects a Chat terminal with `finish_reason: null`. When a removable
+/// standalone marker is cleaned beside surviving visible text, the typed
+/// protocol-terminal witness must keep the attempt deliverable instead of
+/// misclassifying it as processing damage and entering 599 recovery.
+#[tokio::test]
+async fn issuee63d2f2_reasonless_incomplete_marker_delivers_without_reselection() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for streaming in [false, true] {
+        let mut response = text_response("<|end_of_analysis|>\nREASONLESS_OK");
+        response["status"] = json!("incomplete");
+        response["incomplete_details"] = Value::Null;
+        response["output"][0]["status"] = json!("incomplete");
+        let upstream = if streaming {
+            response_sse(&response)
+        } else {
+            response.to_string()
+        };
+        let (endpoint, handle, mut captures, shutdown) = start_entry(
+            "responses",
+            "chat",
+            StatusCode::OK,
+            if streaming {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+            upstream,
+        )
+        .await;
+        let base = endpoint.trim_end_matches("/v1/responses");
+        let (content_type, body) = successful_transfer(
+            client()
+                .post(format!("{base}/v1/chat/completions"))
+                .json(&json!({
+                    "model": "test.test",
+                    "messages": [{"role": "user", "content": "reasonless incomplete"}],
+                    "stream": streaming
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        stop_entry(handle, shutdown).await;
+        assert_one_attempt(&mut captures, "wire-test").await;
+        assert!(!body.contains("<|end_of_analysis|>"), "{streaming}: {body}");
+        assert_no_error_payload(&body);
+        if content_type.starts_with("application/json") {
+            let payload: Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(payload["choices"][0]["finish_reason"], Value::Null);
+            assert_eq!(payload["choices"][0]["message"]["content"], "REASONLESS_OK");
+        } else {
+            let payloads = events(&body);
+            assert_eq!(
+                payloads
+                    .iter()
+                    .filter_map(|event| event["choices"][0]["delta"]["content"].as_str())
+                    .collect::<String>(),
+                "REASONLESS_OK",
+                "{streaming}: {body}"
+            );
+            assert!(
+                payloads
+                    .iter()
+                    .all(|event| event["choices"][0]["finish_reason"].is_null()),
+                "the reason-less terminal stays null: {body}"
+            );
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Anthropic may close a complete visible response with `message_stop` and no
+/// `stop_reason`. The projected Chat terminal keeps `finish_reason: null`, so
+/// only the typed message_stop witness can keep a removable marker rewrite
+/// from being misclassified as processing damage.
+#[tokio::test]
+async fn issuee63d2f2_anthropic_reasonless_message_stop_marker_delivers_without_reselection() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let provider_wire = format!(
+        "{}{}{}{}{}{}",
+        sse(
+            "message_start",
+            &json!({"type":"message_start","message":{"id":"msg_reasonless","type":"message",
+                "role":"assistant","model":"wire-test","content":[],
+                "stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}})
+        ),
+        sse(
+            "content_block_start",
+            &json!({"type":"content_block_start","index":0,
+                "content_block":{"type":"text","text":""}})
+        ),
+        sse(
+            "content_block_delta",
+            &json!({"type":"content_block_delta","index":0,
+                "delta":{"type":"text_delta","text":"<|end_of_analysis|>\nANTHROPIC_REASONLESS_OK"}})
+        ),
+        sse(
+            "content_block_stop",
+            &json!({"type":"content_block_stop","index":0})
+        ),
+        sse(
+            "message_delta",
+            &json!({"type":"message_delta","delta":{},"usage":{"output_tokens":1}})
+        ),
+        sse("message_stop", &json!({"type":"message_stop"}))
+    );
+    let (endpoint, handle, mut captures, shutdown) = start_entry(
+        "anthropic",
+        "chat",
+        StatusCode::OK,
+        "text/event-stream",
+        provider_wire,
+    )
+    .await;
+    let base = endpoint.trim_end_matches("/v1/responses");
+    let (content_type, body) = successful_transfer(
+        client()
+            .post(format!("{base}/v1/chat/completions"))
+            .json(&json!({
+                "model": "test.test",
+                "messages": [{"role": "user", "content": "anthropic reasonless terminal"}],
+                "stream": true
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    stop_entry(handle, shutdown).await;
+    assert_one_attempt(&mut captures, "wire-test").await;
+    assert!(
+        content_type.starts_with("text/event-stream"),
+        "{content_type}"
+    );
+    assert!(!body.contains("<|end_of_analysis|>"), "{body}");
+    assert_no_error_payload(&body);
+    let payloads = events(&body);
+    assert_eq!(
+        payloads
+            .iter()
+            .filter_map(|event| event["choices"][0]["delta"]["content"].as_str())
+            .collect::<String>(),
+        "ANTHROPIC_REASONLESS_OK",
+        "{body}"
+    );
+    assert!(
+        payloads
+            .iter()
+            .all(|event| event["choices"][0]["finish_reason"].is_null()),
+        "the reason-less Anthropic terminal stays null: {body}"
+    );
+    assert!(body.trim_end().ends_with("data: [DONE]"), "{body}");
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Gemini's normal STOP terminal can carry a function call. The Chat client
+/// must receive `finish_reason: "tool_calls"`, execute the call, and send the
+/// paired result back through the same public entry.
+#[tokio::test]
+async fn issuee63d2f2_gemini_stop_function_call_public_roundtrip() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let function_call = json!({
+        "candidates": [{
+            "index": 0,
+            "finishReason": "STOP",
+            "content": {
+                "role": "model",
+                "parts": [{
+                    "functionCall": {
+                        "id": "call_gemini_stop",
+                        "name": "lookup",
+                        "args": {"city": "Paris"}
+                    }
+                }]
+            }
+        }]
+    });
+    let completed = json!({
+        "candidates": [{
+            "index": 0,
+            "finishReason": "STOP",
+            "content": {
+                "role": "model",
+                "parts": [{"text": "gemini tool roundtrip complete"}]
+            }
+        }]
+    });
+    let tools = json!([{
+        "type": "function",
+        "name": "lookup",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"]
+        }
+    }]);
+
+    for stream in [false, true] {
+        let (endpoint, handle, mut captures, _headers, shutdown) = start_entry_configured(
+            "gemini",
+            "chat",
+            StatusCode::OK,
+            if stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+            String::new(),
+            EntryOptions {
+                attempt_bodies: vec![
+                    e63_review_wire("gemini", &function_call, stream),
+                    e63_review_wire("gemini", &completed, stream),
+                ],
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let chat_endpoint = endpoint.replace("/v1/responses", "/v1/chat/completions");
+        let (_, first_body) = successful_transfer(
+            client()
+                .post(&chat_endpoint)
+                .json(&json!({
+                    "model": "test.test",
+                    "stream": stream,
+                    "messages": [{"role": "user", "content": "Use lookup for Paris"}],
+                    "tools": tools.clone()
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        assert_no_error_payload(&first_body);
+
+        let call = if stream {
+            assert_eq!(
+                events(&first_body)
+                    .into_iter()
+                    .rev()
+                    .find_map(|event| {
+                        event["choices"][0]["finish_reason"]
+                            .as_str()
+                            .map(str::to_string)
+                    })
+                    .as_deref(),
+                Some("tool_calls"),
+                "{first_body}"
+            );
+            events(&first_body)
+                .into_iter()
+                .find_map(|event| {
+                    event["choices"][0]["delta"]["tool_calls"]
+                        .as_array()
+                        .and_then(|calls| calls.first())
+                        .cloned()
+                })
+                .expect("Gemini STOP function call reaches the Chat stream")
+        } else {
+            let payload: Value = serde_json::from_str(&first_body).unwrap();
+            assert_eq!(
+                payload["choices"][0]["finish_reason"], "tool_calls",
+                "{first_body}"
+            );
+            payload["choices"][0]["message"]["tool_calls"][0].clone()
+        };
+        assert_eq!(call["id"], "call_gemini_stop");
+        assert_eq!(call["function"]["name"], "lookup");
+
+        let arguments = call["function"]["arguments"]
+            .as_str()
+            .expect("Chat tool arguments are a JSON string");
+        let execution = std::process::Command::new("node")
+            .args([
+                "-e",
+                "process.stdout.write(JSON.stringify({received:JSON.parse(process.argv[1])}));",
+                arguments,
+            ])
+            .output()
+            .unwrap();
+        assert!(execution.status.success());
+        let output = String::from_utf8(execution.stdout).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&output).unwrap(),
+            json!({"received": {"city": "Paris"}})
+        );
+
+        let (_, followup_body) = successful_transfer(
+            client()
+                .post(&chat_endpoint)
+                .json(&json!({
+                    "model": "test.test",
+                    "stream": stream,
+                    "messages": [
+                        {"role": "user", "content": "Use lookup for Paris"},
+                        {"role": "assistant", "content": null, "tool_calls": [call]},
+                        {"role": "tool", "tool_call_id": "call_gemini_stop", "content": output.clone()}
+                    ],
+                    "tools": tools.clone()
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        assert_no_error_payload(&followup_body);
+        assert!(
+            followup_body.contains("gemini tool roundtrip complete"),
+            "{stream}: {followup_body}"
+        );
+        stop_entry(handle, shutdown).await;
+
+        let first_wire = captures.recv().await.expect("first Gemini attempt");
+        assert_eq!(
+            first_wire["tools"][0]["functionDeclarations"][0]["name"], "lookup",
+            "{first_wire}"
+        );
+        let followup_wire = captures.recv().await.expect("Gemini follow-up attempt");
+        assert_eq!(
+            followup_wire["contents"].as_array().unwrap().len(),
+            3,
+            "{followup_wire}"
+        );
+        let function_response = &followup_wire["contents"][2]["parts"][0]["functionResponse"];
+        assert_eq!(function_response["id"], "call_gemini_stop");
+        assert_eq!(function_response["name"], "lookup");
+        assert_eq!(function_response["response"]["output"], output);
+        assert!(matches!(
+            captures.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+        ));
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Literal marker examples inside inline code or a fenced block remain
+/// business text. They must not trigger marker removal or candidate recovery.
+#[tokio::test]
+async fn issuee63d2f2_chat_sse_literal_marker_context_stays_business() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let deltas = [
+        "Inline `<|end_of_",
+        "analysis|>` example.\n\n```text\n</｜DSML｜tool_",
+        "calls>\n```\n多语言保留 café",
+    ];
+    let expected: String = deltas.concat();
+    let upstream = chat_sse_responses_deltas(&deltas, completed_empty_response());
+    let (endpoint, handle, mut captures, shutdown) = start_entry(
+        "responses",
+        "chat",
+        StatusCode::OK,
+        "text/event-stream",
+        upstream,
+    )
+    .await;
+    let base = endpoint.trim_end_matches("/v1/responses");
+    let (_, body) = successful_transfer(
+        client()
+            .post(format!("{base}/v1/chat/completions"))
+            .json(&json!({
+                "model": "test.test",
+                "messages": [{"role": "user", "content": "literal marker context"}],
+                "stream": true
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    stop_entry(handle, shutdown).await;
+    assert_one_attempt(&mut captures, "wire-test").await;
+    let payloads = events(&body);
+    assert_eq!(
+        payloads
+            .iter()
+            .filter_map(|event| event["choices"][0]["delta"]["content"].as_str())
+            .collect::<String>(),
+        expected,
+        "{body}"
+    );
+    assert!(body.contains("多语言保留 café"), "{body}");
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Relay Chat SSE receives role-only and usage-only frames before real
+/// content. Those envelope frames must not classify the attempt as empty, and
+/// native tool calls plus their original terminal must survive byte-preserving
+/// governance.
+#[tokio::test]
+async fn issuee63d2f2_chat_sse_role_usage_native_tools_preserve_terminal() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let tool_calls = json!([{
+        "index": 0,
+        "id": "call_role_usage",
+        "type": "function",
+        "function": {"name": "lookup", "arguments": "{\"q\":\"hello\"}"}
+    }]);
+    let upstream = [
+        chat_sse_chunk(json!({"role": "assistant"}), Value::Null),
+        format!(
+            "data: {}\n\n",
+            json!({
+                "id": "chatcmpl_fragmented",
+                "object": "chat.completion.chunk",
+                "model": "wire-test",
+                "choices": [],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+            })
+        ),
+        chat_sse_chunk(json!({"content": "ROLE_USAGE_CONTENT"}), Value::Null),
+        chat_sse_chunk(json!({"tool_calls": tool_calls.clone()}), Value::Null),
+        chat_sse_chunk(json!({}), json!("tool_calls")),
+        "data: [DONE]\n\n".to_string(),
+    ]
+    .concat();
+    let (endpoint, handle, mut captures, shutdown) = start_entry(
+        "openai_chat",
+        "relay",
+        StatusCode::OK,
+        "text/event-stream",
+        upstream,
+    )
+    .await;
+    let base = endpoint.trim_end_matches("/v1/responses");
+    let (_, body) = successful_transfer(
+        client()
+            .post(format!("{base}/v1/chat/completions"))
+            .json(&json!({
+                "model": "test.test",
+                "messages": [{"role": "user", "content": "role and usage"}],
+                "stream": true,
+                "tools": [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}]
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    stop_entry(handle, shutdown).await;
+    assert_one_attempt(&mut captures, "wire-test").await;
+    let payloads = events(&body);
+    assert!(
+        payloads.iter().any(|event| {
+            event["choices"][0]["delta"]["content"].as_str() == Some("ROLE_USAGE_CONTENT")
+        }),
+        "{body}"
+    );
+    let delivered_calls: Vec<Value> = payloads
+        .iter()
+        .filter_map(|event| event["choices"][0]["delta"]["tool_calls"].as_array())
+        .flatten()
+        .cloned()
+        .collect();
+    assert_eq!(
+        delivered_calls,
+        tool_calls.as_array().unwrap().clone(),
+        "{body}"
+    );
+    assert_eq!(
+        payloads
+            .iter()
+            .filter_map(|event| event["choices"][0]["finish_reason"].as_str())
+            .collect::<Vec<_>>(),
+        vec!["tool_calls"],
+        "{body}"
+    );
+    assert!(body.trim_end().ends_with("data: [DONE]"), "{body}");
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn issuee63d2f2_orphan_dsml_tool_close_recovers_json_and_sse() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for mode in ["direct", "relay"] {
+        assert_markup_recovery(
+            mode,
+            "I will run the baseline tests next.\n\n</｜DSML｜tool_calls>",
+            "faithful recovery answer",
+            &["I will run the baseline tests next.", "DSML"],
+            "issuee63d2f2_orphan_dsml_tool_close_recovers_json_and_sse",
+        )
+        .await;
+    }
     std::env::remove_var(KEY_ENV);
 }
 

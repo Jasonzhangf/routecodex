@@ -23,6 +23,22 @@ mod tests {
     }
 
     #[test]
+    fn blank_finish_reason_is_not_terminal() {
+        assert!(!openai_chat_sse_payload_has_terminal_finish_reason(&json!({
+            "choices":[{"index":0,"delta":{},"finish_reason":""}]
+        }))
+        .unwrap());
+        assert!(!openai_chat_sse_payload_has_terminal_finish_reason(&json!({
+            "choices":[{"index":0,"delta":{},"finish_reason":"  "}]
+        }))
+        .unwrap());
+        assert!(openai_chat_sse_payload_has_terminal_finish_reason(&json!({
+            "choices":[{"index":0,"delta":{},"finish_reason":"stop"}]
+        }))
+        .unwrap());
+    }
+
+    #[test]
     fn responses_settlement_tail_frames_after_completed_are_benign() {
         assert!(is_v3_responses_settlement_tail_frame(
             r#"{"type":"ping","cost":"0"}"#
@@ -330,6 +346,7 @@ mod tests {
             auth_alias: "key".to_string(),
             model_id: "model".to_string(),
             recorded: false,
+            response_control: V3RuntimeStreamObservation::default(),
             _provider_action_permit: None,
         }
     }
@@ -368,6 +385,7 @@ mod tests {
             false,
             true,
             "MiniMax-M3",
+            false,
         )
         .expect("relay response hook must project without protocol failure");
 

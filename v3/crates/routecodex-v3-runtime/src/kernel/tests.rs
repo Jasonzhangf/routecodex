@@ -59,7 +59,7 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
         },
         selected,
         "V3HubRespChatProcess03Governed",
-        599,
+        502,
         Some("relay_unharvestable_tool_markup".into()),
         "recognized partial invocation".into(),
         None,
@@ -94,7 +94,7 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
             .internal_code,
         "500-231"
     );
-    assert_eq!(result.event.status, 599);
+    assert_eq!(result.event.status, 502);
     assert_eq!(result.event.health_record.failure_count, 0);
     assert_eq!(result.event.health_record.cooldown_until_ms, None);
     for (candidate, before) in plan.expanded.candidates.iter().zip(before) {
@@ -153,6 +153,7 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
         crate::direct_response_hooks::V3DirectResponseHookFailure::UnharvestableToolMarkup,
     )
     .expect("typed markup source");
+    assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     let mut failed_candidates = BTreeSet::new();
     let mut retries = std::collections::BTreeMap::new();
     let mut trace = vec![];

@@ -1238,18 +1238,17 @@ async fn anthropic_provider_sse_message_stop_closes_open_thinking_block_without_
             Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_glmrelay\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"glm-5.2\",\"content\":[],\"usage\":{\"input_tokens\":210584,\"output_tokens\":0}}}\n\n".to_vec()),
             Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n".to_vec()),
             Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Working on it\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"Visible answer\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n".to_vec()),
             Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":205404,\"cache_read_input_tokens\":203776,\"output_tokens\":28},\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n".to_vec()),
             Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
         ]));
     let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
-            V3HubProviderWireProtocol::Anthropic,
-            provider,
-            &observation,
-        )
-        .await
-        .expect(
-            "terminal Anthropic message_stop must preserve completed thinking instead of raising synthetic 502",
-        );
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .expect("terminal Anthropic message_stop must preserve thinking alongside visible text");
 
     assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "reasoning");
@@ -1332,14 +1331,20 @@ async fn anthropic_provider_sse_preserves_native_reasoning_with_extra_provider_f
         let stream = format!(
                 "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg_dual\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{content_block}}}\n\nevent: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":0}}\n\nevent: message_delta\ndata: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"end_turn\"}}}}\n\nevent: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             );
-        let provider = Box::pin(stream::iter(vec![Ok(stream.into_bytes())]));
+        let business = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"Visible answer\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n";
+        let terminal = stream.find("event: message_delta").unwrap();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(stream[..terminal].as_bytes().to_vec()),
+            Ok(business.as_bytes().to_vec()),
+            Ok(stream[terminal..].as_bytes().to_vec()),
+        ]));
         let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
             V3HubProviderWireProtocol::Anthropic,
             provider,
             &observation,
         )
         .await
-        .expect("representable reasoning with extra fields must not be rejected");
+        .expect("representable reasoning with extra fields and visible text must not be rejected");
         assert_eq!(response["status"], "completed");
         let serialized = response["output"][0].to_string();
         assert!(

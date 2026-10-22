@@ -60,6 +60,7 @@ pub struct V3ResponsesRelayRuntimeSeeds {
     pub route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
     pub observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     pub request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    pub request_local_busy_candidates: BTreeSet<String>,
 }
 
 pub enum V3ResponsesRelayDryRunOutcome {
@@ -249,6 +250,8 @@ pub enum V3RuntimeSemanticTerminal {
 struct V3RuntimeStreamControlState {
     semantic_terminal: Option<V3RuntimeSemanticTerminal>,
     provider_business_content: bool,
+    /// Attempt-local typed Error handoff, physically separate from snapshots.
+    response_governance_failure: Option<super::V3HubRelayResponseError>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -408,6 +411,36 @@ impl V3RuntimeStreamObservation {
             .lock()
             .map(|control| control.provider_business_content)
             .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn record_response_governance_failure(
+        &self,
+        error: super::V3HubRelayResponseError,
+    ) -> Result<(), String> {
+        let mut control = self
+            .control
+            .lock()
+            .map_err(|_| "V3 stream Error handoff lock is poisoned".to_string())?;
+        if control.response_governance_failure.is_none() {
+            control.response_governance_failure = Some(error);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn take_response_governance_failure(
+        &self,
+    ) -> Result<Option<super::V3HubRelayResponseError>, String> {
+        self.control
+            .lock()
+            .map(|mut control| control.response_governance_failure.take())
+            .map_err(|_| "V3 stream Error handoff lock is poisoned".to_string())
+    }
+
+    pub(crate) fn has_response_governance_failure(&self) -> Result<bool, String> {
+        self.control
+            .lock()
+            .map(|control| control.response_governance_failure.is_some())
+            .map_err(|_| "V3 stream Error handoff lock is poisoned".to_string())
     }
 
     pub fn semantic_terminal(&self) -> Result<Option<V3RuntimeSemanticTerminal>, String> {
