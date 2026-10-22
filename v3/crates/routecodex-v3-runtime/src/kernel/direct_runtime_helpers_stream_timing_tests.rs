@@ -1073,6 +1073,42 @@ fn responses_text_item_sequence(text: &str) -> Vec<Vec<u8>> {
     .collect()
 }
 
+/// Build a Responses item sequence whose visible text arrives as explicit
+/// deltas, so a governed marker can be split across provider frames exactly as
+/// a streaming provider would split it.
+fn responses_split_delta_sequence(deltas: &[&str], full: &str) -> Vec<Vec<u8>> {
+    let mut events = vec![
+        serde_json::json!({"type":"response.created","response":{"id":"r1","status":"in_progress","output":[]}}),
+        serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"id":"m1","type":"message","role":"assistant","status":"in_progress","content":[]}}),
+        serde_json::json!({"type":"response.content_part.added","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}),
+    ];
+    for delta in deltas {
+        events.push(serde_json::json!({
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "content_index": 0,
+            "delta": delta
+        }));
+    }
+    events.extend([
+        serde_json::json!({"type":"response.output_text.done","output_index":0,"content_index":0,"text":full}),
+        serde_json::json!({"type":"response.content_part.done","output_index":0,"content_index":0,"part":{"type":"output_text","text":full}}),
+        serde_json::json!({"type":"response.output_item.done","output_index":0,"item":{"id":"m1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":full}]}}),
+        serde_json::json!({"type":"response.completed","response":{"id":"r1","status":"completed","output":[{"id":"m1","type":"message","role":"assistant","content":[{"type":"output_text","text":full}]}]}}),
+    ]);
+    events
+        .into_iter()
+        .map(|value| {
+            format!(
+                "event: {}\ndata: {}\n\n",
+                value["type"].as_str().unwrap_or("message"),
+                value
+            )
+            .into_bytes()
+        })
+        .collect()
+}
+
 struct EarlyCommitRun {
     frames: Vec<Vec<u8>>,
     committed: bool,
@@ -1391,6 +1427,95 @@ async fn first_frame_commit_marker_after_commit_breaks_visibly_without_leaking()
     assert!(
         streamed.contains("hello"),
         "the certified prefix must still reach the client: {streamed}"
+    );
+}
+
+/// A governed marker split across provider frames is one marker in the
+/// streamed text even though neither frame contains it. The commit must stay
+/// closed, otherwise the client receives raw reasoning text.
+#[tokio::test]
+async fn first_frame_commit_marker_split_across_deltas_never_commits() {
+    let full = "<thinking>secret</thinking>";
+    let chunks = responses_split_delta_sequence(&["<", "thinking>secret</thinking>"], full);
+    let run = run_early_commit_attempt(chunks.clone()).await;
+    assert!(
+        !run.committed,
+        "a marker split across deltas must never be certified"
+    );
+    let streamed = String::from_utf8(run.frames.concat()).unwrap();
+    assert!(
+        !streamed.contains("<thinking>") && !streamed.contains("</thinking>"),
+        "the split marker must not reach the client as text: {streamed}"
+    );
+    let buffered = buffered_with_hooks(chunks).await;
+    assert_eq!(
+        streamed,
+        String::from_utf8(buffered.concat()).unwrap(),
+        "a refused commit must keep byte identity with the buffered attempt"
+    );
+}
+
+/// The same split after a certified prefix: the held frame and the frame that
+/// confirms the marker must not be projected.
+#[tokio::test]
+async fn first_frame_commit_marker_split_after_commit_breaks_without_leaking() {
+    let full = "hello <thinking>secret</thinking>";
+    let chunks =
+        responses_split_delta_sequence(&["hello ", "<thin", "king>secret</thinking>"], full);
+    let run = run_early_commit_attempt(chunks).await;
+    assert!(run.committed, "the clean prefix must commit");
+    assert!(
+        run.failed,
+        "the split marker must end the committed channel detectably"
+    );
+    let streamed = String::from_utf8(run.frames.concat()).unwrap();
+    assert!(
+        streamed.contains("hello"),
+        "the certified prefix must still reach the client: {streamed}"
+    );
+    assert!(
+        !streamed.contains("<thin") && !streamed.contains("secret"),
+        "neither the held prefix frame nor the reasoning body may reach the client: {streamed}"
+    );
+}
+
+/// A marker that only appears in the terminal snapshot is still governed,
+/// because the complete-attempt owners read that snapshot.
+#[tokio::test]
+async fn first_frame_commit_marker_only_in_terminal_snapshot_breaks_without_leaking() {
+    let clean = "hello";
+    let governed = "hello <thinking>secret</thinking>";
+    let chunks: Vec<Vec<u8>> = [
+        serde_json::json!({"type":"response.created","response":{"id":"r1","status":"in_progress","output":[]}}),
+        serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"id":"m1","type":"message","role":"assistant","status":"in_progress","content":[]}}),
+        serde_json::json!({"type":"response.content_part.added","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}),
+        serde_json::json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":clean}),
+        serde_json::json!({"type":"response.completed","response":{"id":"r1","status":"completed","output":[{"id":"m1","type":"message","role":"assistant","content":[{"type":"output_text","text":governed}]}]}}),
+    ]
+    .into_iter()
+    .map(|value| {
+        format!(
+            "event: {}\ndata: {}\n\n",
+            value["type"].as_str().unwrap_or("message"),
+            value
+        )
+        .into_bytes()
+    })
+    .collect();
+    let run = run_early_commit_attempt(chunks).await;
+    assert!(run.committed, "the clean delta must commit");
+    assert!(
+        run.failed,
+        "a governed terminal snapshot must end the committed channel detectably"
+    );
+    let streamed = String::from_utf8(run.frames.concat()).unwrap();
+    assert!(
+        streamed.contains("hello"),
+        "the certified prefix must still reach the client: {streamed}"
+    );
+    assert!(
+        !streamed.contains("<thinking>") && !streamed.contains("secret"),
+        "the terminal snapshot marker must not reach the client: {streamed}"
     );
 }
 

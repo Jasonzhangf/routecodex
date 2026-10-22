@@ -166,8 +166,15 @@ analysis/label 行。因此真实提交点由帧级内容证明（`V3DirectPrefi
 - 内容证明：缓冲前缀必须同时满足「已出现可见业务文本」且「没有任何 Direct 文本治理 owner 会改写的标记」
   且「最新文本不以标记前缀结尾」。标记集合由 owner 自己给出（thinking `<thinking>`/`</thinking>`，
   DSML 无声明即可删除的 standalone label），不在探针里重复硬编码。
+- 标记集合带匹配范围，与 owner 的匹配方式一致：thinking 标记按整段文本内联匹配，DSML label 只按整行匹配，
+  因此普通行内 ` calls>` 不会误判，而末行等于标记前缀（含只有空白的末行）时仍然挂起。
+- delta 是唯一增量载体，探针保留滚动文本尾部再判定，因此跨两个 provider 帧拆开的标记（例如 `<thin` 与
+  `king>secret`）同样被看见并阻止提交；`response.completed`/`response.incomplete` 的终态快照也参与扫描，
+  因为 complete-attempt owner 读取的正是这段文本。
 - 可见文本单调为真，因此提交后 `provider_response_empty`（空/空白/不可见 final）判定不可能被跳过；
   reasoning-only 与纯空白 delta 不提交。
+- DSML close 残渣（独占一行的 `>` 后紧跟 close label）在缓冲路径会被一并删除，因此探针把独占一行的 `>`
+  也当作未决文本，等下一帧决定是否成为标记。
 - `V3CommittedClientSseBuilder` 记录 `flushed_frames`；`commit_client_stream(sink)` 置提交标记并立刻冲出已有帧。
 - 提交后 `push` 逐帧冲出；`seal_after_validated_terminal` 只重放 `flushed_frames` 之后的尾部，客户端字节流与
   全缓冲路径逐字节相同。
@@ -197,5 +204,6 @@ analysis/label 行。因此真实提交点由帧级内容证明（`V3DirectPrefi
 - 提交后若 provider 才吐出字面治理标记（`<thinking>`、无声明即可删除的 DSML label），已发前缀无法回退。
   路径选择有界截断：停止投影并以 typed 运行时错误结束，不泄露标记原文，也不做整段回写。未提交前缀内出现
   标记时仍走全缓冲治理，两条路径字节一致。
-- 标记识别按 owner 给出的精确标记集合，普通 `<`/`>`（比较运算、代码）不算标记，不会触发截断。
+- 标记识别按 owner 给出的精确标记集合与匹配范围，普通 `<`/`>`（比较运算、代码、行内 label 字样）不算
+  未决标记，不会触发挂起或截断；只有独占一行的 `>` 会被挂起一帧。
 - P2（Relay 逐事件投影）与 P3（工具参数完整性闸）未实现：Relay 路径仍全缓冲，客户端窗口不变。

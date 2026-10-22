@@ -20,15 +20,42 @@ pub(crate) use dsml::{
 mod commit_probe;
 pub(crate) use commit_probe::V3DirectPrefixCommitProbe;
 
+/// Where a governed text marker can appear. The thinking owner searches the
+/// whole text; the DSML owner only removes a label that is a complete line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3GovernedTextScope {
+    Inline,
+    Line,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct V3GovernedTextMarker {
+    pub(crate) text: &'static str,
+    pub(crate) scope: V3GovernedTextScope,
+}
+
 /// Every text marker that a registered Direct complete-attempt owner can act on
-/// for this attempt. The thinking owner moves `<thinking>` bodies into
-/// synthesized reasoning items; the DSML owner removes the standalone protocol
-/// labels that no tool declaration is needed for. The first-frame commit probe
-/// treats a prefix containing any of them as not yet governed.
-pub(crate) fn v3_direct_governed_text_markers() -> Vec<&'static str> {
-    let mut markers = crate::tool_markup_parser::governed_text_markers();
-    markers.push(crate::shared_direct_thinking_compat::THINKING_OPEN);
-    markers.push(crate::shared_direct_thinking_compat::THINKING_CLOSE);
+/// for this attempt, with the scope that owner matches it in. The thinking owner
+/// moves `<thinking>` bodies into synthesized reasoning items wherever they
+/// appear; the DSML owner removes the standalone protocol labels that no tool
+/// declaration is needed for. The first-frame commit probe treats a prefix
+/// containing any of them as not yet governed.
+pub(crate) fn v3_direct_governed_text_markers() -> Vec<V3GovernedTextMarker> {
+    let mut markers: Vec<V3GovernedTextMarker> = crate::tool_markup_parser::governed_text_markers()
+        .into_iter()
+        .map(|text| V3GovernedTextMarker {
+            text,
+            scope: V3GovernedTextScope::Line,
+        })
+        .collect();
+    markers.push(V3GovernedTextMarker {
+        text: crate::shared_direct_thinking_compat::THINKING_OPEN,
+        scope: V3GovernedTextScope::Inline,
+    });
+    markers.push(V3GovernedTextMarker {
+        text: crate::shared_direct_thinking_compat::THINKING_CLOSE,
+        scope: V3GovernedTextScope::Inline,
+    });
     markers
 }
 

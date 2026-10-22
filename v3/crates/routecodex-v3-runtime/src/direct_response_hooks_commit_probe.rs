@@ -30,16 +30,74 @@
 
 use serde_json::Value;
 
+use crate::direct_response_hooks::{V3GovernedTextMarker, V3GovernedTextScope};
 use crate::hub_v1::V3HubProviderWireProtocol;
 
 /// Number of trailing characters kept for the split-marker check. Longer than
 /// any governed marker, so a full marker is always found inside the tail.
 const TEXT_TAIL_CHARS: usize = 64;
 
+/// How a text carrier relates to the delta stream. Deltas are incremental, so
+/// their text is appended to the rolling tail; every other carrier repeats text
+/// the deltas already delivered and replaces the tail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextCarrier {
+    Incremental,
+    Complete,
+}
+
+/// The last [`TEXT_TAIL_CHARS`] characters of `text`.
+fn tail_chars(text: &str) -> &str {
+    let count = text.chars().count();
+    if count <= TEXT_TAIL_CHARS {
+        return text;
+    }
+    let cut = text
+        .char_indices()
+        .nth(count - TEXT_TAIL_CHARS)
+        .map(|(index, _)| index)
+        .unwrap_or(text.len());
+    &text[cut..]
+}
+
+fn marker_matches(scope: V3GovernedTextScope, text: &str, marker: &str) -> bool {
+    match scope {
+        V3GovernedTextScope::Inline => text.contains(marker),
+        V3GovernedTextScope::Line => text
+            .lines()
+            .any(|line| line.trim_end_matches('\r') == marker),
+    }
+}
+
+/// True when `text` already carries a marker this attempt's owners can act on.
+fn contains_governed_marker(markers: &[V3GovernedTextMarker], text: &str) -> bool {
+    !text.is_empty()
+        && markers
+            .iter()
+            .any(|marker| marker_matches(marker.scope, text, marker.text))
+}
+
+/// True when the observed text ends with a proper prefix of `marker`, in the
+/// scope that owner matches it: an inline marker may start anywhere, a line
+/// marker must occupy the partial last line.
+fn marker_prefix_at_end(text_tail: &str, last_line: &str, marker: &V3GovernedTextMarker) -> bool {
+    marker.text.char_indices().any(|(index, ch)| {
+        let prefix_len = index + ch.len_utf8();
+        if prefix_len >= marker.text.len() {
+            return false;
+        }
+        let prefix = &marker.text[..prefix_len];
+        match marker.scope {
+            V3GovernedTextScope::Inline => text_tail.ends_with(prefix),
+            V3GovernedTextScope::Line => last_line == prefix,
+        }
+    })
+}
+
 #[derive(Debug)]
 pub(crate) struct V3DirectPrefixCommitProbe {
     protocol: V3HubProviderWireProtocol,
-    markers: Vec<&'static str>,
+    markers: Vec<V3GovernedTextMarker>,
     visible_text: bool,
     confirmed_marker: bool,
     text_tail: String,
@@ -62,15 +120,29 @@ impl V3DirectPrefixCommitProbe {
             return;
         }
         match event.get("type").and_then(Value::as_str) {
-            Some("response.output_text.delta") => self.observe_text(event.get("delta")),
-            Some("response.output_text.done") => self.observe_text(event.get("text")),
+            // The delta stream is the only incremental carrier, so it is the one
+            // a governed marker can be split across.
+            Some("response.output_text.delta") => {
+                self.observe_text(event.get("delta"), TextCarrier::Incremental);
+            }
+            Some("response.output_text.done") => {
+                self.observe_text(event.get("text"), TextCarrier::Complete);
+            }
             Some("response.content_part.added" | "response.content_part.done") => {
                 self.observe_part(event.get("part"));
             }
             Some("response.output_item.added" | "response.output_item.done") => {
                 self.observe_item(event.get("item"));
             }
-            Some("response.created" | "response.in_progress" | "response.queued") => {
+            // The complete-attempt owners read the terminal snapshot output, so
+            // the certification has to read the same text.
+            Some(
+                "response.created"
+                | "response.in_progress"
+                | "response.queued"
+                | "response.completed"
+                | "response.incomplete",
+            ) => {
                 for item in event
                     .pointer("/response/output")
                     .and_then(Value::as_array)
@@ -94,7 +166,7 @@ impl V3DirectPrefixCommitProbe {
         if item.get("type").and_then(Value::as_str) != Some("message") {
             return;
         }
-        self.observe_text(item.get("text"));
+        self.observe_text(item.get("text"), TextCarrier::Complete);
         for part in item
             .get("content")
             .and_then(Value::as_array)
@@ -112,10 +184,10 @@ impl V3DirectPrefixCommitProbe {
         if part.get("type").and_then(Value::as_str) != Some("output_text") {
             return;
         }
-        self.observe_text(part.get("text"));
+        self.observe_text(part.get("text"), TextCarrier::Complete);
     }
 
-    fn observe_text(&mut self, text: Option<&Value>) {
+    fn observe_text(&mut self, text: Option<&Value>, carrier: TextCarrier) {
         let Some(text) = text.and_then(Value::as_str) else {
             return;
         };
@@ -123,15 +195,20 @@ impl V3DirectPrefixCommitProbe {
             return;
         }
         self.visible_text |= crate::hub_v1::v3_text_has_visible_content(text);
-        self.confirmed_marker |= self.markers.iter().any(|marker| text.contains(marker));
-        self.text_tail = text
-            .chars()
-            .rev()
-            .take(TEXT_TAIL_CHARS)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
+        // Append incremental text so a marker split across two provider frames
+        // stays one string. A complete carrier repeats text the deltas already
+        // delivered, so it replaces the tail instead of duplicating it.
+        match carrier {
+            TextCarrier::Incremental => {
+                self.text_tail.push_str(text);
+                self.text_tail = tail_chars(&self.text_tail).to_string();
+            }
+            TextCarrier::Complete => {
+                self.text_tail = tail_chars(text).to_string();
+            }
+        }
+        self.confirmed_marker |= contains_governed_marker(&self.markers, text);
+        self.confirmed_marker |= contains_governed_marker(&self.markers, &self.text_tail);
     }
 
     /// True only while the whole buffered prefix is governed business content:
@@ -148,19 +225,26 @@ impl V3DirectPrefixCommitProbe {
         self.confirmed_marker
     }
 
-    /// The newest observed text ends with a proper prefix of a governed marker.
-    /// The next provider frame decides whether it becomes a marker, so a
-    /// committed channel must not project this frame yet.
+    /// The observed text ends with a proper prefix of a governed marker, or with
+    /// a bare `>` line the DSML owner removes together with the close label that
+    /// follows it. The next provider frame decides which it is, so a committed
+    /// channel must not project this frame yet.
     pub(crate) fn trailing_marker_prefix(&self) -> bool {
         if self.text_tail.is_empty() {
             return false;
         }
-        self.markers.iter().any(|marker| {
-            marker.char_indices().any(|(index, ch)| {
-                let prefix_len = index + ch.len_utf8();
-                prefix_len < marker.len() && self.text_tail.ends_with(&marker[..prefix_len])
-            })
-        })
+        let last_line = self
+            .text_tail
+            .rsplit('\n')
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches('\r');
+        if last_line == ">" {
+            return true;
+        }
+        self.markers
+            .iter()
+            .any(|marker| marker_prefix_at_end(&self.text_tail, last_line, marker))
     }
 }
 
@@ -228,6 +312,66 @@ mod tests {
         probe.observe_event(&delta("Visible.\n<|end▁of▁analysis|>\n"));
         assert!(!probe.is_committable());
         assert!(probe.confirmed_governed_marker());
+    }
+
+    /// The reviewer leak: the marker is split so neither frame contains it, but
+    /// the streamed text does. A per-frame scan misses it and commits raw
+    /// reasoning text.
+    #[test]
+    fn marker_split_across_two_deltas_is_never_committed() {
+        let mut probe = probe();
+        probe.observe_event(&delta("visible "));
+        assert!(probe.is_committable());
+        probe.observe_event(&delta("<thin"));
+        assert!(
+            !probe.is_committable(),
+            "a trailing marker prefix is unresolved"
+        );
+        probe.observe_event(&delta("king>secret"));
+        assert!(
+            probe.confirmed_governed_marker(),
+            "the split marker must be seen in the accumulated text"
+        );
+        assert!(!probe.is_committable());
+    }
+
+    /// A marker that only reaches the terminal snapshot still governs the
+    /// attempt, because the complete-attempt owners read that snapshot.
+    #[test]
+    fn marker_in_terminal_snapshot_is_confirmed() {
+        let mut probe = probe();
+        probe.observe_event(&delta("clean visible text"));
+        assert!(probe.is_committable());
+        probe.observe_event(&json!({
+            "type": "response.completed",
+            "response": {
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "id": "m1",
+                    "content": [{"type": "output_text", "text": "clean visible text <thinking>secret"}]
+                }]
+            }
+        }));
+        assert!(probe.confirmed_governed_marker());
+        assert!(!probe.is_committable());
+    }
+
+    /// A bare `>` line is removed by the DSML owner together with the close
+    /// label that follows it, so it is unresolved until the next frame decides.
+    #[test]
+    fn trailing_close_residue_line_is_held() {
+        let mut probe = probe();
+        probe.observe_event(&delta("visible text"));
+        assert!(probe.is_committable());
+        probe.observe_event(&delta("\n>"));
+        assert!(
+            !probe.is_committable(),
+            "a bare > line may still become the close residue"
+        );
+        probe.observe_event(&delta("\nplain continuation"));
+        assert!(probe.is_committable(), "plain text resolves the residue");
+        assert!(!probe.confirmed_governed_marker());
     }
 
     #[test]

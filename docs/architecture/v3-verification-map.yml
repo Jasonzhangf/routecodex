@@ -4250,13 +4250,13 @@ features:
   - docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
   - docs/architecture/wiki/v3-client-sse-head-commit.md
   required_positive:
-  - The first committable business frame (text, reasoning, or name-bearing tool-call) crosses the client SSE channel at its provider arrival time, before the provider terminal.
-  - The client stream is byte-identical to the fully buffered attempt for attempts without a whole-attempt rewrite.
-  - The whole-attempt rewrites (DSML harvest, thinking template, memory capture) are excluded by the request-level predicate when early commit is enabled, or they run before any delivery.
+  - The first committable business frame (visible output_text that the Direct content probe certifies) crosses the client SSE channel at its provider arrival time, before the provider terminal. Reasoning-only and whitespace-only prefixes never commit, so an empty attempt still recovers through the typed Error chain.
+  - The client stream is byte-identical to the fully buffered attempt for every attempt the content probe commits.
+  - The request-level predicate only filters which attempts carry the content probe; the DSML and thinking whole-attempt rewrites run for the whole attempt and are governed by that probe, so a governed marker observed before the commit prevents it and one observed after it ends the committed channel.
   - After delivery, provider failure ends the committed channel silently with no status, error frame, or provider payload, and never switches candidates or re-issues the attempt.
   - A failed pre-commit attempt is still discarded before any replacement attempt is exposed; residence expiry still terminates through the typed Error chain.
   required_negative:
-  - No frame is delivered while the attempt still lacks the request-level predicate's permission for early commit.
+  - No frame is delivered before the content probe certifies the attempt as ungoverned visible text; a marker split across provider frames, a marker that only appears in the terminal snapshot, and a trailing marker prefix or bare `>` close-residue line all block the commit.
   - A delivered frame is never rewritten, replaced, suppressed, or re-emitted; the ledger rejects whole-attempt rewrites after delivery.
   - Post-delivery failure does not cool other keys, does not mutate untried identities, and does not emit a success receipt.
   - The keepalive comment does not count as a committable business frame and is not used to fabricate a first-token time.

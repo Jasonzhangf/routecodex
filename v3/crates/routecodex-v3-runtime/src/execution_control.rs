@@ -829,18 +829,17 @@ impl V3CommittedClientSseBuilder {
                     .to_string(),
             )
         })?;
-        // The replay skips already-flushed frames; the terminal index observed
-        // by consumers counts from the first replayed frame, so it must be
-        // relative to the flushed prefix.
-        let relative_terminal_frame_index =
-            terminal_frame_index.saturating_sub(self.flushed_frames);
+        // The replay skips already-flushed frames, but the observer counts
+        // absolute frames: `next_frame_index` starts at the flushed prefix, so
+        // `terminal_frame_index` must stay absolute or the terminal would be
+        // marked consumed one frame early.
         Ok(V3CommittedClientSseStream {
             inner: Box::pin(V3ReservedCommittedSseReplay {
                 frames: self.frames.into_iter().skip(self.flushed_frames),
                 _reservation: self.reservation,
             }),
             next_frame_index: self.flushed_frames,
-            terminal_frame_index: relative_terminal_frame_index,
+            terminal_frame_index,
         })
     }
 }
