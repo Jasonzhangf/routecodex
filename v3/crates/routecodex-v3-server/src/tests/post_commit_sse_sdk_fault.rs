@@ -29,6 +29,7 @@ async fn force_accepted_sse_transport(body: Body) -> Body {
         None,
         Box::new(|outcome| outcome),
         Duration::from_millis(2),
+        None,
     )
     .await
     .into_body()

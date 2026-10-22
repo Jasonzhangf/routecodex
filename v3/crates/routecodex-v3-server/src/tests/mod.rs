@@ -1466,6 +1466,62 @@ async fn codex_sample_final_body_capture_persists_drop_prefix_with_stream_error(
 }
 
 #[tokio::test]
+async fn codex_sample_final_body_capture_follows_transport_break_replacement() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-final-body-break-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        5555,
+        true,
+        true,
+        Some("client-response".to_string()),
+        true,
+    );
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let request_id = "final-body-break";
+    let capture = test_final_body_sse_capture(&state, request_id);
+    // A post-commit attempt has no client payload: the transport breaks and the
+    // server replaces the outcome response with the break response.
+    let response = capture.defer_into(model_no_response_output(true));
+    let response = commit_model_transport_outcome(&state, None, response);
+    let response = observe_v3_live_client_wire(response);
+    let mut body = response.into_body().into_data_stream();
+    assert_eq!(
+        body.next().await.unwrap().unwrap().as_ref(),
+        b":\n\n",
+        "the client observes the transport break head"
+    );
+    body.next()
+        .await
+        .expect("transport break must stay visible")
+        .expect_err("transport break must not become a clean EOF");
+    assert!(body.next().await.is_none());
+
+    sample_worker.wait_until_idle().await.unwrap();
+    let response_path =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/final-body-break/response.json");
+    let persisted: Value =
+        serde_json::from_str(&fs::read_to_string(response_path).unwrap()).unwrap();
+    assert_eq!(
+        persisted["rawSse"].as_str(),
+        Some(":\n\n"),
+        "the sample must record the bytes the client receives after the replacement"
+    );
+    assert!(persisted["streamError"]
+        .as_str()
+        .is_some_and(|error| error.contains("provider pool exhausted")));
+
+    sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn codex_sample_final_body_capture_write_failure_does_not_change_sse_wire() {
     let _home_lock = TEST_HOME_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(

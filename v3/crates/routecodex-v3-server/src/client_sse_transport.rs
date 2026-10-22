@@ -21,6 +21,7 @@
 //! - An outcome with no successful client payload closes the client transport
 //!   without projecting a provider status, error payload, or fabricated success.
 //!   The real cause stays in the typed Error chain and in the console record.
+use crate::V3LiveSnapClientWireCaptureSlot;
 use axum::body::{Body, BodyDataStream};
 use axum::http::{header, StatusCode};
 use axum::response::Response;
@@ -70,6 +71,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
     client_frame_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>,
     finalize_runtime_outcome: Box<dyn FnOnce(Response<Body>) -> Response<Body> + Send>,
     keepalive_interval: Duration,
+    client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
 ) -> Response<Body> {
     let mut runtime_outcome = runtime_outcome;
     let mut client_frame_receiver = client_frame_receiver;
@@ -130,6 +132,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
                 client_frame_receiver,
                 prefix_frames,
                 keepalive_interval,
+                client_wire_capture,
             )
         }
         V3ClientSseAcceptRace::CommittedFrame(frame) => {
@@ -154,6 +157,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
                 client_frame_receiver,
                 prefix_frames,
                 keepalive_interval,
+                client_wire_capture,
             )
         }
         V3ClientSseAcceptRace::KeepaliveDeadline => {
@@ -168,6 +172,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
                 client_frame_receiver,
                 Vec::new(),
                 keepalive_interval,
+                client_wire_capture,
             )
         }
     }
@@ -185,6 +190,7 @@ fn commit_v3_client_sse_channel(
     client_frame_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>,
     prefix_frames: Vec<Vec<u8>>,
     keepalive_interval: Duration,
+    client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
 ) -> Response<Body> {
     let mut interval = tokio::time::interval_at(
         tokio::time::Instant::now() + keepalive_interval,
@@ -199,6 +205,7 @@ fn commit_v3_client_sse_channel(
         client_frame_receiver,
         client_frame_prefix: prefix_frames.into(),
         client_frame_emitted: false,
+        client_wire_capture: client_wire_capture.clone(),
         interval,
         keepalive_chunk: build_v3_sse_transport_out_04_keepalive_comment(
             V3_CLIENT_SSE_KEEPALIVE_COMMENT,
@@ -208,12 +215,16 @@ fn commit_v3_client_sse_channel(
             keepalive_sent: false,
         },
     };
-    Response::builder()
+    let mut response = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/event-stream")
         .header(header::CACHE_CONTROL, "no-cache")
         .body(Body::from_stream(stream))
-        .expect("V3 committed client SSE channel response")
+        .expect("V3 committed client SSE channel response");
+    if let Some(client_wire_capture) = client_wire_capture {
+        response.extensions_mut().insert(client_wire_capture);
+    }
+    response
 }
 
 enum V3ClientSseChannelState {
@@ -251,6 +262,9 @@ struct V3ClientSseChannelStream {
     /// Set as soon as one committed frame reached the client. From that point the
     /// transport never emits another keepalive and never projects an error.
     client_frame_emitted: bool,
+    /// Hands the client-response sample recorder from the runtime outcome to the
+    /// transport boundary wrapper that owns the final client wire.
+    client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
     interval: tokio::time::Interval,
     keepalive_chunk: Vec<u8>,
     state: V3ClientSseChannelState,
@@ -370,8 +384,16 @@ impl Stream for V3ClientSseChannelStream {
                     let committed_already = this.client_frame_emitted;
                     match Pin::new(&mut this.outcome).poll(cx) {
                         Poll::Pending => return Poll::Pending,
-                        Poll::Ready(Ok(response)) => {
+                        Poll::Ready(Ok(mut response)) => {
                             this.outcome_task = None;
+                            // The client-response sample recorder travels on the
+                            // runtime outcome, but this channel owns the response
+                            // head the client actually sees. Adopt the recorder
+                            // here so the transport boundary records the final
+                            // wire, including the committed prefix frames.
+                            if let Some(capture_slot) = this.client_wire_capture.as_ref() {
+                                capture_slot.adopt_from_response(&mut response);
+                            }
                             let disposition =
                                 V3ClientSseChannelStream::committed_channel_disposition(&response);
                             if committed_already {
@@ -529,6 +551,7 @@ mod tests {
             client_frame_receiver: None,
             client_frame_prefix: std::collections::VecDeque::new(),
             client_frame_emitted: false,
+            client_wire_capture: None,
             interval,
             keepalive_chunk: b": keepalive\n\n".to_vec(),
             state: V3ClientSseChannelState::AwaitOutcome {
@@ -718,6 +741,7 @@ mod tests {
             None,
             Box::new(|outcome| outcome),
             Duration::from_millis(50),
+            None,
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -809,6 +833,7 @@ mod tests {
             Some(frames),
             Box::new(|outcome| outcome),
             Duration::from_millis(50),
+            None,
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -839,6 +864,7 @@ mod tests {
             Some(frames),
             Box::new(|outcome| outcome),
             Duration::from_millis(500),
+            None,
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);

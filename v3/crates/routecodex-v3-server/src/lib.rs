@@ -1304,6 +1304,11 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
     let response = match client_sse_channel {
         Some(keepalive_interval) => {
             let outcome_state = Arc::clone(&state);
+            // The committed channel owns the response head, so the client-response
+            // sample recorder cannot travel through the runtime outcome response.
+            // The channel hands it to this slot and the boundary reads it here.
+            let client_wire_capture = client_response_wire_capture_enabled(&state)
+                .then(V3LiveSnapClientWireCaptureSlot::new);
             accept_v3_client_sse_transport(
                 runtime_outcome,
                 client_frame_receiver,
@@ -1315,6 +1320,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                     )
                 }),
                 keepalive_interval,
+                client_wire_capture,
             )
             .await
         }
@@ -1322,10 +1328,24 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
     };
     let response =
         hold_response_body_request_activity_permit(response, request_activity_permit, front_socket);
-    match admission_permit {
+    let response = match admission_permit {
         Some(permit) => hold_response_body_admission_permit(response, permit),
         None => response,
-    }
+    };
+    // The client-response sample must record the wire the client receives, so the
+    // recorder wraps the final body after every transport owner has framed it.
+    observe_v3_live_client_wire(response)
+}
+
+/// Whether this request can produce a client-response sample.
+///
+/// The transport boundary wraps the final client wire only when a sample can be
+/// recorded, so an unsampled request pays no per-chunk capture cost.
+fn client_response_wire_capture_enabled(state: &V3ListenerState) -> bool {
+    state.debug.should_capture_snapshot_stage("client-response")
+        || state
+            .debug
+            .should_capture_snapshot_stage("provider-response")
 }
 
 /// v3.protocol.pending_projection：尚未实现协议绑定的客户端响应统一由

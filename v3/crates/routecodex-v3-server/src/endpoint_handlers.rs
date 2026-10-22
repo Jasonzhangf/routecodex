@@ -627,7 +627,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         client_keepalive_interval,
                     );
                     return match client_response_capture {
-                        Some(capture) => capture.observe_response(response),
+                        Some(capture) => capture.defer_into(response),
                         None => response,
                     };
                 }
@@ -837,7 +837,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     client_keepalive_interval,
                 );
                 match client_response_capture {
-                    Some(capture) => capture.observe_response(response),
+                    Some(capture) => capture.defer_into(response),
                     None => response,
                 }
             }
@@ -1465,7 +1465,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                 requested_stream,
             );
             return match client_response_capture {
-                Some(capture) => capture.observe_response(response),
+                Some(capture) => capture.defer_into(response),
                 None => response,
             };
         }
@@ -1609,7 +1609,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
             );
             let response = anthropic_relay_output_response(output, requested_stream);
             return match client_response_capture {
-                Some(capture) => capture.observe_response(response),
+                Some(capture) => capture.defer_into(response),
                 None => response,
             };
         }
@@ -1720,7 +1720,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                 requested_stream,
             );
             return match client_response_capture {
-                Some(capture) => capture.observe_response(response),
+                Some(capture) => capture.defer_into(response),
                 None => response,
             };
         }

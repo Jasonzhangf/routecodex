@@ -560,6 +560,7 @@ features:
   - pending_model_request
   - model_no_response_output
   - commit_model_transport_outcome
+  - transfer_v3_live_client_capture
   - V3ModelClientNoResponse
   - build_v3_server_startup_01_listener_set_from_config_05
   - build_v3_server_03_http_request_raw
@@ -4553,7 +4554,10 @@ features:
   - capture_v3_anthropic_relay_response
   - capture_v3_gemini_relay_response
   - V3LiveSnapFinalSseResponseCapture
-  - V3LiveSnapFinalSseBodyStream
+  - V3LiveSnapPendingClientCapture
+  - V3LiveSnapClientWireCaptureSlot
+  - V3LiveSnapClientWireBodyStream
+  - observe_v3_live_client_wire
   allowed_paths:
   - v3/crates/routecodex-v3-config
   - v3/crates/routecodex-v3-cli
