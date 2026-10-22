@@ -1612,15 +1612,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 // The complete-attempt Direct response hook stays content
                 // driven, so the collector's frame-level commit probe decides
                 // the actual commit and the hook still runs after the terminal.
-                let attempt_client_frame_sink = client_frame_sink
-                    .clone()
-                    .filter(|_| {
-                        !manifest.memory_raw_capture.enabled
-                            && direct_dsml_context.has_no_declared_tools()
-                            && !response_projection.compat_plan.has_block(
-                                crate::direct_response_hooks::V3DirectResponseCompatBlock::ThinkingTags,
-                            )
-                    });
+                let attempt_client_frame_sink = client_frame_sink.clone().filter(|_| {
+                    !manifest.memory_raw_capture.enabled
+                        && direct_dsml_context.has_no_declared_tools()
+                        && !response_projection.compat_plan.has_block(
+                            crate::direct_response_hooks::V3DirectResponseCompatBlock::ThinkingTags,
+                        )
+                });
                 let client_commit_probe = attempt_client_frame_sink.clone();
                 let committed =
                     match direct_runtime_helpers_stream::project_and_collect_direct_sse_attempt(

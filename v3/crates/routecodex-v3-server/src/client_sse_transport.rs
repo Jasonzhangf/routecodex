@@ -349,10 +349,7 @@ impl Stream for V3ClientSseChannelStream {
             // committed frame must reach the client even while the runtime
             // outcome is pending, and the method borrow must not overlap the
             // state match.
-            if matches!(
-                this.state,
-                V3ClientSseChannelState::AwaitOutcome { .. }
-            ) {
+            if matches!(this.state, V3ClientSseChannelState::AwaitOutcome { .. }) {
                 if let Poll::Ready(Some(frame)) = this.poll_client_frame(cx) {
                     return Poll::Ready(Some(Ok(frame)));
                 }

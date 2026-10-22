@@ -158,8 +158,7 @@ impl V3DirectPrefixCommitProbe {
         self.markers.iter().any(|marker| {
             marker.char_indices().any(|(index, ch)| {
                 let prefix_len = index + ch.len_utf8();
-                prefix_len < marker.len()
-                    && self.text_tail.ends_with(&marker[..prefix_len])
+                prefix_len < marker.len() && self.text_tail.ends_with(&marker[..prefix_len])
             })
         })
     }
@@ -192,7 +191,9 @@ mod tests {
         let mut probe = probe();
         probe.observe_event(&delta("   \n"));
         assert!(!probe.is_committable());
-        probe.observe_event(&json!({"type": "response.reasoning_summary_text.delta", "delta": "plan"}));
+        probe.observe_event(
+            &json!({"type": "response.reasoning_summary_text.delta", "delta": "plan"}),
+        );
         assert!(!probe.is_committable());
         probe.observe_event(&json!({"type": "response.output_item.added", "item": {"type": "reasoning", "id": "rs_1"}}));
         assert!(!probe.is_committable());
@@ -202,7 +203,10 @@ mod tests {
     fn ordinary_angle_bracket_prose_is_committable() {
         let mut probe = probe();
         probe.observe_event(&delta("if a < b then b > a"));
-        assert!(probe.is_committable(), "plain comparison operators are not governed markers");
+        assert!(
+            probe.is_committable(),
+            "plain comparison operators are not governed markers"
+        );
     }
 
     #[test]
@@ -212,7 +216,10 @@ mod tests {
         assert!(!probe.is_committable());
         assert!(probe.confirmed_governed_marker());
         probe.observe_event(&delta("more visible text"));
-        assert!(!probe.is_committable(), "a governed marker stops certification for the attempt");
+        assert!(
+            !probe.is_committable(),
+            "a governed marker stops certification for the attempt"
+        );
     }
 
     #[test]
@@ -227,7 +234,10 @@ mod tests {
     fn split_marker_prefix_is_not_committable_until_resolved() {
         let mut probe = probe();
         probe.observe_event(&delta("visible <think"));
-        assert!(!probe.is_committable(), "a trailing marker prefix is unresolved, not safe");
+        assert!(
+            !probe.is_committable(),
+            "a trailing marker prefix is unresolved, not safe"
+        );
         assert!(!probe.confirmed_governed_marker());
         probe.observe_event(&delta("ing>hidden</thinking>"));
         assert!(probe.confirmed_governed_marker());
@@ -240,7 +250,10 @@ mod tests {
         probe.observe_event(&delta("1 <"));
         assert!(!probe.is_committable());
         probe.observe_event(&delta(" 2"));
-        assert!(probe.is_committable(), "an unresolved prefix that never became a marker is safe");
+        assert!(
+            probe.is_committable(),
+            "an unresolved prefix that never became a marker is safe"
+        );
         assert!(!probe.confirmed_governed_marker());
     }
 

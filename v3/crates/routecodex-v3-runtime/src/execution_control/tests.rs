@@ -438,9 +438,18 @@ async fn first_frame_commit_seal_remainder_preserves_byte_identity() {
             builder.push(frame.clone()).unwrap();
         }
         builder.mark_last_frame_as_terminal().unwrap();
-        buffered.extend(builder.seal_after_validated_terminal().unwrap().collect::<Vec<_>>().await);
+        buffered.extend(
+            builder
+                .seal_after_validated_terminal()
+                .unwrap()
+                .collect::<Vec<_>>()
+                .await,
+        );
     }
-    assert_eq!(delivered, buffered, "streamed path must equal buffered path byte for byte");
+    assert_eq!(
+        delivered, buffered,
+        "streamed path must equal buffered path byte for byte"
+    );
     assert_eq!(delivered, frames.to_vec());
 }
 
@@ -456,8 +465,7 @@ fn first_frame_commit_rejects_whole_attempt_rewrite_after_delivery() {
         Err(V3AttemptStoreError::InvalidAttemptState(_))
     ));
     assert!(matches!(
-        builder
-            .rewrite_complete_attempt::<V3AttemptStoreError>(|_| Ok(Some((vec![vec![9]], 0)))),
+        builder.rewrite_complete_attempt::<V3AttemptStoreError>(|_| Ok(Some((vec![vec![9]], 0)))),
         Err(V3AttemptStoreError::InvalidAttemptState(_))
     ));
 }

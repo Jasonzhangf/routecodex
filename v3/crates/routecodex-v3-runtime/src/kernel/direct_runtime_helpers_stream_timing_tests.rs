@@ -993,25 +993,32 @@ async fn first_frame_commit_delivers_business_frame_before_provider_terminal() {
         V3HubProviderWireProtocol::Responses,
     );
     let (sink, mut rx) = crate::nodes::V3CommittedClientFrameSink::channel();
-    let collector = tokio::spawn(collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
-        projected,
-        V3HubProviderWireProtocol::Responses,
-        crate::nodes::V3AttemptBudget::process_default(),
-        None,
-        None,
-        None,
-        Some(sink),
-    ));
+    let collector = tokio::spawn(
+        collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
+            projected,
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+            None,
+            None,
+            None,
+            Some(sink),
+        ),
+    );
     let first = tokio::time::timeout(std::time::Duration::from_millis(900), rx.recv())
         .await
-        .expect("first committable frame must reach the client channel before the provider terminal")
+        .expect(
+            "first committable frame must reach the client channel before the provider terminal",
+        )
         .expect("client channel frame");
     assert!(
         String::from_utf8_lossy(&first).contains("response.output_text.delta"),
         "first delivered frame: {}",
         String::from_utf8_lossy(&first)
     );
-    let sealed = collector.await.expect("collector task").expect("sealed attempt");
+    let sealed = collector
+        .await
+        .expect("collector task")
+        .expect("sealed attempt");
     let mut streamed = vec![first];
     while let Ok(frame) = rx.try_recv() {
         streamed.push(frame);
@@ -1183,18 +1190,21 @@ async fn first_frame_commit_matches_buffered_thinking_governance() {
         &serde_json::json!({}),
         &std::collections::HashMap::new(),
     );
-    let run = run_early_commit_attempt_with_hooks(
-        chunks.clone(),
-        Some((&registry, &context)),
-    )
-    .await;
-    assert!(!run.committed, "a thinking-wrapped prefix must never commit early");
+    let run =
+        run_early_commit_attempt_with_hooks(chunks.clone(), Some((&registry, &context))).await;
+    assert!(
+        !run.committed,
+        "a thinking-wrapped prefix must never commit early"
+    );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     assert!(
         !streamed.contains("<thinking>"),
         "the client stream leaked the raw thinking wrapper: {streamed}"
     );
-    assert!(streamed.contains("answer"), "visible text must survive: {streamed}");
+    assert!(
+        streamed.contains("answer"),
+        "visible text must survive: {streamed}"
+    );
     assert!(
         streamed.contains("response.reasoning_summary_text.delta"),
         "thinking must be preserved as reasoning: {streamed}"
@@ -1219,9 +1229,19 @@ async fn first_frame_commit_reasoning_does_not_mask_blank_final() {
         terminal.as_bytes().to_vec(),
     ])
     .await;
-    assert!(!run.committed, "reasoning alone must not commit the client channel");
-    assert!(run.failed, "a reasoning + blank final attempt must stay a typed provider failure");
-    assert!(run.frames.is_empty(), "no provider payload may reach the client: {:?}", run.frames);
+    assert!(
+        !run.committed,
+        "reasoning alone must not commit the client channel"
+    );
+    assert!(
+        run.failed,
+        "a reasoning + blank final attempt must stay a typed provider failure"
+    );
+    assert!(
+        run.frames.is_empty(),
+        "no provider payload may reach the client: {:?}",
+        run.frames
+    );
 }
 
 /// The invisible-final contract is the same: non-displayable characters are
@@ -1229,12 +1249,27 @@ async fn first_frame_commit_reasoning_does_not_mask_blank_final() {
 #[tokio::test]
 async fn first_frame_commit_invisible_final_never_commits() {
     let invisible = "\u{200b}\u{200b}";
-    let delta = format!("event: response.output_text.delta\ndata: {}\n\n", serde_json::json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":invisible}));
-    let terminal = format!("event: response.completed\ndata: {}\n\n", serde_json::json!({"type":"response.completed","response":{"id":"r1","status":"completed","output":[{"id":"m1","type":"message","role":"assistant","content":[{"type":"output_text","text":invisible}]}]}}));
+    let delta = format!(
+        "event: response.output_text.delta\ndata: {}\n\n",
+        serde_json::json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":invisible})
+    );
+    let terminal = format!(
+        "event: response.completed\ndata: {}\n\n",
+        serde_json::json!({"type":"response.completed","response":{"id":"r1","status":"completed","output":[{"id":"m1","type":"message","role":"assistant","content":[{"type":"output_text","text":invisible}]}]}})
+    );
     let run = run_early_commit_attempt(vec![delta.into_bytes(), terminal.into_bytes()]).await;
-    assert!(!run.committed, "an invisible-only delta must not commit the channel");
-    assert!(run.failed, "an invisible-only final must stay a typed provider failure");
-    assert!(run.frames.is_empty(), "no invisible payload may reach the client");
+    assert!(
+        !run.committed,
+        "an invisible-only delta must not commit the channel"
+    );
+    assert!(
+        run.failed,
+        "an invisible-only final must stay a typed provider failure"
+    );
+    assert!(
+        run.frames.is_empty(),
+        "no invisible payload may reach the client"
+    );
 }
 
 /// A pure reasoning attempt with no explicit final is legal business content.
@@ -1249,8 +1284,14 @@ async fn first_frame_commit_pure_reasoning_without_final_still_seals() {
     ])
     .await;
     assert!(!run.committed, "pure reasoning must stay fully buffered");
-    assert!(!run.failed, "pure reasoning without a final is deliverable business content");
-    assert!(!run.frames.is_empty(), "the reasoning payload must still reach the client");
+    assert!(
+        !run.failed,
+        "pure reasoning without a final is deliverable business content"
+    );
+    assert!(
+        !run.frames.is_empty(),
+        "the reasoning payload must still reach the client"
+    );
 }
 
 /// The DSML owner also strips standalone analysis labels even without declared
@@ -1261,14 +1302,23 @@ async fn first_frame_commit_analysis_label_stays_governed() {
     let text = "Visible prose.\n<|end\u{2581}of\u{2581}analysis|>\n";
     let chunks = responses_text_item_sequence(text);
     let run = run_early_commit_attempt(chunks.clone()).await;
-    assert!(!run.committed, "analysis-label prose must not commit ahead of the DSML owner");
-    assert!(!run.failed, "visible prose with a removable label is still deliverable");
+    assert!(
+        !run.committed,
+        "analysis-label prose must not commit ahead of the DSML owner"
+    );
+    assert!(
+        !run.failed,
+        "visible prose with a removable label is still deliverable"
+    );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     assert!(
         !streamed.contains("end\u{2581}of\u{2581}analysis"),
         "analysis label leaked: {streamed}"
     );
-    assert!(streamed.contains("Visible prose."), "visible prose must be preserved: {streamed}");
+    assert!(
+        streamed.contains("Visible prose."),
+        "visible prose must be preserved: {streamed}"
+    );
     let buffered = buffered_with_hooks(chunks).await;
     assert_eq!(
         streamed,
@@ -1284,7 +1334,10 @@ async fn first_frame_commit_analysis_label_stays_governed() {
 async fn first_frame_commit_keeps_governance_after_commit() {
     let chunks = responses_text_item_sequence("hello world");
     let run = run_early_commit_attempt(chunks.clone()).await;
-    assert!(run.committed, "clean visible text must commit the client channel");
+    assert!(
+        run.committed,
+        "clean visible text must commit the client channel"
+    );
     assert!(!run.failed, "a clean text attempt must seal");
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     let buffered = buffered_with_hooks(chunks).await;
@@ -1349,7 +1402,10 @@ async fn first_frame_commit_plain_angle_bracket_text_streams_normally() {
     let chunks = responses_text_item_sequence("if a < b then b > a");
     let run = run_early_commit_attempt(chunks.clone()).await;
     assert!(run.committed, "plain comparison text must commit");
-    assert!(!run.failed, "plain comparison text must not break the transport");
+    assert!(
+        !run.failed,
+        "plain comparison text must not break the transport"
+    );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     let buffered = buffered_with_hooks(chunks).await;
     assert_eq!(

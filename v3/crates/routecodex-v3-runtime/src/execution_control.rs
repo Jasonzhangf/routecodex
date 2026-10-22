@@ -581,8 +581,7 @@ impl V3CommittedClientFrameSink {
     /// True once the attempt crossed the client commit point. A committed
     /// attempt can never be retracted or replaced by another candidate.
     pub fn is_committed(&self) -> bool {
-        self.committed
-            .load(std::sync::atomic::Ordering::Acquire)
+        self.committed.load(std::sync::atomic::Ordering::Acquire)
     }
 
     fn mark_committed(&self) {
@@ -773,11 +772,7 @@ impl V3CommittedClientSseBuilder {
         self.adopt_rewritten_attempt(frames, terminal)
     }
 
-    fn adopt_rewritten_attempt<E>(
-        &mut self,
-        frames: Vec<Vec<u8>>,
-        terminal: usize,
-    ) -> Result<(), E>
+    fn adopt_rewritten_attempt<E>(&mut self, frames: Vec<Vec<u8>>, terminal: usize) -> Result<(), E>
     where
         E: From<V3AttemptStoreError>,
     {
@@ -837,7 +832,8 @@ impl V3CommittedClientSseBuilder {
         // The replay skips already-flushed frames; the terminal index observed
         // by consumers counts from the first replayed frame, so it must be
         // relative to the flushed prefix.
-        let relative_terminal_frame_index = terminal_frame_index.saturating_sub(self.flushed_frames);
+        let relative_terminal_frame_index =
+            terminal_frame_index.saturating_sub(self.flushed_frames);
         Ok(V3CommittedClientSseStream {
             inner: Box::pin(V3ReservedCommittedSseReplay {
                 frames: self.frames.into_iter().skip(self.flushed_frames),

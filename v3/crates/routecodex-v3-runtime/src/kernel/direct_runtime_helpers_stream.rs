@@ -342,9 +342,8 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
     let mut business_decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut has_business_content = false;
     let mut client_committed = false;
-    let mut commit_probe = crate::direct_response_hooks::V3DirectPrefixCommitProbe::new(
-        provider_protocol,
-    );
+    let mut commit_probe =
+        crate::direct_response_hooks::V3DirectPrefixCommitProbe::new(provider_protocol);
     // Frames whose newest text may still complete a governed marker. They stay
     // out of the append-only client channel until the next observation proves
     // the text is plain business content.
@@ -521,19 +520,18 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
         }
         if client_committed {
             apply_complete_response_hook_preserving_client_prefix(&mut committed, response_hook)?;
-            has_business_content = direct_sse_frames_have_business_content(
-                provider_protocol,
-                committed.frames(),
-            );
+            has_business_content =
+                direct_sse_frames_have_business_content(provider_protocol, committed.frames());
         } else {
-            let _ =
-                rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|error| {
+            let _ = rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(
+                |error| {
                     direct_attempt_store_error_source(
                         error,
                         "V3ExecutionAttemptPayloadStore",
                         "direct_sse_memory_strip_failed",
                     )
-                })?;
+                },
+            )?;
             apply_complete_response_hook(&mut committed, response_hook)?;
             has_business_content =
                 direct_sse_frames_have_business_content(provider_protocol, committed.frames());
@@ -1262,12 +1260,7 @@ pub(crate) fn post_commit_client_transport_break_output(
     node_trace: Vec<&'static str>,
     hook_registry: &V3HookRegistry,
 ) -> V3ResponsesDirectRuntimeOutput {
-    let mut output = source_failure_output(
-        source,
-        last_external_http,
-        node_trace,
-        hook_registry,
-    );
+    let mut output = source_failure_output(source, last_external_http, node_trace, hook_registry);
     // No client payload exists after commit: the server projects a transport
     // break and the committed channel ends without an error frame.
     output.terminal_disposition = Some(V3ProviderTerminalDisposition::NoResponse);
