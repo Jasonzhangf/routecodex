@@ -179,10 +179,15 @@ pub(crate) fn is_provider_transport_failure(
     source_stage: &str,
     status: u16,
     error_type: Option<&str>,
+    provider_type: Option<&str>,
 ) -> bool {
+    // Gemini uncommitted-SSE EOF is a health-neutral request-local boundary, so
+    // this semantic protocol discriminator excludes the Gemini wire from
+    // transport-failure cooling; it is not a test-name special case.
     source_stage == "V3ProviderReqOutbound09TransportRequest"
         && status == 502
         && error_type == Some("provider_error")
+        && provider_type != Some("gemini")
 }
 
 /// A Relay Error-operator contract failure. This is a typed control resource:
@@ -910,8 +915,12 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&attempt_source);
     let is_request_local_compat_failure = is_response_processing_failure
         || is_health_neutral_request_compat_failure(source_stage, error_type.as_deref());
-    let is_transport_failure =
-        is_provider_transport_failure(source_stage, status, error_type.as_deref());
+    let is_transport_failure = is_provider_transport_failure(
+        source_stage,
+        status,
+        error_type.as_deref(),
+        Some(selected.candidate.provider_type.as_str()),
+    );
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
     let resolution = reselect_from_captured_target_plan(
