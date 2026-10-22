@@ -70,11 +70,11 @@ pub(crate) fn projected_sse_has_business_content(
 /// opaque invocations. Never synthesize text or touch native tool arguments.
 pub(crate) fn govern_complete_chat_sse(
     frames: &[Vec<u8>],
+    source_terminal: Option<usize>,
 ) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError> {
     let mut events = decode(frames).map_err(V3RelayCompleteResponseError::Processing)?;
     let mut carriers: BTreeMap<(String, String), (String, Vec<(usize, String, usize, usize)>)> =
         BTreeMap::new();
-    let mut terminal = None;
     for (event_index, (_, value)) in events.iter().enumerate() {
         let Some(choices) = value
             .as_ref()
@@ -84,9 +84,6 @@ pub(crate) fn govern_complete_chat_sse(
             continue;
         };
         for (choice_index, choice) in choices.iter().enumerate() {
-            if choice.get("finish_reason").is_some_and(Value::is_string) {
-                terminal = Some(event_index);
-            }
             let identity = choice
                 .get("index")
                 .cloned()
@@ -183,7 +180,7 @@ pub(crate) fn govern_complete_chat_sse(
     if changed.is_empty() {
         return Ok(None);
     }
-    let terminal = terminal.ok_or_else(|| {
+    let terminal = source_terminal.ok_or_else(|| {
         V3RelayCompleteResponseError::Processing("governed Chat SSE has no source terminal".into())
     })?;
     let mut output = Vec::with_capacity(events.len());
@@ -292,7 +289,7 @@ mod tests {
             chunk(serde_json::json!({}), serde_json::json!("stop")),
             done(),
         ];
-        let (governed, terminal) = govern_complete_chat_sse(&frames)
+        let (governed, terminal) = govern_complete_chat_sse(&frames, Some(2))
             .expect("fragmented label governance must not process-fail")
             .expect("fragmented label must be rewritten");
         assert_eq!(terminal, 2);
@@ -315,7 +312,7 @@ mod tests {
             chunk(serde_json::json!({}), serde_json::json!("stop")),
             done(),
         ];
-        let error = govern_complete_chat_sse(&frames)
+        let error = govern_complete_chat_sse(&frames, Some(2))
             .expect_err("a completed orphan close must discard the whole attempt");
         assert!(matches!(
             error,
@@ -334,7 +331,7 @@ mod tests {
             done(),
         ];
         assert!(
-            govern_complete_chat_sse(&frames)
+            govern_complete_chat_sse(&frames, Some(1))
                 .expect("literal context governance must pass")
                 .is_none(),
             "literal markers are not standalone control labels"
@@ -358,7 +355,7 @@ mod tests {
             chunk(serde_json::json!({}), serde_json::json!("tool_calls")),
             done(),
         ];
-        let (governed, _) = govern_complete_chat_sse(&frames)
+        let (governed, _) = govern_complete_chat_sse(&frames, Some(1))
             .expect("complete invocation governance must pass")
             .expect("only the standalone label is stripped");
         let output = text(&governed);
@@ -390,7 +387,7 @@ mod tests {
             chunk(serde_json::json!({}), serde_json::json!("tool_calls")),
             done(),
         ];
-        let (governed, terminal) = govern_complete_chat_sse(&frames)
+        let (governed, terminal) = govern_complete_chat_sse(&frames, Some(2))
             .expect("native tool governance must pass")
             .expect("the label carrier is rewritten");
         assert_eq!(terminal, 2);
@@ -431,7 +428,7 @@ mod tests {
             &envelope_only
         )
         .expect("envelope-only frames decode"));
-        assert!(govern_complete_chat_sse(&envelope_only)
+        assert!(govern_complete_chat_sse(&envelope_only, Some(2))
             .expect("ungoverned frames pass")
             .is_none());
 
@@ -461,7 +458,7 @@ mod tests {
             &frames
         )
         .expect("reasoning frames decode"));
-        assert!(govern_complete_chat_sse(&frames)
+        assert!(govern_complete_chat_sse(&frames, Some(1))
             .expect("reasoning alone is not processing damage")
             .is_none());
     }
@@ -476,7 +473,7 @@ mod tests {
             chunk(serde_json::json!({}), serde_json::json!("stop")),
             done(),
         ];
-        let (governed, _) = govern_complete_chat_sse(&frames)
+        let (governed, _) = govern_complete_chat_sse(&frames, Some(1))
             .expect("label governance itself succeeds")
             .expect("label carrier is rewritten");
         assert!(
@@ -487,9 +484,30 @@ mod tests {
     }
 
     #[test]
+    fn issuee63d2f2_reasonless_terminal_with_marker_uses_typed_witness() {
+        let frames = vec![
+            chunk(
+                serde_json::json!({"content": "<|end_of_analysis|>\nREASONLESS_OK"}),
+                Value::Null,
+            ),
+            chunk(serde_json::json!({}), Value::Null),
+            done(),
+        ];
+        let (governed, terminal) = govern_complete_chat_sse(&frames, Some(1))
+            .expect("a reason-less protocol terminal must not become processing damage")
+            .expect("the removable standalone marker is rewritten");
+        assert_eq!(terminal, 1);
+        assert_eq!(text(&governed), "REASONLESS_OK");
+        assert!(
+            projected_sse_has_business_content(V3HubProviderWireProtocol::OpenAiChat, &governed)
+                .expect("governed frames decode")
+        );
+    }
+
+    #[test]
     fn issuee63d2f2_malformed_projected_json_is_processing_failure() {
         let frames = vec![b"data: {not-json}\n\n".to_vec()];
-        let error = govern_complete_chat_sse(&frames)
+        let error = govern_complete_chat_sse(&frames, Some(0))
             .expect_err("semantic damage must stay a processing failure");
         assert!(matches!(error, V3RelayCompleteResponseError::Processing(_)));
     }

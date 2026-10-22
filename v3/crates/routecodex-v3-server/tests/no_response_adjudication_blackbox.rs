@@ -8765,6 +8765,258 @@ async fn issuee63d2f2_chat_sse_fragmented_label_preserves_visible_order() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// A valid Responses `response.incomplete` with no `incomplete_details.reason`
+/// projects a Chat terminal with `finish_reason: null`. When a removable
+/// standalone marker is cleaned beside surviving visible text, the typed
+/// protocol-terminal witness must keep the attempt deliverable instead of
+/// misclassifying it as processing damage and entering 599 recovery.
+#[tokio::test]
+async fn issuee63d2f2_reasonless_incomplete_marker_delivers_without_reselection() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for streaming in [false, true] {
+        let mut response = text_response("<|end_of_analysis|>\nREASONLESS_OK");
+        response["status"] = json!("incomplete");
+        response["incomplete_details"] = Value::Null;
+        response["output"][0]["status"] = json!("incomplete");
+        let upstream = if streaming {
+            response_sse(&response)
+        } else {
+            response.to_string()
+        };
+        let (endpoint, handle, mut captures, shutdown) = start_entry(
+            "responses",
+            "chat",
+            StatusCode::OK,
+            if streaming {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+            upstream,
+        )
+        .await;
+        let base = endpoint.trim_end_matches("/v1/responses");
+        let (content_type, body) = successful_transfer(
+            client()
+                .post(format!("{base}/v1/chat/completions"))
+                .json(&json!({
+                    "model": "test.test",
+                    "messages": [{"role": "user", "content": "reasonless incomplete"}],
+                    "stream": streaming
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        stop_entry(handle, shutdown).await;
+        assert_one_attempt(&mut captures, "wire-test").await;
+        assert!(!body.contains("<|end_of_analysis|>"), "{streaming}: {body}");
+        assert_no_error_payload(&body);
+        if content_type.starts_with("application/json") {
+            let payload: Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(payload["choices"][0]["finish_reason"], Value::Null);
+            assert_eq!(payload["choices"][0]["message"]["content"], "REASONLESS_OK");
+        } else {
+            let payloads = events(&body);
+            assert_eq!(
+                payloads
+                    .iter()
+                    .filter_map(|event| event["choices"][0]["delta"]["content"].as_str())
+                    .collect::<String>(),
+                "REASONLESS_OK",
+                "{streaming}: {body}"
+            );
+            assert!(
+                payloads
+                    .iter()
+                    .all(|event| event["choices"][0]["finish_reason"].is_null()),
+                "the reason-less terminal stays null: {body}"
+            );
+        }
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Gemini's normal STOP terminal can carry a function call. The Chat client
+/// must receive `finish_reason: "tool_calls"`, execute the call, and send the
+/// paired result back through the same public entry.
+#[tokio::test]
+async fn issuee63d2f2_gemini_stop_function_call_public_roundtrip() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let function_call = json!({
+        "candidates": [{
+            "index": 0,
+            "finishReason": "STOP",
+            "content": {
+                "role": "model",
+                "parts": [{
+                    "functionCall": {
+                        "id": "call_gemini_stop",
+                        "name": "lookup",
+                        "args": {"city": "Paris"}
+                    }
+                }]
+            }
+        }]
+    });
+    let completed = json!({
+        "candidates": [{
+            "index": 0,
+            "finishReason": "STOP",
+            "content": {
+                "role": "model",
+                "parts": [{"text": "gemini tool roundtrip complete"}]
+            }
+        }]
+    });
+    let tools = json!([{
+        "type": "function",
+        "name": "lookup",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"]
+        }
+    }]);
+
+    for stream in [false, true] {
+        let (endpoint, handle, mut captures, _headers, shutdown) = start_entry_configured(
+            "gemini",
+            "chat",
+            StatusCode::OK,
+            if stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+            String::new(),
+            EntryOptions {
+                attempt_bodies: vec![
+                    e63_review_wire("gemini", &function_call, stream),
+                    e63_review_wire("gemini", &completed, stream),
+                ],
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let chat_endpoint = endpoint.replace("/v1/responses", "/v1/chat/completions");
+        let (_, first_body) = successful_transfer(
+            client()
+                .post(&chat_endpoint)
+                .json(&json!({
+                    "model": "test.test",
+                    "stream": stream,
+                    "messages": [{"role": "user", "content": "Use lookup for Paris"}],
+                    "tools": tools.clone()
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        assert_no_error_payload(&first_body);
+
+        let call = if stream {
+            assert_eq!(
+                events(&first_body)
+                    .into_iter()
+                    .rev()
+                    .find_map(|event| {
+                        event["choices"][0]["finish_reason"]
+                            .as_str()
+                            .map(str::to_string)
+                    })
+                    .as_deref(),
+                Some("tool_calls"),
+                "{first_body}"
+            );
+            events(&first_body)
+                .into_iter()
+                .find_map(|event| {
+                    event["choices"][0]["delta"]["tool_calls"]
+                        .as_array()
+                        .and_then(|calls| calls.first())
+                        .cloned()
+                })
+                .expect("Gemini STOP function call reaches the Chat stream")
+        } else {
+            let payload: Value = serde_json::from_str(&first_body).unwrap();
+            assert_eq!(
+                payload["choices"][0]["finish_reason"], "tool_calls",
+                "{first_body}"
+            );
+            payload["choices"][0]["message"]["tool_calls"][0].clone()
+        };
+        assert_eq!(call["id"], "call_gemini_stop");
+        assert_eq!(call["function"]["name"], "lookup");
+
+        let arguments = call["function"]["arguments"]
+            .as_str()
+            .expect("Chat tool arguments are a JSON string");
+        let execution = std::process::Command::new("node")
+            .args([
+                "-e",
+                "process.stdout.write(JSON.stringify({received:JSON.parse(process.argv[1])}));",
+                arguments,
+            ])
+            .output()
+            .unwrap();
+        assert!(execution.status.success());
+        let output = String::from_utf8(execution.stdout).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&output).unwrap(),
+            json!({"received": {"city": "Paris"}})
+        );
+
+        let (_, followup_body) = successful_transfer(
+            client()
+                .post(&chat_endpoint)
+                .json(&json!({
+                    "model": "test.test",
+                    "stream": stream,
+                    "messages": [
+                        {"role": "user", "content": "Use lookup for Paris"},
+                        {"role": "assistant", "content": null, "tool_calls": [call]},
+                        {"role": "tool", "tool_call_id": "call_gemini_stop", "content": output.clone()}
+                    ],
+                    "tools": tools.clone()
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        assert_no_error_payload(&followup_body);
+        assert!(
+            followup_body.contains("gemini tool roundtrip complete"),
+            "{stream}: {followup_body}"
+        );
+        stop_entry(handle, shutdown).await;
+
+        let first_wire = captures.recv().await.expect("first Gemini attempt");
+        assert_eq!(
+            first_wire["tools"][0]["functionDeclarations"][0]["name"],
+            "lookup",
+            "{first_wire}"
+        );
+        let followup_wire = captures.recv().await.expect("Gemini follow-up attempt");
+        assert_eq!(
+            followup_wire["contents"].as_array().unwrap().len(),
+            3,
+            "{followup_wire}"
+        );
+        let function_response = &followup_wire["contents"][2]["parts"][0]["functionResponse"];
+        assert_eq!(function_response["id"], "call_gemini_stop");
+        assert_eq!(function_response["name"], "lookup");
+        assert_eq!(function_response["response"]["output"], output);
+        assert!(matches!(
+            captures.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected)
+        ));
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 /// Literal marker examples inside inline code or a fenced block remain
 /// business text. They must not trigger marker removal or candidate recovery.
 #[tokio::test]
