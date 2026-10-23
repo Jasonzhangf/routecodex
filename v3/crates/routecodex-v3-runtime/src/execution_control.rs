@@ -442,6 +442,11 @@ pub struct V3CommittedClientSseStream {
     inner: Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>,
     next_frame_index: usize,
     terminal_frame_index: usize,
+    /// Number of committed frames already handed to the client channel before
+    /// sealing. The sealed replay only carries the remainder, so this prefix
+    /// count lets the Direct refill assembly avoid re-emitting content the
+    /// client already received.
+    flushed_prefix_frames: usize,
     /// Complete committed business result of the sealed attempt, shared with
     /// the replay iterator instead of copied. Chat Process governance reads it
     /// to decide bounded refill from the governed result; the client stream
@@ -530,6 +535,7 @@ impl V3CommittedClientSseStream {
     ) -> Self {
         let next_frame_index = self.next_frame_index;
         let terminal_frame_index = self.terminal_frame_index;
+        let flushed_prefix_frames = self.flushed_prefix_frames;
         let sealed_frames = self.sealed_frames.clone();
         Self {
             inner: Box::pin(V3ObservedCommittedSseStream {
@@ -540,8 +546,15 @@ impl V3CommittedClientSseStream {
             }),
             next_frame_index,
             terminal_frame_index,
+            flushed_prefix_frames,
             sealed_frames,
         }
+    }
+
+    /// Number of committed frames already delivered to the client before the
+    /// sealed stream was produced. Zero means the attempt was fully buffered.
+    pub(crate) fn flushed_prefix_frames(&self) -> usize {
+        self.flushed_prefix_frames
     }
 
     /// Every committed business frame of the sealed attempt, in order.
@@ -637,6 +650,11 @@ pub(crate) struct V3CommittedClientSseBuilder {
 pub struct V3CommittedClientFrameSink {
     sender: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
     committed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Request-wide offset applied to each frame's round-local `output_index`
+    /// just before the frame reaches the client channel. The Direct refill
+    /// loop supplies the number of business items already delivered by earlier
+    /// rounds so two executions never both address index 0.
+    output_index_offset: usize,
 }
 
 impl V3CommittedClientFrameSink {
@@ -646,9 +664,18 @@ impl V3CommittedClientFrameSink {
             Self {
                 sender,
                 committed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                output_index_offset: 0,
             },
             receiver,
         )
+    }
+
+    /// Return a sink that shifts each committed frame's `output_index` by
+    /// `offset` before sending. The committed marker stays shared with the
+    /// original sink, so the commit point is still request-wide.
+    pub(crate) fn with_output_index_offset(mut self, offset: usize) -> Self {
+        self.output_index_offset = offset;
+        self
     }
 
     /// True once the attempt crossed the client commit point. A committed
@@ -663,6 +690,11 @@ impl V3CommittedClientFrameSink {
     }
 
     fn send(&self, frame: Vec<u8>) {
+        let frame = if self.output_index_offset == 0 {
+            frame
+        } else {
+            crate::kernel::shift_direct_sse_output_index(&frame, self.output_index_offset)
+        };
         let _ = self.sender.send(frame);
     }
 }
@@ -946,6 +978,7 @@ impl V3CommittedClientSseBuilder {
             }),
             next_frame_index: 0,
             terminal_frame_index: relative_terminal_frame_index,
+            flushed_prefix_frames: self.flushed_frames,
             sealed_frames: Some(sealed_frames),
         })
     }

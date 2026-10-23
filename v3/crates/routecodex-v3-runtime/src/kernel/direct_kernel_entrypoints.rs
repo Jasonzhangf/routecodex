@@ -103,12 +103,19 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             plan
         });
 
+        // Every business item of a prior round already owns its final
+        // `output_index`. Apply that request-wide offset before frames reach
+        // the live sink, because flushed bytes cannot be corrected later.
+        let round_frame_sink = shared_state
+            .client_frame_sink
+            .clone()
+            .map(|sink| sink.with_output_index_offset(accumulated_items.len()));
         let mut state = V3ResponsesDirectRuntimeCoreState::new()
             .with_now_epoch_ms(now_epoch_ms)
             .with_provider_health(shared_state.provider_health.clone())
             .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
             .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
-            .with_client_frame_sink(shared_state.client_frame_sink.clone())
+            .with_client_frame_sink(round_frame_sink)
             .with_request_execution_control(Some(control.clone()));
         if rounds == 0 {
             state = state.with_observability_accumulator(observability_accumulator.clone());
@@ -169,15 +176,14 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                     direct_runtime_helpers_stream::inspect_direct_sse_governed_frames(
                         stream.sealed_frames().as_slice(),
                     );
-                let raw = output
+                // The attempt-scoped typed fact is recorded from the complete
+                // native stream while each provider event is decoded. The raw
+                // SSE snapshot is a 2 MiB diagnostic and a split UTF-8 chunk
+                // can lose a terminal summary, so it must never decide refill.
+                let has_source_summary = output
                     .stream_observation
                     .as_ref()
-                    .and_then(|observation| observation.snapshot().ok())
-                    .map(|snapshot| snapshot.provider_raw_sse)
-                    .unwrap_or_default();
-                let has_source_summary =
-                    direct_runtime_helpers_stream::inspect_direct_sse_raw_provider(&raw)
-                        .has_source_summary;
+                    .is_some_and(|observation| observation.has_source_summary_observed());
                 (
                     V3ResponsesDirectRefillFacts {
                         tool_calls: governed.tool_calls,
@@ -221,6 +227,16 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                                 &mut output.client_payload.body,
                                 V3ClientBody::Bytes(Vec::new()),
                             ) {
+                                // Frames already handed to the live sink are
+                                // irrevocable. Count the business items they
+                                // carried so the assembly never synthesizes a
+                                // second `output_item.done` for them.
+                                let flushed_frames = stream.flushed_prefix_frames();
+                                let sealed_frames = stream.sealed_frames();
+                                let delivered_item_count =
+                                    direct_runtime_helpers_stream::count_direct_sse_output_items(
+                                        &sealed_frames[..flushed_frames.min(sealed_frames.len())],
+                                    );
                                 let chunks = collect_direct_committed_sse(stream).await;
                                 let segments =
                                     direct_runtime_helpers_stream::split_direct_sse_committed_chunks(
@@ -231,6 +247,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                                     finalized,
                                     &mut delivered_sse_frames,
                                     &mut synthesized_output_index,
+                                    delivered_item_count,
                                 );
                             }
                         }
@@ -373,6 +390,7 @@ fn append_direct_sse_intermediate_content(
     finalized: &Value,
     delivered: &mut Vec<Vec<u8>>,
     next_output_index: &mut usize,
+    delivered_item_count: usize,
 ) {
     // `next_output_index` is the number of business items already accumulated
     // from earlier rounds. Offset this round's frames so two rounds cannot both
@@ -401,22 +419,30 @@ fn append_direct_sse_intermediate_content(
 
     // A provider that streamed only a terminal event still owns real business
     // content. Surface it as output_item events so the client sees one stream
-    // with all rounds' text instead of losing the intermediate round.
+    // with all rounds' text instead of losing the intermediate round. Items
+    // whose frames already reached the live sink are not synthesized again;
+    // their bytes cannot be retracted.
     if kept == 0 {
-        for item in crate::hub_v1::collect_v3_chat_process_business_output_items(finalized) {
+        for (position, item) in crate::hub_v1::collect_v3_chat_process_business_output_items(
+            finalized,
+        )
+        .into_iter()
+        .enumerate()
+        {
+            if position < delivered_item_count {
+                continue;
+            }
             if let Some(frame) =
                 direct_runtime_helpers_stream::build_direct_sse_output_item_done_frame(
-                    *next_output_index,
+                    offset + position,
                     &item,
                 )
             {
                 delivered.push(frame);
-                *next_output_index += 1;
             }
         }
-    } else {
-        *next_output_index = offset + item_count;
     }
+    *next_output_index = offset + item_count;
 }
 
 fn rebuild_direct_committed_sse(

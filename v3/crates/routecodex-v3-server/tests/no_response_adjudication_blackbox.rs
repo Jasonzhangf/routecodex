@@ -207,6 +207,72 @@ fn refill_round_wire(stream: bool, text: &str) -> String {
     }
 }
 
+/// A streamed round with a real business item before the terminal. The Direct
+/// client commit point flushes `added`/`delta`/`done` to the live sink, while
+/// the terminal stays held for refill assembly.
+fn streaming_refill_round_sse(item_id: &str, text: &str) -> String {
+    let item = json!({
+        "id": item_id,
+        "type": "message",
+        "role": "assistant",
+        "status": "completed",
+        "content": [{"type": "output_text", "text": text, "annotations": []}]
+    });
+    let response = json!({
+        "id": format!("resp_{item_id}"),
+        "object": "response",
+        "status": "completed",
+        "model": "wire-test",
+        "output": [item.clone()]
+    });
+    format!(
+        "{}{}{}{}{}",
+        sse(
+            "response.created",
+            &json!({
+                "type": "response.created",
+                "response": {
+                    "id": format!("resp_{item_id}"),
+                    "status": "in_progress",
+                    "output": []
+                }
+            })
+        ),
+        sse(
+            "response.output_item.added",
+            &json!({
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "id": item_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "in_progress",
+                    "content": []
+                }
+            })
+        ),
+        sse(
+            "response.output_text.delta",
+            &json!({
+                "type": "response.output_text.delta",
+                "output_index": 0,
+                "item_id": item_id,
+                "delta": text
+            })
+        ),
+        sse(
+            "response.output_item.done",
+            &json!({
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": item
+            })
+        ),
+        response_sse(&response),
+    )
+}
+
 /// Source-explicit summary fixture. It bounds an unexpected extra refill so a
 /// regression fails by attempt count instead of looping to the transport cap.
 fn source_summary_wire(stream: bool, text: &str) -> String {
@@ -545,6 +611,114 @@ async fn refill_direct_relay_content_parity_public() {
             }
         }
     }
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn refill_direct_sse_summary_after_diagnostic_cap_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    // The raw provider diagnostic keeps only 2 MiB. Put the provider-explicit
+    // reasoning summary after that boundary so a refill decision that reads
+    // the diagnostic would miss it.
+    let mut wire = String::new();
+    while wire.len() < 2 * 1024 * 1024 + 64 * 1024 {
+        wire.push_str(": diagnostic-padding\n\n");
+    }
+    wire.push_str(&source_summary_wire(true, "LATE_SOURCE_SUMMARY"));
+    let (consumed, attempts) = refill_public_chain(
+        "direct",
+        true,
+        source_summary_wire(true, "UNEXPECTED_REFILL"),
+        vec![wire],
+        Vec::new(),
+        None,
+    )
+    .await;
+    assert_eq!(
+        attempts, 1,
+        "a source summary after the diagnostic cap must stop refill: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "the original stream must deliver: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("LATE_SOURCE_SUMMARY"),
+        "the late summary must reach the client: {consumed:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Direct SSE early delivery: round content already flushed to the live sink
+/// must not be synthesized again, and round two must continue the request-wide
+/// output index instead of reusing index 0.
+#[tokio::test]
+async fn refill_direct_sse_first_frame_delivery_keeps_item_identity_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (consumed, attempts) = refill_public_chain(
+        "direct",
+        true,
+        streaming_refill_round_sse("msg_unexpected_third", "UNEXPECTED_THIRD"),
+        vec![
+            streaming_refill_round_sse("msg_round_one", "EARLY_ONE"),
+            streaming_refill_round_sse("msg_round_two", "EARLY_TWO"),
+        ],
+        Vec::new(),
+        None,
+    )
+    .await;
+    assert_eq!(
+        attempts, 2,
+        "the default limit must stop after one refill: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "both rounds must deliver: {consumed:?}"
+    );
+    let payloads = events(&consumed.body);
+    let completed: Vec<&Value> = payloads
+        .iter()
+        .filter(|event| event["type"] == "response.completed")
+        .collect();
+    assert_eq!(completed.len(), 1, "{consumed:?}");
+    let output = completed[0]["response"]["output"]
+        .as_array()
+        .expect("final output array");
+    let order: Vec<&str> = output
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .collect();
+    assert_eq!(
+        order,
+        vec!["msg_round_one", "msg_round_two"],
+        "{consumed:?}"
+    );
+    for (position, item_id) in order.iter().enumerate() {
+        let done: Vec<&Value> = payloads
+            .iter()
+            .filter(|event| {
+                event["type"] == "response.output_item.done"
+                    && event.pointer("/item/id").and_then(Value::as_str) == Some(*item_id)
+            })
+            .collect();
+        assert_eq!(
+            done.len(),
+            1,
+            "{item_id} must be delivered exactly once: {payloads:?}"
+        );
+        assert_eq!(
+            done[0]["output_index"].as_u64(),
+            Some(position as u64),
+            "{item_id} output_index must match the final output order: {payloads:?}"
+        );
+    }
+    assert!(
+        !payloads.iter().any(|event| event["type"] == "error"),
+        "no error event may reach the client: {consumed:?}"
+    );
     std::env::remove_var(KEY_ENV);
 }
 

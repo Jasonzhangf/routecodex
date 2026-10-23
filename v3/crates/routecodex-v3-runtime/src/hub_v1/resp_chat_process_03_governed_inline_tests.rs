@@ -716,6 +716,67 @@ fn refill_continuation_keeps_original_fields_and_appends_history_once() {
 }
 
 #[test]
+fn refill_continuation_preserves_provider_reasoning_and_skips_synthesized() {
+    let original = json!({
+        "model": "gpt-test",
+        "input": []
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {
+                "id": "rsn_provider",
+                "type": "reasoning",
+                "encrypted_content": "opaque-cipher",
+                "summary": [{"type": "summary_text", "text": "source summary"}]
+            },
+            {
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "answer"}]
+            },
+            {
+                "id": "rcc_reason_call_1",
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "synthesized"}]
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "anonymous"}]
+            },
+            {
+                "id": "call_1",
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "echo",
+                "arguments": "{}"
+            }
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(&original, &finalized)
+        .expect("continuation must build");
+    let input = continuation["input"].as_array().expect("input array");
+    assert_eq!(
+        input.len(),
+        3,
+        "provider reasoning + assistant message + instruction: {input:?}"
+    );
+    assert_eq!(input[0]["id"], json!("rsn_provider"));
+    assert_eq!(input[0]["encrypted_content"], json!("opaque-cipher"));
+    assert_eq!(input[0]["summary"][0]["text"], json!("source summary"));
+    assert_eq!(input[1]["role"], json!("assistant"));
+    assert_eq!(input[2]["role"], json!("user"));
+    assert!(
+        input
+            .iter()
+            .all(|item| item["id"] != json!("rcc_reason_call_1")),
+        "RCC-synthesized reasoning must not be replayed: {input:?}"
+    );
+}
+
+#[test]
 fn refill_continuation_normalizes_string_input_and_keeps_image_parts() {
     let original = json!({
         "model": "gpt-test",
