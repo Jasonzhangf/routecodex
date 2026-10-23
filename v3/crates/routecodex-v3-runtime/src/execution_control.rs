@@ -697,6 +697,18 @@ impl V3CommittedClientFrameSink {
         };
         let _ = self.sender.send(frame);
     }
+
+    /// Send a frame whose `output_index` is already request-wide.
+    ///
+    /// A refill round's governed remainder is prepared by the runtime before a
+    /// later round may emit live frames, so the round-local offset must not be
+    /// applied a second time. Reaching the client now is what keeps the
+    /// request-level event order intact: the next round can commit its first
+    /// business frame as soon as it exists, and a remainder held back would
+    /// then arrive after it.
+    pub(crate) fn send_prepared(&self, frame: Vec<u8>) {
+        let _ = self.sender.send(frame);
+    }
 }
 
 impl V3CommittedClientSseBuilder {

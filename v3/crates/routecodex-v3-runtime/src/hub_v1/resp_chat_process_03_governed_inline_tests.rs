@@ -882,6 +882,45 @@ fn refill_usage_accumulation_never_fabricates_zero() {
 }
 
 #[test]
+fn refill_usage_accumulation_round_usage_missing_stays_unknown() {
+    let summary = |input: Option<u64>, output: Option<u64>| V3RuntimeUsageSummary {
+        input_tokens: input,
+        output_tokens: output,
+        ..V3RuntimeUsageSummary::default()
+    };
+    // A completed round with no usage at all marks the chain as observed: the
+    // next round's numbers must not be adopted as the whole chain's totals.
+    let mut accumulated = None;
+    accumulate_v3_chat_process_refill_usage(&mut accumulated, None);
+    assert!(
+        accumulated.is_some(),
+        "an observed round with no usage must still mark the chain as started"
+    );
+    accumulate_v3_chat_process_refill_usage(&mut accumulated, Some(summary(Some(10), Some(1))));
+    assert_eq!(
+        accumulated.as_ref().unwrap().input_tokens, None,
+        "round-one usage must not be adopted when an earlier round lacked usage"
+    );
+    assert_eq!(accumulated.as_ref().unwrap().output_tokens, None);
+    assert_eq!(accumulated.as_ref().unwrap().total_tokens, None);
+
+    // None -> Some order: a completed round missing usage first keeps every
+    // field unknown even after a later round reports numbers.
+    let mut ordered = None;
+    accumulate_v3_chat_process_refill_usage(&mut ordered, None);
+    accumulate_v3_chat_process_refill_usage(&mut ordered, Some(summary(Some(10), Some(2))));
+    assert_eq!(ordered.as_ref().unwrap().input_tokens, None);
+
+    // Some -> None order: usage observed first, then a round with none clears
+    // every field for the chain.
+    let mut reversed = None;
+    accumulate_v3_chat_process_refill_usage(&mut reversed, Some(summary(Some(5), Some(3))));
+    accumulate_v3_chat_process_refill_usage(&mut reversed, None);
+    assert_eq!(reversed.as_ref().unwrap().input_tokens, None);
+    assert_eq!(reversed.as_ref().unwrap().output_tokens, None);
+}
+
+#[test]
 fn refill_usage_write_back_writes_only_observed_fields() {
     let mut response = json!({
         "status": "completed",

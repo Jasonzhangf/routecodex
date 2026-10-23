@@ -248,6 +248,12 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                                     &mut delivered_sse_frames,
                                     &mut synthesized_output_index,
                                     delivered_item_count,
+                                    // The next round commits its own first
+                                    // business frame as soon as it exists, so
+                                    // this round's governed remainder must
+                                    // reach the client now or the client sees
+                                    // round N+1 before round N.
+                                    shared_state.client_frame_sink.as_ref(),
                                 );
                             }
                         }
@@ -391,11 +397,13 @@ fn append_direct_sse_intermediate_content(
     delivered: &mut Vec<Vec<u8>>,
     next_output_index: &mut usize,
     delivered_item_count: usize,
+    live_sink: Option<&crate::nodes::V3CommittedClientFrameSink>,
 ) {
     // `next_output_index` is the number of business items already accumulated
     // from earlier rounds. Offset this round's frames so two rounds cannot both
     // claim the same `output_index`.
     let offset = *next_output_index;
+    let mut prepared: Vec<Vec<u8>> = Vec::new();
     let mut kept = 0usize;
     for segment in segments {
         let is_content = segment.value.as_ref().is_some_and(|value| {
@@ -407,7 +415,7 @@ fn append_direct_sse_intermediate_content(
                 || event_type == "response.output_text.delta"
         });
         if is_content {
-            delivered.push(direct_runtime_helpers_stream::shift_direct_sse_output_index(
+            prepared.push(direct_runtime_helpers_stream::shift_direct_sse_output_index(
                 &segment.bytes,
                 offset,
             ));
@@ -438,9 +446,23 @@ fn append_direct_sse_intermediate_content(
                     &item,
                 )
             {
-                delivered.push(frame);
+                prepared.push(frame);
             }
         }
+    }
+
+    // The next round shares the live sink and commits its first business frame
+    // the moment the provider produces one. A remainder left for the final body
+    // would therefore reach the client after that later round. Deliver this
+    // round's governed remainder now, in request order. The frames are already
+    // request-wide indexed, so the sink must not apply a round offset again.
+    match live_sink {
+        Some(sink) => {
+            for frame in prepared {
+                sink.send_prepared(frame);
+            }
+        }
+        None => delivered.extend(prepared),
     }
     *next_output_index = offset + item_count;
 }
