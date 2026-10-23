@@ -387,6 +387,47 @@ async fn committed_sse_drop_after_last_handoff_frame_is_completed() {
 }
 
 #[tokio::test]
+async fn committed_sse_drop_before_held_terminal_after_flushed_prefix_is_dropped() {
+    let mut builder = V3CommittedClientSseBuilder::new();
+    let (sink, _rx) = V3CommittedClientFrameSink::channel();
+    builder
+        .push(b"event: response.created\n\n".to_vec())
+        .unwrap();
+    builder
+        .push(b"event: response.output_text.delta\n\n".to_vec())
+        .unwrap();
+    builder.commit_client_stream(sink);
+    builder.hold_client_flush();
+    builder
+        .push(b"event: response.output_text.delta\n\n".to_vec())
+        .unwrap();
+    builder
+        .push(b"event: response.output_text.delta\n\n".to_vec())
+        .unwrap();
+    builder
+        .push(b"event: response.completed\n\n".to_vec())
+        .unwrap();
+    builder.mark_last_frame_as_terminal().unwrap();
+
+    let terminal = Arc::new(Mutex::new(None));
+    let observed_terminal = Arc::clone(&terminal);
+    let mut stream = builder.seal_after_validated_terminal().unwrap().observe(
+        |_| {},
+        move |value| {
+            *observed_terminal.lock().unwrap() = Some(value);
+        },
+    );
+    stream.next().await.expect("one held nonterminal frame");
+    drop(stream);
+
+    assert_eq!(
+        terminal.lock().unwrap().as_ref(),
+        Some(&V3CommittedSseTerminal::Dropped),
+        "the held terminal must remain unconsumed"
+    );
+}
+
+#[tokio::test]
 async fn first_frame_commit_flushes_delivered_frames_before_terminal() {
     let mut builder = V3CommittedClientSseBuilder::new();
     let (sink, mut rx) = V3CommittedClientFrameSink::channel();

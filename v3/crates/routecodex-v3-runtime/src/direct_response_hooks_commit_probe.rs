@@ -170,41 +170,22 @@ impl V3DirectPrefixCommitProbe {
                 | "response.completed"
                 | "response.incomplete",
             ) => {
-                for item in event
+                for (output_index, item) in event
                     .pointer("/response/output")
                     .and_then(Value::as_array)
                     .into_iter()
                     .flatten()
+                    .enumerate()
                 {
                     // Snapshot items are complete carriers. Their position in
                     // the output array is the authoritative carrier identity,
                     // matching how the complete-attempt owners read the
                     // terminal snapshot.
-                    self.observe_item(
-                        Some(item),
-                        (
-                            self.snapshot_output_index(item),
-                            self.snapshot_content_index(item),
-                        ),
-                    );
+                    self.observe_item(Some(item), (output_index, 0));
                 }
             }
             _ => {}
         }
-    }
-
-    fn snapshot_output_index(&self, item: &Value) -> usize {
-        item.get("output_index")
-            .and_then(Value::as_u64)
-            .map(|index| index as usize)
-            .unwrap_or(0)
-    }
-
-    fn snapshot_content_index(&self, item: &Value) -> usize {
-        item.get("content_index")
-            .and_then(Value::as_u64)
-            .map(|index| index as usize)
-            .unwrap_or(0)
     }
 
     fn observe_item(&mut self, item: Option<&Value>, carrier_key: (usize, usize)) {
@@ -587,6 +568,35 @@ mod tests {
             "content_index": 0,
             "delta": "king>secret"
         }));
+        assert!(probe.confirmed_governed_marker());
+        assert!(!probe.is_committable());
+    }
+
+    #[test]
+    fn snapshot_output_items_keep_their_array_position_carriers() {
+        let mut probe = probe();
+        probe.observe_event(&delta("safe-prefix "));
+        probe.observe_event(&delta("<thin"));
+        probe.observe_event(&json!({
+            "type": "response.in_progress",
+            "response": {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "safe-prefix <thin"}]
+                    },
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "ordinary"}]
+                    }
+                ]
+            }
+        }));
+        assert!(
+            !probe.is_committable(),
+            "an unrelated snapshot item must not clear item zero's pending marker"
+        );
+        probe.observe_event(&delta("king>secret</thinking> tail"));
         assert!(probe.confirmed_governed_marker());
         assert!(!probe.is_committable());
     }

@@ -866,12 +866,10 @@ impl V3CommittedClientSseBuilder {
                     .to_string(),
             )
         })?;
-        // While a client sink exists every push flushes, so a committed seal
-        // always replays an empty remainder and the observer never sees a tail
-        // frame. `next_frame_index` therefore starts and ends at
-        // `frames.len()`, and rebasing the terminal index onto the flushed
-        // prefix keeps the two comparable for the uncommitted seal, where the
-        // flushed prefix is empty and both forms agree.
+        // The sealed stream replays only the held remainder. Its frame indices
+        // therefore start at zero, and the terminal index shares that
+        // remainder-relative coordinate system after subtracting the prefix
+        // already handed to the client.
         let relative_terminal_frame_index =
             terminal_frame_index.saturating_sub(self.flushed_frames);
         Ok(V3CommittedClientSseStream {
@@ -879,7 +877,7 @@ impl V3CommittedClientSseBuilder {
                 frames: self.frames.into_iter().skip(self.flushed_frames),
                 _reservation: self.reservation,
             }),
-            next_frame_index: self.flushed_frames,
+            next_frame_index: 0,
             terminal_frame_index: relative_terminal_frame_index,
         })
     }

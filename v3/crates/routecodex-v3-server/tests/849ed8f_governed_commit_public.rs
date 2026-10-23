@@ -58,12 +58,38 @@ fn delta(output_index: usize, content_index: usize, text: &str) -> String {
     )
 }
 
+fn delta_as(output_index: usize, content_index: usize, item_id: &str, text: &str) -> String {
+    sse(
+        "response.output_text.delta",
+        json!({
+            "type": "response.output_text.delta",
+            "item_id": item_id,
+            "output_index": output_index,
+            "content_index": content_index,
+            "delta": text
+        }),
+    )
+}
+
 fn text_done(output_index: usize, content_index: usize, text: &str) -> String {
     sse(
         "response.output_text.done",
         json!({
             "type": "response.output_text.done",
             "item_id": "msg_849ed8f_0",
+            "output_index": output_index,
+            "content_index": content_index,
+            "text": text
+        }),
+    )
+}
+
+fn text_done_as(output_index: usize, content_index: usize, item_id: &str, text: &str) -> String {
+    sse(
+        "response.output_text.done",
+        json!({
+            "type": "response.output_text.done",
+            "item_id": item_id,
             "output_index": output_index,
             "content_index": content_index,
             "text": text
@@ -87,9 +113,29 @@ fn completed(output: Value) -> String {
     )
 }
 
+fn in_progress(output: Value) -> String {
+    sse(
+        "response.in_progress",
+        json!({
+            "type": "response.in_progress",
+            "response": {
+                "id": "resp_849ed8f",
+                "object": "response",
+                "status": "in_progress",
+                "model": "wire-849ed8f",
+                "output": output
+            }
+        }),
+    )
+}
+
 fn message(text: &str) -> Value {
+    message_with_id(text, "msg_849ed8f_0")
+}
+
+fn message_with_id(text: &str, item_id: &str) -> Value {
     json!({
-        "id": "msg_849ed8f_0",
+        "id": item_id,
         "type": "message",
         "role": "assistant",
         "status": "completed",
@@ -162,6 +208,49 @@ fn scenario(input: &str, model: &str) -> Vec<String> {
                 ])),
             ]
         }
+        "snapshot-split-marker" => {
+            let full = "safe-prefix <thinking>secret</thinking> tail";
+            vec![
+                delta(0, 0, "safe-prefix "),
+                delta(0, 0, "<thin"),
+                delta_as(1, 0, "msg_849ed8f_1", "ordinary "),
+                in_progress(json!([
+                    message_with_id("safe-prefix <thin", "msg_849ed8f_0"),
+                    message_with_id("ordinary", "msg_849ed8f_1")
+                ])),
+                delta(0, 0, "king>secret</thinking> tail"),
+                text_done(0, 0, full),
+                text_done_as(0, 1, "msg_849ed8f_1", "ordinary"),
+                completed(json!([
+                    message_with_id(full, "msg_849ed8f_0"),
+                    message_with_id("ordinary", "msg_849ed8f_1")
+                ])),
+            ]
+        }
+        "snapshot-bare-residue" => {
+            let close = "</\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C} calls>";
+            let full = format!("hello\n>\n{close}");
+            vec![
+                delta(0, 0, "hello\n"),
+                delta(0, 0, ">\n"),
+                delta_as(1, 0, "msg_849ed8f_1", "ordinary "),
+                in_progress(json!([
+                    message_with_id("hello\n>\n", "msg_849ed8f_0"),
+                    message_with_id("ordinary", "msg_849ed8f_1")
+                ])),
+                delta(0, 0, close),
+                text_done(0, 0, &full),
+                text_done_as(0, 1, "msg_849ed8f_1", "ordinary"),
+                completed(json!([
+                    message_with_id(&full, "msg_849ed8f_0"),
+                    message_with_id("ordinary", "msg_849ed8f_1")
+                ])),
+            ]
+        }
+        "clean-probe-terminal-empty" => vec![
+            in_progress(json!([message("clean-prefix")])),
+            completed(json!([])),
+        ],
         _ if model == "wire-recover" => vec![completed(json!([message("recovered")]))],
         _ => vec![completed(json!([message("sibling-success")]))],
     }
@@ -332,6 +421,81 @@ fn wire_text(wire: &[u8]) -> String {
     String::from_utf8_lossy(wire).into_owned()
 }
 
+fn decoded_chunked_body(wire: &[u8]) -> String {
+    let header_end = wire
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("HTTP response headers");
+    let body = &wire[header_end + 4..];
+    let mut cursor = 0;
+    let mut decoded = Vec::new();
+    while cursor < body.len() {
+        let line_end = body[cursor..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|offset| cursor + offset)
+            .expect("chunk size line");
+        let size_line = std::str::from_utf8(&body[cursor..line_end])
+            .unwrap()
+            .trim_end_matches('\r');
+        let size = usize::from_str_radix(size_line.split(';').next().unwrap_or(""), 16)
+            .expect("chunk size");
+        cursor = line_end + 1;
+        if size == 0 {
+            break;
+        }
+        let chunk_end = cursor + size;
+        decoded.extend_from_slice(&body[cursor..chunk_end]);
+        cursor = chunk_end + 2;
+    }
+    String::from_utf8(decoded).unwrap()
+}
+
+fn response_sse_events(body: &str) -> Vec<Value> {
+    body.split("\n\n")
+        .filter_map(|event| {
+            let payload = event
+                .lines()
+                .filter_map(|line| line.strip_prefix("data:").map(str::trim))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!payload.is_empty())
+                .then(|| serde_json::from_str(&payload).ok())
+                .flatten()
+        })
+        .collect()
+}
+
+fn completed_output_texts(wire: &[u8]) -> Vec<String> {
+    let events = response_sse_events(&decoded_chunked_body(wire));
+    let completed = events
+        .iter()
+        .rev()
+        .find(|event| event["type"] == "response.completed")
+        .and_then(|event| event.pointer("/response/output"))
+        .and_then(Value::as_array)
+        .expect("completed response output");
+    let mut texts = Vec::new();
+    for item in completed {
+        if item["type"] == "message" {
+            if let Some(text) = item["text"].as_str() {
+                texts.push(text.to_owned());
+                continue;
+            }
+            if let Some(content) = item.pointer("/content").and_then(Value::as_array) {
+                for part in content {
+                    if part["type"] == "output_text" {
+                        if let Some(text) = part["text"].as_str() {
+                            texts.push(text.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    texts
+}
+
 fn assert_no_client_error(text: &str) {
     assert!(
         !text.contains("\"error\"")
@@ -388,6 +552,10 @@ async fn split_orphan_after_clean_commit_does_not_leak_label_or_completion() {
     assert!(text.contains("hello"), "{text}");
     assert!(!text.contains("tool_calls"), "{text}");
     assert!(!text.contains("response.completed"), "{text}");
+    assert!(
+        !text.ends_with("0\r\n\r\n"),
+        "normal chunked completion leaked: {text}"
+    );
     assert_no_client_error(&text);
     entry.stop().await;
 }
@@ -404,12 +572,16 @@ async fn split_orphan_before_commit_recovers_without_leaking() {
     .await;
     let text = wire_text(&wire);
     eprintln!("849ed8f orphan-before wire={text}");
-    while let Ok(capture) = entry.captures.try_recv() {
-        eprintln!(
-            "849ed8f orphan-before upstream model={} input={}",
-            capture["model"], capture["input"]
-        );
-    }
+    let first = entry.captures.recv().await.expect("first provider attempt");
+    let second = entry.captures.recv().await.expect("recovery attempt");
+    assert_eq!(first["model"], "wire-849ed8f");
+    assert_eq!(second["model"], "wire-recover");
+    assert_eq!(first["input"], "split-orphan-before-commit");
+    assert_eq!(second["input"], "split-orphan-before-commit");
+    assert!(
+        entry.captures.try_recv().is_err(),
+        "exactly two provider attempts are expected"
+    );
 
     assert!(text.contains("recovered"), "{text}");
     assert!(text.contains("response.completed"), "{text}");
@@ -433,7 +605,93 @@ async fn bare_residue_newline_is_removed_before_projection() {
     assert!(text.contains("hello"), "{text}");
     assert!(text.contains("response.completed"), "{text}");
     assert!(!text.contains("DSML"), "{text}");
+    assert_eq!(completed_output_texts(&wire), vec!["hello\n"]);
     assert_no_client_error(&text);
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn snapshot_carrier_collision_does_not_release_split_marker_early() {
+    let _guard = TEST_LOCK.lock().await;
+    let entry = start(false).await;
+    let (wire, ended) =
+        raw_request(&entry, "849ed8f-snapshot-marker", "snapshot-split-marker").await;
+    let text = wire_text(&wire);
+
+    assert!(text.contains("safe-prefix"), "{text}");
+    assert!(!text.contains("<thin"), "{text}");
+    assert!(!text.contains("<thinking>"), "{text}");
+    assert!(!text.contains("</thinking>"), "{text}");
+    assert!(!text.contains("secret"), "{text}");
+    assert_no_client_error(&text);
+    assert!(
+        ended.is_ok()
+            || ended
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
+        "unexpected transport ending: {ended:?}"
+    );
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn snapshot_carrier_collision_does_not_release_bare_residue_early() {
+    let _guard = TEST_LOCK.lock().await;
+    let entry = start(false).await;
+    let (wire, ended) =
+        raw_request(&entry, "849ed8f-snapshot-residue", "snapshot-bare-residue").await;
+    let text = wire_text(&wire);
+
+    assert!(text.contains("hello"), "{text}");
+    assert!(
+        !text.contains("tool_calls"),
+        "the close label must never reach the client: {text}"
+    );
+    assert!(
+        !text.contains("response.completed"),
+        "the bounded truncation must not project completion: {text}"
+    );
+    assert!(
+        !text.ends_with("0\r\n\r\n"),
+        "normal chunked completion leaked: {text}"
+    );
+    assert_no_client_error(&text);
+    assert!(
+        ended.is_ok()
+            || ended
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
+        "unexpected transport ending: {ended:?}"
+    );
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn clean_probe_terminal_acceptance_failure_never_projects_completion() {
+    let _guard = TEST_LOCK.lock().await;
+    let entry = start(false).await;
+    let (wire, ended) = raw_request(
+        &entry,
+        "849ed8f-clean-terminal-failure",
+        "clean-probe-terminal-empty",
+    )
+    .await;
+    let text = wire_text(&wire);
+
+    assert!(text.contains("clean-prefix"), "{text}");
+    assert!(!text.contains("response.completed"), "{text}");
+    assert!(
+        !text.ends_with("0\r\n\r\n"),
+        "normal chunked completion leaked: {text}"
+    );
+    assert_no_client_error(&text);
+    assert!(
+        ended.is_ok()
+            || ended
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
+        "unexpected transport ending: {ended:?}"
+    );
     entry.stop().await;
 }
 

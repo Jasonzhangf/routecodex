@@ -5462,6 +5462,7 @@ features:
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   - v3/crates/routecodex-v3-server/src/websocket.rs
   - v3/crates/routecodex-v3-server/src/tests/post_commit_sse_sdk_fault.rs
+  - v3/crates/routecodex-v3-server/tests/849ed8f_governed_commit_public.rs
   - docs/architecture/dagpipe/graphs/responses-sse-client-frame-commit.graph.json
   - docs/design/v3-responses-first-frame-commit-design.md
   - docs/design/v3-responses-first-frame-commit-dag.md
@@ -5482,6 +5483,7 @@ features:
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib first_frame_commit_
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib client_sse_first_frame_channel_
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test 849ed8f_governed_commit_public -- --test-threads=1
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-dagpipe-governance

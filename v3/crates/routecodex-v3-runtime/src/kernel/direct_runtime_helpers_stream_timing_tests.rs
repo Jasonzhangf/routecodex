@@ -837,6 +837,72 @@ async fn direct_sse_collector_never_swallows_post_terminal_sdk_fault_as_success(
 }
 
 #[tokio::test]
+async fn direct_sse_committed_collector_preserves_post_terminal_sdk_fault_before_held_terminal_release(
+) {
+    let original = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3DirectResp14ProviderProjectionPrepared",
+        "seeded_committed_post_terminal_original",
+        "seeded committed post-terminal original source",
+    );
+    let policy_failure = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3Error01SourceRaised",
+        "seeded_committed_post_terminal_sdk_fault",
+        "seeded committed post-terminal SDK fault",
+    );
+    let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
+        policy_failure: policy_failure.clone(),
+        original_source: Some(original.clone()),
+    };
+    let delta = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"clean-prefix\"}\n\n".to_vec();
+    let terminal = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"status\":\"completed\",\"output\":[{\"id\":\"m1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"clean-prefix\"}]}]}}\n\n".to_vec();
+    let (sink, mut rx) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let source: V3SseAttemptStream = Box::pin(stream::iter(vec![
+        Ok(V3SseAttemptFrame::new(
+            delta,
+            V3SseFrameDisposition::Continue,
+        )),
+        Ok(V3SseAttemptFrame::new(
+            terminal,
+            V3SseFrameDisposition::SemanticTerminal,
+        )),
+        Err(Err(fault.clone())),
+    ]));
+    let result = collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
+        source,
+        V3HubProviderWireProtocol::Responses,
+        crate::nodes::V3AttemptBudget::process_default(),
+        None,
+        None,
+        None,
+        Some(sink),
+    )
+    .await;
+
+    match result {
+        Err(Err(returned)) => {
+            assert_eq!(returned.policy_failure, policy_failure);
+            assert_eq!(returned.original_source, Some(original));
+        }
+        Err(Ok(source)) => panic!("fault was collapsed into an ordinary source: {source:?}"),
+        Ok(_) => panic!("post-terminal SDK fault was incorrectly sealed as success"),
+    }
+    let committed = rx
+        .try_recv()
+        .expect("clean prefix must commit to the client channel");
+    assert!(
+        String::from_utf8_lossy(&committed).contains("response.output_text.delta"),
+        "committed prefix: {}",
+        String::from_utf8_lossy(&committed)
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "the held terminal must not be released before the typed fault reaches the caller"
+    );
+}
+
+#[tokio::test]
 async fn direct_chat_sse_seals_at_terminal_with_unterminated_tail_bytes() {
     // Trailing partial bytes after the chat terminal leave the incremental
     // decoder unterminated; that post-terminal tail must not fail the attempt.
@@ -1667,5 +1733,62 @@ async fn first_frame_commit_bare_gt_residue_with_newline_never_leaks() {
         streamed,
         String::from_utf8(buffered.concat()).unwrap(),
         "the committed attempt must stay byte-identical with the buffered attempt"
+    );
+}
+
+/// Interleaved carrier collision: item zero holds a bare `>` residue while an
+/// unrelated item streams plain text, and a mid-attempt snapshot re-reads both
+/// carriers. The committed channel must hold the residue until the DSML owner
+/// can remove it, so neither the `>` byte nor the close label reaches the client.
+#[tokio::test]
+async fn first_frame_commit_snapshot_carrier_collision_holds_residue() {
+    let close = "</\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C} calls>";
+    let full = format!("hello\n>\n{close}");
+    let chunks: Vec<Vec<u8>> = [
+        serde_json::json!({"type":"response.output_text.delta","item_id":"msg_0","output_index":0,"content_index":0,"delta":"hello\n"}),
+        serde_json::json!({"type":"response.output_text.delta","item_id":"msg_0","output_index":0,"content_index":0,"delta":">\n"}),
+        serde_json::json!({"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"ordinary "}),
+        serde_json::json!({"type":"response.in_progress","response":{"id":"r1","status":"in_progress","output":[
+            {"id":"msg_0","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello\n>\n"}]},
+            {"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ordinary"}]}
+        ]}}),
+        serde_json::json!({"type":"response.output_text.delta","item_id":"msg_0","output_index":0,"content_index":0,"delta":close}),
+        serde_json::json!({"type":"response.output_text.done","item_id":"msg_0","output_index":0,"content_index":0,"text":full.clone()}),
+        serde_json::json!({"type":"response.output_text.done","item_id":"msg_1","output_index":0,"content_index":1,"text":"ordinary"}),
+        serde_json::json!({"type":"response.completed","response":{"id":"r1","status":"completed","output":[
+            {"id":"msg_0","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":full.clone()}]},
+            {"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ordinary"}]}
+        ]}}),
+    ]
+    .into_iter()
+    .map(|value| {
+        format!(
+            "event: {}\ndata: {}\n\n",
+            value["type"].as_str().unwrap_or("message"),
+            value
+        )
+        .into_bytes()
+    })
+    .collect();
+    let registry = crate::hooks::register_responses_direct_hooks();
+    let context = crate::direct_response_hooks::V3DirectDsmlContext::from_request(
+        &serde_json::json!({}),
+        &std::collections::HashMap::new(),
+    );
+    let run =
+        run_early_commit_attempt_with_hooks(chunks.clone(), Some((&registry, &context))).await;
+    let streamed = String::from_utf8(run.frames.concat()).unwrap();
+    assert!(run.committed, "the clean visible prefix must commit");
+    assert!(
+        run.failed,
+        "the post-commit owner rewrite must end the attempt detectably"
+    );
+    assert!(
+        !streamed.contains("tool_calls"),
+        "the close label must not reach the client: {streamed}"
+    );
+    assert!(
+        !streamed.contains(">\n"),
+        "the bare close residue must not reach the client: {streamed}"
     );
 }
