@@ -140,8 +140,10 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             || output.protocol_relay_handoff.is_some();
 
         // Gather one typed disposition from the single shared policy owner.
-        // Direct has no Resp03 stage, so the raw-provider facts come from the
-        // JSON snapshot or the buffered raw SSE observation before synthesis.
+        // The completion and tool facts come from the complete governed result.
+        // Only the source-summary provenance still reads the native provider
+        // observation, because the governed projection may already carry
+        // RCC-synthesized reasoning summary content.
         let (facts, finalized_response, is_sse) = match &output.client_payload.body {
             V3ClientBody::Json(body) => {
                 let response_completed =
@@ -162,22 +164,27 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                     false,
                 )
             }
-            V3ClientBody::CommittedSse(_) => {
+            V3ClientBody::CommittedSse(stream) => {
+                let governed =
+                    direct_runtime_helpers_stream::inspect_direct_sse_governed_frames(
+                        stream.sealed_frames().as_slice(),
+                    );
                 let raw = output
                     .stream_observation
                     .as_ref()
                     .and_then(|observation| observation.snapshot().ok())
                     .map(|snapshot| snapshot.provider_raw_sse)
                     .unwrap_or_default();
-                let raw_facts =
-                    direct_runtime_helpers_stream::inspect_direct_sse_raw_provider(&raw);
+                let has_source_summary =
+                    direct_runtime_helpers_stream::inspect_direct_sse_raw_provider(&raw)
+                        .has_source_summary;
                 (
                     V3ResponsesDirectRefillFacts {
-                        tool_calls: raw_facts.tool_calls,
-                        has_source_summary: raw_facts.has_source_summary,
-                        response_completed: raw_facts.response_completed,
+                        tool_calls: governed.tool_calls,
+                        has_source_summary,
+                        response_completed: governed.response_completed,
                     },
-                    raw_facts.finalized_response,
+                    governed.finalized_response,
                     true,
                 )
             }

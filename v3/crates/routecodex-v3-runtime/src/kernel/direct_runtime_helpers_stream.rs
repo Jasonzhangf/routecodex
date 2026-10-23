@@ -964,6 +964,58 @@ pub(crate) fn build_direct_sse_output_item_done_frame(
     .ok()
 }
 
+/// Facts the Direct SSE refill decision reads from the governed committed
+/// result.
+#[derive(Debug, Default)]
+pub(crate) struct V3DirectSseGovernedFacts {
+    pub(crate) response_completed: bool,
+    pub(crate) tool_calls: Vec<crate::hub_v1::V3HubResponseToolCall>,
+    pub(crate) finalized_response: Option<Value>,
+}
+
+/// Read the refill facts from the sealed committed attempt.
+///
+/// The Chat Process decision must judge the complete governed result. The raw
+/// provider observation is a bounded diagnostic (2 MiB) that also predates
+/// governance, so a harvested tool call never appears there and a long stream
+/// loses its terminal. The sealed frames are the governed client projection.
+pub(crate) fn inspect_direct_sse_governed_frames(
+    frames: &[Vec<u8>],
+) -> V3DirectSseGovernedFacts {
+    let mut facts = V3DirectSseGovernedFacts::default();
+    for segment in split_direct_sse_committed_chunks(frames) {
+        let Some(value) = segment.value.as_ref() else {
+            continue;
+        };
+        let Some(event_type) = value.get("type").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let is_terminal = matches!(
+            event_type,
+            "response.completed" | "response.incomplete" | "response.done" | "response.failed"
+        );
+        if !is_terminal {
+            continue;
+        }
+        let status = value
+            .get("response")
+            .and_then(|response| response.get("status"))
+            .and_then(serde_json::Value::as_str);
+        // The event type is authoritative for completion; `done` must still
+        // carry the real final status. `incomplete` and `failed` never refill.
+        facts.response_completed = match event_type {
+            "response.completed" => matches!(status, None | Some("completed") | Some("done")),
+            "response.done" => matches!(status, Some("completed") | Some("done")),
+            _ => false,
+        };
+        if let Some(response) = value.get("response") {
+            facts.tool_calls = crate::hub_v1::collect_v3_governed_response_tool_calls(response);
+            facts.finalized_response = Some(response.clone());
+        }
+    }
+    facts
+}
+
 /// Rewrite the terminal frame's `response.usage` with the accumulated summary
 /// while leaving every other segment byte-for-byte unchanged.
 pub(crate) fn rewrite_direct_sse_terminal_usage(

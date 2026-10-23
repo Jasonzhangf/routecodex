@@ -442,6 +442,11 @@ pub struct V3CommittedClientSseStream {
     inner: Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>,
     next_frame_index: usize,
     terminal_frame_index: usize,
+    /// Complete committed business result of the sealed attempt, shared with
+    /// the replay iterator instead of copied. Chat Process governance reads it
+    /// to decide bounded refill from the governed result; the client stream
+    /// keeps replaying exactly the same frames.
+    sealed_frames: Option<std::sync::Arc<Vec<Vec<u8>>>>,
 }
 
 /// Runtime-issued proof that one provider attempt reached a protocol-valid
@@ -480,7 +485,8 @@ impl V3AttemptSuccessReceipt {
 }
 
 struct V3ReservedCommittedSseReplay {
-    frames: std::iter::Skip<std::vec::IntoIter<Vec<u8>>>,
+    frames: std::sync::Arc<Vec<Vec<u8>>>,
+    next: usize,
     _reservation: V3AttemptReservation,
 }
 
@@ -488,7 +494,11 @@ impl Stream for V3ReservedCommittedSseReplay {
     type Item = Vec<u8>;
 
     fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(self.frames.next())
+        let item = self.frames.get(self.next).cloned();
+        if item.is_some() {
+            self.next += 1;
+        }
+        Poll::Ready(item)
     }
 }
 
@@ -520,6 +530,7 @@ impl V3CommittedClientSseStream {
     ) -> Self {
         let next_frame_index = self.next_frame_index;
         let terminal_frame_index = self.terminal_frame_index;
+        let sealed_frames = self.sealed_frames.clone();
         Self {
             inner: Box::pin(V3ObservedCommittedSseStream {
                 source: self,
@@ -529,7 +540,20 @@ impl V3CommittedClientSseStream {
             }),
             next_frame_index,
             terminal_frame_index,
+            sealed_frames,
         }
+    }
+
+    /// Every committed business frame of the sealed attempt, in order.
+    ///
+    /// The sealed stream only replays frames that were not already handed to
+    /// the client, so the intermediate refill decision cannot read the
+    /// delivered remainder and call it the complete result. This accessor
+    /// exposes the whole committed attempt that the seal validated.
+    pub(crate) fn sealed_frames(&self) -> std::sync::Arc<Vec<Vec<u8>>> {
+        self.sealed_frames
+            .clone()
+            .unwrap_or_else(|| std::sync::Arc::new(Vec::new()))
     }
 }
 
@@ -912,13 +936,17 @@ impl V3CommittedClientSseBuilder {
         // already handed to the client.
         let relative_terminal_frame_index =
             terminal_frame_index.saturating_sub(self.flushed_frames);
+        let sealed_frames = std::sync::Arc::new(self.frames);
+        let replay_frames = std::sync::Arc::clone(&sealed_frames);
         Ok(V3CommittedClientSseStream {
             inner: Box::pin(V3ReservedCommittedSseReplay {
-                frames: self.frames.into_iter().skip(self.flushed_frames),
+                frames: replay_frames,
+                next: self.flushed_frames,
                 _reservation: self.reservation,
             }),
             next_frame_index: 0,
             terminal_frame_index: relative_terminal_frame_index,
+            sealed_frames: Some(sealed_frames),
         })
     }
 }
