@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import {
   executeDeclaredEchoTool,
+  executeDeclaredStructuredEchoTool,
   executeLocalNamespaceMock,
   extractToolCalls,
   runToolFollowup,
@@ -54,6 +55,40 @@ test('executeDeclaredEchoTool uses actual arguments and rejects undeclared/non-e
   assert.throws(() => executeDeclaredEchoTool({ request: declaredRequest, call: { id: 'call_x', name: 'spawn_agent', namespace: 'collaboration', type: 'function_call', arguments: '{"message":"x"}' } }), /not declared/u);
   assert.throws(() => executeDeclaredEchoTool({ request: { body: { tools: [{ type: 'function', name: 'spawn_agent' }] } }, call: { id: 'call_x', name: 'spawn_agent', type: 'function_call', arguments: '{"message":"x"}' } }), /not an echo consumer/u);
   assert.throws(() => executeDeclaredEchoTool({ request: declaredRequest, call: { id: 'call_x', name: 'echo', type: 'function_call', arguments: '{"wrong":1}' } }), /exactly one text/u);
+});
+
+test('structured echo derives the result from text and keeps the complete argument object', () => {
+  const request = {
+    body: {
+      tools: [
+        {
+          type: 'function',
+          name: 'echo',
+          parameters: {
+            type: 'object',
+            properties: { text: { type: 'string' } },
+            required: ['text'],
+          },
+        },
+      ],
+    },
+  };
+  const call = {
+    id: 'call_structured',
+    name: 'echo',
+    type: 'function_call',
+    arguments: {
+      text: 'ping',
+      encrypted_content: 'structured-tool-argument-business-value',
+      nested: { encrypted_content: 'nested-tool-argument-business-value' },
+    },
+  };
+  assert.equal(
+    executeDeclaredStructuredEchoTool({ request, call, entryProtocol: 'responses' }),
+    'ping',
+  );
+  assert.deepEqual(call.arguments.encrypted_content, 'structured-tool-argument-business-value');
+  assert.deepEqual(call.arguments.nested.encrypted_content, 'nested-tool-argument-business-value');
 });
 
 test('runToolFollowup executes exactly once from actual args and sends the next request', async () => {

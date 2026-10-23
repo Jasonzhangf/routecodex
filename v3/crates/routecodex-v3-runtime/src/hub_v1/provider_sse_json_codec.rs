@@ -444,6 +444,7 @@ pub(super) fn response_output_item_has_client_output(item: &Value) -> Result<boo
             require_non_empty_output_string(item, "custom_tool_call", "name")?;
             Ok(true)
         }
+        Some("function_call_output") => Ok(true),
         Some("tool_search_call") => {
             require_non_empty_output_string(item, "tool_search_call", "call_id")?;
             if !item.get("arguments").is_some_and(Value::is_object) {
@@ -1327,6 +1328,27 @@ mod provider_sse_json_codec_tests {
                 "business output must authorize streaming: {data}"
             );
         }
+    }
+
+    #[test]
+    fn responses_function_call_output_is_preserved_business_data() {
+        let item = r#"{"type":"function_call_output","call_id":"call_output","output":{"receipt":"ok","encrypted_content":"business-cipher","nested":{"opaque":"keep"}}}"#;
+        let item_done =
+            format!(r#"{{"type":"response.output_item.done","output_index":3,"item":{item}}}"#);
+        assert_eq!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &item_done)
+                .expect("function_call_output output item must remain valid business data"),
+            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
+        );
+
+        let completed = format!(
+            r#"{{"type":"response.completed","response":{{"id":"resp_output","status":"completed","output":[{item}]}}}}"#
+        );
+        assert_eq!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &completed)
+                .expect("completed response with function_call_output must remain business data"),
+            Some(V3ProviderResponsesJsonFrameOutcome::Terminal)
+        );
     }
 
     #[test]

@@ -163,6 +163,13 @@ test('openai_chat JSON captures the exact raw request and returns the scripted b
   assert.equal(capture.attempt, 0);
   assert.equal(capture.phase, 'case');
   assert.deepEqual(capture.response_script, { protocol: 'openai_chat', mode: 'json', status: 200, content_type: 'application/json', body: { ok: true } });
+  assert.equal(capture.response_wire.mode, 'json');
+  assert.equal(capture.response_wire.status, 200);
+  assert.equal(capture.response_wire.content_type, 'application/json');
+  assert.equal(capture.response_wire.text, '{"ok":true}');
+  assert.equal(capture.response_wire.text_byte_length, Buffer.byteLength('{"ok":true}'));
+  assert.equal(capture.response_wire.bytes_base64, Buffer.from('{"ok":true}').toString('base64'));
+  assert.equal(capture.response_wire.complete, true);
 });
 
 test('all four endpoint families are accepted, including Gemini generate and stream plus query', async (t) => {
@@ -202,6 +209,10 @@ test('SSE preserves exact raw chunks, frame order, and the raw [DONE] data liter
   });
   const ordered = await postJson(`${server.url}/v1/chat/completions`, { stream: true });
   assert.equal(ordered.bodyText, 'data: first\n\ndata: second\n\n');
+  const [orderedCapture] = server.getCaptures('raw-chunks');
+  assert.equal(orderedCapture.response_wire.text, ordered.bodyText);
+  assert.equal(orderedCapture.response_wire.bytes_base64, ordered.bytes.toString('base64'));
+  assert.equal(orderedCapture.response_wire.complete, true);
 
   server.setActiveCase({
     case_id: 'done-literal',
@@ -267,6 +278,8 @@ test('fault attempts advance deterministically and the recovered attempt is deli
   assert.deepEqual(captures.map((capture) => capture.attempt), [0, 1]);
   assert.deepEqual(captures.map((capture) => capture.response_script.mode), ['fault', 'json']);
   assert.equal(captures[1].attempt_repeated, false);
+  assert.equal(captures[0].response_wire.complete, false, 'truncated attempt must be recorded as incomplete');
+  assert.equal(captures[0].response_wire.truncated, true, 'truncated attempt must keep its truncated receipt');
 });
 
 test('reset destroys the transport and hold-open stays open until close()', async (t) => {

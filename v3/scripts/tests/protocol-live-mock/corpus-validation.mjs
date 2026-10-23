@@ -419,6 +419,7 @@ function validateTurns(relative, value, findings) {
       seenIds.add(turn.turn_id);
     }
     const hasRequest = isObject(turn.client_request);
+    const hasProvider = isObject(turn.expected_provider);
     const hasProviderExact = isObject(turn.expected_provider_exact);
     const hasClientMust = isObject(turn.expected_client_must);
     if (index === 0 && hasProviderExact && typeof turn.expected_provider_exact === 'object') {
@@ -428,10 +429,14 @@ function validateTurns(relative, value, findings) {
       fail('turns[0].upstream_response must not redefine the top-level first upstream script');
     }
     if (index > 0 && !hasRequest) fail(`turns[${index}] must declare client_request`);
-    if (index > 0 && !hasRequest && !hasProviderExact && !hasClientMust) {
+    if (index > 0 && !hasRequest && !hasProvider && !hasProviderExact && !hasClientMust) {
       fail(`turns[${index}] must assert a follow-up provider shape or client output`);
     }
+    if (index > 0 && hasProvider && hasProviderExact) {
+      fail(`turns[${index}] must not declare both expected_provider and expected_provider_exact`);
+    }
     if (hasRequest) validateClientRequest(`${relative}: turns[${index}].client_request`, turn.client_request, findings);
+    if (hasProvider) validateExpectedProvider(`${relative}: turns[${index}].expected_provider`, turn.expected_provider, findings);
     if (isObject(turn.upstream_response)) validateUpstream(relative, turn.upstream_response, findings, `turns[${index}].upstream_response`);
   }
 }
@@ -461,7 +466,7 @@ function validateToolFollowup(relative, value, findings) {
     || followup.assert_declared_tool_binding_only === true
     || followup.assert_tool_executed_once === true;
   if (!hasToolFlag) fail('tool_followup must declare at least one tool assertion flag');
-  const executingConsumers = new Set(['echo', 'echo-line-result', 'local-namespace-mock', 'unknown-tool-correction', 'codex-real-exec']);
+  const executingConsumers = new Set(['echo', 'structured-echo', 'echo-line-result', 'local-namespace-mock', 'unknown-tool-correction', 'codex-real-exec']);
   if (followup.assert_tool_executed_once === true && !executingConsumers.has(followup.consumer)) {
     fail('tool_followup.assert_tool_executed_once requires an executing consumer (echo, echo-line-result, local-namespace-mock or unknown-tool-correction)');
   }
@@ -489,6 +494,19 @@ function validateToolFollowup(relative, value, findings) {
   if (followup.consumer === 'echo-line-result') {
     validateEchoLineResultFollowup(relative, value, followup, findings);
     return;
+  }
+  if (followup.consumer === 'structured-echo') {
+    if (value.cell?.entry_protocol !== 'responses') {
+      fail('tool_followup.consumer structured-echo requires the responses entry protocol');
+    }
+    if (followup.side_effect !== 'none') {
+      fail('tool_followup.consumer structured-echo requires side_effect none');
+    }
+    if (followup.assert_no_synthesized_tool_result !== true
+      || followup.assert_declared_tool_binding_only !== true
+      || followup.assert_tool_executed_once !== true) {
+      fail('tool_followup.consumer structured-echo requires all three tool assertion flags');
+    }
   }
   if (followup.consumer === 'codex-real-exec') {
     validateCodexRealExecFollowup(relative, value, followup, findings);

@@ -206,7 +206,7 @@ export async function runCase({
     lastSent = await sendTurn(turns[0], turns[0].request, 'fixture');
     const firstTurnPassed = processTurn(turns[0], lastSent);
 
-    if (firstTurnPassed && turns.length > 1 && ['echo', 'echo-line-result', 'local-namespace-mock', 'unknown-tool-correction'].includes(fixture.tool_followup?.consumer)) {
+    if (firstTurnPassed && turns.length > 1 && ['echo', 'structured-echo', 'echo-line-result', 'local-namespace-mock', 'unknown-tool-correction'].includes(fixture.tool_followup?.consumer)) {
       const consumer = fixture.tool_followup.consumer;
       const correction = consumer === 'unknown-tool-correction';
       const localMock = consumer === 'local-namespace-mock';

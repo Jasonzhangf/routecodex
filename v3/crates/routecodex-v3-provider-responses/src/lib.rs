@@ -62,8 +62,8 @@ pub use transport_handoff::{
     V3ProviderTransportHandoffScope, V3ProviderTransportKind,
 };
 pub use wire::{
-    apply_v3_response_cipher_policy, build_v3_provider_12_responses_wire_payload,
-    v3_provider_auth_handle_from_manifest_entry,
+    apply_v3_chat_reasoning_cipher_policy, apply_v3_response_cipher_policy,
+    build_v3_provider_12_responses_wire_payload, v3_provider_auth_handle_from_manifest_entry,
     v3_provider_auth_secret_handle_from_declaration_fields, V3Provider12ResponsesWirePayload,
     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ResponsesProviderTarget,
     V3ResponsesRequestEndpoint, V3ResponsesStreamIntent,
