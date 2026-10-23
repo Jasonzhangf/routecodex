@@ -352,6 +352,17 @@ fn discovered_wire_name(body: &Value) -> Option<&str> {
     (matches.next().is_none() && !name.is_empty()).then_some(name)
 }
 
+/// The Responses wire keeps function schemas under `parameters`. Match the
+/// complete declaration the provider actually received and use its bound name.
+fn discovered_responses_wire_name(body: &Value) -> Option<&str> {
+    let expected = discovered_schema();
+    let mut matches = body["tools"].as_array()?.iter().filter(|tool| {
+        tool["description"] == DISCOVERED_COMPOSED_DESCRIPTION && tool["parameters"] == expected
+    });
+    let name = matches.next()?["name"].as_str()?;
+    (matches.next().is_none() && !name.is_empty()).then_some(name)
+}
+
 fn discovered_schema() -> Value {
     discovered_tool_declarations()[0]["tools"][0]["parameters"].clone()
 }
@@ -361,8 +372,13 @@ fn discovered_schema() -> Value {
 /// 200: it requires the same namespace, leaf name, and schema in every final
 /// declaration channel.
 fn answer_discovery_consistency(body: &Value) -> Response<Body> {
+    let Some(wire_name) = discovered_responses_wire_name(body) else {
+        return bad_request(
+            "strict discovery consistency upstream saw no bound discovered declaration",
+        );
+    };
     let stream = body["stream"].as_bool() == Some(true);
-    let json_call = json!({"id":"msg_discovery_consistency","type":"response","status":"completed","model":WIRE_MODEL,"output":[{"type":"function_call","call_id":ECHO_CALL_ID,"name":DISCOVERED_LEAF,"namespace":DISCOVERED_NAMESPACE,"arguments":json!({"nonce":NONCE}).to_string()}]});
+    let json_call = json!({"id":"msg_discovery_consistency","type":"response","status":"completed","model":WIRE_MODEL,"output":[{"type":"function_call","call_id":ECHO_CALL_ID,"name":wire_name,"arguments":json!({"nonce":NONCE}).to_string()}]});
     let events = if stream {
         let id = "resp_discovery_consistency";
         sse_event(
@@ -370,7 +386,7 @@ fn answer_discovery_consistency(body: &Value) -> Response<Body> {
             json!({"type":"response.created","response":{"id":id,"object":"response","status":"in_progress","model":WIRE_MODEL,"output":[]}}),
         ) + &sse_event(
             "response.output_item.added",
-            json!({"type":"response.output_item.added","output_index":0,"item":{"id":"msg_discovery_consistency","type":"function_call","status":"in_progress","call_id":ECHO_CALL_ID,"name":DISCOVERED_LEAF,"namespace":DISCOVERED_NAMESPACE,"arguments":""}}),
+            json!({"type":"response.output_item.added","output_index":0,"item":{"id":"msg_discovery_consistency","type":"function_call","status":"in_progress","call_id":ECHO_CALL_ID,"name":wire_name,"arguments":""}}),
         ) + &sse_event(
             "response.function_call_arguments.delta",
             json!({"type":"response.function_call_arguments.delta","item_id":"msg_discovery_consistency","output_index":0,"delta":json!({"nonce":NONCE}).to_string()}),
@@ -379,10 +395,10 @@ fn answer_discovery_consistency(body: &Value) -> Response<Body> {
             json!({"type":"response.function_call_arguments.done","item_id":"msg_discovery_consistency","output_index":0,"arguments":json!({"nonce":NONCE}).to_string()}),
         ) + &sse_event(
             "response.output_item.done",
-            json!({"type":"response.output_item.done","output_index":0,"item":{"id":"msg_discovery_consistency","type":"function_call","status":"completed","call_id":ECHO_CALL_ID,"name":DISCOVERED_LEAF,"namespace":DISCOVERED_NAMESPACE,"arguments":json!({"nonce":NONCE}).to_string()}}),
+            json!({"type":"response.output_item.done","output_index":0,"item":{"id":"msg_discovery_consistency","type":"function_call","status":"completed","call_id":ECHO_CALL_ID,"name":wire_name,"arguments":json!({"nonce":NONCE}).to_string()}}),
         ) + &sse_event(
             "response.completed",
-            json!({"type":"response.completed","response":{"id":id,"object":"response","status":"completed","model":WIRE_MODEL,"output":[{"id":"msg_discovery_consistency","type":"function_call","status":"completed","call_id":ECHO_CALL_ID,"name":DISCOVERED_LEAF,"namespace":DISCOVERED_NAMESPACE,"arguments":json!({"nonce":NONCE}).to_string()}]}}),
+            json!({"type":"response.completed","response":{"id":id,"object":"response","status":"completed","model":WIRE_MODEL,"output":[{"id":"msg_discovery_consistency","type":"function_call","status":"completed","call_id":ECHO_CALL_ID,"name":wire_name,"arguments":json!({"nonce":NONCE}).to_string()}]}}),
         )
     } else {
         String::new()
