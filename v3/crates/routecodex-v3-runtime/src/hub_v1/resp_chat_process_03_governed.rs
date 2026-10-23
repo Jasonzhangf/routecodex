@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 #[path = "resp_chat_process_tool_markup.rs"]
 mod tool_markup;
+pub(crate) use tool_markup::harvest_chat_text;
 
 include!("resp_chat_process_03_governed_provider_identity.rs");
 
@@ -1494,6 +1495,7 @@ pub struct V3HubRelayResponseHookRegistry {
         fn(
             &[Vec<u8>],
             Option<usize>,
+            &V3HubRelaySerializedToolContext,
         ) -> Result<Option<(Vec<Vec<u8>>, usize)>, super::V3RelayCompleteResponseError>,
 }
 
@@ -1529,9 +1531,13 @@ impl V3HubRelayResponseHookRegistry {
     pub(crate) fn govern_complete_chat_sse(
         &self,
         builder: &mut crate::execution_control::V3CommittedClientSseBuilder,
+        namespace_registry: &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
     ) -> Result<(), super::V3RelayCompleteResponseError> {
         let source_terminal = builder.last_marked_terminal_frame_index();
-        builder.rewrite_complete_attempt(|frames| (self.complete_chat_sse)(frames, source_terminal))
+        let context = V3HubRelaySerializedToolContext::from_registry(namespace_registry);
+        builder.rewrite_complete_attempt(|frames| {
+            (self.complete_chat_sse)(frames, source_terminal, &context)
+        })
     }
 }
 
@@ -1540,7 +1546,8 @@ pub fn compile_v3_hub_relay_response_hooks() -> V3HubRelayResponseHookRegistry {
         normalize: normalize_v3_hub_relay_response,
         govern: govern_v3_hub_relay_response,
         typed_sse_catalog: V3RelaySseHookCatalog::new(),
-        complete_chat_sse: super::resp_chat_process_complete_chat_sse::govern_complete_chat_sse,
+        complete_chat_sse:
+            super::resp_chat_process_complete_chat_sse::govern_complete_chat_sse_with_context,
     }
 }
 

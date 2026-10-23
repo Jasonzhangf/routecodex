@@ -1,9 +1,9 @@
 //! Complete Chat text-carrier governance. Runtime owns admission and storage.
+use super::resp_chat_process_03_governed::{harvest_chat_text, V3HubRelaySerializedToolContext};
 use super::{V3HubProviderWireProtocol, V3HubRelayResponseError, V3ProviderAttemptBusinessContent};
-use crate::tool_markup_parser::{scan_tool_markup, ToolMarkupDeclarations, ToolMarkupSegment};
 use routecodex_v3_sse::*;
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum V3RelayCompleteResponseError {
@@ -68,13 +68,29 @@ pub(crate) fn projected_sse_has_business_content(
 
 /// Keep exact surviving source spans, including literal/code contexts and
 /// opaque invocations. Never synthesize text or touch native tool arguments.
-pub(crate) fn govern_complete_chat_sse(
+#[cfg(test)]
+fn govern_complete_chat_sse(
     frames: &[Vec<u8>],
     source_terminal: Option<usize>,
+) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError> {
+    govern_complete_chat_sse_with_context(
+        frames,
+        source_terminal,
+        &V3HubRelaySerializedToolContext::default(),
+    )
+}
+
+pub(crate) fn govern_complete_chat_sse_with_context(
+    frames: &[Vec<u8>],
+    source_terminal: Option<usize>,
+    context: &V3HubRelaySerializedToolContext,
 ) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError> {
     let mut events = decode(frames).map_err(V3RelayCompleteResponseError::Processing)?;
     let mut carriers: BTreeMap<(String, String), (String, Vec<(usize, String, usize, usize)>)> =
         BTreeMap::new();
+    let mut used = HashSet::new();
+    let mut next_indices = BTreeMap::<String, usize>::new();
+    let mut opaque_choices = BTreeSet::new();
     for (event_index, (_, value)) in events.iter().enumerate() {
         let Some(choices) = value
             .as_ref()
@@ -90,6 +106,26 @@ pub(crate) fn govern_complete_chat_sse(
                 .unwrap_or_else(|| choice_index.into())
                 .to_string();
             for field in ["message", "delta"] {
+                if let Some(native) = choice
+                    .get(field)
+                    .and_then(|message| message.get("tool_calls"))
+                {
+                    if let Some(native) = native.as_array() {
+                        for (ordinal, call) in native.iter().enumerate() {
+                            if let Some(id) = call["id"].as_str() {
+                                used.insert(id.to_owned());
+                            }
+                            let index = call["index"]
+                                .as_u64()
+                                .and_then(|index| usize::try_from(index).ok())
+                                .unwrap_or(ordinal);
+                            let next = next_indices.entry(identity.clone()).or_default();
+                            *next = (*next).max(index.saturating_add(1));
+                        }
+                    } else {
+                        opaque_choices.insert(identity.clone());
+                    }
+                }
                 let Some(content) = choice.get(field).and_then(|v| v.get("content")) else {
                     continue;
                 };
@@ -131,24 +167,65 @@ pub(crate) fn govern_complete_chat_sse(
         }
     }
     let mut changed = BTreeSet::new();
-    for (_, (text, pieces)) in carriers {
-        let scan = scan_tool_markup(&text, &ToolMarkupDeclarations::default());
-        if scan.incomplete_tool_invocation {
-            return Err(V3HubRelayResponseError::UnharvestableToolMarkup.into());
-        }
-        if !scan.removed_label {
-            continue;
-        }
+    for ((identity, carrier), (text, pieces)) in carriers {
+        let empty = V3HubRelaySerializedToolContext::default();
+        // The existing Chat adapter harvests string content only. Structured
+        // content and opaque native carriers retain their business shape.
+        let context = if matches!(carrier.as_str(), "message/content" | "delta/content")
+            && !opaque_choices.contains(&identity)
+        {
+            context
+        } else {
+            &empty
+        };
+        let (visible, mut calls) = harvest_chat_text(&text, context, &mut used)?;
         let base = text.as_ptr() as usize;
-        let mut spans = BTreeSet::new();
-        for segment in scan.segments {
-            match segment {
-                ToolMarkupSegment::Text(value) => {
-                    spans.insert((value.as_ptr() as usize - base, value.len()));
-                }
-                ToolMarkupSegment::Calls(calls) => {
-                    for call in calls {
-                        spans.insert((call.envelope.as_ptr() as usize - base, call.envelope.len()));
+        let spans: BTreeSet<_> = visible
+            .iter()
+            .map(|value| (value.as_ptr() as usize - base, value.len()))
+            .collect();
+        if !calls.is_empty() {
+            let (first_event, first_path, _, _) = &pieces[0];
+            let message_path = first_path.split('/').take(4).collect::<Vec<_>>().join("/");
+            let message = events[*first_event]
+                .1
+                .as_mut()
+                .and_then(|event| event.pointer_mut(&message_path))
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| {
+                    V3RelayCompleteResponseError::Processing("Chat tool carrier disappeared".into())
+                })?;
+            let next = next_indices.entry(identity.clone()).or_default();
+            for call in &mut calls {
+                call["index"] = (*next).into();
+                *next += 1;
+            }
+            message
+                .entry("tool_calls")
+                .or_insert_with(|| Value::Array(Vec::new()))
+                .as_array_mut()
+                .expect("opaque native carriers were preserved")
+                .extend(calls);
+            changed.insert(*first_event);
+            for (event_index, (_, event)) in events.iter_mut().enumerate() {
+                let Some(choices) = event
+                    .as_mut()
+                    .and_then(|event| event["choices"].as_array_mut())
+                else {
+                    continue;
+                };
+                for (ordinal, choice) in choices.iter_mut().enumerate() {
+                    let key = choice
+                        .get("index")
+                        .cloned()
+                        .unwrap_or_else(|| ordinal.into())
+                        .to_string();
+                    if key == identity
+                        && choice["finish_reason"].is_string()
+                        && choice["finish_reason"] != "content_filter"
+                    {
+                        choice["finish_reason"] = "tool_calls".into();
+                        changed.insert(event_index);
                     }
                 }
             }
@@ -220,6 +297,93 @@ pub(crate) fn govern_complete_chat_sse(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn declared_context(custom: bool) -> V3HubRelaySerializedToolContext {
+        let tool = if custom {
+            serde_json::json!({"type":"custom","name":"bash","format":{"type":"text"}})
+        } else {
+            serde_json::json!({"type":"function","name":"bash","parameters":{"type":"object","properties":{"command":{"type":"string"}}}})
+        };
+        let registry =
+            provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_tools(&[
+                tool,
+            ])
+            .unwrap();
+        V3HubRelaySerializedToolContext::from_registry(&registry)
+    }
+
+    #[test]
+    fn issueff1e031_complete_chat_native_extensions_and_choices() {
+        let text = "Before.<tool_call>bash<arg_key>command</arg_key><arg_value>printf SAFE</arg_value></tool_call>After.";
+        let native = serde_json::json!({"index":4,"id":"native_keep","type":"function","function":{"name":"other","arguments":"not-json"}});
+        let first = format!("data: {}\n\n", serde_json::json!({"choices":[{"index":2,"delta":{"tool_calls":[native]},"finish_reason":null},{"index":7,"delta":{"content":"other choice"},"finish_reason":null}]})).into_bytes();
+        let content = format!("id: retained\nevent: vendor.chunk\nretry: 91\ndata: {}\n\n", serde_json::json!({"choices":[{"index":2,"delta":{"content":text,"vendor_delta":{"all":[1,2]}},"finish_reason":null}],"vendor_payload":{"kept":true}})).into_bytes();
+        let terminal = format!("data: {}\n\n", serde_json::json!({"choices":[{"index":2,"delta":{},"finish_reason":"stop"},{"index":7,"delta":{},"finish_reason":"stop"}]})).into_bytes();
+        let frames = vec![first, content, terminal, usage(), done()];
+        let (governed, terminal) =
+            govern_complete_chat_sse_with_context(&frames, Some(2), &declared_context(false))
+                .unwrap()
+                .unwrap();
+        assert_eq!(terminal, 2);
+        assert_eq!(governed.len(), frames.len());
+        assert_eq!(governed[0], frames[0]);
+        assert_eq!(governed[3..], frames[3..]);
+        let rewritten = String::from_utf8(governed[1].clone()).unwrap();
+        assert!(rewritten.contains("id: retained"));
+        assert!(rewritten.contains("event: vendor.chunk"));
+        assert!(rewritten.contains("retry: 91"));
+        let values = values(&governed);
+        assert_eq!(values[0]["choices"][0]["delta"]["tool_calls"][0], native);
+        assert_eq!(
+            values[1]["vendor_payload"],
+            serde_json::json!({"kept":true})
+        );
+        let delta = &values[1]["choices"][0]["delta"];
+        assert_eq!(delta["content"], "Before.After.");
+        assert_eq!(delta["vendor_delta"], serde_json::json!({"all":[1,2]}));
+        assert_eq!(delta["tool_calls"][0]["index"], 5);
+        assert_ne!(delta["tool_calls"][0]["id"], "native_keep");
+        assert_eq!(delta["tool_calls"][0]["function"]["name"], "bash");
+        assert_eq!(
+            delta["tool_calls"][0]["function"]["arguments"],
+            "{\"command\":\"printf SAFE\"}"
+        );
+        assert_eq!(values[2]["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(values[2]["choices"][1]["finish_reason"], "stop");
+    }
+
+    #[test]
+    fn issueff1e031_complete_chat_opaque_and_custom_are_preserved() {
+        let text = "<tool_call>bash<arg_key>command</arg_key><arg_value>printf SAFE</arg_value></tool_call>";
+        let opaque_part = chunk(
+            serde_json::json!({"content":[{"type":"text","text":text,"vendor":{"opaque":true}}]}),
+            Value::Null,
+        );
+        let opaque_native = chunk(
+            serde_json::json!({"content":text,"tool_calls":{"opaque":true}}),
+            Value::Null,
+        );
+        for frame in [opaque_part, opaque_native] {
+            let frames = vec![frame, chunk(serde_json::json!({}), "stop".into()), done()];
+            assert!(govern_complete_chat_sse_with_context(
+                &frames,
+                Some(1),
+                &declared_context(false)
+            )
+            .unwrap()
+            .is_none());
+        }
+        let frames = vec![
+            chunk(serde_json::json!({"content":text}), Value::Null),
+            chunk(serde_json::json!({}), "stop".into()),
+            done(),
+        ];
+        assert!(
+            govern_complete_chat_sse_with_context(&frames, Some(1), &declared_context(true))
+                .unwrap()
+                .is_none()
+        );
+    }
 
     fn chunk(delta: Value, finish_reason: Value) -> Vec<u8> {
         format!(
