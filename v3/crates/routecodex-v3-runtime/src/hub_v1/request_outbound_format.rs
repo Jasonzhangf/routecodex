@@ -1275,10 +1275,13 @@ fn chat_assistant_reasoning_to_responses_input_item(
             let Some(entry) = entry.as_object() else {
                 return Err("responses_reasoning_items entry must be an object".to_string());
             };
-            items.push(build_responses_reasoning_input_from_entry(entry, text));
+            items.push(build_responses_reasoning_input_from_entry(entry));
         }
     } else if text.is_some() || item_id.is_some() || signature.is_some() {
         let mut entry = Map::new();
+        if let Some(text) = text {
+            entry.insert("text".to_string(), Value::String(text.to_string()));
+        }
         if let Some(item_id) = item_id {
             entry.insert("id".to_string(), Value::String(item_id.to_string()));
         }
@@ -1288,7 +1291,7 @@ fn chat_assistant_reasoning_to_responses_input_item(
                 Value::String(signature.to_string()),
             );
         }
-        items.push(build_responses_reasoning_input_from_entry(&entry, text));
+        items.push(build_responses_reasoning_input_from_entry(&entry));
     }
     if items.is_empty() {
         return Ok(None);
@@ -1299,17 +1302,24 @@ fn chat_assistant_reasoning_to_responses_input_item(
     Ok(Some(Value::Array(items)))
 }
 
-fn build_responses_reasoning_input_from_entry(
-    entry: &Map<String, Value>,
-    text: Option<&str>,
-) -> Value {
+fn build_responses_reasoning_input_from_entry(entry: &Map<String, Value>) -> Value {
     let mut item = Map::new();
     item.insert("type".to_string(), Value::String("reasoning".to_string()));
-    if let Some(text) = text {
-        item.insert(
-            "summary".to_string(),
-            json!([{"type": "summary_text", "text": text}]),
-        );
+    let summary = entry
+        .get("summary")
+        .and_then(Value::as_array)
+        .filter(|value| !value.is_empty())
+        .cloned()
+        .or_else(|| {
+            let text = entry.get("text").and_then(Value::as_str);
+            match text.map(str::trim) {
+                Some("") => None,
+                Some(value) => Some(vec![json!({"type":"summary_text","text":value})]),
+                None => None,
+            }
+        });
+    if let Some(summary) = summary {
+        item.insert("summary".to_string(), Value::Array(summary));
     }
     if let Some(item_id) = entry.get("id").and_then(Value::as_str) {
         item.insert("id".to_string(), Value::String(item_id.to_string()));

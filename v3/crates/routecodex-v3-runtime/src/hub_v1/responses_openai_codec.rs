@@ -852,6 +852,13 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
                     Value::String(signature.clone()),
                 );
             }
+            if let Some(summary) = item
+                .get("summary")
+                .and_then(Value::as_array)
+                .filter(|value| !value.is_empty())
+            {
+                entry.insert("summary".to_string(), Value::Array(summary.clone()));
+            }
             if !ordered.iter().any(|entry| entry["id"] == item_id) {
                 ordered.push(Value::Object(entry));
             }

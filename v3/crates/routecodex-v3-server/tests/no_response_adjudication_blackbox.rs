@@ -1052,6 +1052,88 @@ async fn refill_continuation_captures_provider_reasoning_public() {
 }
 
 #[tokio::test]
+async fn responses_relay_history_preserves_per_item_reasoning_summary_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["chat"] {
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "application/json",
+            text_response("HISTORY_ROUND_TWO").to_string(),
+            EntryOptions {
+                model_key: Some("gpt-5.6-sol".to_string()),
+                wire_model: Some("gpt-5.6-sol".to_string()),
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let consumed = consume_response(
+            client()
+                .post(&endpoint)
+                .json(&json!({
+                    "model": "test.gpt-5.6-sol",
+                    "input": [
+                        {"type":"message","role":"user","content":[{"type":"input_text","text":"continue the paired reasoning history"}]},
+                        {"type":"reasoning","id":"rsn_history_first","summary":[{"type":"summary_text","text":"first plaintext"}],"encrypted_content":"cipher-first"},
+                        {"type":"reasoning","id":"rsn_history_second","summary":[{"type":"summary_text","text":"second plaintext"}],"encrypted_content":"cipher-second"},
+                        {"type":"function_call","id":"fc_history","call_id":"call_history","name":"lookup","arguments":"{\"q\":\"history\"}"},
+                        {"type":"function_call_output","call_id":"call_history","output":"history result"}
+                    ],
+                    "stream": false
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let captured = tokio::time::timeout(Duration::from_secs(2), captures.recv())
+            .await
+            .expect("real provider attempt")
+            .unwrap();
+        stop_entry(handle, shutdown).await;
+        assert!(
+            consumed.transport_error.is_none(),
+            "{process}: relay history must deliver: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains("mixed roundtrip complete"),
+            "{process}: provider business text must reach client: {consumed:?}"
+        );
+        let reasoning: Vec<&Value> = captured["input"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{process}: provider request must carry input: {captured}"))
+            .iter()
+            .filter(|item| item["type"] == "reasoning")
+            .collect();
+        assert_eq!(reasoning.len(), 2, "{process}: {captured}");
+        assert_eq!(reasoning[0]["id"], json!("rsn_history_first"), "{process}");
+        assert_eq!(
+            reasoning[0]["summary"],
+            json!([{"type":"summary_text","text":"first plaintext"}]),
+            "{process}"
+        );
+        assert_eq!(
+            reasoning[0]["encrypted_content"],
+            json!("cipher-first"),
+            "{process}"
+        );
+        assert_eq!(reasoning[1]["id"], json!("rsn_history_second"), "{process}");
+        assert_eq!(
+            reasoning[1]["summary"],
+            json!([{"type":"summary_text","text":"second plaintext"}]),
+            "{process}"
+        );
+        assert_eq!(
+            reasoning[1]["encrypted_content"],
+            json!("cipher-second"),
+            "{process}"
+        );
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
 async fn issuee63d2f2_review_signed_gemini_thought_is_not_a_result() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
