@@ -504,10 +504,18 @@ fn completed_output_texts(wire: &[u8]) -> Vec<String> {
 fn projected_delta_text(wire: &[u8]) -> String {
     let mut text = String::new();
     for event in response_sse_events(&decoded_chunked_body(wire)) {
-        if event["type"] == "response.output_text.delta" {
-            if let Some(delta) = event["delta"].as_str() {
-                text.push_str(delta);
+        match event["type"].as_str() {
+            Some("response.output_text.delta") => {
+                if let Some(delta) = event["delta"].as_str() {
+                    text.push_str(delta);
+                }
             }
+            Some("response.output_text.done") => {
+                if let Some(done) = event["text"].as_str() {
+                    text.push_str(done);
+                }
+            }
+            _ => {}
         }
     }
     text

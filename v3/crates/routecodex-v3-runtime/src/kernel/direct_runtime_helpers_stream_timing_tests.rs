@@ -8,10 +8,18 @@ fn projected_delta_text(frames: &[Vec<u8>]) -> String {
     let mut text = String::new();
     for frame in frames {
         for event in parse_direct_sse_json_frames(frame) {
-            if event["type"] == "response.output_text.delta" {
-                if let Some(delta) = event["delta"].as_str() {
-                    text.push_str(delta);
+            match event["type"].as_str() {
+                Some("response.output_text.delta") => {
+                    if let Some(delta) = event["delta"].as_str() {
+                        text.push_str(delta);
+                    }
                 }
+                Some("response.output_text.done") => {
+                    if let Some(done) = event["text"].as_str() {
+                        text.push_str(done);
+                    }
+                }
+                _ => {}
             }
         }
     }
