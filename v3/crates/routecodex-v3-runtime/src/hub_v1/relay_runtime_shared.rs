@@ -366,6 +366,7 @@ pub(crate) async fn handle_provider_failure_with_response_code(
         None,
         state,
         response_processing_code,
+        None,
     )
     .await
     {

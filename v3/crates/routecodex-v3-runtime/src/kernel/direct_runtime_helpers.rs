@@ -578,8 +578,8 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         .unwrap_or(status);
     let is_response_processing_failure =
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&source);
-    let is_health_neutral_failure = is_response_processing_failure ||
-        crate::provider_failure_runtime_policy::is_health_neutral_request_compat_failure(
+    let is_health_neutral_failure = is_response_processing_failure
+        || crate::provider_failure_runtime_policy::is_health_neutral_request_compat_failure(
             source.source_stage,
             source
                 .external_error
@@ -827,12 +827,19 @@ fn build_v3_direct_provider_failure_observation(
 ) -> V3RuntimeProviderFailureObservation {
     let response_processing_failure =
         routecodex_v3_error::is_v3_recoverable_response_processing_source(source);
-    let observed_status = if response_processing_failure { 599 } else { source
-        .external_error
-        .as_ref()
-        .and_then(|external| external.status)
-        .filter(|external_status| *external_status >= 400)
-        .unwrap_or(status) };
+    let observed_status = if response_processing_failure {
+        match source.internal_error.as_ref().map(|error| error.lane) {
+            Some(routecodex_v3_error::V3InternalErrorLane::Request) => 598,
+            _ => 599,
+        }
+    } else {
+        source
+            .external_error
+            .as_ref()
+            .and_then(|external| external.status)
+            .filter(|external_status| *external_status >= 400)
+            .unwrap_or(status)
+    };
     V3RuntimeProviderFailureObservation {
         provider_key: candidate_key(&selected.candidate),
         provider_id: selected.candidate.provider_id.clone(),
@@ -852,7 +859,9 @@ fn build_v3_direct_provider_failure_observation(
             .external_error
             .as_ref()
             .and_then(|external| external.status)
-            .or_else(|| response_processing_failure.then_some(status)),
+            .or_else(|| {
+                (response_processing_failure && (200..300).contains(&status)).then_some(status)
+            }),
         internal_code: source
             .internal_error
             .as_ref()

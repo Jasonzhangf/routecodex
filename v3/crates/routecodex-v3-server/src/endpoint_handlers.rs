@@ -470,13 +470,20 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
             Err(error) => project_v3_responses_relay_runtime_failure(error, None),
         };
-        persist_v3_responses_relay_failure_sources(
-            &state,
-            &entry_protocol,
-            &path,
-            &request_id,
-            &output,
-        );
+        if output.protocol_direct_handoff.is_none() {
+            publish_v3_responses_closeout_observations(
+                &state,
+                Some(&trace_scope),
+                &entry_protocol,
+                &path,
+                &request_id,
+                &output.node_trace,
+                output.error_chain.as_deref(),
+                output.observability.as_ref(),
+                output.diagnostic_source.as_ref(),
+                output.diagnostic_cause.as_ref(),
+            );
+        }
         if let Some(disposition) = output.terminal_disposition.take() {
             // A provider terminal disposition ends the client transport without
             // a client payload, so this path never reaches the relay closeout
@@ -526,7 +533,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         }
         if let Some(handoff) = output.protocol_direct_handoff.take() {
-            let outcome = execute_responses_direct_server_outcome(
+            let relay_trace = output.node_trace.clone();
+            let mut outcome = execute_responses_direct_server_outcome(
                 &state,
                 &request_headers,
                 method,
@@ -544,22 +552,25 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 request_purpose,
             )
             .await;
+            outcome.prepend_observations(&relay_trace, handoff.provider_failure_events);
+            outcome.publish_observations(
+                &state,
+                Some(&trace_scope),
+                &entry_protocol,
+                &path,
+                &request_id,
+            );
             match outcome {
-                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
+                V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) => {
                     return provider_terminal_response(
                         &state,
                         front_connection_identity,
-                        disposition,
+                        terminal.disposition,
                         requested_stream,
                         terminal_evidence,
                     );
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
-                    prepend_v3_relay_handoff_trace_to_direct_frame(&mut frame, &handoff.node_trace);
-                    merge_v3_relay_handoff_provider_failure_events_into_direct_frame(
-                        &mut frame,
-                        handoff.provider_failure_events,
-                    );
                     // Recovered provider failures are not terminal client errors; only the
                     // Error06/status truth may create error.json after a successful handoff.
                     persist_responses_direct_frame_error_evidence(
@@ -612,13 +623,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     };
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(mut relay_output) => {
-                    persist_v3_responses_relay_failure_sources(
-                        &state,
-                        &entry_protocol,
-                        &path,
-                        &request_id,
-                        &relay_output,
-                    );
                     if let Some(disposition) = relay_output.terminal_disposition.take() {
                         // Same entry, same defect as the branch below: a
                         // provider terminal disposition bypasses the relay
@@ -654,14 +658,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                             terminal_evidence,
                         );
                     }
-                    prepend_v3_protocol_plan_trace_to_responses_relay_output(
-                        &mut relay_output,
-                        &handoff.node_trace,
-                    );
-                    merge_v3_direct_handoff_provider_failure_events(
-                        &mut relay_output,
-                        handoff.provider_failure_events,
-                    );
                     return finalize_v3_responses_relay_server_output(
                         &state,
                         &trace_scope,
@@ -727,12 +723,19 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             request_purpose,
         )
         .await;
+        outcome.publish_observations(
+            &state,
+            Some(&trace_scope),
+            &entry_protocol,
+            &path,
+            &request_id,
+        );
         match outcome {
-            V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
+            V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) => {
                 provider_terminal_response(
                     &state,
                     front_connection_identity,
-                    disposition,
+                    terminal.disposition,
                     requested_stream,
                     terminal_evidence,
                 )
@@ -822,13 +825,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 }
             }
             V3ResponsesDirectServerOutcome::RelayOutput(output) => {
-                persist_v3_responses_relay_failure_sources(
-                    &state,
-                    &entry_protocol,
-                    &path,
-                    &request_id,
-                    &output,
-                );
                 if let Some(disposition) = output.terminal_disposition.clone() {
                     // Third and last Responses terminal-disposition site: same
                     // entry, same defect, so the real typed chain and the

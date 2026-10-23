@@ -248,7 +248,7 @@ impl ResponsesTransport for RecordingChatTransport {
 }
 
 #[tokio::test]
-async fn target_protocol_unmapped_field_projects_internal_598_without_switching_provider() {
+async fn target_protocol_unmapped_field_recovers_through_next_provider() {
     std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
     std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
     let mut manifest = anthropic_then_openai_chat_manifest();
@@ -284,20 +284,16 @@ async fn target_protocol_unmapped_field_projects_internal_598_without_switching_
         V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
-    .expect("unmapped target field must project as client request error");
+    .expect("unmapped target field must enter provider recovery");
 
-    assert_eq!(output.status, 598);
-    assert!(!output
+    assert_eq!(output.status, 200);
+    assert!(output
         .node_trace
         .iter()
         .any(|node| *node == "V3TargetLocalReselected"));
-    assert!(
-        transport
-            .provider_ids
-            .lock()
-            .expect("provider ids")
-            .is_empty(),
-        "a request-shape error must not send or switch provider"
+    assert_eq!(
+        *transport.provider_ids.lock().expect("provider ids"),
+        vec!["openai_second"]
     );
 }
 

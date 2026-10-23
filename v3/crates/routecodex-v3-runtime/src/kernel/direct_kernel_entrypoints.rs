@@ -85,6 +85,8 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
     let mut accumulated_items: Vec<Value> = Vec::new();
     let mut accumulated_usage: Option<crate::hub_v1::V3RuntimeUsageSummary> = None;
     let mut accumulated_attempts: Option<usize> = None;
+    let mut accumulated_node_trace = Vec::new();
+    let mut accumulated_failures = Vec::new();
     let mut delivered_sse_frames: Vec<Vec<u8>> = Vec::new();
     let mut synthesized_output_index: usize = 0;
     let mut rounds = 0usize;
@@ -131,6 +133,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             hook_registry,
             default_responses_transport(),
             debug,
+            shared_state.debug_node_publication,
         )
         .await;
 
@@ -172,10 +175,9 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                 )
             }
             V3ClientBody::CommittedSse(stream) => {
-                let governed =
-                    direct_runtime_helpers_stream::inspect_direct_sse_governed_frames(
-                        stream.sealed_frames().as_slice(),
-                    );
+                let governed = direct_runtime_helpers_stream::inspect_direct_sse_governed_frames(
+                    stream.sealed_frames().as_slice(),
+                );
                 // The attempt-scoped typed fact is recorded from the complete
                 // native stream while each provider event is decoded. The raw
                 // SSE snapshot is a 2 MiB diagnostic and a split UTF-8 chunk
@@ -258,6 +260,10 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                             }
                         }
 
+                        accumulated_node_trace.append(&mut output.node_trace);
+                        if let Some(observability) = output.observability.as_mut() {
+                            accumulated_failures.append(&mut observability.provider_failure_events);
+                        }
                         payload = next_payload;
                         rounds += 1;
                         continue;
@@ -346,20 +352,27 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                                 // failure and must enter the typed Error chain;
                                 // it must never ship an empty 200 body as if the
                                 // request had succeeded.
-                                return direct_runtime_helpers_stream::source_failure_output(
-                                    direct_runtime_helpers_stream::runtime_source(
-                                        "V3ChatProcessRefillDeliveryAssembly",
-                                        reason,
-                                    ),
-                                    None,
-                                    vec![
-                                        "V3Config05ManifestPublished",
-                                        "V3Server03HttpRequestRaw",
-                                        "V3Req04StandardizedResponses",
-                                        "V3ChatProcessRefillDeliveryAssembly",
-                                    ],
-                                    &hook_registry,
+                                accumulated_node_trace.append(&mut output.node_trace);
+                                if let Some(observability) = output.observability.as_mut() {
+                                    accumulated_failures
+                                        .append(&mut observability.provider_failure_events);
+                                }
+                                let mut failure =
+                                    direct_runtime_helpers_stream::source_failure_output(
+                                        direct_runtime_helpers_stream::runtime_source(
+                                            "V3ChatProcessRefillDeliveryAssembly",
+                                            reason,
+                                        ),
+                                        None,
+                                        vec!["V3ChatProcessRefillDeliveryAssembly"],
+                                        &hook_registry,
+                                    );
+                                prepend_refill_observations(
+                                    &mut failure,
+                                    accumulated_node_trace,
+                                    accumulated_failures,
                                 );
+                                return failure;
                             }
                         }
                     }
@@ -377,7 +390,34 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             }
         }
 
+        prepend_refill_observations(&mut output, accumulated_node_trace, accumulated_failures);
         return output;
+    }
+}
+
+// Completed rounds contribute returned diagnostics only. Never seed these
+// observations into another round's accounting, provider policy or health sink.
+fn prepend_refill_observations(
+    output: &mut V3ResponsesDirectRuntimeOutput,
+    mut prior_trace: Vec<&'static str>,
+    mut prior_failures: Vec<V3RuntimeProviderFailureObservation>,
+) {
+    if let Some(handoff) = output.protocol_relay_handoff.as_mut() {
+        let mut trace = prior_trace.clone();
+        trace.append(&mut handoff.node_trace);
+        handoff.node_trace = trace;
+        let mut failures = prior_failures.clone();
+        failures.append(&mut handoff.provider_failure_events);
+        handoff.provider_failure_events = failures;
+    }
+    prior_trace.append(&mut output.node_trace);
+    output.node_trace = prior_trace;
+    if !prior_failures.is_empty() {
+        let observability = output
+            .observability
+            .get_or_insert_with(V3RuntimeObservability::default);
+        prior_failures.append(&mut observability.provider_failure_events);
+        observability.provider_failure_events = prior_failures;
     }
 }
 
@@ -431,11 +471,10 @@ fn append_direct_sse_intermediate_content(
     // whose frames already reached the live sink are not synthesized again;
     // their bytes cannot be retracted.
     if kept == 0 {
-        for (position, item) in crate::hub_v1::collect_v3_chat_process_business_output_items(
-            finalized,
-        )
-        .into_iter()
-        .enumerate()
+        for (position, item) in
+            crate::hub_v1::collect_v3_chat_process_business_output_items(finalized)
+                .into_iter()
+                .enumerate()
         {
             if position < delivered_item_count {
                 continue;

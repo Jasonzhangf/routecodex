@@ -3413,6 +3413,36 @@ chains:
       side_channel_writes:
       - v3.debug.event_ledger
     status: anchored
+  - step_id: v3-responses-refill-observation-compose-01
+    from_node: V3ResponsesDirectRuntimeOutput
+    to_node: V3RuntimeProviderFailureObservation
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_with_refill
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+    callee_symbol: prepend_refill_observations
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+    owner_feature_id: v3.debug_error_foundation
+    resource_flow:
+      consumes: [v3.runtime.responses_observability]
+      produces: [v3.runtime.responses_observability]
+      side_channel_reads: []
+      side_channel_writes: []
+    semantic_contract:
+    - Completed refill rounds contribute ordered return-only trace and typed failure observations, including normal, terminal, replacement-failure and Direct-to-Relay exits. The outer Server remains the sole final publisher; these vectors never seed later-round accounting, recovery policy, failure sinks or provider health.
+    status: anchored
+  - step_id: v3-responses-observation-closeout-01
+    from_node: V3RuntimeProviderFailureObservation
+    to_node: V3DebugEventLedgerRecorded
+    caller_symbol: publish_v3_responses_closeout_observations
+    caller_file: v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
+    callee_symbol: V3DebugRuntime::record_node_event
+    callee_file: v3/crates/routecodex-v3-debug/src/lib.rs
+    owner_feature_id: v3.debug_error_foundation
+    resource_flow:
+      consumes: [v3.debug.trace_context, v3.runtime.responses_observability]
+      produces: [v3.debug.event_ledger]
+      side_channel_reads: [v3.debug.trace_context, v3.runtime.responses_observability]
+      side_channel_writes: [v3.debug.event_ledger]
+    status: anchored
   - step_id: v3-de-04
     from_node: V3Server03HttpRequestRaw
     to_node: V3Error01SourceRaised
@@ -5529,8 +5559,8 @@ chains:
   - step_id: v3-responses-direct-error-evidence-02
     from_node: V3RuntimeProviderFailureObservation
     to_node: V3ChatFailedAttemptEvidenceSerialized
-    caller_symbol: take_responses_direct_terminal_outcome
-    caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+    caller_symbol: publish_v3_responses_closeout_observations
+    caller_file: v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
     callee_symbol: persist_v3_chat_failure_evidence_sources
     callee_file: v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
     status: anchored

@@ -1524,10 +1524,10 @@ model = "client-test"
 aliases = ["client-test"]
 selection = {{ strategy = "priority" }}
 targets = [
-  {{ kind = "provider_model", provider = "relay_first", model = "relay-first", key = "key", priority = 1 }},
-  {{ kind = "provider_model", provider = "direct_second", model = "direct-second", key = "key", priority = 2 }},
-  {{ kind = "provider_model", provider = "relay_third", model = "relay-third", key = "key", priority = 3 }},
-  {{ kind = "provider_model", provider = "direct_final", model = "direct-final", key = "key", priority = 4 }}
+  {{ kind = "provider_model", provider = "relay_first", model = "relay-first", key = "key", priority = 4 }},
+  {{ kind = "provider_model", provider = "direct_second", model = "direct-second", key = "key", priority = 3 }},
+  {{ kind = "provider_model", provider = "relay_third", model = "relay-third", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "direct_final", model = "direct-final", key = "key", priority = 1 }}
 ]
 [debug]
 log_console = false
@@ -8999,6 +8999,161 @@ fn assert_control_fields_absent(body: &Value) {
 }
 
 #[tokio::test]
+async fn issue4aeb668_compat_failure_reselects_later_tier() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("issue4aeb668-compat-evidence");
+    let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_4AEB668_KEY", "controlled-key");
+    let mut manifest = p6_reselection_manifest(
+        free_port(),
+        free_port(),
+        "http://127.0.0.1:9/v1",
+        &provider_base_url,
+        "V3_4AEB668_KEY",
+        "V3_4AEB668_KEY",
+    );
+    let first = manifest.providers.get_mut("first").unwrap();
+    first.provider_type = "anthropic".into();
+    for interface in first.interfaces.values_mut() {
+        interface.provider_type = "anthropic".into();
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({
+            "model":"client-test", "stream":false,
+            "input":[
+                {"type":"reasoning", "summary":[{"type":"summary_text","text":"prior thought"}], "encrypted_content":{"opaque":true}},
+                {"role":"user","content":"hello"}
+            ]
+        }))
+        .send().await;
+    let result = match response {
+        Ok(response) => {
+            let status = response.status();
+            let body = response.text().await.unwrap();
+            assert_eq!(status, StatusCode::OK, "{body}");
+            serde_json::from_str::<Value>(&body).unwrap()
+        }
+        Err(error) => panic!("compat failure must try the later eligible tier: {error}"),
+    };
+    assert_eq!(result["output_text"], "ok");
+    assert!(result.get("error").is_none());
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(capture.body["model"], "wire-second");
+    let evidence = wait_for_concurrency_failure_source(
+        &home_guard.codex_samples_root(handle.listeners[0].addr.port()),
+    )
+    .await;
+    let failure = &evidence["attempts"][0];
+    assert_eq!(failure["provider_id"], "first", "{evidence}");
+    assert_eq!(failure["status"], 598, "{evidence}");
+    assert_eq!(
+        failure["diagnostic_source"]["code"], "provider_request_payload_invalid",
+        "{evidence}"
+    );
+    assert!(failure["provider_status"].is_null(), "{evidence}");
+    assert_eq!(failure["action"], "switch_provider", "{evidence}");
+    assert!(
+        failure["next_provider_key"]
+            .as_str()
+            .unwrap()
+            .contains("second"),
+        "{evidence}"
+    );
+    let logs: Value = reqwest::Client::new()
+        .get(format!(
+            "http://{}/_routecodex/debug/logs",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events = logs["logs"].as_array().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|event| event["node_id"] == "V3TargetLocalReselected"),
+        "retained event nodes: {:?}",
+        events
+            .iter()
+            .map(|event| &event["node_id"])
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["node_id"] == "V3Router07OpaqueTargetHitOnce")
+            .count(),
+        1
+    );
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_4AEB668_KEY");
+}
+
+#[tokio::test]
+async fn issue4aeb668_actual_exhaustion_has_no_client_error_payload() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_4AEB668_EXHAUST_KEY", "controlled-key");
+    let mut manifest = p6_reselection_manifest(
+        free_port(),
+        free_port(),
+        "http://127.0.0.1:9/v1",
+        "http://127.0.0.1:9/v1",
+        "V3_4AEB668_EXHAUST_KEY",
+        "V3_4AEB668_EXHAUST_KEY",
+    );
+    manifest
+        .forwarders
+        .get_mut("responses")
+        .unwrap()
+        .targets
+        .truncate(1);
+    let provider = manifest.providers.get_mut("first").unwrap();
+    provider.provider_type = "anthropic".into();
+    for interface in provider.interfaces.values_mut() {
+        interface.provider_type = "anthropic".into();
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let addr = handle.listeners[0].addr;
+    for stream in [false, true] {
+        let body = serde_json::to_vec(&json!({"model":"client-test", "stream":stream, "input":[
+            {"type":"reasoning","summary":[{"type":"summary_text","text":"thought"}],"encrypted_content":{"opaque":true}},
+            {"role":"user","content":"hello"}
+        ]})).unwrap();
+        let mut socket = TcpStream::connect(addr).await.unwrap();
+        socket.write_all(format!("POST /v1/responses HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+        socket.write_all(&body).await.unwrap();
+        let mut wire = Vec::new();
+        let _ = timeout(Duration::from_secs(10), socket.read_to_end(&mut wire))
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&wire);
+        assert!(
+            !text.contains("\"error\"")
+                && !text.contains("598")
+                && !text.contains("response.failed")
+                && !text.contains("response.completed")
+                && !text.contains("[DONE]"),
+            "{text}"
+        );
+        assert!(
+            !wire.ends_with(b"0\r\n\r\n"),
+            "exhaustion cannot be a normal empty completion"
+        );
+    }
+    handle.shutdown().await;
+    std::env::remove_var("V3_4AEB668_EXHAUST_KEY");
+}
+
+#[tokio::test]
 async fn p6_provider_failure_reselects_inside_target_without_router_reentry() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failed_provider_base_url, failed_shutdown) = start_controlled_failure_upstream().await;
@@ -9074,10 +9229,369 @@ async fn p6_provider_failure_reselects_inside_target_without_router_reentry() {
 
 #[tokio::test]
 async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projection() {
+    assert_nested_handoff_observations(NestedHandoffCase::default()).await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_trace_published_once() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_trace: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_failure_evidence_keeps_all_attempts() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_failures: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_final_relay_trace_published_once() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_trace: true,
+        check_failures: true,
+        final_relay: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_sse_keeps_complete_observations() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_trace: true,
+        check_failures: true,
+        stream: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_exhaustion_keeps_terminal_observations() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_trace: true,
+        check_failures: true,
+        exhausted: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_local_compat_keeps_original_source() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_trace: true,
+        check_failures: true,
+        local_compat: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_committed_sse_keeps_enclosing_evidence() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_trace: true,
+        check_failures: true,
+        stream: true,
+        committed_failure: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+async fn start_nested_committed_failure_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures, received) = mpsc::unbounded_channel();
+    let (shutdown, stop) = oneshot::channel();
+    let app = Router::new().route("/v1/responses", post(|State(state): State<Arc<ProviderState>>, headers: HeaderMap, axum::Json(body): axum::Json<Value>| async move {
+        state.captures.send(ProviderCapture::from_http(&headers, body)).unwrap();
+        let frames = [
+            ("response.output_text.delta", json!({"type":"response.output_text.delta","item_id":"msg_nested_commit","output_index":0,"content_index":0,"delta":"committed-prefix"})),
+            ("response.output_text.delta", json!({"type":"response.output_text.delta","item_id":"msg_nested_commit","output_index":0,"content_index":0,"delta":"<thinking>secret</thinking>"})),
+            ("response.completed", json!({"type":"response.completed","response":{"id":"resp_nested_commit","object":"response","status":"completed","output":[{"id":"msg_nested_commit","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"committed-prefix <thinking>secret</thinking>","annotations":[]}]}]}})),
+        ];
+        let stream = futures_util::stream::iter(frames.into_iter().map(|(event, data)| Ok::<_, std::convert::Infallible>(format!("event: {event}\ndata: {data}\n\n"))));
+        Response::builder().status(200).header("content-type", "text/event-stream").body(Body::from_stream(stream)).unwrap()
+    })).with_state(Arc::new(ProviderState { captures }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = stop.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), received, shutdown)
+}
+
+#[derive(Default)]
+struct NestedHandoffCase {
+    check_trace: bool,
+    check_failures: bool,
+    final_relay: bool,
+    stream: bool,
+    exhausted: bool,
+    local_compat: bool,
+    committed_failure: bool,
+}
+
+#[tokio::test]
+async fn issue4aeb668_refill_recovery_keeps_ordered_observations() {
+    assert_refill_round_observations(false).await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_refill_exhaustion_keeps_prior_observations() {
+    assert_refill_round_observations(true).await;
+}
+
+async fn assert_refill_round_observations(exhausted: bool) {
+    let _guard = TEST_LOCK.lock().await;
+    let home = TestHomeGuard::new("issue4aeb668-refill-observations");
+    let calls = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let state = Arc::new((calls.clone(), exhausted));
+    let app = Router::new().route("/v1/responses", post(
+        |State(state): State<Arc<(Arc<Mutex<Vec<Value>>>, bool)>>,
+         axum::Json(body): axum::Json<Value>| async move {
+            assert!(body["input"].is_array() || body["input"].is_string(), "provider requires Responses input: {body}");
+            assert!(body.get("messages").is_none(), "conflicting Chat history: {body}");
+            if body["input"] == json!([{"role":"user","content":[{"type":"input_text","text":"ping; reply pong"}]}]) {
+                return Response::builder().status(200).header("content-type", "application/json")
+                    .body(Body::from("{}")).unwrap();
+            }
+            assert!(body.to_string().contains("issue4aeb668-refill"), "missing paired history: {body}");
+            let mut calls = state.0.lock().await;
+            let model = body["model"].as_str().unwrap().to_owned();
+            let occurrence = calls.iter().filter(|call| call["model"] == model).count();
+            if model == "wire-last" || (model == "wire-second" && occurrence > 0) {
+                assert!(body["input"].to_string().contains("wire-second"), "refill must retain the first round's actual message item: {body}");
+            }
+            calls.push(body);
+            let failed = model == "wire-first"
+                || (model == "wire-second" && occurrence > 0)
+                || (model == "wire-last" && state.1);
+            let response = if failed {
+                json!({"error":{"type":"server_error","code":"overloaded","message":"controlled refill provider failure"}})
+            } else {
+                json!({"id":format!("resp_{model}"),"object":"response","status":"completed",
+                    "model":model,"output":[{"type":"message","id":format!("msg_{model}"),
+                    "role":"assistant","status":"completed","content":[{"type":"output_text","text":model}]}],
+                    "usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}})
+            };
+            Response::builder().status(if failed { 503 } else { 200 })
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&response).unwrap())).unwrap()
+        }
+    )).with_state(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (stop, stopped) = oneshot::channel();
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await
+            .unwrap();
+    });
+    std::env::set_var("V3_REFILL_OBSERVATIONS_KEY", "refill-observations-secret");
+    let providers = ["first", "second", "last"]
+        .map(|id| {
+            format!(
+                r#"
+[providers.{id}]
+type = "responses"
+base_url = "{base}"
+default_model = "{id}"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_REFILL_OBSERVATIONS_KEY" }}] }}
+[providers.{id}.models.{id}]
+wire_name = "wire-{id}"
+"#
+            )
+        })
+        .join("\n");
+    let port_a = free_port();
+    let port_b = free_port();
+    let declaration = HUB_V1_TEST_DECLARATION;
+    let execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{execution}
+{providers}
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 256 }}
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "first", model = "first", key = "key", priority = 3 }},
+  {{ kind = "provider_model", provider = "second", model = "second", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "last", model = "last", key = "key", priority = 1 }}
+]
+"#
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let root = format!("http://{}", handle.listeners[0].addr);
+    let response = client
+        .post(format!("{root}/v1/responses"))
+        .json(&json!({"model":"client-test","input":"issue4aeb668-refill","stream":false}))
+        .send()
+        .await;
+    let business = if exhausted {
+        if let Ok(response) = response {
+            assert!(
+                response.text().await.is_err(),
+                "exhaustion must break transport without a completion"
+            );
+        }
+        None
+    } else {
+        let response = response.expect("real refill recovery must deliver");
+        assert_eq!(response.status(), 200);
+        Some(
+            response
+                .json::<Value>()
+                .await
+                .expect("real refill response body"),
+        )
+    };
+    let logs: Value = client
+        .get(format!("{root}/_routecodex/debug/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let evidence = wait_for_concurrency_failure_source(&home.codex_samples_root(port_a)).await;
+    let calls = calls.lock().await.clone();
+    handle.shutdown().await;
+    stop.send(()).unwrap();
+    std::env::remove_var("V3_REFILL_OBSERVATIONS_KEY");
+    let models: Vec<_> = calls
+        .iter()
+        .map(|call| call["model"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        models,
+        ["wire-first", "wire-second", "wire-second", "wire-last"],
+        "actual execution/recovery sequence: {calls:?}"
+    );
+    if let Some(body) = business {
+        let output = body["output"].to_string();
+        assert!(
+            output.contains("wire-second") && output.contains("wire-last"),
+            "both real rounds must survive: {body}"
+        );
+    }
+    let sends = logs["logs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["node_id"] == "V3Transport13ResponsesHttpRequest")
+        .count();
+    assert_eq!(
+        sends, 4,
+        "all actual round transport nodes must be published once: {logs}"
+    );
+    let attempts = evidence["attempts"].as_array().unwrap();
+    let ids: Vec<_> = attempts
+        .iter()
+        .map(|attempt| attempt["provider_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        if exhausted {
+            vec!["first", "first", "second", "last"]
+        } else {
+            vec!["first", "first", "second"]
+        },
+        "all real round failures must survive: {evidence}"
+    );
+    for (index, attempt) in attempts.iter().enumerate() {
+        let id = attempt["provider_id"].as_str().unwrap();
+        assert_eq!(
+            attempt["provider_key"],
+            format!("{id}:default:key:{id}"),
+            "{attempt}"
+        );
+        assert_eq!(attempt["status"], 503, "{attempt}");
+        if index == 1 {
+            // The refill plan first observes the original identity's cooldown.
+            // This is a distinct local selection failure, not a second wire attempt.
+            assert!(attempt["provider_status"].is_null(), "{attempt}");
+            assert_eq!(
+                attempt["diagnostic_source"]["code"], "selected_provider_unavailable",
+                "{attempt}"
+            );
+            assert!(
+                attempt["failed_attempt_evidence"]["provider_response"].is_null(),
+                "{attempt}"
+            );
+        } else {
+            assert_eq!(attempt["provider_status"], 503, "{attempt}");
+            assert_eq!(
+                attempt["diagnostic_source"]["code"], "provider_http_503",
+                "{attempt}"
+            );
+            assert_eq!(
+                attempt["failed_attempt_evidence"]["provider_response"]["status"], 503,
+                "{attempt}"
+            );
+        }
+    }
+}
+
+async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
+    let NestedHandoffCase {
+        check_trace,
+        check_failures,
+        final_relay,
+        stream,
+        exhausted,
+        local_compat,
+        committed_failure,
+    } = case;
     let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("issue4aeb668-nested-observations");
     let (failed_base_url, failed_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
-    let (success_base_url, mut captures, success_shutdown) = start_controlled_upstream().await;
+    let (success_base_url, mut captures, success_shutdown) = if committed_failure {
+        start_nested_committed_failure_upstream().await
+    } else if final_relay {
+        start_controlled_openai_chat_upstream().await
+    } else {
+        start_controlled_upstream().await
+    };
     std::env::set_var("V3_NESTED_HANDOFF_RELAY_FIRST_KEY", "secret-relay-first");
     std::env::set_var(
         "V3_NESTED_HANDOFF_DIRECT_SECOND_KEY",
@@ -9085,14 +9599,31 @@ async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projecti
     );
     std::env::set_var("V3_NESTED_HANDOFF_RELAY_THIRD_KEY", "secret-relay-third");
     std::env::set_var("V3_NESTED_HANDOFF_DIRECT_FINAL_KEY", "secret-direct-final");
-    let handle = spawn_v3_server_aggregate(responses_relay_nested_protocol_handoff_manifest(
+    let mut manifest = responses_relay_nested_protocol_handoff_manifest(
         free_port(),
         free_port(),
         &failed_base_url,
-        &success_base_url,
-    ))
-    .await
-    .unwrap();
+        if exhausted {
+            &failed_base_url
+        } else {
+            &success_base_url
+        },
+    );
+    if final_relay {
+        let provider = manifest.providers.get_mut("direct_final").unwrap();
+        provider.provider_type = "openai_chat".into();
+        for interface in provider.interfaces.values_mut() {
+            interface.provider_type = "openai_chat".into();
+        }
+    }
+    if local_compat {
+        let provider = manifest.providers.get_mut("relay_first").unwrap();
+        provider.provider_type = "anthropic".into();
+        for interface in provider.interfaces.values_mut() {
+            interface.provider_type = "anthropic".into();
+        }
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
@@ -9100,14 +9631,53 @@ async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projecti
         .header("thread-id", "nested-handoff-thread")
         .json(&json!({
             "model":"client-test",
-            "input":"relay direct relay direct handoff drain",
-            "stream":false
+            "input": if local_compat { json!([
+                {"type":"reasoning","summary":[],"encrypted_content":{"opaque":true}},
+                {"role":"user","content":"relay direct relay direct handoff drain"}
+            ]) } else { json!("relay direct relay direct handoff drain") },
+            "stream":stream
         }))
         .send()
+        .await;
+    let business_response = if exhausted {
+        if let Ok(response) = response {
+            assert!(
+                response.text().await.is_err(),
+                "exhaustion must break the request transport"
+            );
+        }
+        None
+    } else if committed_failure {
+        let mut response = response.unwrap();
+        let status = response.status();
+        let mut bytes = Vec::new();
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
+                Ok(None) => panic!("committed failure must not complete its SSE transport"),
+                Err(_) => break,
+            }
+        }
+        Some((status, String::from_utf8(bytes).unwrap()))
+    } else {
+        let response = response.unwrap();
+        Some((response.status(), response.text().await.unwrap()))
+    };
+    let logs: Value = client
+        .get(format!(
+            "http://{}/_routecodex/debug/logs",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
         .await
         .unwrap();
-    let status = response.status();
-    let response_body = response.text().await.unwrap();
+    let evidence = wait_for_concurrency_failure_source(
+        &home_guard.codex_samples_root(handle.listeners[0].addr.port()),
+    )
+    .await;
     handle.shutdown().await;
     std::env::remove_var("V3_NESTED_HANDOFF_RELAY_FIRST_KEY");
     std::env::remove_var("V3_NESTED_HANDOFF_DIRECT_SECOND_KEY");
@@ -9116,16 +9686,185 @@ async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projecti
     failed_shutdown.send(()).unwrap();
     success_shutdown.send(()).unwrap();
 
-    assert_eq!(status, 200, "unexpected response body: {response_body}");
-    let body: Value = serde_json::from_str(&response_body).unwrap();
-    assert_eq!(body["id"], "resp_json");
-    assert_eq!(body["output_text"], "ok");
-    let capture = captures.recv().await.unwrap();
-    assert_eq!(
-        capture.authorization.as_deref(),
-        Some("Bearer secret-direct-final")
-    );
-    assert_eq!(capture.body["model"], "wire-direct-final");
+    if let Some((status, response_body)) = business_response {
+        assert_eq!(status, 200, "unexpected response body: {response_body}");
+        if committed_failure {
+            assert!(
+                response_body.contains("committed-prefix"),
+                "{response_body}"
+            );
+            for forbidden in [
+                "<thinking>",
+                "secret",
+                "response.completed",
+                "response.failed",
+                "[DONE]",
+            ] {
+                assert!(!response_body.contains(forbidden), "{response_body}");
+            }
+        } else if stream {
+            assert_eq!(
+                response_body.matches("event: response.completed").count(),
+                1,
+                "{response_body}"
+            );
+            assert!(
+                !response_body.contains("response.failed"),
+                "{response_body}"
+            );
+        } else {
+            let body: Value = serde_json::from_str(&response_body).unwrap();
+            if final_relay {
+                assert!(body.to_string().contains("controlled chat JSON"), "{body}");
+            } else {
+                assert_eq!(body["id"], "resp_json");
+                assert_eq!(body["output_text"], "ok");
+            }
+        }
+        let capture = captures.recv().await.unwrap();
+        assert_eq!(
+            capture.authorization.as_deref(),
+            Some("Bearer secret-direct-final")
+        );
+        assert_eq!(capture.body["model"], "wire-direct-final");
+        if !final_relay && !committed_failure {
+            let refill = timeout(Duration::from_secs(1), captures.recv())
+                .await
+                .expect("the native completion must trigger the real default refill")
+                .expect("refill upstream capture must be retained");
+            assert_eq!(refill.authorization, capture.authorization);
+            assert_eq!(refill.body["model"], "wire-direct-final");
+            // The existing fixture has no canonical output items; the dedicated
+            // refill fixture above verifies pairing of real message items.
+            assert!(refill.body["input"].is_array(), "{}", refill.body);
+            assert!(
+                refill.body["input"]
+                    .to_string()
+                    .contains("relay direct relay direct handoff drain"),
+                "refill must retain original history: {}",
+                refill.body
+            );
+        }
+    } else {
+        assert!(
+            captures.try_recv().is_err(),
+            "exhausted request must not reach the success upstream"
+        );
+    }
+    if check_trace {
+        let nodes: Vec<_> = logs["logs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|event| event["node_id"].as_str())
+            .collect();
+        assert_eq!(
+            nodes
+                .iter()
+                .filter(|node| **node == "V3Router07OpaqueTargetHitOnce")
+                .count(),
+            1,
+            "nested execution must publish its initial route once: {nodes:?}"
+        );
+        assert_eq!(
+            nodes
+                .iter()
+                .filter(|node| **node == "V3TargetLocalReselected")
+                .count(),
+            3,
+            "the four candidates have exactly three successful selection transitions: {nodes:?}"
+        );
+        let sends: Vec<_> = nodes
+            .iter()
+            .copied()
+            .filter(|node| {
+                matches!(
+                    *node,
+                    "V3ProviderReqOutbound09TransportRequest" | "V3Transport13ResponsesHttpRequest"
+                )
+            })
+            .collect();
+        let mut expected_sends = Vec::new();
+        if !local_compat {
+            expected_sends.push("V3ProviderReqOutbound09TransportRequest");
+        }
+        expected_sends.extend([
+            "V3Transport13ResponsesHttpRequest",
+            "V3ProviderReqOutbound09TransportRequest",
+        ]);
+        expected_sends.push(if final_relay {
+            "V3ProviderReqOutbound09TransportRequest"
+        } else {
+            "V3Transport13ResponsesHttpRequest"
+        });
+        if !final_relay && !exhausted && !committed_failure {
+            expected_sends.push("V3Transport13ResponsesHttpRequest");
+        }
+        assert_eq!(
+            sends, expected_sends,
+            "each actual protocol segment must be published in execution order: {nodes:?}"
+        );
+    }
+    if check_failures {
+        let attempts = evidence["attempts"].as_array().unwrap();
+        let identities: Vec<_> = attempts
+            .iter()
+            .map(|attempt| attempt["provider_id"].as_str().unwrap())
+            .collect();
+        let mut expected = vec!["relay_first", "direct_second", "relay_third"];
+        if exhausted {
+            expected.push("direct_final");
+        }
+        assert_eq!(
+            identities, expected,
+            "all enclosing and nested failures must survive in attempt order: {evidence}"
+        );
+        for attempt in attempts {
+            let model = match attempt["provider_id"].as_str().unwrap() {
+                "relay_first" => "relay-first",
+                "direct_second" => "direct-second",
+                "relay_third" => "relay-third",
+                "direct_final" => "direct-final",
+                other => panic!("unexpected attempted identity {other}"),
+            };
+            assert_eq!(
+                attempt["provider_key"],
+                format!(
+                    "{}:default:key:{model}",
+                    attempt["provider_id"].as_str().unwrap()
+                ),
+                "{attempt}"
+            );
+            if local_compat && attempt["provider_id"] == "relay_first" {
+                assert_eq!(attempt["status"], 598, "{attempt}");
+                assert!(attempt["provider_status"].is_null(), "{attempt}");
+                assert_eq!(
+                    attempt["diagnostic_source"]["code"], "provider_request_payload_invalid",
+                    "{attempt}"
+                );
+            } else {
+                assert_eq!(attempt["status"], 503, "{attempt}");
+                assert_eq!(attempt["provider_status"], 503, "{attempt}");
+                assert_eq!(
+                    attempt["diagnostic_source"]["code"],
+                    if matches!(
+                        attempt["provider_id"].as_str(),
+                        Some("direct_second" | "direct_final")
+                    ) {
+                        "provider_http_503"
+                    } else {
+                        "provider_error"
+                    },
+                    "{attempt}"
+                );
+                assert_eq!(
+                    attempt["failed_attempt_evidence"]["provider_response"]["status"], 503,
+                    "{attempt}"
+                );
+            }
+            assert!(attempt["diagnostic_source"].is_object(), "{attempt}");
+        }
+    }
 }
 
 #[tokio::test]

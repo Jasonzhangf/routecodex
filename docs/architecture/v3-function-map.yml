@@ -628,6 +628,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/provider_error_policy_matching.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -688,9 +690,16 @@ features:
   - v3-de-22
   - v3-de-23
   - v3-de-24
+  - v3-responses-observation-closeout-01
+  - v3-responses-refill-observation-compose-01
   entry_symbols:
   - execute_v3_foundation_pending_runtime
   - is_v3_recoverable_response_processing_source
+  - V3ResponsesDirectRuntimeSharedState::defer_debug_node_publication_to_server
+  - prepend_refill_observations
+  - V3ResponsesDirectServerOutcome::prepend_observations
+  - V3ResponsesDirectServerOutcome::publish_observations
+  - publish_v3_responses_closeout_observations
   - V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup
   - V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup
   - execute_v3_responses_direct_dry_run_runtime
@@ -4364,7 +4373,8 @@ features:
   - finalize_v3_responses_relay_server_output
   - persist_v3_chat_failure_evidence
   - persist_v3_chat_failure_evidence_sources
-  - take_responses_direct_terminal_outcome
+  - publish_v3_responses_closeout_observations
+  - publish_responses_direct_terminal_outcome
   - issue885bb74_responses_direct_http502_recovers_with_wire_evidence_json_and_sse
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -4372,6 +4382,7 @@ features:
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
   - v3/crates/routecodex-v3-server/src/executors.rs
+  - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   - v3/crates/routecodex-v3-debug/src/sample_store.rs
   - v3/crates/routecodex-v3-server/tests
   - docs/architecture
