@@ -222,6 +222,35 @@ fn responses(
     Ok(())
 }
 
+pub(crate) fn harvest_chat_text<'a>(
+    text: &'a str,
+    context: &V3HubRelaySerializedToolContext,
+    used: &mut HashSet<String>,
+) -> Result<(Vec<&'a str>, Vec<Value>), V3HubRelayResponseError> {
+    let result = scan(text, context)?;
+    let mut visible = Vec::new();
+    let mut calls = Vec::new();
+    for segment in result.segments {
+        match segment {
+            ToolMarkupSegment::Text(text) => visible.push(text),
+            ToolMarkupSegment::Calls(parsed) => {
+                for call in parsed {
+                    let native = native(call, context, used);
+                    let mut function =
+                        json!({"name":native["name"],"arguments":native["arguments"]});
+                    if let Some(namespace) = native.get("namespace") {
+                        function["namespace"] = namespace.clone();
+                    }
+                    calls.push(
+                        json!({"id":native["call_id"],"type":"function","function":function}),
+                    );
+                }
+            }
+        }
+    }
+    Ok((visible, calls))
+}
+
 fn chat(
     payload: &mut Value,
     context: &V3HubRelaySerializedToolContext,
@@ -243,9 +272,6 @@ fn chat(
         let Some(text) = message.get("content").and_then(Value::as_str) else {
             continue;
         };
-        let result = scan(text, context)?;
-        let mut visible = String::new();
-        let mut calls = Vec::new();
         let mut used: HashSet<String> = message
             .get("tool_calls")
             .and_then(Value::as_array)
@@ -254,25 +280,8 @@ fn chat(
             .filter_map(|call| call.get("id").and_then(Value::as_str))
             .map(str::to_owned)
             .collect();
-        for segment in result.segments {
-            match segment {
-                ToolMarkupSegment::Text(text) => visible.push_str(text),
-                ToolMarkupSegment::Calls(parsed) => {
-                    for call in parsed {
-                        let native = native(call, context, &mut used);
-                        let mut function =
-                            json!({"name":native["name"],"arguments":native["arguments"]});
-                        if let Some(namespace) = native.get("namespace") {
-                            function["namespace"] = namespace.clone();
-                        }
-                        calls.push(
-                            json!({"id":native["call_id"],"type":"function","function":function}),
-                        );
-                    }
-                }
-            }
-        }
-        message["content"] = visible.into();
+        let (visible, calls) = harvest_chat_text(text, context, &mut used)?;
+        message["content"] = visible.concat().into();
         if !calls.is_empty() {
             if let Some(existing) = message.get_mut("tool_calls").and_then(Value::as_array_mut) {
                 existing.extend(calls);

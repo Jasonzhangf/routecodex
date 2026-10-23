@@ -317,6 +317,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         retain_response_cipher: bool,
         tool_thinking_enabled: bool,
         _expected_model_id: &str,
+        _namespace_registry: &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response_with_source(
             provider_value,

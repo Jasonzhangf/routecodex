@@ -2441,6 +2441,51 @@ chains:
       produces: [v3.hub.response_semantic]
       side_channel_reads: []
       side_channel_writes: [v3.relay_response.tool_markup_context]
+  - step_id: v3-tool-markup-chat-attempt-context
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3HubRespChatProcess03Governed
+    caller_symbol: project_json_response
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    callee_symbol: V3HubRelaySerializedToolContext::from_registry
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    status: anchored
+    binding_kind: adjacent_protocol_codec_helper
+    owner_feature_id: v3.openai_chat_relay_runtime_integration
+    resource_flow:
+      consumes: [v3.hub.response_semantic]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: []
+      side_channel_writes: [v3.relay_response.tool_markup_context]
+  - step_id: v3-tool-markup-chat-complete-sse-context
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3HubRespChatProcess03Governed
+    caller_symbol: govern_complete_chat_sse_with_context
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_complete_chat_sse.rs
+    callee_symbol: harvest_chat_text
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs
+    status: anchored
+    binding_kind: adjacent_protocol_codec_helper
+    owner_feature_id: v3.openai_chat_relay_runtime_integration
+    resource_flow:
+      consumes: [v3.hub.response_semantic]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: [v3.relay_response.tool_markup_context]
+      side_channel_writes: []
+  - step_id: v3-tool-markup-chat-complete-sse-attempt-context
+    from_node: V3HubRespInbound02Normalized
+    to_node: V3HubRespChatProcess03Governed
+    caller_symbol: govern_complete_chat_sse
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    callee_symbol: V3HubRelaySerializedToolContext::from_registry
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    status: anchored
+    binding_kind: adjacent_protocol_codec_helper
+    owner_feature_id: v3.openai_chat_relay_runtime_integration
+    resource_flow:
+      consumes: [v3.hub.response_semantic]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: []
+      side_channel_writes: [v3.relay_response.tool_markup_context]
 - chain_id: v3.protocol_conversion_field_parity.outbound_helper_bindings
   owner_feature_id: v3.protocol_conversion_field_parity
   summary: Verification bindings for OpenAI, Anthropic, and Gemini outbound helper calls inside the existing Req07 to ProviderCompat06 adjacent codec edge; this chain does not add runtime nodes.
