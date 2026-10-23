@@ -313,9 +313,9 @@ fn terminal_only_refill_round_sse(item_id: &str, text: &str) -> String {
     )
 }
 
-/// A completed round with visible text, one provider-origin reasoning item with
-/// an empty summary and opaque continuation material, and one anonymous
-/// reasoning item that must not be replayed.
+/// A completed round with visible text, two consecutive provider-origin
+/// reasoning items carrying distinct empty-summary continuation associations,
+/// and one anonymous reasoning item that must not be replayed.
 fn refill_reasoning_round_wire() -> String {
     json!({
         "id": "resp_reasoning_round",
@@ -328,6 +328,12 @@ fn refill_reasoning_round_wire() -> String {
                 "type": "reasoning",
                 "summary": [],
                 "encrypted_content": "opaque-refill-cipher"
+            },
+            {
+                "id": "rsn_provider_capture_second",
+                "type": "reasoning",
+                "summary": [],
+                "encrypted_content": "opaque-refill-cipher-second"
             },
             {
                 "id": "msg_reasoning_round",
@@ -1017,8 +1023,8 @@ async fn refill_continuation_captures_provider_reasoning_public() {
             .collect();
         assert_eq!(
             reasoning.len(),
-            1,
-            "{process}: only the provider-origin reasoning item may replay: {input:?}"
+            2,
+            "{process}: both provider-origin reasoning items must replay: {input:?}"
         );
         assert_eq!(
             reasoning[0]["id"],
@@ -1028,6 +1034,16 @@ async fn refill_continuation_captures_provider_reasoning_public() {
         assert_eq!(
             reasoning[0]["encrypted_content"],
             json!("opaque-refill-cipher"),
+            "{process}"
+        );
+        assert_eq!(
+            reasoning[1]["id"],
+            json!("rsn_provider_capture_second"),
+            "{process}"
+        );
+        assert_eq!(
+            reasoning[1]["encrypted_content"],
+            json!("opaque-refill-cipher-second"),
             "{process}"
         );
         assert_no_error_payload(&consumed.body);

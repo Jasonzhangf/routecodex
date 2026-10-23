@@ -5,6 +5,7 @@ mod chat_extension_merge;
 mod tool_output;
 const ANTHROPIC_REASONING_EXTENSION: &str = "anthropic_reasoning";
 const ANTHROPIC_REASONING_BLOCKS_EXTENSION: &str = "anthropic_reasoning_blocks";
+pub(super) const RESPONSES_REASONING_ITEMS_EXTENSION: &str = "responses_reasoning_items";
 pub(super) use tool_output::{
     canonical_content as responses_tool_output_content, image_url as responses_image_url,
 };
@@ -557,20 +558,42 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
         target.insert("reasoning_content".to_string(), Value::String(merged));
     }
     if let Some(source_extension) = source.get("routecodex_chat_extension") {
-        // Keep the first Responses reasoning signature: a canonical assistant
-        // message carries one reasoning_content, so a later folded item must
-        // not overwrite the association captured for the first one.
+        // Keep every Responses reasoning id/cipher association in source order.
+        // The canonical assistant message may fold several provider-origin
+        // reasoning items, so the ordered list is the complete business
+        // association while the legacy scalar fields remain compatibility
+        // projections of the first item.
+        let existing_items = target
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object)
+            .and_then(|extension| extension.get(RESPONSES_REASONING_ITEMS_EXTENSION))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         let existing_signature = target
             .get("routecodex_chat_extension")
             .and_then(Value::as_object)
             .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
             .cloned();
         chat_extension_merge::merge_chat_extension(target, source_extension)?;
-        if let Some(signature) = existing_signature {
-            if let Some(extension) = target
-                .get_mut("routecodex_chat_extension")
-                .and_then(Value::as_object_mut)
-            {
+        let source_items = source_extension
+            .get(RESPONSES_REASONING_ITEMS_EXTENSION)
+            .and_then(Value::as_array);
+        let mut ordered_items = existing_items;
+        if let Some(source_items) = source_items {
+            ordered_items.extend(source_items.iter().cloned());
+        }
+        if let Some(extension) = target
+            .get_mut("routecodex_chat_extension")
+            .and_then(Value::as_object_mut)
+        {
+            if !ordered_items.is_empty() {
+                extension.insert(
+                    RESPONSES_REASONING_ITEMS_EXTENSION.to_string(),
+                    Value::Array(ordered_items),
+                );
+            }
+            if let Some(signature) = existing_signature {
                 extension.insert(
                     "responses_reasoning_encrypted_content".to_string(),
                     signature,
@@ -800,14 +823,14 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
     }
     // Carry the Responses reasoning item identity so an outbound Chat->Responses
     // projection can restore a reasoning input item even when the plaintext
-    // summary is empty. A provider-origin reasoning item with an id and opaque
-    // cipher must survive a continuation round trip; an item without an id
-    // (synthesized, never source material) is not recorded.
-    if let Some(item_id) = item
+    // summary is empty. Every provider-origin reasoning item in the same turn
+    // keeps its complete id/cipher pair in source order so a continuation does
+    // not collapse distinct reasoning items into one.
+    let provider_item_id = item
         .get("id")
         .and_then(Value::as_str)
-        .filter(|id| !id.trim().is_empty())
-    {
+        .filter(|id| !id.trim().is_empty());
+    if let Some(item_id) = provider_item_id {
         if let Some(extension) = message
             .get_mut("routecodex_chat_extension")
             .and_then(Value::as_object_mut)
@@ -815,6 +838,26 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
             extension.insert(
                 "responses_reasoning_item_id".to_string(),
                 Value::String(item_id.to_string()),
+            );
+            let mut ordered = extension
+                .get(RESPONSES_REASONING_ITEMS_EXTENSION)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let mut entry = Map::new();
+            entry.insert("id".to_string(), Value::String(item_id.to_string()));
+            if let Some(Value::String(signature)) = item.get("encrypted_content") {
+                entry.insert(
+                    "encrypted_content".to_string(),
+                    Value::String(signature.clone()),
+                );
+            }
+            if !ordered.iter().any(|entry| entry["id"] == item_id) {
+                ordered.push(Value::Object(entry));
+            }
+            extension.insert(
+                RESPONSES_REASONING_ITEMS_EXTENSION.to_string(),
+                Value::Array(ordered),
             );
         }
     }
