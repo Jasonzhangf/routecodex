@@ -686,6 +686,10 @@ async fn snapshot_carrier_collision_does_not_release_bare_residue_early() {
         "the close label must never reach the client: {projected:?}"
     );
     assert!(
+        !text.contains('>') && !text.contains("DSML"),
+        "any projected event form must not carry the residue or label: {text}"
+    );
+    assert!(
         !text.contains("response.completed"),
         "the bounded truncation must not project completion: {text}"
     );
