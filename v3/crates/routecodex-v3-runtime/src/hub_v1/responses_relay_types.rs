@@ -3,7 +3,7 @@ use super::*;
 use crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault;
 use routecodex_v3_error::V3Error01SourceRaised;
 use serde_json::Value;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 
 pub type V3ResponsesRelayClientStream = crate::nodes::V3CommittedClientSseStream;
@@ -274,6 +274,11 @@ pub struct V3RuntimeObservability {
 pub struct V3RuntimeStreamObservation {
     inner: Arc<Mutex<V3RuntimeStreamObservationSnapshot>>,
     control: Arc<Mutex<V3RuntimeStreamControlState>>,
+    /// Typed attempt-local fact recorded while the complete native provider
+    /// stream is processed. It is physically separate from the diagnostic
+    /// snapshot (`provider_raw_sse`) so a 2 MiB diagnostic cap or a split UTF-8
+    /// chunk can never hide a provider-explicit reasoning summary.
+    source_summary_observed: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -401,6 +406,14 @@ impl V3RuntimeStreamObservation {
             .lock()
             .map(|snapshot| snapshot.clone())
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn record_source_summary_observed(&self) {
+        self.source_summary_observed.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn has_source_summary_observed(&self) -> bool {
+        self.source_summary_observed.load(Ordering::Acquire)
     }
 
     pub(crate) fn record_post_commit_error(&self, error: &str) -> Result<(), String> {

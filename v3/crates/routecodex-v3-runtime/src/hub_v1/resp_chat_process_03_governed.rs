@@ -1016,8 +1016,11 @@ pub(crate) struct V3ChatProcessGovernedFacts {
 /// The original payload is cloned and every field other than `input` is kept
 /// verbatim (model, instructions, tools, tool_choice, reasoning, parallel
 /// tool calls and unknown business extensions). Each collected business item of
-/// the just-finished execution is appended as an assistant message, then the
-/// refill instruction is appended as a new user turn. No counter, state or
+/// the just-finished execution is appended as an assistant message. A
+/// provider-origin reasoning item with real identity and opaque continuation
+/// material is appended verbatim because the target protocol can express it;
+/// RCC-synthesized reasoning is not replayable source material and is omitted.
+/// The refill instruction is appended as a new user turn. No counter, state or
 /// control field ever enters the payload.
 pub(crate) fn build_v3_chat_process_refill_continuation_request(
     original_request_payload: &Value,
@@ -1047,10 +1050,24 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
         .ok_or_else(|| "refill continuation input must normalize to an array".to_string())?;
     for item in collect_v3_chat_process_business_output_items(current_execution_finalized_response)
     {
-        if item.get("type").and_then(Value::as_str) != Some("message") {
-            // Non-message items (tool calls, hosted search calls) are already
-            // carried by the request's declared tool surface and history; a
-            // refill round only replays assistant message content.
+        let Some(item_type) = item.get("type").and_then(Value::as_str) else {
+            continue;
+        };
+        if item_type != "message" {
+            // A provider-origin reasoning item carries the real `id` and
+            // opaque fields such as `encrypted_content`, so it is valid
+            // continuation input for the target protocol. RCC-synthesized
+            // reasoning (`rcc_reason_*`) has no provider identity and must not
+            // be replayed as if it were source material. Tool calls stay out:
+            // their result belongs to the client's next turn, not to this
+            // message-only continuation.
+            let provider_origin_id = item
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty() && !id.starts_with("rcc_reason_"));
+            if item_type == "reasoning" && provider_origin_id.is_some() {
+                input_array.push(item.clone());
+            }
             continue;
         }
         let Some(content) = item

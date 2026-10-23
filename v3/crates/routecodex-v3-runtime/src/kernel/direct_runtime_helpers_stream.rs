@@ -943,6 +943,33 @@ pub(crate) fn split_direct_sse_committed_chunks(
     segments
 }
 
+/// Number of round-local business item slots already represented by a frame
+/// prefix that reached the live client sink.
+///
+/// Every content event for one item repeats its `output_index`, so the highest
+/// claimed index plus one is the first index of an item that was not yet
+/// delivered. Flushed bytes cannot be corrected later; the refill assembly
+/// uses this count to avoid synthesizing an undelivered item for content the
+/// client already received.
+pub(crate) fn count_direct_sse_output_items(frames: &[Vec<u8>]) -> usize {
+    let mut highest: Option<u64> = None;
+    for segment in split_direct_sse_committed_chunks(frames) {
+        let Some(value) = segment.value.as_ref() else {
+            continue;
+        };
+        let Some(index) = value
+            .get("output_index")
+            .and_then(serde_json::Value::as_u64)
+        else {
+            continue;
+        };
+        highest = Some(highest.map_or(index, |current| current.max(index)));
+    }
+    highest
+        .map(|index| usize::try_from(index.saturating_add(1)).unwrap_or(usize::MAX))
+        .unwrap_or(0)
+}
+
 /// Encode one synthesized `response.output_item.done` frame for a round whose
 /// provider terminal carried the only copy of its business content.
 pub(crate) fn build_direct_sse_output_item_done_frame(
@@ -1107,12 +1134,13 @@ pub(crate) fn shift_direct_sse_output_index(segment: &[u8], offset: usize) -> Ve
     })
 }
 
-/// Raw-provider facts for the Direct SSE refill decision.
+/// Raw-provider facts retained as a diagnostic/test seam.
 ///
-/// These come from the buffered raw provider attempt bytes recorded before any
-/// Direct client rewrite or RCC reasoning/toolreason synthesis. The raw SSE is
-/// the only SSE source-summary provenance seam; client frames may already
-/// carry synthesized reasoning summaries and must not be used for this fact.
+/// The live refill decision reads the attempt-scoped typed fact recorded while
+/// the complete stream is decoded, so a 2 MiB diagnostic cap cannot hide a
+/// terminal summary. This parser stays for captured-sample triage and is the
+/// architecture-gate anchor that forbids using SSE event metadata as provider
+/// semantic source.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct V3DirectSseProviderFacts {
     pub(crate) has_source_summary: bool,
@@ -1416,8 +1444,44 @@ fn record_direct_sse_provider_event_json_frame(
     if is_v3_provider_sse_keepalive_text(&data) {
         return Ok(());
     }
+    record_direct_sse_source_summary_fact(&data, stream_observation);
     record_v3_provider_sse_json_frame(fields, stream_observation)
         .map_err(provider_sse_failure_source)
+}
+
+/// Record the provider-explicit summary fact while the complete native stream
+/// is still being decoded. This is intentionally separate from the truncated
+/// `provider_raw_sse` diagnostic, so a summary that first appears past the 2 MiB
+/// diagnostic cap or across a split UTF-8 chunk still stops the bounded refill.
+fn record_direct_sse_source_summary_fact(data: &str, observation: &V3RuntimeStreamObservation) {
+    if observation.has_source_summary_observed() {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
+        return;
+    };
+    let mut has_source_summary = crate::hub_v1::has_v3_source_explicit_nonempty_summary(&value);
+    match value.get("type").and_then(serde_json::Value::as_str) {
+        Some("response.output_item.added" | "response.output_item.done") => {
+            if let Some(item) = value.get("item") {
+                has_source_summary |= crate::hub_v1::has_v3_source_explicit_nonempty_summary(
+                    &serde_json::json!({"output": [item]}),
+                );
+            }
+        }
+        Some(
+            "response.completed" | "response.incomplete" | "response.done" | "response.failed",
+        ) => {
+            if let Some(response) = value.get("response") {
+                has_source_summary |=
+                    crate::hub_v1::has_v3_source_explicit_nonempty_summary(response);
+            }
+        }
+        _ => {}
+    }
+    if has_source_summary {
+        observation.record_source_summary_observed();
+    }
 }
 
 fn provider_sse_failure_source(
@@ -2752,7 +2816,84 @@ mod refill_tests {
     }
 
     #[test]
-    fn refill_sse_raw_facts_read_source_summary_before_client_synthesis() {
+    fn refill_sse_source_summary_fact_survives_diagnostic_cap() {
+        let observation = crate::hub_v1::V3RuntimeStreamObservation::default();
+        // The diagnostic snapshot keeps only 2 MiB; the typed fact is recorded
+        // from the decoded event and must not depend on that buffer.
+        observation
+            .record_provider_raw_sse_chunk(&vec![b'x'; 3 * 1024 * 1024])
+            .expect("diagnostic chunk");
+        let data = json!({
+            "type": "response.completed",
+            "response": {
+                "status": "completed",
+                "output": [{
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "LATE_SUMMARY"}]
+                }]
+            }
+        })
+        .to_string();
+        record_direct_sse_source_summary_fact(&data, &observation);
+        assert!(observation.has_source_summary_observed());
+        assert!(
+            observation
+                .snapshot()
+                .expect("snapshot")
+                .provider_raw_sse
+                .len()
+                <= 2 * 1024 * 1024,
+            "the diagnostic stays capped while the typed fact survives"
+        );
+
+        let synthesized = json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "reasoning",
+                "content": [{"type": "reasoning_text", "text": "SYNTH"}],
+                "text": "SYNTH"
+            }
+        })
+        .to_string();
+        let other = crate::hub_v1::V3RuntimeStreamObservation::default();
+        record_direct_sse_source_summary_fact(&synthesized, &other);
+        assert!(!other.has_source_summary_observed());
+    }
+
+    #[test]
+    fn refill_sse_output_item_count_uses_the_highest_delivered_index() {
+        let frames = vec![
+            sse_frame(
+                "response.output_item.added",
+                &json!({
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": {"type": "message"}
+                }),
+            )
+            .into_bytes(),
+            sse_frame(
+                "response.output_text.delta",
+                &json!({
+                    "type": "response.output_text.delta",
+                    "output_index": 1,
+                    "delta": "next"
+                }),
+            )
+            .into_bytes(),
+        ];
+        assert_eq!(count_direct_sse_output_items(&frames), 2);
+        assert_eq!(count_direct_sse_output_items(&[]), 0);
+        let terminal = vec![sse_frame(
+            "response.completed",
+            &json!({"type": "response.completed", "response": {"status": "completed"}}),
+        )
+        .into_bytes()];
+        assert_eq!(count_direct_sse_output_items(&terminal), 0);
+    }
+
+    #[test]
+    fn refill_sse_raw_facts_remain_available_for_sample_triage() {
         let raw = format!(
             "{}{}",
             sse_frame(
@@ -2785,30 +2926,6 @@ mod refill_tests {
         assert!(facts.response_completed);
         assert!(facts.tool_calls.is_empty());
         assert!(facts.finalized_response.is_some());
-    }
-
-    #[test]
-    fn refill_sse_raw_facts_only_refill_a_completed_terminal() {
-        for (event, status) in [
-            ("response.incomplete", "incomplete"),
-            ("response.failed", "failed"),
-        ] {
-            let raw = sse_frame(
-                event,
-                &json!({"type": event, "response": {"status": status, "output": []}}),
-            );
-            let facts = inspect_direct_sse_raw_provider(&raw);
-            assert!(!facts.response_completed, "{event} must not refill");
-        }
-
-        let raw = sse_frame(
-            "response.done",
-            &json!({
-                "type": "response.done",
-                "response": {"status": "completed", "output": []}
-            }),
-        );
-        assert!(inspect_direct_sse_raw_provider(&raw).response_completed);
     }
 
     #[test]
