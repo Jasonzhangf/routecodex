@@ -59,6 +59,8 @@ mod issue_d94731e_thinking;
 mod issue4effed6_relay_markers;
 #[path = "multi_listener_server/issue4effed6_relay_serialized.rs"]
 mod issue4effed6_relay_serialized;
+#[path = "multi_listener_server/issueff1e031_chat_markup.rs"]
+mod issueff1e031_chat_markup;
 
 async fn read_raw_content_length_response(socket: &mut TcpStream) -> Vec<u8> {
     let mut wire = Vec::new();

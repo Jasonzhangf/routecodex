@@ -375,6 +375,7 @@ fn project_json_response(
     tool_thinking_enabled: bool,
     expected_model_id: &str,
     complete_provider_attempt: bool,
+    serialized_tool_context: &super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
     match provider_protocol {
         V3HubProviderWireProtocol::OpenAiChat => {
@@ -441,6 +442,7 @@ fn project_json_response(
     let hooks = compile_v3_hub_relay_response_hooks();
     let mut response_profile = V3HubRelayResponseHookProfile::empty()
         .with_complete_provider_attempt(complete_provider_attempt)
+        .with_serialized_tool_context(serialized_tool_context.clone())
         .with_retain_response_cipher(retain_response_cipher)
         .with_tool_thinking_enabled(tool_thinking_enabled)
         .with_toolreason_expected_model_id(expected_model_id)
@@ -1250,6 +1252,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         retain_response_cipher: bool,
         tool_thinking_enabled: bool,
         expected_model_id: &str,
+        namespace_registry: &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response(
             Some(request_id),
@@ -1264,6 +1267,9 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             tool_thinking_enabled,
             expected_model_id,
             true,
+            &super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext::from_registry(
+                namespace_registry,
+            ),
         )
         .map_err(|error| match error {
             V3OpenAiChatRelayRuntimeError::Response(error) => {

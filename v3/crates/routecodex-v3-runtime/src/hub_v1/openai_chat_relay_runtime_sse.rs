@@ -39,9 +39,12 @@ fn project_sse_event_payload(
         false,
         expected_model_id,
         false,
+        &super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext::default(),
     );
     if let Err(V3OpenAiChatRelayRuntimeError::Response(error)) = &result {
-        response_control.record_response_governance_failure(error.clone()).map_err(V3OpenAiChatRelayRuntimeError::Target)?;
+        response_control
+            .record_response_governance_failure(error.clone())
+            .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
     }
     result
 }
@@ -95,9 +98,10 @@ fn project_anthropic_sse_as_openai_chat_stream(
                 loop {
                     if let Some((frame, terminal)) = pending.pop_front() {
                         if terminal {
-                            if let Err(error) = provider_outcome.response_control.record_semantic_terminal(
-                                V3RuntimeSemanticTerminal::Success,
-                            ) {
+                            if let Err(error) = provider_outcome
+                                .response_control
+                                .record_semantic_terminal(V3RuntimeSemanticTerminal::Success)
+                            {
                                 return Some((
                                     Err(error),
                                     (
@@ -363,6 +367,7 @@ fn project_gemini_sse_as_openai_chat_stream(
                 tool_thinking_enabled,
                 &provider_outcome.model_id,
                 true,
+                &super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext::default(),
             ) {
                 Ok(projected) => projected,
                 Err(error) => {
