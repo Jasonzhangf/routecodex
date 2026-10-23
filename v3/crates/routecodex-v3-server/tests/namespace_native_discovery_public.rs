@@ -51,6 +51,11 @@ const SEARCH_LIMIT: i64 = 4;
 
 const DISCOVERED_NAMESPACE: &str = "namespace_probe";
 const DISCOVERED_LEAF: &str = "echo_nonce";
+const DISCOVERED_NAMESPACE_DESCRIPTION: &str =
+    "Namespace documentation: safe discovered nonce tools.";
+const DISCOVERED_LEAF_DESCRIPTION: &str = "safe nonce echo handler";
+const DISCOVERED_COMPOSED_DESCRIPTION: &str =
+    "Namespace documentation: safe discovered nonce tools.\n\nsafe nonce echo handler";
 const ECHO_CALL_ID: &str = "toolu_echo_nonce";
 const NONCE: &str = "NS_ROUTE_CODEX_20261014_SAFE";
 
@@ -89,10 +94,26 @@ fn manifest(
     server_port: u16,
     upstream_base_url: &str,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    manifest_for_protocol(server_port, upstream_base_url, false)
+}
+
+fn manifest_for_protocol(
+    server_port: u16,
+    upstream_base_url: &str,
+    responses: bool,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let upstream_base_url = if responses {
+        format!("{upstream_base_url}/v1")
+    } else {
+        upstream_base_url.to_string()
+    };
     let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
     let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
-    let hub_v1_declaration =
-        hub_v1_fixture::hub_v1_test_declaration().replace(direct_binding, relay_binding);
+    let hub_v1_declaration = if responses {
+        hub_v1_fixture::hub_v1_test_declaration()
+    } else {
+        hub_v1_fixture::hub_v1_test_declaration().replace(direct_binding, relay_binding)
+    };
     let source = format!(
         r#"
 version = 3
@@ -134,6 +155,16 @@ targets = [{{ kind = "provider_model", provider = "native_discovery", model = "{
         wire_model = WIRE_MODEL,
         client_model = CLIENT_MODEL,
     );
+    let source = if responses {
+        source
+            .replace("type = \"anthropic\"", "type = \"responses\"")
+            .replace(
+                "process = \"chat\", streaming = \"always\"",
+                "process = \"direct\", streaming = \"always\"",
+            )
+    } else {
+        source
+    };
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
@@ -276,10 +307,11 @@ fn discovered_tool_declarations() -> Value {
         {
             "type": "namespace",
             "name": DISCOVERED_NAMESPACE,
+            "description": DISCOVERED_NAMESPACE_DESCRIPTION,
             "tools": [{
                 "type": "function",
                 "name": DISCOVERED_LEAF,
-                "description": "safe nonce echo handler",
+                "description": DISCOVERED_LEAF_DESCRIPTION,
                 "parameters": {
                     "type": "object",
                     "properties": {"nonce": {"type": "string"}},
@@ -312,14 +344,195 @@ fn wire_tool<'a>(body: &'a Value, name: &str) -> Option<&'a Value> {
 /// the provider actually received. The allocator spelling is never an oracle:
 /// the fixture matches the complete declared schema and uses the bound name.
 fn discovered_wire_name(body: &Value) -> Option<&str> {
-    let declarations = discovered_tool_declarations();
-    let expected = &declarations[0]["tools"][0];
+    let expected = discovered_schema();
     let mut matches = body["tools"].as_array()?.iter().filter(|tool| {
-        tool["description"] == expected["description"]
-            && tool["input_schema"] == expected["parameters"]
+        tool["description"] == DISCOVERED_COMPOSED_DESCRIPTION && tool["input_schema"] == expected
     });
     let name = matches.next()?["name"].as_str()?;
     (matches.next().is_none() && !name.is_empty()).then_some(name)
+}
+
+/// The Responses wire keeps function schemas under `parameters`. Match the
+/// complete declaration the provider actually received and use its bound name.
+fn discovered_responses_wire_name(body: &Value) -> Option<&str> {
+    let expected = discovered_schema();
+    let mut matches = body["tools"].as_array()?.iter().filter(|tool| {
+        tool["description"] == DISCOVERED_COMPOSED_DESCRIPTION && tool["parameters"] == expected
+    });
+    let name = matches.next()?["name"].as_str()?;
+    (matches.next().is_none() && !name.is_empty()).then_some(name)
+}
+
+fn discovered_schema() -> Value {
+    discovered_tool_declarations()[0]["tools"][0]["parameters"].clone()
+}
+
+/// Reject the historical inferai conflict while preserving the actual
+/// namespaced discovery declaration. The upstream never sends an unconditional
+/// 200: it requires the same namespace, leaf name, and schema in every final
+/// declaration channel.
+fn answer_discovery_consistency(body: &Value) -> Response<Body> {
+    let Some(wire_name) = discovered_responses_wire_name(body) else {
+        return bad_request(
+            "strict discovery consistency upstream saw no bound discovered declaration",
+        );
+    };
+    let stream = body["stream"].as_bool() == Some(true);
+    let json_call = json!({"id":"msg_discovery_consistency","type":"response","status":"completed","model":WIRE_MODEL,"output":[{"type":"function_call","call_id":ECHO_CALL_ID,"name":wire_name,"arguments":json!({"nonce":NONCE}).to_string()}]});
+    let events = if stream {
+        let id = "resp_discovery_consistency";
+        sse_event(
+            "response.created",
+            json!({"type":"response.created","response":{"id":id,"object":"response","status":"in_progress","model":WIRE_MODEL,"output":[]}}),
+        ) + &sse_event(
+            "response.output_item.added",
+            json!({"type":"response.output_item.added","output_index":0,"item":{"id":"msg_discovery_consistency","type":"function_call","status":"in_progress","call_id":ECHO_CALL_ID,"name":wire_name,"arguments":""}}),
+        ) + &sse_event(
+            "response.function_call_arguments.delta",
+            json!({"type":"response.function_call_arguments.delta","item_id":"msg_discovery_consistency","output_index":0,"delta":json!({"nonce":NONCE}).to_string()}),
+        ) + &sse_event(
+            "response.function_call_arguments.done",
+            json!({"type":"response.function_call_arguments.done","item_id":"msg_discovery_consistency","output_index":0,"arguments":json!({"nonce":NONCE}).to_string()}),
+        ) + &sse_event(
+            "response.output_item.done",
+            json!({"type":"response.output_item.done","output_index":0,"item":{"id":"msg_discovery_consistency","type":"function_call","status":"completed","call_id":ECHO_CALL_ID,"name":wire_name,"arguments":json!({"nonce":NONCE}).to_string()}}),
+        ) + &sse_event(
+            "response.completed",
+            json!({"type":"response.completed","response":{"id":id,"object":"response","status":"completed","model":WIRE_MODEL,"output":[{"id":"msg_discovery_consistency","type":"function_call","status":"completed","call_id":ECHO_CALL_ID,"name":wire_name,"arguments":json!({"nonce":NONCE}).to_string()}]}}),
+        )
+    } else {
+        String::new()
+    };
+    if stream {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(events))
+            .unwrap();
+    }
+    ok_json(json_call)
+}
+
+fn validate_discovery_consistency(body: &Value) -> Result<(), String> {
+    let expected = discovered_schema();
+    let mut retained = body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["type"] == "tool_search_output")
+        .flat_map(|item| item["tools"].as_array().unwrap().iter())
+        .filter(|tool| tool["type"] == "function" && tool["parameters"] == expected);
+    let Some(declaration) = retained.next() else {
+        return Err(format!(
+            "retained tool_search_output did not expose the flattened discovered declaration: {body}"
+        ));
+    };
+    if retained.next().is_some() {
+        return Err(format!(
+            "retained tool_search_output exposed more than one matching discovered declaration: {body}"
+        ));
+    }
+    if declaration["description"] != DISCOVERED_COMPOSED_DESCRIPTION {
+        return Err(format!(
+            "retained discovery declaration lost the composed namespace and leaf description: {declaration}"
+        ));
+    }
+    let name = declaration["name"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| format!("retained discovery declaration has no wire name: {declaration}"))?;
+    let mut promoted_declarations = body["tools"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|tool| tool["type"] == "function" && tool["name"] == name);
+    let Some(promoted) = promoted_declarations.next() else {
+        return Err(format!(
+            "retained discovery declaration has no promoted tool: {body}"
+        ));
+    };
+    if promoted_declarations.next().is_some() {
+        return Err(format!(
+            "retained discovery declaration maps to more than one promoted tool: {body}"
+        ));
+    }
+    if promoted != declaration {
+        return Err(format!(
+            "retained discovery and promoted flat declaration differ: retained={declaration} promoted={promoted}"
+        ));
+    }
+    if promoted["description"] != DISCOVERED_COMPOSED_DESCRIPTION {
+        return Err(format!(
+            "promoted discovery declaration lost the composed namespace and leaf description: {promoted}"
+        ));
+    }
+    if !body["input"].as_array().unwrap().iter().any(|item| {
+        item["type"] == "tool_search_output"
+            && item["call_id"] == SEARCH_CALL_ID
+            && item["tools"]
+                .as_array()
+                .is_some_and(|tools| !tools.is_empty())
+    }) {
+        return Err("native tool_search paired result was not forwarded".to_string());
+    }
+    Ok(())
+}
+
+fn assert_captured_discovery_description(body: &Value) {
+    let expected = discovered_schema();
+    let retained: Vec<&Value> = body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["type"] == "tool_search_output" && item["call_id"] == SEARCH_CALL_ID)
+        .flat_map(|item| item["tools"].as_array().unwrap().iter())
+        .filter(|tool| tool["type"] == "function" && tool["parameters"] == expected)
+        .collect();
+    assert_eq!(
+        retained.len(),
+        1,
+        "one retained discovered declaration: {body}"
+    );
+    let retained = retained[0];
+    assert_eq!(
+        retained["description"], DISCOVERED_COMPOSED_DESCRIPTION,
+        "retained discovery declaration lost the composed description: {retained}"
+    );
+    let promoted: Vec<&Value> = body["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|tool| tool["type"] == "function" && tool["name"] == retained["name"])
+        .collect();
+    assert_eq!(
+        promoted.len(),
+        1,
+        "one promoted declaration for the retained identity: {body}"
+    );
+    assert_eq!(
+        promoted[0], retained,
+        "retained discovery and promoted declaration must match exactly"
+    );
+    let description = retained["description"].as_str().unwrap();
+    assert_eq!(description, DISCOVERED_COMPOSED_DESCRIPTION);
+    assert_eq!(
+        description
+            .matches(DISCOVERED_NAMESPACE_DESCRIPTION)
+            .count(),
+        1,
+        "namespace documentation must appear once: {description}"
+    );
+    assert_eq!(
+        description.matches(DISCOVERED_LEAF_DESCRIPTION).count(),
+        1,
+        "leaf documentation must appear once: {description}"
+    );
+    let namespace_position = description.find(DISCOVERED_NAMESPACE_DESCRIPTION).unwrap();
+    let leaf_position = description.find(DISCOVERED_LEAF_DESCRIPTION).unwrap();
+    assert!(
+        namespace_position < leaf_position,
+        "namespace documentation must precede leaf documentation: {description}"
+    );
 }
 
 fn wire_tool_has_property(body: &Value, name: &str, property: &str) -> bool {
@@ -582,6 +795,86 @@ async fn controlled_upstream(
     answer(&body)
 }
 
+#[derive(Clone)]
+struct ConsistencyState {
+    captures: mpsc::UnboundedSender<Value>,
+}
+
+async fn consistency_upstream(
+    State(state): State<ConsistencyState>,
+    uri: Uri,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    let marker = body["input"]
+        .as_array()
+        .and_then(|items| items.last())
+        .and_then(|item| item["content"].as_str())
+        .unwrap_or_default();
+    state
+        .captures
+        .send(json!({"path": uri.path(), "body": body.clone()}))
+        .unwrap();
+    if marker != TURN2_MARKER && marker != TURN3_MARKER {
+        return bad_request("strict discovery consistency upstream saw an unexpected request");
+    }
+    match validate_discovery_consistency(&body) {
+        Ok(()) if marker == TURN3_MARKER => {
+            let paired = body["input"].as_array().unwrap().iter().any(|item| {
+                item["type"] == "function_call_output"
+                    && item["call_id"] == ECHO_CALL_ID
+                    && item["output"] == NONCE
+            });
+            if !paired {
+                return bad_request("actual handler result missing or mismatched");
+            }
+            let item = json!({"id":"msg_receipt","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":NONCE,"annotations":[]}]});
+            let response = json!({"id":"resp_receipt","object":"response","status":"completed","model":WIRE_MODEL,"output":[item.clone()]});
+            if body["stream"] == true {
+                let events = sse_event(
+                    "response.output_item.done",
+                    json!({"type":"response.output_item.done","output_index":0,"item":item}),
+                ) + &sse_event(
+                    "response.completed",
+                    json!({"type":"response.completed","response":response}),
+                );
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "text/event-stream")
+                    .body(Body::from(events))
+                    .unwrap()
+            } else {
+                ok_json(response)
+            }
+        }
+        Ok(()) => answer_discovery_consistency(&body),
+        Err(message) => bad_request(&format!(
+            "discovered tool {DISCOVERED_LEAF} conflicts with an existing declaration; {message}"
+        )),
+    }
+}
+
+async fn spawn_consistency_upstream(
+) -> (String, mpsc::UnboundedReceiver<Value>, oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(consistency_upstream))
+        .with_state(ConsistencyState {
+            captures: captures_tx,
+        });
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}"), captures_rx, shutdown_tx)
+}
+
 async fn spawn_upstream() -> (String, mpsc::UnboundedReceiver<Value>, oneshot::Sender<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -612,6 +905,163 @@ async fn capture(captures: &mut mpsc::UnboundedReceiver<Value>, label: &str) -> 
         Ok(None) => panic!("{label}: upstream capture channel closed"),
         Err(_) => panic!("{label}: controlled upstream never received the request"),
     }
+}
+
+async fn execute_consistency_followup(
+    client: &reqwest::Client,
+    endpoint: &str,
+    call: Value,
+    stream: bool,
+    captures: &mut mpsc::UnboundedReceiver<Value>,
+) {
+    assert!(
+        captures.try_recv().is_err(),
+        "first turn used more than one provider attempt"
+    );
+    let arguments = call_arguments(&call);
+    let receipt = execute_safe_handler(&arguments);
+    assert_eq!(receipt, NONCE);
+    let (status, text) = send(client, endpoint, &json!({
+        "model":CLIENT_MODEL, "stream":stream, "tools":discovery_tools(),
+        "input":[
+            {"type":"tool_search_call","call_id":SEARCH_CALL_ID,"execution":"client","arguments":{"query":SEARCH_QUERY,"limit":SEARCH_LIMIT}},
+            {"type":"tool_search_output","call_id":SEARCH_CALL_ID,"tools":discovered_tool_declarations()},
+            call,
+            {"type":"function_call_output","call_id":ECHO_CALL_ID,"output":receipt},
+            {"role":"user","content":TURN3_MARKER}
+        ]
+    })).await.unwrap();
+    let wire = capture(captures, "CONSISTENCY_FOLLOWUP").await;
+    assert_eq!(wire["path"], "/v1/responses");
+    assert!(validate_discovery_consistency(&wire["body"]).is_ok());
+    let items = client_output_items(status, &text, stream);
+    assert!(contains_string(&Value::Array(items), NONCE));
+    assert!(
+        captures.try_recv().is_err(),
+        "followup used more than one provider attempt"
+    );
+}
+
+#[tokio::test]
+async fn responses_discovery_declaration_consistency_json_public() {
+    let _guard = TEST_LOCK.lock().await;
+    let _key = NativeDiscoveryKeyGuard::install();
+    let (base_url, mut captures, upstream_shutdown) = spawn_consistency_upstream().await;
+    let handle = spawn_v3_server_aggregate(manifest_for_protocol(
+        test_ports::free_port(),
+        &base_url,
+        true,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = http_client();
+
+    let result = send(
+        &client,
+        &endpoint,
+        &json!({
+            "model": CLIENT_MODEL,
+            "stream": false,
+            "input": [
+                {"type": "tool_search_call", "call_id": SEARCH_CALL_ID, "execution": "client", "arguments": {"query": SEARCH_QUERY, "limit": SEARCH_LIMIT}},
+                {"type": "tool_search_output", "call_id": SEARCH_CALL_ID, "tools": discovered_tool_declarations()},
+                {"role": "user", "content": TURN2_MARKER}
+            ],
+            "tools": discovery_tools()
+        }),
+    )
+    .await;
+    let capture = capture(&mut captures, "CONSISTENCY_JSON").await;
+    assert_eq!(capture["path"], "/v1/responses");
+    assert_captured_discovery_description(&capture["body"]);
+    assert!(
+        validate_discovery_consistency(&capture["body"]).is_ok(),
+        "final declaration conflict: {}",
+        capture["body"]
+    );
+    let (status, text) = result.unwrap();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "semantic equivalent must pass on first attempt: {capture}"
+    );
+    let body = parsed(status, &text).unwrap();
+    let call = output_items(&body)
+        .unwrap()
+        .into_iter()
+        .find(|item| item["type"] == "function_call")
+        .unwrap_or_else(|| panic!("strict upstream did not return the discovered call: {body}"));
+    assert_eq!(call["call_id"], ECHO_CALL_ID);
+    assert_eq!(call["namespace"], DISCOVERED_NAMESPACE);
+    assert_eq!(call["name"], DISCOVERED_LEAF);
+    let arguments: Value = serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+    assert_eq!(arguments, json!({"nonce": NONCE}));
+    execute_consistency_followup(&client, &endpoint, call, false, &mut captures).await;
+
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_discovery_declaration_consistency_sse_public() {
+    let _guard = TEST_LOCK.lock().await;
+    let _key = NativeDiscoveryKeyGuard::install();
+    let (base_url, mut captures, upstream_shutdown) = spawn_consistency_upstream().await;
+    let handle = spawn_v3_server_aggregate(manifest_for_protocol(
+        test_ports::free_port(),
+        &base_url,
+        true,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = http_client();
+
+    let result = send(
+        &client,
+        &endpoint,
+        &json!({
+            "model": CLIENT_MODEL,
+            "stream": true,
+            "input": [
+                {"type": "tool_search_call", "call_id": SEARCH_CALL_ID, "execution": "client", "arguments": {"query": SEARCH_QUERY, "limit": SEARCH_LIMIT}},
+                {"type": "tool_search_output", "call_id": SEARCH_CALL_ID, "tools": discovered_tool_declarations()},
+                {"role": "user", "content": TURN2_MARKER}
+            ],
+            "tools": discovery_tools()
+        }),
+    )
+    .await;
+    let capture = capture(&mut captures, "CONSISTENCY_SSE").await;
+    assert_eq!(capture["path"], "/v1/responses");
+    assert_captured_discovery_description(&capture["body"]);
+    assert!(
+        validate_discovery_consistency(&capture["body"]).is_ok(),
+        "final declaration conflict: {}",
+        capture["body"]
+    );
+    let (status, text) = result.unwrap();
+    assert_eq!(capture["body"]["stream"], true);
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "semantic equivalent must pass on first attempt: {capture}"
+    );
+    let items = client_output_items(status, &text, true);
+    let call = items
+        .into_iter()
+        .find(|item| item["type"] == "function_call")
+        .unwrap_or_else(|| panic!("strict upstream did not return the discovered call: {text}"));
+    assert_eq!(call["call_id"], ECHO_CALL_ID);
+    assert_eq!(call["namespace"], DISCOVERED_NAMESPACE);
+    assert_eq!(call["name"], DISCOVERED_LEAF);
+    let arguments = call_arguments(&call);
+    assert_eq!(arguments, json!({"nonce": NONCE}));
+    execute_consistency_followup(&client, &endpoint, call, true, &mut captures).await;
+
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
 }
 
 #[tokio::test]

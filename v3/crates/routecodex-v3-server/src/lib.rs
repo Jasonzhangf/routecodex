@@ -287,7 +287,7 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 
 impl V3ServerAggregateHandle {
     pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
-        let maintenance_guard = self.request_activity_gate.begin_maintenance().await;
+        let maintenance_guard = self.request_activity_gate.pause_dispatch().await;
         let probe_quiescence_guard = self.probe_lifecycle.quiesce(maintenance_guard).await?;
         self.flush_runtime_persistence();
         let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {

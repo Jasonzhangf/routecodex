@@ -3926,7 +3926,7 @@ features:
 - feature_id: v3.client_sse_head_commit
   status: source_controlled_blackbox_verified
   owner_crate: routecodex-v3-server
-  owner_scope: Server-owned client SSE transport channel for a streamed client request while the Runtime still buffers the full provider attempt; the channel carries transport-only keepalives before the runtime outcome, frames the projected successful payload through the SSE transport codec afterwards, and closes without an error frame when the outcome has no successful client payload; the exec replacement drains in-flight client responses before closing transports.
+  owner_scope: Server-owned client SSE transport channel for a streamed client request while the Runtime still buffers the full provider attempt; the channel carries transport-only keepalives before the runtime outcome, frames the projected successful payload through the SSE transport codec afterwards, and closes without an error frame when the outcome has no successful client payload; exec replacement pauses new dispatch without draining business requests, leaves valid existing responses deliverable during preparation, and permits detectable interruption for client-managed retries.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -3949,6 +3949,7 @@ features:
   - V3ClientSseChannelStream
   - build_v3_client_sse_data_frame
   - V3ServerRequestActivityGate::begin_maintenance
+  - V3ServerRequestActivityGate::pause_dispatch
   - V3ServerMaintenanceGuard::wait_for_quiescence
   - V3StableFrontSocket::hold_activity_until_flush
   - V3FrontHttpIo::poll_flush

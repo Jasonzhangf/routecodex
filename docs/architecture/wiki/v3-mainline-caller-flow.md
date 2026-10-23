@@ -651,7 +651,7 @@ flowchart TD
   end
   subgraph c_14_v3_managed_restart_attempt_m_v3_server["v3-server"]
     c_14_v3_managed_restart_attempt_5["v3-server<br/>V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_14_v3_managed_restart_attempt_6["v3-server<br/>V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
+    c_14_v3_managed_restart_attempt_6["v3-server<br/>V3ServerRequestActivityGate::pause_dispatch<br/><small>routecodex-v3-server/src/session_admission.rs</small>"]
     c_14_v3_managed_restart_attempt_19["v3-server<br/>V3FrontTransportBroker::freeze<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
     c_14_v3_managed_restart_attempt_31["v3-server<br/>spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_14_v3_managed_restart_attempt_32["v3-server<br/>build_v3_server_startup_01_listener_set_from_config_05<br/><small>routecodex-v3-server/src/lib.rs</small>"]
@@ -696,7 +696,7 @@ flowchart TD
 | `v3-restart-prepare-previous-release-transfer` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | V3ManagedLifecycle::restart_with_observer<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | prepare_previous_release_restart_transfer<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-bind-transfer-rejection-guard` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | restart_managed_runtime_in_place<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | bind_previous_release_restart_transfer<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-prepare-live` | `V3Lifecycle06LiveControlled` → `V3LifecycleRestartPrepared` | anchored | restart_managed_runtime_in_place<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.managed_server_lifecycle` |
-| `v3-restart-quiesce-live` | `V3LifecycleRestartPrepared` → `V3Front08ClientTerminalOrError` | anchored | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ServerRequestActivityGate::begin_maintenance<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.managed_server_lifecycle` |
+| `v3-restart-quiesce-live` | `V3LifecycleRestartPrepared` → `V3Front08ClientTerminalOrError` | anchored | V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ServerRequestActivityGate::pause_dispatch<br/><small>routecodex-v3-server/src/session_admission.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-cleanup-exact-hooks` | `V3LifecycleRestartExecReentered` → `V3LifecycleRestartHooksReconciled` | anchored | V3ManagedLifecycle::run_managed_child_with_declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | V3HooksSidecarSupervisor::cleanup_exec_owner<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-control-exchange` | `V3Lifecycle02InstanceDeclared` → `V3Lifecycle06LiveControlled` | anchored | send_restart_control<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | send_control_without_timeout<br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-restart-retain-hooks-cleanup-owner` | `V3LifecycleRestartExecReentered` → `V3LifecycleRestartHooksOwnerRetained` | anchored | adopt_exec_restart_declaration_change<br/><small>routecodex-v3-lifecycle/src/exec_restart.rs</small> | V3HooksSidecarSupervisor::retain_exec_owner<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.managed_server_lifecycle` |
@@ -2598,7 +2598,7 @@ flowchart TD
 
 ## v3.client_sse_head_commit
 
-A streamed client request commits the HTTP SSE response head and transport keepalives at the Server boundary while the Runtime still buffers the full provider attempt, and an exec replacement drains in-flight client responses before closing their transports.
+A streamed client request commits the HTTP SSE response head and transport keepalives at the Server boundary while the Runtime still buffers the full provider attempt. Exec replacement pauses new dispatch without draining accepted business responses; replacement may interrupt their transports detectably without fabricated completion or RCC replay.
 
 Owner feature: `v3.client_sse_head_commit`
 Manifest: `docs/architecture/manifests/v3.client_sse_head_commit.mainline.yml`

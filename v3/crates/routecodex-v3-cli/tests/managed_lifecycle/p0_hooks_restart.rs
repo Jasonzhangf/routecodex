@@ -439,6 +439,92 @@ fn read_stream_to_end(mut stream: TcpStream) -> std::io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn interrupted_http_response(bytes: &[u8]) -> bool {
+    let Some(head_end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") else {
+        return true;
+    };
+    let head = String::from_utf8_lossy(&bytes[..head_end]).to_ascii_lowercase();
+    if head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        != Some("200")
+    {
+        return false;
+    }
+    let mut body = &bytes[head_end + 4..];
+    let mut decoded = Vec::new();
+    if head
+        .lines()
+        .any(|line| line.trim() == "transfer-encoding: chunked")
+    {
+        loop {
+            let Some(end) = body.windows(2).position(|part| part == b"\r\n") else {
+                return true;
+            };
+            let size = String::from_utf8_lossy(&body[..end]);
+            let Ok(size) = usize::from_str_radix(size.split(';').next().unwrap().trim(), 16) else {
+                return true;
+            };
+            body = &body[end + 2..];
+            if size == 0 {
+                if !body.starts_with(b"\r\n") {
+                    return true;
+                }
+                break;
+            }
+            if size > body.len() || body.len() - size < 2 || &body[size..size + 2] != b"\r\n" {
+                return true;
+            }
+            decoded.extend_from_slice(&body[..size]);
+            body = &body[size + 2..];
+        }
+        body = &decoded;
+    } else if let Some(length) = head.lines().find_map(|line| {
+        line.strip_prefix("content-length:")
+            .and_then(|value| value.trim().parse::<usize>().ok())
+    }) {
+        if body.len() < length {
+            return true;
+        }
+    }
+    if head.contains("content-type: text/event-stream") {
+        let body = String::from_utf8_lossy(body);
+        return ![
+            "response.completed",
+            "response.incomplete",
+            "response.done",
+            "response.failed",
+            "[DONE]",
+        ]
+        .iter()
+        .any(|terminal| body.contains(terminal));
+    }
+    false
+}
+
+#[test]
+fn p0_restart_interruption_rejects_normally_framed_empty_success() {
+    assert!(!interrupted_http_response(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nContent-Type: application/json\r\n\r\n"
+    ));
+    assert!(!interrupted_http_response(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: application/json\r\n\r\n{}"
+    ));
+    assert!(!interrupted_http_response(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: application/json\r\n\r\n0\r\n\r\n"));
+    assert!(interrupted_http_response(b""));
+    assert!(interrupted_http_response(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n{"
+    ));
+    assert!(interrupted_http_response(
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nab"
+    ));
+    assert!(interrupted_http_response(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n: keepalive\n\n"
+    ));
+    assert!(!interrupted_http_response(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\nevent: response.completed\ndata: {}\n\n"));
+}
+
 fn decode_backpressure_body(raw: &[u8]) -> Vec<u8> {
     let head_end = raw.windows(4).position(|part| part == b"\r\n\r\n").unwrap() + 4;
     let head = std::str::from_utf8(&raw[..head_end])
@@ -481,13 +567,6 @@ fn decode_backpressure_body(raw: &[u8]) -> Vec<u8> {
     body.to_vec()
 }
 
-#[derive(Clone, Copy)]
-enum BackpressureEnd {
-    Complete,
-    Cancel,
-    Disconnect,
-}
-
 fn read_backpressure_head(response: &mut TcpStream) -> Vec<u8> {
     let mut head = Vec::new();
     while !head.ends_with(b"\r\n\r\n") {
@@ -525,7 +604,7 @@ fn assert_backpressure_content(raw: &[u8], text: &str, streaming: bool) {
     }
 }
 
-fn restart_waits_for_backpressured_response(streaming: bool, end: BackpressureEnd) {
+fn restart_interrupts_backpressured_response(streaming: bool) {
     let _guard = lifecycle_test_guard();
     let root = tempfile::Builder::new()
         .prefix("p0-backpressure-")
@@ -555,104 +634,39 @@ fn restart_waits_for_backpressured_response(streaming: bool, end: BackpressureEn
         .store(true, std::sync::atomic::Ordering::SeqCst);
     // Read just the head, then leave a response larger than the TCP buffers unread.
     let mut prefix = read_backpressure_head(&mut response);
-    let mut other = if matches!(end, BackpressureEnd::Disconnect) {
-        let mut socket = send_responses(ports[0], root.path(), true);
-        assert!(provider
-            .received
-            .recv_timeout(Duration::from_secs(5))
-            .unwrap());
-        let head = read_backpressure_head(&mut socket);
-        Some((socket, head))
-    } else {
-        None
-    };
-    let mut restart = spawn_with_hooks_record(
+    let restart = spawn_with_hooks_record(
         env!("CARGO_BIN_EXE_rccv3"),
         &state,
         &config,
         "restart",
         &install,
-        if matches!(end, BackpressureEnd::Cancel) {
-            &["--timeout-ms", "2000"]
-        } else {
-            &[]
-        },
+        &["--timeout-ms", "5000"],
     );
-    let queued = if matches!(end, BackpressureEnd::Cancel) {
-        sleep(Duration::from_millis(300));
-        let socket = send_responses(ports[0], root.path(), false);
-        assert!(
-            provider
-                .received
-                .recv_timeout(Duration::from_millis(300))
-                .is_err(),
-            "dispatch waits during maintenance"
-        );
-        Some(socket)
-    } else {
-        None
-    };
-    sleep(Duration::from_secs(3));
-    let premature = restart.try_wait().unwrap();
-    if matches!(end, BackpressureEnd::Cancel) {
-        assert!(
-            premature.is_some_and(|status| !status.success()),
-            "operation timeout must reject restart"
-        );
-        assert!(!wait_for_child_output(restart, Duration::from_secs(10))
-            .status
-            .success());
-        assert!(
-            !provider
-                .received
-                .recv_timeout(Duration::from_secs(5))
-                .unwrap(),
-            "queued dispatch resumes"
-        );
-        let after = active_instance(&state);
-        let cache: Value =
-            serde_json::from_slice(&fs::read(after.join("pid.cache")).unwrap()).unwrap();
-        assert_eq!(cache["pid"], process.pid);
-        assert_eq!(cache["start_nonce"], old_cache["start_nonce"]);
-        assert_eq!(fs::read_to_string(&marker).unwrap().lines().count(), 1);
-        prefix.extend(read_stream_to_end(response).unwrap());
-        assert_backpressure_content(&prefix, &text, streaming);
-        let queued = read_stream_to_end(queued.unwrap()).unwrap();
-        assert_backpressure_content(&queued, &text, false);
-        restart = spawn_with_hooks_record(
-            env!("CARGO_BIN_EXE_rccv3"),
-            &state,
-            &config,
-            "restart",
-            &install,
-            &[],
-        );
-    } else {
-        assert!(
-            premature.is_none(),
-            "restart completed with a backpressured response: {premature:?}"
-        );
-        if matches!(end, BackpressureEnd::Disconnect) {
-            drop(response);
-            sleep(Duration::from_millis(300));
-            assert!(
-                restart.try_wait().unwrap().is_none(),
-                "other healthy SSE must remain protected after disconnect"
-            );
-            let (socket, mut head) = other.take().unwrap();
-            head.extend(read_stream_to_end(socket).unwrap());
-            assert_backpressure_content(&head, &text, true);
-        } else {
-            prefix.extend(read_stream_to_end(response).unwrap());
-            assert_backpressure_content(&prefix, &text, streaming);
-        }
-    }
-    let restart = wait_for_child_output(restart, Duration::from_secs(30));
+    let restart = wait_for_child_output(restart, Duration::from_secs(10));
     assert!(
         restart.status.success(),
         "{}",
         String::from_utf8_lossy(&restart.stderr)
     );
+    match read_stream_to_end(response) {
+        Ok(rest) => {
+            prefix.extend(rest);
+            assert!(
+                interrupted_http_response(&prefix),
+                "restart must leave an incomplete HTTP or SSE response"
+            );
+            let body = String::from_utf8(prefix).unwrap();
+            assert!(!body.contains("TAIL_BACKPRESSURE_COMPLETE"));
+            assert!(!body.contains("event: response.completed"));
+        }
+        Err(error) => assert!(
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof
+            ),
+            "restart must close the old transport rather than leave it stalled: {error}"
+        ),
+    }
     let current = active_instance(&state);
     let cache: Value =
         serde_json::from_slice(&fs::read(current.join("pid.cache")).unwrap()).unwrap();
@@ -679,32 +693,171 @@ fn restart_waits_for_backpressured_response(streaming: bool, end: BackpressureEn
 }
 
 #[test]
-fn p0_restart_waits_for_backpressured_json_transport() {
-    restart_waits_for_backpressured_response(false, BackpressureEnd::Complete);
+fn p0_restart_interrupts_backpressured_json_transport() {
+    restart_interrupts_backpressured_response(false);
 }
 
 #[test]
-fn p0_restart_waits_for_backpressured_sse_transport() {
-    restart_waits_for_backpressured_response(true, BackpressureEnd::Complete);
+fn p0_restart_interrupts_backpressured_sse_transport() {
+    restart_interrupts_backpressured_response(true);
 }
 
 #[test]
-fn p0_restart_backpressure_json_cancellation_preserves_owner_and_dispatch() {
-    restart_waits_for_backpressured_response(false, BackpressureEnd::Cancel);
+fn p0_restart_preparation_deadline_retains_owner_and_resumes_dispatch() {
+    let _guard = lifecycle_test_guard();
+    let root = tempfile::Builder::new()
+        .prefix("p0-deadline-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let state = root.path().join("state");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let ports = [free_port(), free_port()];
+    let provider = HeldResponsesProvider::start();
+    let config = write_config_with_provider(&root, ports, true, true, Some(provider.port));
+    let (install, marker) = configure_hooks(&root);
+    let launch = |command: &str| {
+        let mut cli = managed_test_command(env!("CARGO_BIN_EXE_rccv3"), &state);
+        cli.args(["server", command, "--config"])
+            .arg(&config)
+            .env("HOME", &home)
+            .env("ROUTECODEX_V3_STATE_DIR", &state)
+            .env("V3_MANAGED_TEST_KEY", SECRET)
+            .env("ROUTECODEX_HOOKS_INSTALL_RECORD", &install);
+        if command != "stop" {
+            cli.arg("--snapall");
+        }
+        cli
+    };
+    let started = launch("start").output().unwrap();
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let owner = active_instance(&state);
+    wait_for_hooksd_marker(&owner, &marker, "deadline fixture hooks must start");
+    let cache: Value = serde_json::from_slice(&fs::read(owner.join("pid.cache")).unwrap()).unwrap();
+    let process = P0ManagedProcess {
+        pid: cache["pid"].as_u64().unwrap() as u32,
+    };
+    struct ReleaseOnDrop(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for ReleaseOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let _release_on_drop = ReleaseOnDrop(provider.release.clone());
+    let control = fs::read(owner.join("control.json")).unwrap();
+    let hooks = hooks_record(&owner);
+    let first = send_responses(ports[0], root.path(), false);
+    provider
+        .received
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap();
+    let lock_path = home.join(".rcc/codex-samples/.retention.lock");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !lock_path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "sampling must create its real retention lock"
+        );
+        sleep(Duration::from_millis(5));
+    }
+    let sample_lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .unwrap();
+    sample_lock.lock().unwrap();
+    let second = send_responses(ports[0], root.path(), false);
+    provider
+        .received
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap();
+    let mut restart = launch("restart")
+        .args(["--timeout-ms", "500"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + PORT_STATE_TIMEOUT;
+    while !owner.join("restart.plan.json").exists() {
+        assert!(
+            restart.try_wait().unwrap().is_none(),
+            "CLI must reach native preparation before its deadline"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "real CLI must publish its typed restart plan"
+        );
+        sleep(Duration::from_millis(1));
+    }
+    let mut accepted = vec![first, second];
+    let queued = loop {
+        assert!(
+            restart.try_wait().unwrap().is_none(),
+            "deadline must not expire before native dispatch pause is observed"
+        );
+        let response = send_responses(ports[0], root.path(), false);
+        match provider.received.recv_timeout(Duration::from_millis(100)) {
+            Ok(_) => accepted.push(response),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break response,
+            Err(error) => panic!("provider fixture disconnected before preparation: {error}"),
+        }
+    };
+    let output = wait_for_child_output(restart, Duration::from_secs(5));
+    assert!(
+        !output.status.success(),
+        "blocked native preparation must not exec"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("timed out"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Keep the sample barrier locked: dispatch recovery must come from cancelled
+    // preparation, rather than allowing a late successful replacement.
+    provider
+        .received
+        .recv_timeout(Duration::from_secs(5))
+        .expect("cancelled native preparation must resume queued dispatch");
+    let retained: Value =
+        serde_json::from_slice(&fs::read(owner.join("pid.cache")).unwrap()).unwrap();
+    assert_eq!(retained["pid"], cache["pid"]);
+    assert_eq!(retained["start_nonce"], cache["start_nonce"]);
+    assert_eq!(fs::read(owner.join("control.json")).unwrap(), control);
+    assert_eq!(hooks_record(&owner), hooks);
+    assert!(!owner.join("front-handoff.json").exists());
+    assert!(!owner.join("provider-handoff.json").exists());
+    drop(sample_lock);
+    provider
+        .release
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    accepted.push(queued);
+    for response in accepted {
+        let bytes = read_stream_to_end(response).unwrap();
+        assert!(
+            !interrupted_http_response(&bytes),
+            "rollback must preserve accepted responses"
+        );
+        assert!(String::from_utf8_lossy(&bytes).contains("resp_p0_live"));
+    }
+    wait_hooks_count(&marker, 1);
+    for port in ports {
+        assert_eq!(http_get_json(port, "/health")["status"], "ok");
+    }
+    let stopped = launch("stop").output().unwrap();
+    assert!(
+        stopped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stopped.stderr)
+    );
+    drop(process);
 }
 
 #[test]
-fn p0_restart_backpressure_sse_cancellation_preserves_owner_and_dispatch() {
-    restart_waits_for_backpressured_response(true, BackpressureEnd::Cancel);
-}
-
-#[test]
-fn p0_restart_backpressure_disconnect_releases_only_failed_transport() {
-    restart_waits_for_backpressured_response(false, BackpressureEnd::Disconnect);
-}
-
-#[test]
-fn p0_restart_success_with_hooks_drains_inflight_json_and_sse_then_serves_new_requests() {
+fn p0_restart_success_with_hooks_execs_before_inflight_release_then_serves_new_requests() {
     let _guard = lifecycle_test_guard();
     let root = tempfile::Builder::new()
         .prefix("p0-hooks-")
@@ -730,8 +883,8 @@ fn p0_restart_success_with_hooks_drains_inflight_json_and_sse_then_serves_new_re
         "P0 successful exec old hooks group={}",
         old_group.process_group_id
     );
-    let mut json = send_responses(ports[0], root.path(), false);
-    let mut sse = send_responses(ports[0], root.path(), true);
+    let json = send_responses(ports[0], root.path(), false);
+    let sse = send_responses(ports[0], root.path(), true);
     let mut received = [
         provider
             .received
@@ -750,55 +903,65 @@ fn p0_restart_success_with_hooks_drains_inflight_json_and_sse_then_serves_new_re
     );
     let json_reader = std::thread::spawn(move || read_stream_to_end(json));
     let sse_reader = std::thread::spawn(move || read_stream_to_end(sse));
-    let started = Instant::now();
-    let mut restart = spawn_with_hooks_record(
+    let control: Value =
+        serde_json::from_slice(&fs::read(old.join("control.json")).unwrap()).unwrap();
+    let mut held_control_peers = Vec::new();
+    for index in 0..10 {
+        let mut peer = p0_control_stream(&control);
+        if index % 2 == 1 {
+            peer.write_all(b"{\"schema_version\":").unwrap();
+        }
+        held_control_peers.push(peer);
+    }
+    let restart = spawn_with_hooks_record(
         env!("CARGO_BIN_EXE_rccv3"),
         &state,
         &config_b,
         "restart",
         &install,
-        &[],
+        &["--timeout-ms", "5000"],
     );
-    // The provider stays healthy and held beyond the retired fixed drain
-    // window. A restart that force-cuts healthy client bodies finishes here.
-    sleep(Duration::from_secs(6));
+    let restart = wait_for_child_output(restart, Duration::from_secs(10));
+    drop(held_control_peers);
     assert!(
-        restart.try_wait().unwrap().is_none(),
-        "managed restart must wait for healthy in-flight client responses before exec"
+        restart.status.success(),
+        "restart must succeed before provider release: {}",
+        String::from_utf8_lossy(&restart.stderr)
     );
     assert!(
-        !json_reader.is_finished() && !sse_reader.is_finished(),
-        "healthy in-flight client transports must stay live while restart drains"
+        provider.received.try_recv().is_err(),
+        "RCC must not replay interrupted requests"
     );
     provider
         .release
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let json_body = String::from_utf8(json_reader.join().unwrap().unwrap()).unwrap();
-    let sse_body = String::from_utf8(sse_reader.join().unwrap().unwrap()).unwrap();
-    assert!(
-        json_body.starts_with("HTTP/1.1 200") && json_body.contains("resp_p0_live"),
-        "held JSON response must complete: {json_body}"
-    );
-    assert!(
-        sse_body.starts_with("HTTP/1.1 200") && sse_body.contains("response.completed"),
-        "held SSE response must complete: {sse_body}"
-    );
-    assert_eq!(
-        sse_body.matches("event: response.completed").count(),
-        1,
-        "held SSE response must carry exactly one completion: {sse_body}"
-    );
-    let restart = wait_for_child_output(restart, Duration::from_secs(30));
-    assert!(
-        restart.status.success(),
-        "{}",
-        String::from_utf8_lossy(&restart.stderr)
-    );
-    assert!(
-        started.elapsed() >= Duration::from_secs(6),
-        "restart must complete only after the in-flight bodies drained, took {:?}",
-        started.elapsed()
-    );
+    for result in [json_reader.join().unwrap(), sse_reader.join().unwrap()] {
+        match result {
+            Ok(bytes) => {
+                assert!(
+                    interrupted_http_response(&bytes),
+                    "restart must leave an incomplete HTTP or SSE response: {}",
+                    String::from_utf8_lossy(&bytes)
+                );
+                let body = String::from_utf8(bytes).unwrap();
+                assert!(
+                    !body.contains("resp_p0_live"),
+                    "no fake JSON completion: {body}"
+                );
+                assert!(
+                    !body.contains("response.completed"),
+                    "no fake SSE completion: {body}"
+                );
+            }
+            Err(error) => assert!(
+                matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof
+                ),
+                "restart must interrupt the old client detectably: {error}"
+            ),
+        }
+    }
     wait_hooks_count(&marker, 2);
     let current = active_instance(&state);
     let new_cache: Value =
@@ -847,108 +1010,4 @@ fn p0_restart_success_with_hooks_drains_inflight_json_and_sse_then_serves_new_re
     new_group.assert_removed();
     assert!(!current.join("hooks-sidecar.pid").exists());
     assert!(!current.join("hooks-sidecar.sock").exists());
-}
-
-#[test]
-fn p0_restart_operation_budget_cancels_drain_and_resumes_queued_dispatch() {
-    let _guard = lifecycle_test_guard();
-    let root = tempfile::Builder::new()
-        .prefix("p0-hooks-")
-        .tempdir_in("/tmp")
-        .unwrap();
-    let state = root.path().join("state");
-    let ports = [free_port(), free_port()];
-    let provider = HeldResponsesProvider::start();
-    let config = write_config_with_provider(&root, ports, true, true, Some(provider.port));
-    let (install, marker) = configure_hooks(&root);
-    let process = start_with_hooks(&root, &state, &config, &install);
-    let old = active_instance(&state);
-    wait_for_hooksd_marker(&old, &marker, "configured hooks did not start");
-    let old_cache: Value =
-        serde_json::from_slice(&fs::read(old.join("pid.cache")).unwrap()).unwrap();
-    let old_record = hooks_record(&old);
-    let mut old_group = OwnedHooksGroup {
-        process_group_id: old_record["process_group_id"].as_i64().unwrap() as i32,
-    };
-
-    let mut held = send_responses(ports[0], root.path(), true);
-    assert!(
-        provider
-            .received
-            .recv_timeout(Duration::from_secs(5))
-            .unwrap(),
-        "the held client must be an in-flight streaming request"
-    );
-    let restart = spawn_with_hooks_record(
-        env!("CARGO_BIN_EXE_rccv3"),
-        &state,
-        &config,
-        "restart",
-        &install,
-        &["--timeout-ms", "2000"],
-    );
-    sleep(Duration::from_millis(700));
-    let mut queued = send_responses(ports[0], root.path(), false);
-    assert!(
-        provider
-            .received
-            .recv_timeout(Duration::from_millis(300))
-            .is_err(),
-        "new dispatch must wait at the maintenance gate instead of reaching the provider"
-    );
-
-    let restart = wait_for_child_output(restart, Duration::from_secs(20));
-    assert!(
-        !restart.status.success(),
-        "the expired restart budget must not report success: {}",
-        String::from_utf8_lossy(&restart.stderr)
-    );
-    assert_eq!(
-        provider
-            .received
-            .recv_timeout(Duration::from_secs(5))
-            .expect("cancelled maintenance must resume the queued dispatch"),
-        false,
-        "the queued JSON request must reach the provider after cancellation"
-    );
-    provider
-        .release
-        .store(true, std::sync::atomic::Ordering::SeqCst);
-    let held_body = String::from_utf8(read_stream_to_end(held).unwrap()).unwrap();
-    let queued_body = String::from_utf8(read_stream_to_end(queued).unwrap()).unwrap();
-    assert!(
-        held_body.starts_with("HTTP/1.1 200") && held_body.contains("response.completed"),
-        "the pending SSE response must complete after restart cancellation: {held_body}"
-    );
-    assert!(
-        queued_body.starts_with("HTTP/1.1 200") && queued_body.contains("resp_p0_live"),
-        "the queued response must complete after restart cancellation: {queued_body}"
-    );
-    let after = active_instance(&state);
-    let after_cache: Value =
-        serde_json::from_slice(&fs::read(after.join("pid.cache")).unwrap()).unwrap();
-    assert_eq!(after_cache["pid"], process.pid);
-    assert_eq!(after_cache["start_nonce"], old_cache["start_nonce"]);
-    assert_eq!(
-        fs::read_to_string(&marker).unwrap().lines().count(),
-        1,
-        "cancelled restart must retain the original hooks owner"
-    );
-    assert_eq!(hooks_record(&old), old_record);
-    let mut connection = TcpStream::connect(("127.0.0.1", ports[0])).unwrap();
-    p0_responses_on_connection(&mut connection, ports[0], root.path());
-
-    let stop = run_with_hooks_record(
-        env!("CARGO_BIN_EXE_rccv3"),
-        &state,
-        &config,
-        "stop",
-        &install,
-    );
-    assert!(
-        stop.status.success(),
-        "{}",
-        String::from_utf8_lossy(&stop.stderr)
-    );
-    old_group.assert_removed();
 }

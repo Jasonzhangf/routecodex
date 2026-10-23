@@ -639,12 +639,10 @@ async fn borrowed_exec_preparation_cancellation_resumes_queued_dispatch_and_pend
     })).send().await.unwrap();
     assert_eq!(held.status(), StatusCode::OK);
     captures.recv().await.unwrap();
-    let mut preparation = Box::pin(handle.prepare_exec_attempt());
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), &mut preparation)
-            .await
-            .is_err()
-    );
+    let preparation = tokio::time::timeout(Duration::from_secs(2), handle.prepare_exec_attempt())
+        .await
+        .expect("borrowed preparation must not drain the held provider")
+        .unwrap();
     let mut queued = Box::pin(client.post(&endpoint).json(&json!({
         "model": "chat-client-alias", "messages": [{"role":"user", "content":"queued"}], "stream":false
     })).send());

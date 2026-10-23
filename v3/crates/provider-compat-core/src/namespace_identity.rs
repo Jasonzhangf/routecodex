@@ -38,6 +38,9 @@ pub struct NamespaceToolIdentity {
     /// declaration name and later components preserve their own spelling.
     /// Empty for a plain flat declaration.
     pub namespace_segments: Vec<String>,
+    /// Ordered documentation for each namespace segment. Empty and missing
+    /// entries contribute no text during standard description composition.
+    pub namespace_descriptions: Vec<Option<String>>,
     pub leaf_name: String,
     pub kind: ToolKind,
     pub source: Value,
@@ -60,6 +63,24 @@ impl NamespaceToolIdentity {
         } else {
             format!("{}.{}", self.client_namespace(), self.leaf_name)
         }
+    }
+
+    /// Rebuild the original ancestor wrappers around the retained leaf source
+    /// without reparsing a flattened provider name.
+    fn source_declaration(&self) -> Value {
+        let mut tool = self.source.clone();
+        for (index, namespace) in self.namespace_segments.iter().enumerate().rev() {
+            let mut wrapper = serde_json::json!({
+                "type": "namespace",
+                "name": namespace,
+                "tools": [tool],
+            });
+            if let Some(Some(description)) = self.namespace_descriptions.get(index) {
+                wrapper["description"] = Value::String(description.clone());
+            }
+            tool = wrapper;
+        }
+        tool
     }
 }
 
@@ -191,10 +212,12 @@ impl NamespaceToolIdentityRegistry {
             .collect();
         for identity in self.identities() {
             let mut tool = if identity.is_namespaced() {
-                let declaration = serde_json::json!({"type":"namespace","name":"projection","tools":[identity.source.clone()]});
-                crate::namespace_tools::flatten_namespace_tool_for_provider(protocol, &declaration)?
-                    .unwrap()
-                    .remove(0)
+                crate::namespace_tools::flatten_namespace_tool_for_provider(
+                    protocol,
+                    &identity.source_declaration(),
+                )?
+                .unwrap()
+                .remove(0)
             } else {
                 identity.source.clone()
             };
@@ -302,6 +325,38 @@ impl NamespaceToolIdentityRegistry {
             body["tools"] = Value::Array(self.project_tools(protocol, tools)?);
         }
         self.project_references(body);
+        self.project_discovered_tool_declarations(body, protocol)?;
+        Ok(())
+    }
+
+    /// Project each retained discovery surface with the complete request's
+    /// binding. A discovered declaration and its promoted top-level declaration
+    /// must use the same wire name, kind and schema.
+    pub fn project_discovered_tool_declarations(
+        &self,
+        body: &mut Value,
+        protocol: &str,
+    ) -> Result<(), String> {
+        for item in body
+            .get_mut("input")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            if item.get("type").and_then(Value::as_str) != Some("tool_search_output") {
+                continue;
+            }
+            let Some(tools) = item.get("tools").and_then(Value::as_array) else {
+                continue;
+            };
+            let mut surface = Self::from_tools(tools)?;
+            for (key, identity) in &mut surface.by_identity {
+                if let Some(bound) = self.by_identity.get(key) {
+                    *identity = bound.clone();
+                }
+            }
+            item["tools"] = Value::Array(surface.project_tools(protocol, tools)?);
+        }
         Ok(())
     }
 
@@ -323,11 +378,7 @@ impl NamespaceToolIdentityRegistry {
             .cloned()
             .collect();
         for identity in self.identities() {
-            let mut tool = identity.source.clone();
-            for namespace in identity.namespace_segments.iter().rev() {
-                tool = serde_json::json!({"type":"namespace","name":namespace,"tools":[tool]});
-            }
-            result.push(tool);
+            result.push(identity.source_declaration());
         }
         result
     }
@@ -524,9 +575,15 @@ impl NamespaceToolIdentityRegistry {
                     return Ok(());
                 };
                 let mut namespace_segments = Vec::new();
+                let mut namespace_descriptions = Vec::new();
                 self.collect_namespace(
                     name,
+                    object
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
                     &mut namespace_segments,
+                    &mut namespace_descriptions,
                     children,
                     &format!("provider namespace tool {name}"),
                 )?;
@@ -552,6 +609,7 @@ impl NamespaceToolIdentityRegistry {
                 // string is split back into a namespace.
                 self.insert_identity(NamespaceToolIdentity {
                     namespace_segments: Vec::new(),
+                    namespace_descriptions: Vec::new(),
                     leaf_name: name.to_string(),
                     kind,
                     source: tool.clone(),
@@ -566,11 +624,14 @@ impl NamespaceToolIdentityRegistry {
     fn collect_namespace(
         &mut self,
         namespace_name: &str,
+        namespace_description: Option<String>,
         namespace_segments: &mut Vec<String>,
+        namespace_descriptions: &mut Vec<Option<String>>,
         children: &[Value],
         path: &str,
     ) -> Result<(), String> {
         namespace_segments.push(namespace_name.to_string());
+        namespace_descriptions.push(namespace_description);
         for (index, child) in children.iter().enumerate() {
             let Some(object) = child.as_object() else {
                 continue;
@@ -589,7 +650,17 @@ impl NamespaceToolIdentityRegistry {
                     let Some(nested) = object.get("tools").and_then(Value::as_array) else {
                         continue;
                     };
-                    self.collect_namespace(name, namespace_segments, nested, &child_path)?;
+                    self.collect_namespace(
+                        name,
+                        object
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                        namespace_segments,
+                        namespace_descriptions,
+                        nested,
+                        &child_path,
+                    )?;
                 }
                 Some(kind @ ("function" | "custom")) => {
                     let Some(leaf_name) = object
@@ -614,6 +685,7 @@ impl NamespaceToolIdentityRegistry {
                     let actual_wire_name = namespace_wire_name(namespace_segments, leaf_name);
                     self.insert_identity(NamespaceToolIdentity {
                         namespace_segments: namespace_segments.clone(),
+                        namespace_descriptions: namespace_descriptions.clone(),
                         leaf_name: leaf_name.to_string(),
                         kind,
                         source: child.clone(),
@@ -623,6 +695,7 @@ impl NamespaceToolIdentityRegistry {
                 _ => {}
             }
         }
+        namespace_descriptions.pop();
         namespace_segments.pop();
         Ok(())
     }
@@ -1040,6 +1113,53 @@ mod tests {
     }
 
     #[test]
+    fn discovered_declaration_uses_complete_request_collision_binding() {
+        let mut request = json!({
+            "tools":[{"type":"function","name":"n__f","parameters":{"type":"object"}}],
+            "input":[{"type":"tool_search_output","call_id":"search","opaque":{"keep":true},
+                "tools":[{"type":"namespace","name":"n","tools":[
+                    {"type":"function","name":"f","parameters":{"type":"object","required":["nonce"]}}
+                ]}]},
+                {"type":"additional_tools","role":"developer","tools":[
+                    {"type":"namespace","name":"functions","tools":[
+                        {"type":"custom","name":"exec","format":{"type":"text"}}
+                    ]}
+                ]}
+            ]
+        });
+        let additional = request["input"][1].clone();
+        let registry =
+            NamespaceToolIdentityRegistry::from_request(&request, "openai-responses").unwrap();
+        let name = registry
+            .wire_name_for_client(Some("n"), "f", ToolKind::Function)
+            .unwrap();
+        assert_ne!(name, "n__f", "the plain declaration reserves its wire name");
+        registry
+            .project_request(&mut request, "openai-responses")
+            .unwrap();
+        let discovered = &request["input"][0]["tools"][0];
+        assert_eq!(discovered["name"], name);
+        let promoted = request["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .unwrap();
+        assert_eq!(discovered, promoted);
+        assert_eq!(request["input"][0]["call_id"], "search");
+        assert_eq!(request["input"][0]["opaque"], json!({"keep":true}));
+        assert_eq!(
+            request["input"][1], additional,
+            "TCM declarations remain opaque in history"
+        );
+        let once = request.clone();
+        registry
+            .project_discovered_tool_declarations(&mut request, "openai-responses")
+            .unwrap();
+        assert_eq!(request, once);
+    }
+
+    #[test]
     fn bug4beffbf_anthropic_flat_collision_gets_deterministic_unique_aliases() {
         let registry = NamespaceToolIdentityRegistry::from_request(
             &json!({
@@ -1113,6 +1233,103 @@ mod tests {
                 .identities()
                 .map(|identity| identity.actual_wire_name.clone())
                 .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn outbound_projection_keeps_namespace_descriptions_without_repeated_prepending() {
+        let request = json!({
+            "tools":[
+                {"type":"function","name":"n__f","parameters":{"type":"object"}},
+                {"type":"namespace","name":"n","description":"Namespace docs.","tools":[
+                    {"type":"function","name":"f","description":"Leaf docs.","parameters":{"type":"object","required":["nonce"]}}
+                ]}
+            ]
+        });
+        let registry =
+            NamespaceToolIdentityRegistry::from_request(&request, "openai-responses").unwrap();
+        let name = registry
+            .wire_name_for_client(Some("n"), "f", ToolKind::Function)
+            .expect("the namespaced collision identity must bind one wire name")
+            .to_string();
+        let first = registry
+            .project_tools("openai-responses", request["tools"].as_array().unwrap())
+            .unwrap();
+        let second = registry
+            .project_tools("openai-responses", request["tools"].as_array().unwrap())
+            .unwrap();
+        assert_eq!(first, second, "repeated projection must be stable");
+        let projected = first.iter().find(|tool| tool["name"] == name).unwrap();
+        let description = projected["description"].as_str().unwrap();
+        assert_eq!(description, "Namespace docs.\n\nLeaf docs.");
+        assert_eq!(description.matches("Namespace docs.").count(), 1);
+        assert_eq!(description.matches("Leaf docs.").count(), 1);
+        assert_ne!(
+            name, "n__f",
+            "collision allocation must reserve a unique name"
+        );
+    }
+
+    #[test]
+    fn later_namespace_source_refreshes_description_context_together_with_leaf() {
+        let request = json!({
+            "tools":[{"type":"namespace","name":"mcp","description":"Old namespace.","tools":[
+                {"type":"function","name":"read","description":"Old leaf.","parameters":{"type":"object","properties":{"old":{"type":"string"}}}}
+            ]}],
+            "input":[{"type":"additional_tools","role":"developer","tools":[
+                {"type":"namespace","name":"mcp","description":"New namespace.","tools":[
+                    {"type":"function","name":"read","description":"New leaf.","parameters":{"type":"object","properties":{"new":{"type":"string"}}}}
+                ]}
+            ]}]
+        });
+        let registry =
+            NamespaceToolIdentityRegistry::from_request(&request, "openai-responses").unwrap();
+        let projected = registry
+            .project_tools("openai-responses", request["tools"].as_array().unwrap())
+            .unwrap();
+        let tool = projected
+            .iter()
+            .find(|tool| tool["name"] == "mcp__read")
+            .unwrap();
+        assert_eq!(tool["description"], "New namespace.\n\nNew leaf.");
+        let sourced = registry.source_tools(request["tools"].as_array().unwrap());
+        let wrapper = sourced
+            .iter()
+            .find(|tool| tool["type"] == "namespace" && tool["name"] == "mcp")
+            .unwrap();
+        assert_eq!(wrapper["description"], "New namespace.");
+        assert_eq!(wrapper["tools"][0]["description"], "New leaf.");
+    }
+
+    #[test]
+    fn description_projection_leaves_additional_tools_history_unchanged() {
+        let declaration = json!({
+            "type":"namespace",
+            "name":"functions",
+            "description":"Namespace docs.",
+            "tools":[{"type":"custom","name":"exec","description":"Leaf docs.","format":{"type":"text"}}]
+        });
+        let additional = json!({
+            "type":"additional_tools",
+            "role":"developer",
+            "opaque":{"keep":true},
+            "tools":[declaration.clone()]
+        });
+        let mut request = json!({
+            "tools":[],
+            "input":[
+                additional.clone(),
+                {"type":"tool_search_output","call_id":"call_search","tools":[declaration]}
+            ]
+        });
+        let registry =
+            NamespaceToolIdentityRegistry::from_request(&request, "openai-responses").unwrap();
+        registry
+            .project_request(&mut request, "openai-responses")
+            .unwrap();
+        assert_eq!(
+            request["input"][0], additional,
+            "TCM additional_tools history must remain exactly unchanged"
         );
     }
 }

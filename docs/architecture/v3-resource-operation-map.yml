@@ -1484,7 +1484,7 @@ resources:
     identity: [server_aggregate, request_body_and_front_flush_lifetime]
     semantic_contract:
       success_terminal: Body EOF transfers the existing activity permit to its Front socket; Hyper submits the remaining HTTP framing before poll_flush snapshots permits into the ordered write queue; only actual worker write/flush completion releases that snapshot. A prior flush cannot release a later EOF permit. Real error/disconnect/drop releases its own failed transport without fabricated success.
-    allowed_writers: [V3ServerRequestActivityGate::admit, V3ServerRequestActivityGate::begin_maintenance, V3StableFrontSocket::hold_activity_until_flush, V3FrontHttpIo::poll_flush, write_front_command, V3ServerRequestActivityPermit::drop, V3ServerMaintenanceGuard::drop]
+    allowed_writers: [V3ServerRequestActivityGate::admit, V3ServerRequestActivityGate::begin_maintenance, V3ServerRequestActivityGate::pause_dispatch, V3StableFrontSocket::hold_activity_until_flush, V3FrontHttpIo::poll_flush, write_front_command, V3ServerRequestActivityPermit::drop, V3ServerMaintenanceGuard::drop]
     allowed_readers: [V3ServerAggregateHandle::prepare_for_exec, V3ServerAggregateHandle::prepare_exec_attempt, V3ServerMaintenanceGuard::wait_for_quiescence]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, MetadataCenter.payload]
     may_enter_provider_body: false
