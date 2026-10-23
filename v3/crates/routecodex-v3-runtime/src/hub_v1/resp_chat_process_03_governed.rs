@@ -1,3 +1,4 @@
+pub(crate) use super::common::V3ChatProcessRefillDisposition;
 use super::*;
 use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 use crate::operation_runner::{
@@ -721,7 +722,6 @@ pub struct V3HubRespChatProcess03Governed {
     pub(crate) previous: V3HubRespInbound02Normalized,
     pub(crate) terminality: V3HubResponseTerminality,
     pub(crate) tool_calls: Vec<V3HubResponseToolCall>,
-    pub(crate) servertool_action: V3HubServertoolResponseAction,
 }
 
 pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
@@ -731,7 +731,6 @@ pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
         previous: input,
         terminality: V3HubResponseTerminality::Terminal,
         tool_calls: Vec::new(),
-        servertool_action: V3HubServertoolResponseAction::None,
     }
 }
 
@@ -797,10 +796,6 @@ impl V3HubRespChatProcess03Governed {
         self.tool_calls.len()
     }
 
-    pub fn servertool_action(&self) -> V3HubServertoolResponseAction {
-        self.servertool_action
-    }
-
     pub fn tool_call_kinds(&self) -> Vec<V3HubRelayToolKind> {
         self.tool_calls
             .iter()
@@ -812,31 +807,11 @@ impl V3HubRespChatProcess03Governed {
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRespChatProcess03Outcome {
     data: V3HubRespChatProcess03Governed,
-    web_search_transition: Option<V3WebSearchCenterState>,
-    web_search_hook_outcome: V3WebSearchHookOutcome,
 }
 
 impl V3HubRespChatProcess03Outcome {
-    pub fn into_parts(
-        self,
-    ) -> (
-        V3HubRespChatProcess03Governed,
-        Option<V3WebSearchCenterState>,
-        V3WebSearchHookOutcome,
-    ) {
-        (
-            self.data,
-            self.web_search_transition,
-            self.web_search_hook_outcome,
-        )
-    }
-
-    pub fn web_search_transition(&self) -> Option<&V3WebSearchCenterState> {
-        self.web_search_transition.as_ref()
-    }
-
-    pub fn web_search_hook_outcome(&self) -> &V3WebSearchHookOutcome {
-        &self.web_search_hook_outcome
+    pub fn into_governed(self) -> V3HubRespChatProcess03Governed {
+        self.data
     }
 }
 
@@ -845,6 +820,403 @@ impl Deref for V3HubRespChatProcess03Outcome {
 
     fn deref(&self) -> &Self::Target {
         &self.data
+    }
+}
+
+/// Source-explicit non-empty summary fact for refill gating.
+///
+/// Provenance contract: only a provider-mapped explicit summary field counts.
+/// The fact is recognized in the two provider-native shapes that the runtime
+/// reads before governance:
+/// - Responses canonical: `output[]` items of type `reasoning` whose `summary[]`
+///   entries carry a non-empty `text`.
+/// - OpenAI Chat native: `choices[].message.reasoning.summary[]` entries with a
+///   non-empty `text`.
+/// RCC-synthesized reasoning/toolreason content, ordinary assistant body text
+/// (`output_text`, `content[].text`, `reasoning_content`, provider `thinking`),
+/// native full-reasoning `reasoning.content`, and request-side summary policy
+/// never count.
+pub(crate) fn has_v3_source_explicit_nonempty_summary(payload: &Value) -> bool {
+    has_responses_source_explicit_summary(payload)
+        || has_openai_chat_source_explicit_summary(payload)
+}
+
+fn has_nonempty_summary_text(summaries: Option<&Value>) -> bool {
+    summaries
+        .and_then(Value::as_array)
+        .map(|summaries| {
+            summaries.iter().any(|summary| {
+                summary
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(|text| !text.trim().is_empty())
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn has_responses_source_explicit_summary(payload: &Value) -> bool {
+    payload
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items.iter().any(|item| {
+                item.get("type").and_then(Value::as_str) == Some("reasoning")
+                    && has_nonempty_summary_text(item.get("summary"))
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn has_openai_chat_source_explicit_summary(payload: &Value) -> bool {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .map(|choices| {
+            choices.iter().any(|choice| {
+                let reasoning = choice
+                    .get("message")
+                    .and_then(|message| message.get("reasoning"));
+                // Only the explicit `summary` field counts. Native full
+                // reasoning (`reasoning.content`), `reasoning_content` and
+                // `reasoning_text` are not summaries.
+                has_nonempty_summary_text(reasoning.and_then(|reasoning| reasoning.get("summary")))
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// The single shared refill policy for Direct-registered hooks and Relay.
+/// Contract: no governed tool call AND no source-explicit non-empty summary AND
+/// a remaining consecutive-refill budget ask for one more execution. A real
+/// error never reaches this decision (it is handled by the Error chain first).
+/// 0 disables refill; N allows at most N new executions beyond the original.
+pub(crate) fn decide_v3_chat_process_refill(
+    tool_calls: &[V3HubResponseToolCall],
+    has_source_summary: bool,
+    response_completed: bool,
+    refill_used: u32,
+    max_consecutive_refills: u32,
+) -> V3ChatProcessRefillDisposition {
+    if !response_completed
+        || !tool_calls.is_empty()
+        || has_source_summary
+        || refill_used >= max_consecutive_refills
+    {
+        V3ChatProcessRefillDisposition::Deliver
+    } else {
+        V3ChatProcessRefillDisposition::RequestRefill
+    }
+}
+
+/// Map a Responses canonical output item type to its governed tool-call kind.
+///
+/// This is the single structural classifier used by the Direct refill fact
+/// extractor. It accepts the complete call item types produced by the
+/// Responses wire contract and the `*_call` suffix for opaque hosted call
+/// shapes. Output items (`*_output`) are explicitly rejected even when they
+/// carry a `call_id`, because an output is not a new tool call.
+fn v3_governed_tool_call_kind(item_type: &str) -> Option<V3HubRelayToolKind> {
+    match item_type {
+        "function_call" | "function" => Some(V3HubRelayToolKind::Function),
+        "custom_tool_call" | "custom" => Some(V3HubRelayToolKind::Custom),
+        "tool_search_call" | "tool_search" | "web_search_call" | "web_search" => {
+            Some(V3HubRelayToolKind::Native)
+        }
+        "mcp_call" | "mcp" => Some(V3HubRelayToolKind::Mcp),
+        "computer_call"
+        | "computer"
+        | "code_interpreter_call"
+        | "code_interpreter"
+        | "local_shell_call"
+        | "local_shell"
+        | "image_generation_call"
+        | "image_generation" => Some(V3HubRelayToolKind::Native),
+        other if other.ends_with("_call") => Some(V3HubRelayToolKind::Native),
+        _ => None,
+    }
+}
+
+/// Structural tool-call facts for Direct response payloads.
+///
+/// Direct does not run the Relay `Resp03` governance stage, so the refill
+/// decision still needs one source for "has a real tool call". Only emptiness
+/// is consumed by the policy; call identity fields are populated for the
+/// shared `V3HubResponseToolCall` shape and must not be projected into any
+/// business payload.
+pub(crate) fn collect_v3_governed_response_tool_calls(
+    payload: &Value,
+) -> Vec<V3HubResponseToolCall> {
+    payload
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let item_type = item.get("type").and_then(Value::as_str)?;
+                    if item_type.ends_with("_output") {
+                        return None;
+                    }
+                    let kind = v3_governed_tool_call_kind(item_type)?;
+                    let call_id = item
+                        .get("call_id")
+                        .or_else(|| item.get("id"))
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_default()
+                        .to_string();
+                    let name = item
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or(item_type)
+                        .to_string();
+                    Some(V3HubResponseToolCall {
+                        call_id,
+                        name,
+                        kind,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The explicit continuation instruction appended as the last user turn of a
+/// bounded refill request. It asks the model to keep going and to call a tool
+/// when the task still needs one, so a silent stop can recover without the
+/// proxy inventing any business content.
+pub(crate) const V3_CHAT_PROCESS_REFILL_INSTRUCTION: &str =
+    "继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。";
+
+/// Compiled request-local refill budget. This is the single runtime accessor so
+/// the selection decision and the launch decision cannot drift. The compiled
+/// `internal.toml` value is the only production source; the config crate's
+/// effective accessor exists so public-entry tests can inject the same typed
+/// policy input.
+pub(crate) fn v3_chat_process_refill_max_consecutive() -> u32 {
+    routecodex_v3_config::internal::v3_effective_chat_process_refill_max()
+}
+
+/// Facts the Chat Process owner hands back to the Relay response-hook caller so
+/// Runtime can apply the shared refill policy without re-reading the governed
+/// payload or duplicating a decision.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct V3ChatProcessGovernedFacts {
+    pub(crate) tool_calls: Vec<V3HubResponseToolCall>,
+    /// Source-explicit non-empty summary captured BEFORE governance could
+    /// synthesize RCC reasoning/toolreason summary content.
+    pub(crate) has_source_summary: bool,
+}
+
+/// Build the standard continuation request for one refill execution.
+///
+/// The original payload is cloned and every field other than `input` is kept
+/// verbatim (model, instructions, tools, tool_choice, reasoning, parallel
+/// tool calls and unknown business extensions). Each collected business item of
+/// the just-finished execution is appended as an assistant message. A
+/// provider-origin reasoning item with real identity and opaque continuation
+/// material is appended verbatim because the target protocol can express it;
+/// RCC-synthesized reasoning is not replayable source material and is omitted.
+/// The refill instruction is appended as a new user turn. No counter, state or
+/// control field ever enters the payload.
+pub(crate) fn build_v3_chat_process_refill_continuation_request(
+    original_request_payload: &Value,
+    current_execution_finalized_response: &Value,
+) -> Result<Value, String> {
+    let mut payload = original_request_payload.clone();
+    let Some(payload_object) = payload.as_object_mut() else {
+        return Err("refill continuation requires an object request payload".to_string());
+    };
+    let mut input = match payload_object.get("input") {
+        Some(Value::Array(_)) => payload_object
+            .get("input")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+        Some(Value::String(text)) => json!([{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": text}],
+        }]),
+        None => Value::Array(Vec::new()),
+        Some(_) => {
+            return Err("refill continuation input must be a string or an input array".to_string())
+        }
+    };
+    let input_array = input
+        .as_array_mut()
+        .ok_or_else(|| "refill continuation input must normalize to an array".to_string())?;
+    for item in collect_v3_chat_process_business_output_items(current_execution_finalized_response)
+    {
+        let Some(item_type) = item.get("type").and_then(Value::as_str) else {
+            continue;
+        };
+        if item_type != "message" {
+            // A provider-origin reasoning item carries the real `id` and
+            // opaque fields such as `encrypted_content`, so it is valid
+            // continuation input for the target protocol. RCC-synthesized
+            // reasoning (`rcc_reason_*`) has no provider identity and must not
+            // be replayed as if it were source material. Tool calls stay out:
+            // their result belongs to the client's next turn, not to this
+            // message-only continuation.
+            let provider_origin_id = item
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty() && !id.starts_with("rcc_reason_"));
+            if item_type == "reasoning" && provider_origin_id.is_some() {
+                input_array.push(item.clone());
+            }
+            continue;
+        }
+        let Some(content) = item
+            .get("content")
+            .filter(|value| value.is_array())
+            .cloned()
+        else {
+            continue;
+        };
+        input_array.push(json!({
+            "type": "message",
+            "role": "assistant",
+            "content": content,
+        }));
+    }
+    input_array.push(json!({
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": V3_CHAT_PROCESS_REFILL_INSTRUCTION}],
+    }));
+    payload_object.insert("input".to_string(), input);
+    Ok(payload)
+}
+
+/// Collect the business output items of one execution response, in order.
+///
+/// Every item shape is kept verbatim, including reasoning items: an earlier
+/// round's reasoning is real business content that the final standard result
+/// must still carry. Only the continuation *request* replays messages (see
+/// `build_v3_chat_process_refill_continuation_request`), because a provider
+/// regenerates its own reasoning for the next round and cannot accept an
+/// invented reasoning item without source identity.
+pub(crate) fn collect_v3_chat_process_business_output_items(
+    finalized_response: &Value,
+) -> Vec<Value> {
+    finalized_response
+        .get("output")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Merge prior-round business items in front of the last execution's output.
+///
+/// The last execution stays authoritative for its own item order, ids, status
+/// and terminal fields; accumulated items only extend the front of `output`.
+/// A missing or non-array `output` is left untouched.
+pub(crate) fn merge_v3_chat_process_refill_output_items(
+    finalized_response: &mut Value,
+    accumulated: &[Value],
+) {
+    let Some(output) = finalized_response
+        .get_mut("output")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    if accumulated.is_empty() {
+        return;
+    }
+    let existing = std::mem::take(output);
+    output.extend(accumulated.iter().cloned());
+    output.extend(existing);
+}
+
+/// Accumulate one completed refill round's usage into the running summary.
+///
+/// Missing stays missing: a field absent in any merged round becomes `None`
+/// and is never fabricated as 0. A `None` accumulator means no completed round
+/// has been merged yet, so the first round's summary is adopted as-is.
+pub(crate) fn accumulate_v3_chat_process_refill_usage(
+    accumulated: &mut Option<V3RuntimeUsageSummary>,
+    round: Option<V3RuntimeUsageSummary>,
+) {
+    let Some(round) = round else {
+        if let Some(accumulated) = accumulated.as_mut() {
+            // A completed round with no usage evidence at all means no field
+            // was observed for the whole chain; missing must stay missing.
+            *accumulated = V3RuntimeUsageSummary::default();
+        }
+        return;
+    };
+    let Some(accumulated) = accumulated.as_mut() else {
+        *accumulated = Some(round);
+        return;
+    };
+    for (current, value) in [
+        (&mut accumulated.input_tokens, round.input_tokens),
+        (&mut accumulated.output_tokens, round.output_tokens),
+        (&mut accumulated.total_tokens, round.total_tokens),
+        (&mut accumulated.cached_tokens, round.cached_tokens),
+        (
+            &mut accumulated.cache_read_input_tokens,
+            round.cache_read_input_tokens,
+        ),
+        (
+            &mut accumulated.cache_creation_input_tokens,
+            round.cache_creation_input_tokens,
+        ),
+    ] {
+        *current = match (*current, value) {
+            (Some(current), Some(value)) => Some(current.saturating_add(value)),
+            _ => None,
+        };
+    }
+}
+
+/// Write an accumulated usage summary into a finalized response.
+///
+/// Only fields that are actually `Some` are written. The object is rebuilt from
+/// the accumulated evidence so a field missing in any round never reappears
+/// from the last round's usage.
+pub(crate) fn write_v3_chat_process_refill_usage(
+    finalized_response: &mut Value,
+    usage: &V3RuntimeUsageSummary,
+) {
+    let Some(response_object) = finalized_response.as_object_mut() else {
+        return;
+    };
+    let mut usage_object = Map::new();
+    if let Some(value) = usage.input_tokens {
+        usage_object.insert("input_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = usage.output_tokens {
+        usage_object.insert("output_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = usage.total_tokens {
+        usage_object.insert("total_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = usage.cached_tokens {
+        usage_object.insert(
+            "input_tokens_details".to_string(),
+            json!({"cached_tokens": value}),
+        );
+    }
+    if let Some(value) = usage.cache_read_input_tokens {
+        usage_object.insert("cache_read_input_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = usage.cache_creation_input_tokens {
+        usage_object.insert(
+            "cache_creation_input_tokens".to_string(),
+            Value::from(value),
+        );
+    }
+    if usage_object.is_empty() {
+        // No observed field: keep usage absent rather than fabricating 0s.
+        response_object.remove("usage");
+    } else {
+        response_object.insert("usage".to_string(), Value::Object(usage_object));
     }
 }
 
@@ -950,9 +1322,6 @@ impl V3HubRelaySerializedToolContext {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRelayResponseHookProfile {
-    servertool_names: BTreeSet<String>,
-    web_search_execution_mode: Option<routecodex_v3_config::V3WebSearchExecutionMode>,
-    web_search_center_state: Option<V3WebSearchCenterState>,
     /// 请求侧 VR 路由决策时算好的"该请求是否保留响应密文"标记：仅当目标是 gpt 模型
     /// **且该模型只有单一 provider 候选**时，响应里的 `encrypted_content` 才原样透传给
     /// Codex 客户端（客户端用自己的密文重建 reasoning 历史）；其余情况 Resp03 一律剥离。
@@ -970,18 +1339,8 @@ pub struct V3HubRelayResponseHookProfile {
 }
 
 impl V3HubRelayResponseHookProfile {
-    pub fn new<I, S>(servertool_names: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
+    pub fn empty() -> Self {
         Self {
-            servertool_names: servertool_names
-                .into_iter()
-                .map(|name| name.as_ref().to_owned())
-                .collect(),
-            web_search_execution_mode: None,
-            web_search_center_state: None,
             retain_response_cipher: false,
             tool_thinking: false,
             toolreason_client_projection: true,
@@ -993,19 +1352,6 @@ impl V3HubRelayResponseHookProfile {
             serialized_tool_context: V3HubRelaySerializedToolContext::default(),
             complete_provider_attempt: false,
         }
-    }
-
-    pub fn empty() -> Self {
-        Self::new(std::iter::empty::<&'static str>())
-    }
-
-    pub fn with_servertool_name(mut self, name: impl Into<String>) -> Self {
-        self.servertool_names.insert(name.into());
-        self
-    }
-
-    pub(crate) fn is_servertool_name(&self, name: &str) -> bool {
-        self.servertool_names.contains(name)
     }
 
     pub(crate) fn with_serialized_tool_context(
@@ -1022,25 +1368,6 @@ impl V3HubRelayResponseHookProfile {
 
     pub(crate) fn with_complete_provider_attempt(mut self, complete: bool) -> Self {
         self.complete_provider_attempt = complete;
-        self
-    }
-
-    pub fn with_web_search_execution_mode(
-        mut self,
-        mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    ) -> Self {
-        self.web_search_execution_mode = Some(mode);
-        self
-    }
-
-    pub fn web_search_execution_mode(
-        &self,
-    ) -> Option<routecodex_v3_config::V3WebSearchExecutionMode> {
-        self.web_search_execution_mode
-    }
-
-    pub fn with_web_search_center_state(mut self, state: V3WebSearchCenterState) -> Self {
-        self.web_search_center_state = Some(state);
         self
     }
 
@@ -1065,7 +1392,7 @@ impl V3HubRelayResponseHookProfile {
 
     pub(crate) fn with_tool_thinking_turn_context(
         mut self,
-        context: &super::servertool_hooks::V3ToolThinkingTurnContext,
+        context: &super::tool_thinking_hooks::V3ToolThinkingTurnContext,
     ) -> Self {
         self.tool_thinking_original_custom_tool_names = context
             .original_custom_tool_names()
@@ -1122,21 +1449,6 @@ impl V3HubRelayResponseHookProfile {
     pub fn toolreason_observation_request_id(&self) -> Option<&str> {
         self.toolreason_observation_request_id.as_deref()
     }
-
-    pub fn web_search_center_state(&self) -> Option<&V3WebSearchCenterState> {
-        self.web_search_center_state.as_ref()
-    }
-
-    /// Mode B：本地 ServerToolCenter 治理的 web_search 需在 Resp03 拦截并
-    /// 本地执行，而不是投影为客户端 exec_command。
-    pub fn web_search_local_surface_active(&self) -> bool {
-        self.web_search_execution_mode.is_some_and(
-            routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search,
-        ) && self
-            .web_search_center_state
-            .as_ref()
-            .is_some_and(|state| state.phase() == V3WebSearchCenterPhase::LocalToolSurfaceActive)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -1149,12 +1461,6 @@ pub enum V3HubRelayResponseError {
     ProviderResponseOutputNotArray,
     #[error("malformed tool call at output index {index}: {reason}")]
     MalformedToolCall { index: usize, reason: &'static str },
-    #[error("web_search ServerTool activation missing at Resp03 interception")]
-    MissingWebSearchActivation,
-    #[error("web_search ServerTool state transition failed at Resp03: {reason}")]
-    WebSearchStateTransitionFailed { reason: String },
-    #[error("web_search typed hook contract failed at Resp03: {reason}")]
-    WebSearchHookContractFailed { reason: String },
     #[error("provider response status is required")]
     MissingStatus,
     #[error("unsupported provider response status: {status}")]
@@ -1318,23 +1624,11 @@ fn govern_v3_hub_relay_response(
     if profile.complete_provider_attempt {
         tool_markup::govern_thinking(&mut input);
     }
-    let _identified_servertool_tool = super::servertool_hooks::inspect_v3_servertool_response_tool(
-        input.provider_payload().as_ref(),
-    );
     let governance = build_v3_resp03_protocol_governance(&input)?;
     let branch = inspect_v3_resp03_finish_reason(&input, &governance);
-    let mut web_search_center_state = None;
-    let mut web_search_hook_outcome = V3WebSearchHookOutcome::NotApplicable;
     let (input, governance) = match branch {
         V3Resp03FinishReasonBranch::ToolCall => {
-            let tool_call_hook = apply_v3_tool_call_servertool_hook_at_resp03(input, profile)?;
-            web_search_center_state = tool_call_hook.web_search_state;
-            web_search_hook_outcome = tool_call_hook.web_search_hook_outcome;
-            let mut input = if tool_call_hook.intercepted {
-                tool_call_hook.input
-            } else {
-                project_v3_apply_patch_freeform_calls_at_resp03(tool_call_hook.input)
-            };
+            let mut input = project_v3_apply_patch_freeform_calls_at_resp03(input);
             restore_v3_tool_thinking_custom_calls_at_resp03(
                 &mut input,
                 profile.tool_thinking_original_custom_tool_names(),
@@ -1348,24 +1642,8 @@ fn govern_v3_hub_relay_response(
         }
         V3Resp03FinishReasonBranch::Other => (input, governance),
     };
-    let servertool_tool_call_followup = governance
-        .tool_calls
-        .iter()
-        .any(|tool_call| profile.is_servertool_name(&tool_call.name));
-    let servertool_action = if servertool_tool_call_followup {
-        V3HubServertoolResponseAction::FollowupRequired
-    } else {
-        V3HubServertoolResponseAction::None
-    };
-    let typed_servertool_continuation = servertool_tool_call_followup
-        || web_search_center_state.is_some()
-        || !matches!(
-            web_search_hook_outcome,
-            V3WebSearchHookOutcome::NotApplicable
-        );
     // Only the complete post-governance result authorizes client delivery.
     if profile.complete_provider_attempt
-        && !typed_servertool_continuation
         && !super::v3_provider_attempt_has_deliverable_business_content(
             input.semantic_protocol(),
             input.provider_payload().as_ref(),
@@ -1383,10 +1661,7 @@ fn govern_v3_hub_relay_response(
             previous: input,
             terminality,
             tool_calls: governance.tool_calls,
-            servertool_action,
         },
-        web_search_transition: web_search_center_state,
-        web_search_hook_outcome,
     })
 }
 
@@ -1896,9 +2171,6 @@ pub(crate) fn classify_v3_hub_relay_tool_kind(raw_kind: &str, name: &str) -> V3H
     }
     if raw_kind == "custom_tool_call" {
         return V3HubRelayToolKind::Custom;
-    }
-    if name.strip_prefix("servertool.").is_some() || name.strip_prefix("servertool__").is_some() {
-        return V3HubRelayToolKind::Servertool;
     }
     if name.strip_prefix("mcp.").is_some() || name.strip_prefix("mcp__").is_some() {
         return V3HubRelayToolKind::Mcp;
@@ -5116,18 +5388,7 @@ mod canonical_govern_registry_tests {
     }
 
     fn success_profile() -> V3HubRelayResponseHookProfile {
-        let active_search = V3WebSearchCenterState::new()
-            .transition_to(
-                V3WebSearchCenterPhase::LocalToolSurfaceActive,
-                "registry_test_request",
-            )
-            .expect("typed web_search state must activate");
         V3HubRelayResponseHookProfile::empty()
-            .with_servertool_name("registry_followup")
-            .with_web_search_execution_mode(
-                routecodex_v3_config::V3WebSearchExecutionMode::MetadataCenterLocalSearch,
-            )
-            .with_web_search_center_state(active_search)
     }
 
     #[test]
@@ -5142,7 +5403,7 @@ mod canonical_govern_registry_tests {
             json!("typed sidecar")
         );
         assert!(!expected.to_string().contains("<think>"));
-        assert!(!expected.to_string().contains("call_registry_web_search"));
+        assert!(expected.to_string().contains("call_registry_web_search"));
         assert!(expected.to_string().contains("call_registry_followup"));
         assert!(expected.to_string().contains("preserved"));
 
@@ -5151,21 +5412,7 @@ mod canonical_govern_registry_tests {
             .expect("public registry governance must succeed");
 
         assert_eq!(outcome.finalized_payload(), &expected);
-        assert_eq!(
-            outcome.servertool_action(),
-            V3HubServertoolResponseAction::FollowupRequired
-        );
         assert_eq!(outcome.terminality(), V3HubResponseTerminality::NonTerminal);
-        let sidecar = outcome
-            .web_search_transition()
-            .expect("local web_search must preserve its typed state transition");
-        assert_eq!(sidecar.phase(), V3WebSearchCenterPhase::ToolCallObserved);
-        assert_eq!(sidecar.original_call_id(), Some("call_registry_web_search"));
-        assert_eq!(sidecar.query(), Some("registry"));
-        assert_eq!(
-            outcome.web_search_hook_outcome(),
-            &V3WebSearchHookOutcome::NotApplicable
-        );
     }
 
     #[test]
@@ -5258,10 +5505,7 @@ mod canonical_govern_registry_tests {
                 previous: input,
                 terminality: V3HubResponseTerminality::Terminal,
                 tool_calls: Vec::new(),
-                servertool_action: V3HubServertoolResponseAction::None,
             },
-            web_search_transition: None,
-            web_search_hook_outcome: V3WebSearchHookOutcome::NotApplicable,
         })
     }
 

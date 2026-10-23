@@ -614,7 +614,7 @@ features:
   - Config publishes declarations and capabilities but never a request-specific branch decision
   - P6 remains frozen until Hub v1 Direct equivalence cutover then is physically deleted
   - Relay and new protocols fill hooks without changing or renumbering the skeleton
-  - servertool followup Dry Run JSON SSE retry and Error paths use existing hook slots and the sole response exit
+  - refill continuation Dry Run JSON SSE retry and Error paths use the normal Runtime request mainline and the sole response exit
   required_gates:
   - npm run verify:v3-stage-protocol-shapes
   - npm run test:v3-stage-protocol-shapes-red-fixtures
@@ -639,7 +639,7 @@ features:
   status: contract_defined_runtime_pending
   change_risk: critical
   owner_kind: rust_project_v3_contract
-  owner_scope: Relay fixed request/response pipeline, four-worker split, static entry/exit hooks, runtime resource configuration, and servertool hook placement
+  owner_scope: Relay fixed request/response pipeline, four-worker split, static entry/exit hooks, runtime resource configuration, and Chat Process hook placement
   owner_modules:
   - v3/crates/routecodex-v3-runtime
   - v3/crates/routecodex-v3-config
@@ -658,7 +658,7 @@ features:
   - Relay is an execution mode inside the fixed Hub v1 skeleton, not a second lifecycle
   - request and response sides are symmetric and every request traverses all fixed nodes
   - the fixed chain carries no continuation save, restore, store, locator, or immutable interval
-  - servertool is a Chat Process hook profile and cannot own a response exit or immutable-interval logic
+  - Chat Process hooks cannot own a response exit or immutable-interval logic
   - every node has static entry and exit hooks with deterministic Manifest selection
   - Runtime resources are configured only through config.v3.toml to Manifest compilation
   - four workers have independent claim IDs, allowed paths, forbidden paths, gates, and completion signals
@@ -674,7 +674,7 @@ features:
   completion_rule:
     source: Contract phase is complete when design docs, four-worker plan, wiki, maps, and red fixtures agree and reject Relay shortcuts.
     runtime: No live Relay runtime is claimed from this feature; request/response/resource worker implementation and controlled replay remain pending.
-    forbidden_claim: Do not claim live Relay, servertool runtime hooks, Hub v1 cutover, P6 deletion, additional protocols, global install, or production replacement.
+    forbidden_claim: Do not claim live Relay, Hub v1 cutover, P6 deletion, additional protocols, global install, or production replacement.
 - feature_id: v3.hub_relay_response_semantics
   status: response_source_slice_verified
   change_risk: critical
@@ -696,9 +696,7 @@ features:
   required_contract:
   - provider raw response can enter Relay response semantics only at Resp01 and only in Relay execution mode
   - Resp02 normalizes provider response kind and must not harvest tools or decide terminality
-  - Resp03 owns provider-neutral tool harvest servertool response action and terminal/non-terminal classification
-  - Resp03 data node contains no server-tool state; typed outcome carriers return the web search transition independently to the runtime owner
-  - Resp05 consumes only V3HubRespChatProcess03Outcome.into_data and cannot read or reconstruct the web search transition
+  - Resp03 owns provider-neutral tool harvest and terminal/non-terminal classification
   - Resp05 Server SSE handler and store transport do not save restore repair or infer response semantics
   - JSON and SSE share the sole V3ServerRespOutbound06ClientFrame response exit
   - response payload ownership is Arc-backed and does not deep-copy full provider response/body/context for governance
@@ -735,7 +733,7 @@ features:
   required_contract:
   - Req01 and Req02 perform lossless entry normalization into Chat semantic protocol only
   - Req01 and Req02 reject a non-empty previous_response_id instead of resolving a continuation owner
-  - Req04 runs tool/history/servertool governance and never restores local context or repairs history
+  - Req04 runs tool/history governance and never restores local context or repairs history
   - every Req01 through Req04 owner operation emits deterministic entry and exit hook evidence
   - required hook failures and malformed tool outputs are explicit fail-fast errors
   - request payload ownership moves forward once and rejects JSON round-trip or full payload clone budget violations
@@ -755,7 +753,7 @@ features:
   status: payload_copy_probes_and_gates_verified
   change_risk: high
   owner_kind: rust_project_v3_test_and_architecture_gate
-  owner_scope: Test-only Relay JSON/SSE/servertool copy-budget observations and mutation-backed source gates
+  owner_scope: Test-only Relay JSON/SSE copy-budget observations and mutation-backed source gates
   owner_modules:
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_payload_copy_runtime_probes.rs
   - v3/scripts/architecture/verify-v3-relay-payload-copy-budget.mjs
@@ -771,7 +769,7 @@ features:
   required_contract:
   - Relay JSON request payload moves through Req01-Req04 without a runtime full-payload clone or JSON roundtrip
   - Relay SSE response permits only provider-inbound protocol event aggregation at the adjacent owner and retains one response exit without non-owner shape rebuild
-  - servertool response and following request use one Resp03 canonical context truth and govern before client projection
+  - refill continuation and the following request use one Resp03 canonical context truth and govern before client projection
   - Debug snapshot and hook planning cannot become retained business payload truth
   required_gates:
   - npm run test:v3-relay-payload-copy-runtime-probes
@@ -783,8 +781,8 @@ features:
   - git diff --check
   completion_rule:
     source: Copy-budget probes/gates are complete only when four focused probes and every mutation fixture pass with map/package bindings present.
-    runtime: This feature does not wire or prove live Relay or servertool execution.
-    forbidden_claim: Do not claim live Relay, servertool runtime, Server cutover, P6 deletion, global install, restart, or production replacement.
+    runtime: This feature does not wire or prove live Relay execution.
+    forbidden_claim: Do not claim live Relay, Server cutover, P6 deletion, global install, restart, or production replacement.
 - feature_id: v3.hub_relay_runtime_resources_hooks
   status: relay_resource_hook_declaration_surface_verified
   change_risk: critical
@@ -809,7 +807,7 @@ features:
   - Runtime consumes Manifest declarations only and never scans directories or loads dynamic hook code
   - hook order is priority then order then hook_id
   - required hooks fail fast and disabled optional hooks yield typed no-op events
-  - servertool hooks exist only at Req04 and Resp03
+  - Chat Process hooks exist only at Req04 and Resp03
   - resource access denies immutable-interval mutation and payload side-channel leakage
   required_gates:
   - npm run test:v3-relay-hook-resources
@@ -824,7 +822,7 @@ features:
   - npm run test:v3-workspace
   completion_rule:
     source: Worker C may claim only the resource and hook declaration surface after config/runtime focused gates pass.
-    runtime: No live Relay behavior or servertool runtime execution is implied.
+    runtime: No live Relay behavior is implied.
     forbidden_claim: Do not claim request/response behavior, live Relay, P6 cutover/deletion, global install, or production replacement.
 - feature_id: v3.hub_relay_gate_review_surface
   status: architecture_review_surface_locked
@@ -852,7 +850,7 @@ features:
   - all four worker feature IDs expose resources mainline bindings allowed and forbidden paths required gates and completion limits
   - Relay remains one Hub v1 execution mode with fixed node IDs and one response exit
   - the fixed chain carries no continuation save, restore, store, locator, or immutable interval
-  - servertool stays inside Req04 and Resp03 Chat Process hooks
+  - Chat Process hooks stay inside Req04 and Resp03
   - payload copy budget rejects unbounded deep copy full SSE materialization and Debug or snapshot truth substitution
   - P6 stays frozen until separately verified cutover and physical deletion
   required_gates:
@@ -863,8 +861,8 @@ features:
   - npm run test:v3-compile-fail
   completion_rule:
     source: D completes only when docs/maps/wiki/gates are mutually queryable and red fixtures reject contract mutations.
-    runtime: Review surface is not runtime evidence; live Relay, servertool runtime hooks, and P6 deletion remain pending.
-    forbidden_claim: Do not claim runtime implementation, live Relay, servertool runtime execution, P6 deletion, global install, restart, or production replacement.
+    runtime: Review surface is not runtime evidence; live Relay and P6 deletion remain pending.
+    forbidden_claim: Do not claim runtime implementation, live Relay, P6 deletion, global install, restart, or production replacement.
 - feature_id: v3.protocol_anthropic_codec_characterization
   status: characterization_source_verified
   change_risk: high
@@ -1193,7 +1191,7 @@ features:
   - Runtime remains the only complete lifecycle executor
   - routecodex-v3-provider-responses is generic and contains no deployment provider ID or provider-family branch
   - Server and CLI cannot import or call Provider transport
-  - no relay servertool other protocol V2 compatibility fallback repair sanitize or raw replay
+  - no relay other protocol V2 compatibility fallback repair sanitize or raw replay
   - v3-rd-10 through v3-rd-12 may be anchored only by the generic Provider runtime source and controlled-upstream evidence
   - V3Execution11ProtocolDecision is written by protocol execution planning before initial dispatch and recomputed only for the currently selected Target10 after provider failure reselection; the
     selected entry-protocol execution mode remains the only Direct/Relay lock
@@ -1247,7 +1245,7 @@ features:
     source: P6 Server03 through Server16, generic Provider transport, Target-local reselection, full exhaustion, and same-kernel no-network Dry Run require all listed source gates.
     runtime: 'Verified with the actual V3 CLI and dedicated multi-listener config.p6.toml: JSON, SSE, reselection, exhaustion, Dry Run no-send, Debug trace, secret isolation, explicit Ctrl-C, and closed
       ports.'
-    forbidden_claim: Local controlled-upstream P6 evidence does not prove relay, servertool, other protocols, V2 compatibility, global install, real ~/.rcc mutation, production replacement,
+    forbidden_claim: Local controlled-upstream P6 evidence does not prove relay, other protocols, V2 compatibility, global install, real ~/.rcc mutation, production replacement,
       or real-provider compatibility.
 - feature_id: v3.provider_oauth_credentials
   status: source_and_controlled_transport_verified
@@ -1370,7 +1368,7 @@ features:
   completion_rule:
     source: Provider nodes 12-14 and adjacent edges 10-12 are bound to real Rust symbols, and Provider module blackbox passes against a controlled upstream.
     runtime: This feature proves Provider execution only; Server /v1/responses live usability remains pending until the full Responses Direct MVP feature is completed. This OpenCode Zen task additionally requires separate installed-runtime acceptance through authenticated curl on the 7777 /v1/chat/completions entry; that evidence does not change this feature-level completion claim.
-    forbidden_claim: Do not claim Server live integration, client projection completeness, relay, servertool, V2 compatibility, global install, or real ~/.rcc mutation from this provider slice.
+    forbidden_claim: Do not claim Server live integration, client projection completeness, relay, V2 compatibility, global install, or real ~/.rcc mutation from this provider slice.
 - feature_id: v3.debug_error_foundation
   status: p3_p4_source_and_live_verified
   change_risk: high
@@ -1959,7 +1957,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_terminal_semantics.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_inline_tests.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/tool_thinking_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/signature_target_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/signature_target_projection_tests.rs
   - v3/crates/routecodex-v3-server/tests/namespace_cross_protocol_public.rs
@@ -2269,7 +2267,7 @@ features:
   status: controlled_runtime_closeout_verified
   change_risk: critical
   owner_kind: rust_project_v3_runtime_integration_gate
-  owner_scope: Controlled Hub Relay Runtime closeout across JSON/SSE, servertool response hook profile, Error01-06, side-channel isolation, one-response-exit, and Responses Relay
+  owner_scope: Controlled Hub Relay Runtime closeout across JSON/SSE, Error01-06, side-channel isolation, one-response-exit, and Responses Relay
     source server entry.
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
@@ -2304,7 +2302,7 @@ features:
   - v3-hub-relay-closeout-01 through v3-hub-relay-closeout-14 remain adjacent and anchored to docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
   - Responses Relay provider-facing JSON blackbox preserves tools and the current-turn function_call/function_call_output pairing
   - wrong Responses Relay call_id fails before provider send
-  - servertool response hook profile is consumed by Runtime response governance
+  - the Chat Process response hook profile is consumed by Runtime response governance
   - Responses Relay separates provider request transport intent, provider response body kind, and client response projection intent; client `stream=true` remains SSE even if provider raw body is JSON, and
     client `stream=false` remains JSON even if a controlled provider raw body is SSE
   - provider error enters Error01-06 without Resp01 success projection
@@ -2343,69 +2341,6 @@ features:
     runtime: Responses Relay JSON/SSE is verified on globally installed managed V3 5555 with real provider replay; P6 deletion, Anthropic/Gemini live replay, live error samples, credential/config mutation,
       and full production cutover are not claimed.
     forbidden_claim: Do not claim P6 deletion, credential/config mutation, Anthropic/Gemini live replay, live 401/403/5xx/timeout provider failures, or full production cutover.
-- feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-  status: controlled_runtime_parity_verified
-  change_risk: critical
-  owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: V3 Relay tool/servertool multiturn controlled parity matrix over request current-turn tool output governance, immutable client history, response tool harvest, servertool hook profile,
-    JSON/SSE ordering, and single response exit.
-  owner_modules:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-  - v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs
-  - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
-  - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
-  design:
-  - docs/goals/v3-relay-tool-servertool-multiturn-parity-closeout-plan.md
-  - docs/design/v3-hub-relay-fixed-pipeline-contract.md
-  contract:
-  - docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml
-  - docs/architecture/v3-resource-operation-map.yml
-  - docs/architecture/v3-function-map.yml
-  - docs/architecture/v3-mainline-call-map.yml
-  - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
-  required_unit:
-  - protocol transport matrix covers Responses Anthropic OpenAI Chat and Gemini entries over JSON and SSE
-  - request governance matches function custom servertool apply_patch MCP and native tool outputs only to current-turn tool calls
-  - Req04 preserves paired apply_patch execution output exactly, including failure details and line endings, in the next provider request
-  - Req04 accepts legacy function_call apply_patch contexts when the client returns custom_tool_call_output after freeform projection
-  - orphan tool output missing call_id and wrong custom/function output kind fail fast inside Req04
-  - client-supplied history remains byte-stable while current-turn tool output governance remains active
-  - response governance classifies function custom servertool apply_patch MCP and native calls inside Resp03
-  - Resp03 projects apply_patch function_call arguments into client-facing freeform custom_tool_call input
-  - JSON and SSE use one response exit and SSE arbitrary chunks preserve delta order terminal tool order DONE/finish reason parity
-  - provider/client payloads reject RouteCodex control metadata_center debug/resource leakage
-  - Responses Relay JSON two-turn provider request preserves tools and pairs the client-supplied function_call with current function_call_output
-  - Responses Relay JSON two-turn apply_patch returns freeform custom_tool_call to client and sends the exact paired failure or success output to provider
-  - public HTTP /v1/responses two-turn apply_patch preserves client failure and success output including CRLF and absolute-path diagnostics
-  - wrong Responses Relay call_id fails before provider send
-  required_gates:
-  - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay_apply_patch_feedback_preserves_client_output_two_turns -- --exact
-  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_field_parity_integration -- --test-threads=1 --nocapture
-  - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
-  - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
-  - npm run test:v3-anthropic-codec-characterization
-  - npm run test:v3-openai-chat-codec-characterization
-  - npm run test:v3-gemini-codec-characterization
-  - npm run test:v3-hub-relay-runtime-closeout
-  - npm run verify:v3-hub-relay-runtime-closeout
-  - npm run test:v3-relay-payload-copy-runtime-probes
-  - npm run verify:v3-relay-payload-copy-budget
-  - npm run verify:v3-architecture-docs
-  - npm run verify:v3-resource-map
-  - npm run verify:v3-module-boundaries
-  - npm run verify:v3-cargo-fmt
-  - npm run verify:v3-clippy
-  - npm run test:v3-workspace
-  - git diff --check
-  completion_rule:
-    source: Complete when focused parity tests, protocol codec characterization gates, source verifier, red fixtures, existing Hub Relay closeout/copy gates, architecture/resource/module/static-hook/fmt/clippy/workspace
-      gates, and diff check pass.
-    runtime: Controlled Rust Runtime parity only; live provider replay, live inbound WebSocket replay, P6 deletion, global install, restart, release, production
-      cutover, and ~/.rcc mutation are not claimed.
-    forbidden_claim: Do not claim live Relay/provider compatibility, P6 deletion, global installation, restart, production cutover, or real ~/.rcc mutation from this controlled parity feature.
 - feature_id: v3.live_provider_compat_parity_closeout
   status: partial_live_provider_replay_verified
   change_risk: high
@@ -2540,13 +2475,10 @@ features:
   status: source_gate_verified
   change_risk: critical
   owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: 'Resp03 response governance small skeleton: text harvest, finish_reason branch, tool_call servertool hook, and ordinary governance before client projection; a completed tool-call response stays completed/tool_calls and is never rewritten to a fabricated Responses tool-continuation status.'
+  owner_scope: 'Resp03 response governance small skeleton: text harvest, finish_reason branch, and ordinary tool governance before client projection; a completed tool-call response stays completed/tool_calls and is never rewritten to a fabricated Responses tool-continuation status.'
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
-  - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
-  - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
   design:
   - docs/goals/v3-resp03-tool-governance-gap-closeout-plan.md
   - docs/architecture/wiki/v3-req04-tool-governance-review.md
@@ -2556,16 +2488,12 @@ features:
   - docs/architecture/v3-verification-map.yml
   required_unit:
   - Resp03 preserves a completed tool-call response as completed/tool_calls before ordinary tool governance and never rewrites it to requires_action
-  - Resp03 runs the registered tool_call servertool hook before ordinary tool governance
-  - Resp03 runs ordinary apply_patch/client tool governance only after tool-call servertool pass-through
-  - Resp03 owns response tool/servertool governance before client projection
+  - Resp03 runs ordinary apply_patch/client tool governance after tool-call governance
+  - Resp03 owns response tool governance before client projection
   - Resp05 consumes the Resp03-governed provider payload without semantic repair
   - Resp03 preserves the complete historical message prefix and only coalesces the newly appended response suffix
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture
-  - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
-  - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
   - npm run verify:v3-normalization-payload-logic-boundary
   - npm run verify:v3-architecture-docs
   - npm run verify:architecture-wiki-html-sync
@@ -2618,7 +2546,6 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_gemini_codec_characterization -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture
   - npm run verify:v3-architecture-docs
   - npm run verify:function-map-compile-gate
   - npm run verify:architecture-mainline-manifest-sync
@@ -2744,62 +2671,6 @@ features:
     source: Positive/negative Rust tests, unique-writer red fixtures, architecture maps, and build gate pass.
     runtime: Installed V3 10000 dry-run and 5555 old-sample replay prove provider-request model identity equals the selected candidate wire_model for every attempt; body-model protocols prove this in body.model, while Gemini proves it in the URL path with body.model omitted.
     forbidden_claim: Correct local provider-request model does not prove an upstream provider did not remap that model internally.
-- feature_id: v3.web_search_servertool_state_machine
-  status: design
-  change_risk: high
-  owner_kind: rust_v3_chatprocess_servertool_state_machine
-  owner_scope: web_search route activation, provider search execution mode, ServerTool state manager, search-only dispatch, result capture, follow-up marker, and paired tool-result injection.
-  design:
-  - docs/goals/v3-web-search-servertool-state-machine-proposal.md
-  contract:
-  - docs/architecture/v3-resource-operation-map.yml
-  - docs/architecture/v3-function-map.yml
-  - docs/architecture/v3-mainline-call-map.yml
-  - docs/architecture/v3-verification-map.yml
-  mainline_bindings:
-  - v3-web-search-sm-sidecar-socket-01
-  - v3-web-search-sm-01
-  - v3-web-search-sm-02
-  - v3-web-search-sm-03
-  - v3-web-search-sm-04
-  - v3-web-search-sm-05
-  - v3-web-search-sm-06
-  - v3-web-search-sm-07
-  - v3-web-search-sm-08
-  required_positive:
-  - A completed WebSearchResult carries normalized content or typed source references, while a failed result carries only a typed error.
-  - The hooks sidecar carries the typed WebSearchHookRequest through ControlRequest::ExecuteWebSearch and returns a call-id-bound completed or typed failed WebSearchHookOutcome.
-  - Explicit latest-turn search intent activates web_search route.
-  - Current assistant canonical web_search tool call starts ServerTool web_search state.
-  - GPT-family/native tool-mix mode routes without ServerTool state or ordinary tool stripping.
-  - MiniMax/search-only mode starts ServerTool state and strips ordinary tools only inside search dispatch.
-  - Captured search result is paired to the original tool_call_id and injected on the next governed request.
-  required_negative:
-  - A completed WebSearchResult without call identity is rejected; WebSearchHookRequest scope/deadline binding is required before the adapter executes.
-  - A mismatched call id, malformed adapter output, NotApplicable result, missing adapter, expired deadline, or unavailable subagent fails explicitly.
-  - A configured sidecar path is passed only through the typed runtime control state; an absent socket path or failed typed response enters the existing error chain without a second provider attempt.
-  - Completed results cannot carry errors; failed results cannot carry content or sources; control state cannot appear in result metadata at any nesting depth.
-  - Center-state conversion maps only an explicit usage object into provider metadata and does not duplicate normalized query/result content.
-  - Declared web_search tool alone does not activate web_search route.
-  - Wrong session, port, protocol, or toolRunId cannot consume ServerTool state.
-  - ServerTool state cannot enter provider wire payload, client response body, or debug normal payload.
-  - Provider/search dispatch failure enters Error01-Error06 and cannot be projected as success.
-  - Virtual Router cannot inspect tool schema text or repair mixed-tool payloads.
-  required_gates:
-  - cargo test --manifest-path v3/Cargo.toml -p servertool-core web_search_contract -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib web_search_hook_ -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks -- --nocapture
-  - npm run verify:v3-resource-map
-  - npm run verify:v3-mainline-caller-flow
-  - npm run verify:v3-architecture-docs
-  - npm run build:v3-cli
-  source_evidence:
-  - docs/architecture/evidence/v3-web-search-servertool-source.json
-  completion_rule:
-    source: Red fixtures first, then Rust ChatProcess/ServerTool/provider-wire tests plus architecture gates and build pass.
-    runtime: After global install and managed restart, live 5520 MiniMax explicit search proves search-only dispatch; declared-tool-only request stays normal route; GPT native search path has no ServerTool
-      state.
-    forbidden_claim: A /v1/models capability, declared tool list, provider name, provider compat workaround, SSE behavior, or debug sample is not proof of web_search routing correctness.
 - feature_id: v3.console_request_count_visibility
   status: active
   change_risk: low
@@ -3262,33 +3133,6 @@ features:
   completion_rule:
     source: Wrapper behavior, red fixtures, profile contract, package-script wiring, maps, and diff check pass.
     runtime: No install or live request replay is required because this owner cannot enter runtime or payload paths.
-- feature_id: v3.servertool_center_skeleton
-  status: design_locked_docs_and_maps
-  change_risk: critical
-  owner_kind: rust_project_v3_runtime_servertool_metadata_center
-  owner_scope: 'Unified ServertoolCenter (MetadataCenter): tool identification, state registration and machine transitions for web_search/servertool CLI; hooks only at fixed Req04/Resp03 governance
-    nodes; data plane logic-free.'
-  owner_modules:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-  design:
-  - docs/design/v3-servertool-center-skeleton.md
-  contract:
-  - docs/architecture/v3-resource-operation-map.yml
-  - docs/architecture/v3-function-map.yml
-  - docs/architecture/v3-mainline-call-map.yml
-  required_unit:
-  - Servertool hooks are called only from Req04/Resp03 governance nodes and the direct kernel; SSE stays transport-only with no control symbol references.
-  - ServertoolCenter manages tool identification, state registration and machine transitions; data plane never parses or rewrites control semantics.
-  required_gates:
-  - npm run verify:v3-servertool-center-skeleton
-  - npm run test:v3-servertool-center-skeleton-red-fixtures
-  - npm run verify:v3-resource-map
-  - npm run verify:v3-module-boundaries
-  - npm run verify:v3-architecture-docs
-  completion_rule:
-    source: Design doc, function/mainline/resource maps, red fixtures, and verify gates pass; implementation pending next round.
-    runtime: No install or live replay is required for the design-locked skeleton.
 - feature_id: v3.route_classifier_local_owner
   status: source_controlled_runtime_boundary_verified
   change_risk: critical
@@ -3570,7 +3414,7 @@ features:
   - The internal empty-attempt 502 keeps its real upstream HTTP status separate from the internal classification, never enters client payload or MetadataCenter, and never fabricates a client HTTP error or empty completion.
   required_gates:
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issuee63d2f2_ -- --nocapture --test-threads=1
-  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test responses_relay_mode_b_web_search_integration -- --nocapture
+
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issue0ff6700_ -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issuec1090f9_ -- --nocapture --test-threads=1
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox -- --nocapture
@@ -3742,7 +3586,8 @@ features:
   - Relay and Direct requests enter the same Front skeleton; the Front does not choose between them.
   - The accept skeleton does not parse provider business events or own routing, health, or retry.
   - A non-SSE inner response on an accepted SSE channel becomes an internal response-stage Error01-06 failure; it is never reinterpreted from payload bytes.
-  - A post-commit provider failure does not reroute or rebuild the current response; the lifecycle makes provider failure post-commit unreachable by withholding semantic commit until terminal success.
+  - A post-commit provider failure does not reroute or rebuild the current response; without first-frame commit the lifecycle makes provider failure post-commit unreachable by withholding semantic commit until terminal success, and with first-frame commit the committed channel ends silently without switching candidates or re-issuing the attempt.
+  - Delivered first-frame-commit frames are never rewritten, replaced, suppressed, or re-emitted; the ledger rejects whole-attempt rewrites after delivery.
   - Failed-attempt frames are discarded and cannot be concatenated with replacement-attempt frames.
   - New features cannot replace the accept channel, runtime worker, or projected-frame edge.
   required_gates:
@@ -4096,7 +3941,7 @@ features:
   - ReqOutbound07 is the unique producer of v3.operation_runner.attempt_declaration_map and records only tools actually emitted for this successful attempt
   - explicit_history_pairing is a registered typed resource written by ReqInbound02 and read by Req04, ReqOutbound07, and Resp03 for validation/pass-through only
   - request_origin_kind is an immutable invocation-scoped typed control resource keyed by [requestId, invocationId, originKind]; RuntimeRequestGraphEntry is the sole producer before every request graph invocation, normalize_request_losslessly is its only graph reader, storage is none, scope ends when the graph invocation returns, and RuntimeRequestFinalizer does not consume or release it
-  - request_inverse_context and explicit_history_pairing are request-scoped; they initialize only for client_entry, are preserved on retry/internal_followup, and release only at RuntimeRequestFinalizer
+  - request_inverse_context and explicit_history_pairing are request-scoped; they initialize only for client, are preserved on retry/refill, and release only at RuntimeRequestFinalizer
   - response_tool_binding is written by Resp03 for the new provider call returned in this successful attempt and read only by RespOutbound05
   - the response graph sink is v3.operation_runner.client_frame_candidate; the candidate is staged and never enters a client body directly
   - the legacy-named error graph sink v3.error.client_projection_candidate carries internal evidence only; Error06 never authorizes a model-client error candidate; Runtime consumes retry or terminal no-commit decisions and Server/SSE commits only success or aborts the affected transport
@@ -4109,15 +3954,15 @@ features:
   - fold operations declare input paths, registered operator@version, typed params, and one finalize operator/position
   - tool arguments/input are opaque complete values and are not reparsed as JSON mapping text
   - RespInbound02/Resp03/RespOutbound05 use only the successful attempt map and current response binding
-  - remote continuation is projection-only; no local continuation is introduced
+  - protocol remote continuation is projection-only; bounded Chat Process refill is a new Runtime request execution, not a remote continuation hop
   - semantic matrix partial/declared statuses are preserved, not relabeled as covered
   - canonical error_err02_classified classifies the typed source before error_err03_target_local_action; retired HostCaptured-era labels are not the executable chain
   - recoverable Error05 decisions skip Error06 and launch a new attempt outside the static DAG after attempt-only cleanup; Error06 accepts terminal decisions only
   - after all declared response rewrites, the whole attempt must retain visible text, tools, refusal, content_filter, or another independent business result before client commit; reasoning alone or deliberate non-client envelope removal leaving no deliverable content enters typed Error01 as provider_response_empty internal 502
-  - loss or processing failure of representable business content enters typed Error01 as internal 599; servertool_followup remains internal continuation and is not an empty client success or provider failure
+  - loss or processing failure of representable business content enters typed Error01 as internal 599; refill_requested remains internal continuation and is not an empty client success or provider failure
   - Direct/Relay, ToolThinking, inverse context, attempt projection, and response binding have one writer and declared readers
-  - servertool hop re-enters the same runner before client commit
-  - servertool_sidecar_plan is produced only by Resp03 when execution_disposition=servertool_followup, read only by RuntimeInternalFollowup, and released after sidecar execution before request re-entry
+  - a refill is a new execution that re-enters the same request mainline before client commit; the static DAG has no back-edge
+  - refill_continuation_signal is produced only by Resp03 when execution_disposition=refill_requested, read only by the Relay and Direct Runtime refill executors, and released after typed attempt cleanup before the new request execution
   - SSE is the only client projection/communication exit
   - the first node has two real Server callers: the four-protocol HTTP dispatcher and the Responses WebSocket message handler; both call the same Runtime capture operation before their mode dispatch
   - capture_client_json output is the same serde_json::Value and is adapted without payload changes into current Direct and protocol-specific Relay owners
@@ -4154,10 +3999,10 @@ features:
   - no graph node or staged candidate resource is defined as writing directly to a client body
   - no response graph node may write v3.response.client_payload or a Server/SSE frame as its own output
   - no Server/SSE frame node appears in allowed_readers of v3.operation_runner.client_frame_candidate or v3.error.client_projection_candidate
-  - no retry disposition is produced by Resp03; execution_disposition legal_values are exactly client_commit and servertool_followup
+  - no retry disposition is produced by Resp03; execution_disposition legal_values are exactly client_commit and refill_requested
   - no old current_attempt_declaration_map or request_history_pairing identifiers appear in the operation-runner design/map/lifecycle references owned by this feature
   - no cross-graph backedge or second runner re-enters an earlier graph before the current graph returns to its single sink
-  - retry and servertool intermediate outcomes go through the typed Error05/RuntimeInternalFollowup disposition and the single graph sink; no graph node or Server/SSE frame commits before the graph returns and RuntimeClientCommit consumes the staged candidate
+  - retry and refill intermediate outcomes go through the typed Error05 execution decision and the single graph sink; no graph node or Server/SSE frame commits before the graph returns and RuntimeClientCommit consumes the staged candidate
   - no graph node writes v3.operation_runner.request_origin_kind; no payload-carried origin marker or fallback shortcut replaces the typed invocation origin
   - capture_client_json reads or writes neither v3.operation_runner.metadata_center_control nor v3.operation_runner.request_origin_kind
   - missing capture_client_json@1 registration is rejected by DAGpipe compile and enters the typed ErrorErr01 path
@@ -4236,8 +4081,22 @@ features:
     - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_registry_govern_preserves_the_original_typed_error
     - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_govern_operator_consumes_sdk_input_not_captured_payload
     - resp_chat_process_03_governed::canonical_govern_registry_tests::canonical_govern_operator_uses_sdk_output_as_business_payload
+  refill_gate:
+    work_item: "66301e2"
+    public_tests:
+    - refill_limit_zero_public
+    - refill_default_exactly_two_public
+    - refill_limit_three_public
+    - refill_synthesized_summary_does_not_stop_public
+    - refill_error_chain_public
+    - refill_direct_relay_content_parity_public
+    - refill_default_one_second_request_red
+    - refill_summary_stops_public
+    - refill_tool_call_stops_public
+    command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox refill_ -- --test-threads=1 --nocapture
   required_gates:
   - npm run verify:v3-operation-runner-dagpipe
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox refill_ -- --test-threads=1 --nocapture
   - npm run test:v3-last-provider-policy
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib typed_planning_failure_is_sdk_error_and_keeps_original_source -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib protocol_candidate_keys_raise_only_actual_failures -- --nocapture
@@ -4307,3 +4166,49 @@ features:
     source: Complete when the faithful-text public HTTP cases, runtime and error tests, and affected map/resource/mainline gates pass on the exact candidate.
     runtime: No live claim is made without installed-binary restart and same-entry replay.
     forbidden_claim: Do not claim live closure from source tests alone.
+
+- feature_id: v3.responses_first_frame_commit
+  status: source_active_live_verification_required
+  change_risk: critical
+  owner_kind: rust_v3_runtime_direct_sse_first_frame_commit
+  owner_scope: Client-facing first committable business frame crossing the SSE channel before provider terminal, append-only continuation, terminal closeout of the remainder, and silent transport break after delivery.
+  owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/execution_control.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
+  contract:
+  - docs/architecture/dagpipe/graphs/responses-sse-client-frame-commit.graph.json
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
+  - docs/architecture/wiki/v3-client-sse-head-commit.md
+  required_positive:
+  - The first committable business frame (visible output_text that the Direct content probe certifies) crosses the client SSE channel at its provider arrival time, before the provider terminal. Reasoning-only and whitespace-only prefixes never commit, so an empty attempt still recovers through the typed Error chain.
+  - The client stream carries exactly the fully buffered bytes whenever the registered complete-attempt owner preserves the committed prefix; otherwise the transport breaks before any further byte is projected.
+  - The request-level predicate only filters which attempts carry the content probe; the DSML and thinking whole-attempt rewrites run for the whole attempt. A governed marker observed before the commit prevents it. After the commit the probe only suspends projection and the owner decides the whole attempt at the terminal, so protected business text (fenced or inline code, quoted text) is delivered unchanged and governed text never reaches the client.
+  - After delivery, provider failure records provider health for the attempted identity, switches no candidate, re-issues no attempt, and ends the committed transport as a 200 SSE body break without an error frame, keepalive, or normal chunked terminator.
+  - A failed pre-commit attempt is still discarded before any replacement attempt is exposed; residence expiry still terminates through the typed Error chain.
+  required_negative:
+  - No frame is delivered before the content probe certifies the attempt as ungoverned visible text; a marker split across provider frames, a marker that only appears in the terminal snapshot, and a trailing marker prefix or bare `>` close-residue line all block the commit.
+  - A delivered frame is never rewritten, replaced, suppressed, or re-emitted; the attempt builder rejects any whole-attempt rewrite that would change an already-delivered frame.
+  - Post-delivery failure cools only the attempted provider.model.key identity, does not mutate untried identities, and does not emit a success receipt.
+  - The keepalive comment does not count as a committable business frame and is not used to fabricate a first-token time.
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib first_frame_commit_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_committed_client_projection_removes_memory_from_delta_done_completed -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_direct_sse_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib client_sse_first_frame_channel_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib commit_probe
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test e041a3b_response_timeout -- --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test 849ed8f_governed_commit_public -- --test-threads=1
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-dagpipe-governance
+  - npm run verify:v3-mainline-caller-flow
+  - git diff --check
+  completion_boundary:
+    source_controlled: true
+    live_cutover: required
+    global_install_restart: required
+    live_evidence: required
+    dsh_review: required

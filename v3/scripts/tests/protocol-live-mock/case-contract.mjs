@@ -34,16 +34,55 @@ export function describeTurns(fixture) {
         : turn?.expected_provider_exact
           ? { ...laterTurnProviderShape(fixture.expected_provider ?? {}), exact: turn.expected_provider_exact }
           : (isFirst ? fixture.expected_provider : null),
+      providerExpectedExactAttempts: Array.isArray(turn?.expected_provider_exact_attempts)
+        ? turn.expected_provider_exact_attempts.map((body) => ({
+            ...laterTurnProviderShape(fixture.expected_provider ?? {}),
+            exact: body,
+          }))
+        : null,
+      providerExpectedByAttempt: providerExpectedByAttempt(fixture, turn, isFirst),
       clientExpected: describeClientExpected(fixture, turn, isFirst),
       upstream: isFirst
         ? (fixture.upstream_response ?? turn?.upstream_response ?? null)
         : (turn?.upstream_response ?? null),
-      declaredAttemptCount: isFirst && Number.isInteger(fixture.assertions?.provider_attempt_count)
-        ? fixture.assertions.provider_attempt_count
-        : null,
+      declaredAttemptCount: declaredAttemptCount(fixture, turn, isFirst),
     });
   }
   return turns;
+}
+
+function providerExpectedByAttempt(fixture, turn, isFirst) {
+  const declared = Array.isArray(turn?.expected_provider_by_attempt)
+    ? turn.expected_provider_by_attempt
+    : isFirst && Array.isArray(fixture.expected_provider_by_attempt)
+      ? fixture.expected_provider_by_attempt
+      : null;
+  return declared ? declared.filter((expected) => isPlainObject(expected)) : null;
+}
+
+function declaredAttemptCount(fixture, turn, isFirst) {
+  if (Number.isInteger(turn?.declared_attempt_count)) return turn.declared_attempt_count;
+  if (isFirst && Number.isInteger(fixture.assertions?.provider_attempt_count)) {
+    return fixture.assertions.provider_attempt_count;
+  }
+  return null;
+}
+
+export function providerExpectedForAttempt(turn, attemptIndex) {
+  const base = turn?.providerExpected ?? null;
+  const byAttempt = turn?.providerExpectedByAttempt;
+  if (Number.isInteger(attemptIndex) && attemptIndex >= 0) {
+    if (Array.isArray(byAttempt)) {
+      const override = byAttempt[attemptIndex];
+      if (isPlainObject(override)) return { ...(base ?? {}), ...override };
+    }
+    const exactAttempts = turn?.providerExpectedExactAttempts;
+    if (Array.isArray(exactAttempts)) {
+      const exact = exactAttempts[attemptIndex];
+      if (isPlainObject(exact)) return exact;
+    }
+  }
+  return base;
 }
 
 // A later turn's `expected_provider_exact` is the complete intended provider
@@ -84,6 +123,7 @@ function clientContractFields(value) {
     'status',
     'body_must_not',
     'semantic_terminal_required',
+    'semantic_terminal_count',
     'committed_business_stream',
   ]) {
     if (Object.prototype.hasOwnProperty.call(value, key)) fields[key] = value[key];

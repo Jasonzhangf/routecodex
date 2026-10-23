@@ -113,7 +113,7 @@ routing_group = "default"
 endpoints = ["responses"]
 [servers.main.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 [providers.primary]
 type = "responses"

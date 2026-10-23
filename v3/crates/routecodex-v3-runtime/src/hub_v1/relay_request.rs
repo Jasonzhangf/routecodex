@@ -2,10 +2,9 @@ use super::{
     build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02,
     build_v3_hub_req_inbound_01_client_raw,
     build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
-    govern_v3_servertool_request_at_req04, V3HubEntryProtocol, V3HubInvocationSource,
+    compile_v3_tool_thinking_turn_context_at_req04, V3HubEntryProtocol, V3HubInvocationSource,
     V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
     V3HubRequestSemanticProtocol, V3HubTransportIntent, V3ToolThinkingTurnContext,
-    V3WebSearchCenterState,
 };
 use crate::operation_runner::{run_v3_single_node_operator, V3OperationGraph};
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
@@ -16,40 +15,22 @@ use std::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum V3HubServertoolRequestProfile {
+pub enum V3HubRequestHookProfile {
     Disabled,
     Enabled {
-        hook_ids: Vec<&'static str>,
-        web_search_execution_mode: Option<routecodex_v3_config::V3WebSearchExecutionMode>,
         tool_thinking: bool,
         memory_raw_capture: bool,
     },
-    RequiredFailure(&'static str),
 }
-impl V3HubServertoolRequestProfile {
+impl V3HubRequestHookProfile {
     pub fn disabled() -> Self {
         Self::Disabled
     }
-    pub fn enabled<const N: usize>(hook_ids: [&'static str; N]) -> Self {
+    pub fn enabled() -> Self {
         Self::Enabled {
-            hook_ids: hook_ids.into(),
-            web_search_execution_mode: None,
             tool_thinking: false,
             memory_raw_capture: false,
         }
-    }
-    pub fn with_web_search_execution_mode(
-        mut self,
-        mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    ) -> Self {
-        if let Self::Enabled {
-            web_search_execution_mode,
-            ..
-        } = &mut self
-        {
-            *web_search_execution_mode = Some(mode);
-        }
-        self
     }
     pub fn with_tool_thinking_enabled(mut self, enabled: bool) -> Self {
         if let Self::Enabled { tool_thinking, .. } = &mut self {
@@ -84,20 +65,6 @@ impl V3HubServertoolRequestProfile {
             }
         )
     }
-    pub fn web_search_execution_mode(
-        &self,
-    ) -> Option<routecodex_v3_config::V3WebSearchExecutionMode> {
-        match self {
-            Self::Enabled {
-                web_search_execution_mode,
-                ..
-            } => *web_search_execution_mode,
-            Self::Disabled | Self::RequiredFailure(_) => None,
-        }
-    }
-    pub fn required_failure(hook_id: &'static str) -> Self {
-        Self::RequiredFailure(hook_id)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,8 +76,6 @@ pub enum V3HubRelayRequestHookEvent {
     Req04Entry,
     Req04ToolGoverned,
     Req04ProtocolToolIdentityGoverned,
-    Req04ServertoolGoverned,
-    ServertoolOptionalNoop,
     Req04Exit,
 }
 
@@ -126,12 +91,6 @@ pub enum V3HubRelayRequestError {
     ToolOutputKindMismatch { index: usize, call_id: String },
     #[error("current-turn payload boundary is invalid: start {start}, len {len}")]
     CurrentPayloadBoundaryInvalid { start: usize, len: usize },
-    #[error("required request hook failed: {hook_id}")]
-    RequiredHookFailed { hook_id: &'static str },
-    #[error("unknown static servertool request hook: {hook_id}")]
-    UnknownStaticHook { hook_id: &'static str },
-    #[error("web_search ServerTool surface activation failed at Req04: {reason}")]
-    WebSearchToolSurfaceActivationFailed { reason: String },
     #[error("tool-thinking schema is invalid: {reason}")]
     ToolThinkingSchemaInvalid { reason: String },
     #[error("memory raw capture guidance injection failed at Req04: {reason}")]
@@ -149,7 +108,6 @@ pub struct V3HubRelayRequestOutcome {
     governed: V3HubReqChatProcess04Governed,
     tool_output_count: usize,
     events: Vec<V3HubRelayRequestHookEvent>,
-    web_search_state: Option<V3WebSearchCenterState>,
     tool_thinking_enabled: bool,
     tool_thinking_turn_context: V3ToolThinkingTurnContext,
 }
@@ -169,9 +127,6 @@ impl V3HubRelayRequestOutcome {
     }
     pub fn tool_output_count(&self) -> usize {
         self.tool_output_count
-    }
-    pub fn web_search_state(&self) -> Option<&V3WebSearchCenterState> {
-        self.web_search_state.as_ref()
     }
     pub fn tool_thinking_enabled(&self) -> bool {
         self.tool_thinking_enabled
@@ -200,7 +155,6 @@ struct GovernChatRequestSideOutput {
     context: GovernChatRequestContext,
     events: Vec<V3HubRelayRequestHookEvent>,
     tool_output_count: usize,
-    web_search_state: Option<V3WebSearchCenterState>,
     tool_thinking_enabled: bool,
     tool_thinking_turn_context: V3ToolThinkingTurnContext,
 }
@@ -255,7 +209,7 @@ enum GovernChatRequestOperatorSideOutput {
 
 struct GovernChatRequestOperator {
     normalized: V3HubReqInbound02Normalized,
-    profile: V3HubServertoolRequestProfile,
+    profile: V3HubRequestHookProfile,
     events: Vec<V3HubRelayRequestHookEvent>,
     side_output: Arc<Mutex<Option<GovernChatRequestOperatorSideOutput>>>,
 }
@@ -307,7 +261,7 @@ impl Operator for GovernChatRequestOperator {
 
 fn govern_chat_request_at_req04(
     normalized: &mut V3HubReqInbound02Normalized,
-    profile: &V3HubServertoolRequestProfile,
+    profile: &V3HubRequestHookProfile,
     events: &mut Vec<V3HubRelayRequestHookEvent>,
 ) -> Result<Box<GovernChatRequestSideOutput>, V3HubRelayRequestError> {
     events.push(V3HubRelayRequestHookEvent::Req04Entry);
@@ -327,13 +281,9 @@ fn govern_chat_request_at_req04(
         })?;
         normalized.memory_raw_capture_guidance_injected = true;
     }
-    let (web_search_state, tool_thinking_turn_context) = govern_v3_servertool_request_at_req04(
+    let tool_thinking_turn_context = compile_v3_tool_thinking_turn_context_at_req04(
         Arc::make_mut(&mut normalized.previous.payload.0),
         current_payload_start,
-        events,
-        profile.web_search_execution_mode().is_some_and(
-            routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search,
-        ),
         profile.tool_thinking_enabled(),
     )?;
     if govern_protocol_tool_identity_at_req04(normalized.entry_protocol(), normalized.payload())? {
@@ -350,13 +300,11 @@ fn govern_chat_request_at_req04(
         current_payload_start,
     )?;
     events.push(V3HubRelayRequestHookEvent::Req04ToolGoverned);
-    run_servertool_profile(profile, events)?;
     events.push(V3HubRelayRequestHookEvent::Req04Exit);
     Ok(Box::new(GovernChatRequestSideOutput {
         context: GovernChatRequestContext::from_normalized(normalized),
         events: Vec::new(),
         tool_output_count,
-        web_search_state,
         tool_thinking_enabled: profile.tool_thinking_enabled(),
         tool_thinking_turn_context,
     }))
@@ -364,7 +312,7 @@ fn govern_chat_request_at_req04(
 
 fn run_govern_chat_request_through_sdk(
     normalized: V3HubReqInbound02Normalized,
-    profile: &V3HubServertoolRequestProfile,
+    profile: &V3HubRequestHookProfile,
     events: Vec<V3HubRelayRequestHookEvent>,
 ) -> Result<
     (
@@ -423,7 +371,7 @@ impl V3HubRelayRequestHooks {
     pub fn run(
         &self,
         raw: V3HubReqInbound01ClientRaw,
-        profile: &V3HubServertoolRequestProfile,
+        profile: &V3HubRequestHookProfile,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
         let mut events = vec![
             V3HubRelayRequestHookEvent::Req01Entry,
@@ -439,7 +387,7 @@ impl V3HubRelayRequestHooks {
     pub fn run_from_normalized(
         &self,
         normalized: V3HubReqInbound02Normalized,
-        profile: &V3HubServertoolRequestProfile,
+        profile: &V3HubRequestHookProfile,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
         self.run_from_normalized_with_events(normalized, profile, Vec::new())
     }
@@ -447,7 +395,7 @@ impl V3HubRelayRequestHooks {
     fn run_from_normalized_with_events(
         &self,
         normalized: V3HubReqInbound02Normalized,
-        profile: &V3HubServertoolRequestProfile,
+        profile: &V3HubRequestHookProfile,
         events: Vec<V3HubRelayRequestHookEvent>,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
         let (normalized, side_output) =
@@ -457,7 +405,6 @@ impl V3HubRelayRequestHooks {
             governed,
             tool_output_count: side_output.tool_output_count,
             events: side_output.events,
-            web_search_state: side_output.web_search_state,
             tool_thinking_enabled: side_output.tool_thinking_enabled,
             tool_thinking_turn_context: side_output.tool_thinking_turn_context,
         })
@@ -799,30 +746,6 @@ fn read_tool_call_name_at_req04(item: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn run_servertool_profile(
-    profile: &V3HubServertoolRequestProfile,
-    events: &mut Vec<V3HubRelayRequestHookEvent>,
-) -> Result<(), V3HubRelayRequestError> {
-    match profile {
-        V3HubServertoolRequestProfile::Disabled => {
-            events.push(V3HubRelayRequestHookEvent::ServertoolOptionalNoop);
-            Ok(())
-        }
-        V3HubServertoolRequestProfile::Enabled { hook_ids, .. } => {
-            for hook_id in hook_ids {
-                if *hook_id != "servertool.request" {
-                    return Err(V3HubRelayRequestError::UnknownStaticHook { hook_id });
-                }
-                events.push(V3HubRelayRequestHookEvent::Req04ServertoolGoverned);
-            }
-            Ok(())
-        }
-        V3HubServertoolRequestProfile::RequiredFailure(hook_id) => {
-            Err(V3HubRelayRequestError::RequiredHookFailed { hook_id })
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -879,7 +802,7 @@ mod tests {
     fn govern_chat_request_operator_consumes_sdk_input_not_captured_business_payload() {
         let captured = normalized_chat(tool_exchange_payload("captured payload"));
         let sdk_input = tool_exchange_payload("sdk input payload");
-        let profile = V3HubServertoolRequestProfile::enabled([]).with_tool_thinking_enabled(true);
+        let profile = V3HubRequestHookProfile::enabled().with_tool_thinking_enabled(true);
         let side_output = Arc::new(Mutex::new(None));
 
         let output = run_v3_single_node_operator(
@@ -930,55 +853,6 @@ mod tests {
                 V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned,
                 V3HubRelayRequestHookEvent::Req04ToolGoverned,
                 V3HubRelayRequestHookEvent::Req04Exit,
-            ]
-        );
-    }
-
-    #[test]
-    fn govern_chat_request_operator_keeps_typed_error_and_returns_err() {
-        let profile = V3HubServertoolRequestProfile::required_failure("servertool.request");
-        let side_output = Arc::new(Mutex::new(None));
-
-        let error = run_v3_single_node_operator(
-            V3OperationGraph::Request,
-            "govern_chat_request",
-            tool_exchange_payload("typed error"),
-            GovernChatRequestOperator {
-                normalized: normalized_chat(tool_exchange_payload("captured payload")),
-                profile,
-                events: Vec::new(),
-                side_output: side_output.clone(),
-            },
-        )
-        .expect_err("typed governance failure must not become a successful SDK output");
-
-        assert_eq!(
-            error.message,
-            V3HubRelayRequestError::RequiredHookFailed {
-                hook_id: "servertool.request"
-            }
-            .to_string()
-        );
-        let side_output = side_output
-            .lock()
-            .expect("side-output lock")
-            .take()
-            .expect("typed error side output");
-        let GovernChatRequestOperatorSideOutput::Failure(side_output) = side_output else {
-            panic!("failed SDK execution must expose the original typed error");
-        };
-        assert_eq!(
-            side_output.error,
-            V3HubRelayRequestError::RequiredHookFailed {
-                hook_id: "servertool.request"
-            }
-        );
-        assert_eq!(
-            side_output.events,
-            vec![
-                V3HubRelayRequestHookEvent::Req04Entry,
-                V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned,
-                V3HubRelayRequestHookEvent::Req04ToolGoverned,
             ]
         );
     }

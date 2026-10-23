@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { HARNESS_ID, SOURCE_REPO, SOURCE_SHA, inspectCorpus } from './protocol-live-mock/corpus.mjs';
 import { MockProviderError, startMockProvider } from './protocol-live-mock/mock-provider.mjs';
 import { assertProviderCaptures } from './protocol-live-mock/assertions.mjs';
-import { describeTurns } from './protocol-live-mock/case-contract.mjs';
+import { describeTurns, providerExpectedForAttempt } from './protocol-live-mock/case-contract.mjs';
 import {
   captureRuntimeIdentity, generateRccConfig, sendHttp, startRcc, stopRcc,
 } from './protocol-live-mock/lifecycle.mjs';
@@ -157,7 +157,8 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
     try {
       mock = await startMockProvider({
         validateRequest(capture, fixture, turnIndex) {
-          const expected = describeTurns(fixture)[turnIndex]?.providerExpected;
+          const turn = describeTurns(fixture)[turnIndex];
+          const expected = providerExpectedForAttempt(turn, capture?.attempt ?? 0);
           if (!expected) return;
           const result = assertProviderCaptures([capture], 0, expected, {
             providerProtocol: fixture.cell.provider_protocol,

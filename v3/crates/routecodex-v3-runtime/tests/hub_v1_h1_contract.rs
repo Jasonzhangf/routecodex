@@ -46,7 +46,6 @@ fn published_manifest() -> V3Config05ManifestPublished {
                 order,
                 allowed_resources: vec!["metadata_center".to_string()],
                 forbidden_resources: vec![],
-                profile: None,
             });
             order += 1;
         }

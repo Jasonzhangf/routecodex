@@ -88,13 +88,105 @@
         ],
         "stream": false
       },
+      "expected_provider_exact_attempts": [
+        {
+          "model": "chat-model",
+          "messages": [
+            {
+              "role": "user",
+              "content": "go"
+            },
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_ns_1",
+                  "type": "function",
+                  "function": {
+                    "name": "collaboration__spawn_agent",
+                    "arguments": "{\"message\":\"do work\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_ns_1",
+              "content": "local namespace mock recorded: do work"
+            }
+          ],
+          "stream": false
+        },
+        {
+          "model": "chat-model",
+          "messages": [
+            {
+              "role": "user",
+              "content": "go"
+            },
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_ns_1",
+                  "type": "function",
+                  "function": {
+                    "name": "collaboration__spawn_agent",
+                    "arguments": "{\"message\":\"do work\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_ns_1",
+              "content": "local namespace mock recorded: do work"
+            },
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "done"
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。"
+                }
+              ]
+            }
+          ],
+          "stream": false
+        }
+      ],
       "upstream_response": {
         "protocol": "openai_chat",
         "mode": "json",
         "status": 200,
         "content_type": "application/json",
-        "body": {"id": "chatcmpl_ns_mock_followup", "object": "chat.completion", "choices": [{"index": 0, "message": {"role": "assistant", "content": "done"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13}}
+        "body": {"id": "chatcmpl_ns_mock_followup", "object": "chat.completion", "choices": [{"index": 0, "message": {"role": "assistant", "content": "done"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13}},
+    "attempts": [
+      {
+            "protocol": "openai_chat",
+            "mode": "json",
+            "status": 200,
+            "content_type": "application/json",
+            "body": {"id": "chatcmpl_ns_mock_followup", "object": "chat.completion", "choices": [{"index": 0, "message": {"role": "assistant", "content": "done"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13}}
       },
+      {
+            "protocol": "openai_chat",
+            "mode": "json",
+            "status": 200,
+            "content_type": "application/json",
+            "body": {"id": "chatcmpl_ns_mock_followup", "object": "chat.completion", "choices": [{"index": 0, "message": {"role": "assistant", "content": "done"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13}}
+      }
+    ]
+  },
       "expected_client_contract": {
         "transport": "complete",
         "status": 200,

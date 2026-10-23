@@ -258,8 +258,6 @@ fn test_v3_listener_state_with_debug(
                 && !manifest.debug.full_codex_sampling
                 && !manifest.debug.codex_samples,
         )),
-        responses_direct_server_tool_state: Arc::new(V3ResponsesDirectServerToolState::default()),
-        responses_relay_server_tool_state: Arc::new(V3ResponsesRelayServerToolState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
@@ -616,7 +614,6 @@ fn relay_consumers_preserve_sources_without_observation_or_attempts() {
         client_body: routecodex_v3_runtime::V3AnthropicRelayClientBody::Json,
         node_trace: Vec::new(),
         error_chain: None,
-        servertool_followup_required: false,
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
@@ -1466,6 +1463,62 @@ async fn codex_sample_final_body_capture_persists_drop_prefix_with_stream_error(
 }
 
 #[tokio::test]
+async fn codex_sample_final_body_capture_follows_transport_break_replacement() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-final-body-break-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        5555,
+        true,
+        true,
+        Some("client-response".to_string()),
+        true,
+    );
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let request_id = "final-body-break";
+    let capture = test_final_body_sse_capture(&state, request_id);
+    // A post-commit attempt has no client payload: the transport breaks and the
+    // server replaces the outcome response with the break response.
+    let response = capture.defer_into(model_no_response_output(true));
+    let response = commit_model_transport_outcome(&state, None, response);
+    let response = observe_v3_live_client_wire(response);
+    let mut body = response.into_body().into_data_stream();
+    assert_eq!(
+        body.next().await.unwrap().unwrap().as_ref(),
+        b":\n\n",
+        "the client observes the transport break head"
+    );
+    body.next()
+        .await
+        .expect("transport break must stay visible")
+        .expect_err("transport break must not become a clean EOF");
+    assert!(body.next().await.is_none());
+
+    sample_worker.wait_until_idle().await.unwrap();
+    let response_path =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/final-body-break/response.json");
+    let persisted: Value =
+        serde_json::from_str(&fs::read_to_string(response_path).unwrap()).unwrap();
+    assert_eq!(
+        persisted["rawSse"].as_str(),
+        Some(":\n\n"),
+        "the sample must record the bytes the client receives after the replacement"
+    );
+    assert!(persisted["streamError"]
+        .as_str()
+        .is_some_and(|error| error.contains("provider pool exhausted")));
+
+    sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn codex_sample_final_body_capture_write_failure_does_not_change_sse_wire() {
     let _home_lock = TEST_HOME_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(
@@ -1648,7 +1701,6 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
         client_body: V3AnthropicRelayClientBody::Json,
         node_trace: vec!["V3Resp03ToolReason"],
         error_chain: None,
-        servertool_followup_required: false,
         diagnostic_source: None,
         diagnostic_cause: None,
         provider_failure_attempts: Vec::new(),
@@ -3006,64 +3058,7 @@ fn responses_control_scope_prefers_explicit_headers_over_codex_turn_metadata() {
 }
 
 #[test]
-fn responses_server_tool_scope_ignores_plugin_session_without_typed_conversation() {
-    let mut headers = HeaderMap::new();
-    headers.insert("session_id", HeaderValue::from_static("plugin-session"));
-    headers.insert(
-        "x-client-request-id",
-        HeaderValue::from_static("plugin-request"),
-    );
-
-    let scope = request_local_server_tool_scope(&headers, None, false, "req-fresh")
-        .expect("fresh request must not require a conversation header");
-
-    assert_eq!(
-        scope,
-        (
-            "request:req-fresh".to_string(),
-            "request:req-fresh".to_string()
-        )
-    );
-}
-
-#[test]
-fn responses_server_tool_scope_accepts_body_client_metadata_as_fallback() {
-    let headers = HeaderMap::new();
-    let payload = json!({
-        "input":[{"type":"function_call_output","call_id":"call-1","output":"{\"ok\":true}"}],
-        "client_metadata":{"session_id":"zcode-session","thread_id":"zcode-thread"}
-    });
-
-    let scope = request_local_server_tool_scope(&headers, Some(&payload), true, "req-body-scope")
-        .expect("body client_metadata must construct server tool scope as a fallback");
-
-    assert_eq!(
-        scope,
-        ("zcode-session".to_string(), "zcode-thread".to_string())
-    );
-}
-
-#[test]
-fn responses_server_tool_scope_prefers_headers_over_body_client_metadata() {
-    let mut headers = HeaderMap::new();
-    headers.insert("session-id", HeaderValue::from_static("header-session"));
-    headers.insert("thread-id", HeaderValue::from_static("header-thread"));
-    let payload = json!({
-        "previous_response_id":"resp-1",
-        "client_metadata":{"session_id":"body-session","thread_id":"body-thread"}
-    });
-
-    let scope = request_local_server_tool_scope(&headers, Some(&payload), true, "req-precedence")
-        .expect("typed control headers must keep precedence over body client_metadata");
-
-    assert_eq!(
-        scope,
-        ("header-session".to_string(), "header-thread".to_string())
-    );
-}
-
-#[test]
-fn responses_paired_function_outputs_are_not_server_tool_scope() {
+fn responses_paired_function_outputs_allow_fresh_protocol_plan() {
     let payload = json!({
         "input": [
             {"type": "function_call", "call_id": "call-1", "name": "tool", "arguments": "{}"},
@@ -4753,8 +4748,6 @@ fn error_projection_appends_human_console_failure_line() {
             routecodex_v3_config::internal::v3_error_samples_only()
                 && !manifest.debug.full_codex_sampling,
         )),
-        responses_direct_server_tool_state: Arc::new(V3ResponsesDirectServerToolState::default()),
-        responses_relay_server_tool_state: Arc::new(V3ResponsesRelayServerToolState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
@@ -5327,7 +5320,6 @@ async fn anthropic_relay_output_consumes_typed_sealed_sse_body() {
         provider_failure_attempts: Vec::new(),
         node_trace: vec!["V3ServerRespOutbound06ClientFrame"],
         error_chain: None,
-        servertool_followup_required: false,
         observability: None,
         stream_observation: None,
         provider_snapshots: None,

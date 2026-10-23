@@ -38,8 +38,6 @@ const STEPS = [
   ['verify:v3-entry-protocol-endpoint-binding', 'V3 entry protocol/endpoint binding'],
   ['verify:v3-stage-protocol-shapes', 'Direct same-protocol and Relay per-stage protocol shape contract'],
   ['test:v3-stage-protocol-shapes-red-fixtures', 'Stage-shape contract mutations are rejected'],
-  ['verify:v3-relay-tool-servertool-multiturn-parity-closeout', 'Req04/Resp03 tool governance preserves restored history and current-turn ownership'],
-  ['test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures', 'Historical payload rewrite and wrong-owner tool mutations are rejected'],
   ['test:v3-selected-provider-model-binding-red-fixtures', 'Selected provider/model binding mutations are rejected'],
   ['verify:v3-protocol-conversion-field-parity-ci', 'V3 protocol conversion parity aggregate gate'],
   ['test:v3-normalization-payload-logic-boundary-red-fixtures', 'Normalization boundary mutations are rejected'],

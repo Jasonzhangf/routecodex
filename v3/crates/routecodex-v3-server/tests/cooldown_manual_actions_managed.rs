@@ -114,6 +114,9 @@ impl Managed {
     ) -> Self {
         std::env::set_var("V3_COOLDOWN_MANUAL_TEST_KEY", "controlled-secret");
         std::env::remove_var("ROUTECODEX_V3_ADMIN_BIND");
+        // These cases count upstream attempts and health probes, so the Chat
+        // Process continuation must not add an extra execution.
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
         let home = temp_home(label);
         let previous_home = env::var_os("HOME");
         env::set_var("HOME", &home);

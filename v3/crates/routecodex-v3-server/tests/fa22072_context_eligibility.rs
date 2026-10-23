@@ -91,6 +91,9 @@ impl Drop for TestHomeGuard {
 }
 
 fn eligible_manifest(provider_base_url: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
+    // This case counts upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let source = format!(
         r#"
 version = 3

@@ -1,7 +1,7 @@
 use serde_json::{Map, Value};
 
-const THINKING_OPEN: &str = "<thinking>";
-const THINKING_CLOSE: &str = "</thinking>";
+pub(crate) const THINKING_OPEN: &str = "<thinking>";
+pub(crate) const THINKING_CLOSE: &str = "</thinking>";
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct V3ThinkingTagTextProjection {

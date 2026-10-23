@@ -244,6 +244,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                 None,
                 None,
                 None,
+                None,
                 V3RequestPurpose::Conversation,
             )
             .await;
@@ -341,23 +342,6 @@ pub(crate) async fn execute_responses_relay_websocket_output(
     payload: Value,
     protocol_plan: Option<&V3ResponsesProtocolExecutionPlan>,
 ) -> V3ResponsesDirectServerOutcome {
-    let server_tool_scope = match build_responses_relay_server_tool_scope(
-        headers,
-        Some(&payload),
-        &request_id,
-        &state.server,
-        "/v1/responses",
-    ) {
-        Ok(scope) => scope,
-        Err(message) => {
-            return V3ResponsesDirectServerOutcome::RelayOutput(
-                project_v3_responses_relay_runtime_failure(
-                    V3ResponsesRelayRuntimeError::ProviderWireEncoding(message),
-                    None,
-                ),
-            );
-        }
-    };
     let provider_failure_session_scope =
         match get_failure_session_scope(&state.server, headers, &request_id) {
             Ok(scope) => scope,
@@ -378,12 +362,10 @@ pub(crate) async fn execute_responses_relay_websocket_output(
     };
     let output = match protocol_plan {
         Some(plan) => {
-            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+            execute_v3_responses_relay_runtime_with_default_transport_health(
                 &state.manifest,
                 input,
                 &state.provider_health,
-                &state.responses_relay_server_tool_state,
-                server_tool_scope,
                 V3ResponsesRelayProviderSnapshotCapture::new(false, false),
                 None,
                 None,
@@ -395,12 +377,10 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             .await
         }
         None => {
-            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+            execute_v3_responses_relay_runtime_with_default_transport_health(
                 &state.manifest,
                 input,
                 &state.provider_health,
-                &state.responses_relay_server_tool_state,
-                server_tool_scope,
                 V3ResponsesRelayProviderSnapshotCapture::new(false, false),
                 None,
                 None,
@@ -440,6 +420,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             Some(&handoff.plan),
             Some(handoff.observability_accumulator),
             Some(request_execution_control),
+            None,
             None,
             None,
             V3RequestPurpose::Conversation,

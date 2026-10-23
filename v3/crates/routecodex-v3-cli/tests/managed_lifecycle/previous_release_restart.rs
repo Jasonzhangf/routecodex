@@ -54,7 +54,11 @@ pub(super) fn start_previous_release(
     };
     let deadline = Instant::now() + PORT_STATE_TIMEOUT;
     while TcpStream::connect(("127.0.0.1", port)).is_err() {
-        assert!(runtime.child.try_wait().unwrap().is_none());
+        assert!(
+            runtime.child.try_wait().unwrap().is_none(),
+            "previous release runtime exited before listening on {port}: {}",
+            fs::read_to_string(root.path().join("previous-runtime.log")).unwrap_or_default()
+        );
         assert!(Instant::now() < deadline);
         sleep(Duration::from_millis(20));
     }

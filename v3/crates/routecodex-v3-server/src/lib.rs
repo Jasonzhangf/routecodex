@@ -103,9 +103,9 @@ use routecodex_v3_runtime::{
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
-    execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state,
+    execute_v3_responses_relay_dry_run_orchestration_outcome,
     execute_v3_responses_relay_runtime_with_default_transport,
-    execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state,
+    execute_v3_responses_relay_runtime_with_default_transport_health,
     foundation_output_from_error_sdk_result,
     plan_v3_responses_protocol_execution_with_provider_health,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
@@ -121,15 +121,14 @@ use routecodex_v3_runtime::{
     V3OpenAiChatClientStream, V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody,
     V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3ProviderHealthListenerScope,
     V3RelayProviderSnapshots, V3RequestExecutionControl, V3Resp15ClientPayload,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
-    V3ResponsesDirectServerToolState, V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody,
-    V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
+    V3ResponsesDirectRuntimeSharedState, V3ResponsesProtocolExecutionPlan,
+    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
     V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
     V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
-    V3ResponsesRelayRuntimeSeeds, V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState,
-    V3RuntimeObservability, V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
-    V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
-    V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
+    V3ResponsesRelayRuntimeSeeds, V3RuntimeObservability, V3RuntimeObservabilityAccumulator,
+    V3RuntimeProviderFailureEventSink, V3RuntimeProviderFailureObservation,
+    V3RuntimeRouteSelectionEventSink, V3RuntimeStreamObservation, V3RuntimeTimingSummary,
+    V3RuntimeUsageSummary,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -193,8 +192,6 @@ struct V3ListenerState {
     sse_dump_enabled: bool,
     request_counter: Arc<Mutex<V3RequestIdCounter>>,
     codex_sample_store: Arc<routecodex_v3_debug::V3CodexSampleStore>,
-    responses_direct_server_tool_state: Arc<V3ResponsesDirectServerToolState>,
-    responses_relay_server_tool_state: Arc<V3ResponsesRelayServerToolState>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeMap<String, u64>>>,
     responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
@@ -483,20 +480,6 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     admin_config_path: Option<std::path::PathBuf>,
     hooks_sidecar_socket: Option<PathBuf>,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
-    if hooks_sidecar_socket.is_none()
-        && manifest.providers.values().any(|provider| {
-            provider.models.values().any(|model| {
-                model
-                    .web_search_execution_mode
-                    .is_metadata_center_local_search()
-            })
-        })
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "web_search metadata_center_local_search requires a hooks sidecar socket",
-        ));
-    }
     let sse_dump_enabled = v3_sse_dump_env_flag();
     let console_enabled = manifest.debug.log_console;
     let debug_manifest = manifest.debug.clone();
@@ -518,13 +501,6 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             );
         }
     }
-    let responses_direct_server_tool_state = Arc::new(
-        V3ResponsesDirectServerToolState::default()
-            .with_hooks_sidecar_socket(hooks_sidecar_socket.clone()),
-    );
-    let responses_relay_server_tool_state = Arc::new(
-        V3ResponsesRelayServerToolState::default().with_hooks_sidecar_socket(hooks_sidecar_socket),
-    );
     let codex_sample_store = Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
         manifest.debug.codex_samples,
         routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
@@ -652,8 +628,6 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                 sse_dump_enabled,
                 request_counter: Arc::clone(&request_counter),
                 codex_sample_store: codex_sample_store.clone(),
-                responses_direct_server_tool_state: responses_direct_server_tool_state.clone(),
-                responses_relay_server_tool_state: responses_relay_server_tool_state.clone(),
                 provider_health: listener_provider_health,
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
                 responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
@@ -1276,6 +1250,17 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
         || (entry_protocol == "gemini" && path.ends_with(":streamGenerateContent")))
     .then_some(Duration::from_millis(state.server.http_sse_keepalive_ms))
     .filter(|interval| !interval.is_zero());
+    // The runtime owns the commit point: it hands over the first real business
+    // frame of a Direct SSE attempt, and the client channel emits those bytes
+    // while the provider attempt is still running. A request that never commits
+    // leaves this channel empty, so the transport behaves exactly as before.
+    let (client_frame_sink, client_frame_receiver) = match client_sse_channel {
+        Some(_) => {
+            let (sink, receiver) = routecodex_v3_runtime::V3CommittedClientFrameSink::channel();
+            (Some(sink), Some(receiver))
+        }
+        None => (None, None),
+    };
     let runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>> =
         Box::pin(pending_endpoint_after_responses_admission(
             Arc::clone(&state),
@@ -1288,13 +1273,20 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
             execution_mode,
             pending_owner_symbol,
             request_purpose,
+            client_frame_sink,
             payload,
         ));
     let response = match client_sse_channel {
         Some(keepalive_interval) => {
             let outcome_state = Arc::clone(&state);
+            // The committed channel owns the response head, so the client-response
+            // sample recorder cannot travel through the runtime outcome response.
+            // The channel hands it to this slot and the boundary reads it here.
+            let client_wire_capture = client_response_wire_capture_enabled(&state)
+                .then(V3LiveSnapClientWireCaptureSlot::new);
             accept_v3_client_sse_transport(
                 runtime_outcome,
+                client_frame_receiver,
                 Box::new(move |outcome| {
                     commit_model_transport_outcome(
                         &outcome_state,
@@ -1303,6 +1295,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                     )
                 }),
                 keepalive_interval,
+                client_wire_capture,
             )
             .await
         }
@@ -1310,10 +1303,24 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
     };
     let response =
         hold_response_body_request_activity_permit(response, request_activity_permit, front_socket);
-    match admission_permit {
+    let response = match admission_permit {
         Some(permit) => hold_response_body_admission_permit(response, permit),
         None => response,
-    }
+    };
+    // The client-response sample must record the wire the client receives, so the
+    // recorder wraps the final body after every transport owner has framed it.
+    observe_v3_live_client_wire(response)
+}
+
+/// Whether this request can produce a client-response sample.
+///
+/// The transport boundary wraps the final client wire only when a sample can be
+/// recorded, so an unsampled request pays no per-chunk capture cost.
+fn client_response_wire_capture_enabled(state: &V3ListenerState) -> bool {
+    state.debug.should_capture_snapshot_stage("client-response")
+        || state
+            .debug
+            .should_capture_snapshot_stage("provider-response")
 }
 
 /// v3.protocol.pending_projection：尚未实现协议绑定的客户端响应统一由

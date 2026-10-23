@@ -91,6 +91,7 @@ pub(crate) fn pending_endpoint_after_responses_admission(
     execution_mode: V3EntryProtocolExecutionMode,
     pending_owner_symbol: Option<String>,
     request_purpose: V3RequestPurpose,
+    client_frame_sink: Option<routecodex_v3_runtime::V3CommittedClientFrameSink>,
     payload: Value,
 ) -> std::pin::Pin<Box<impl std::future::Future<Output = Response<Body>> + Send>> {
     // Avoid a second poll frame for the large protocol-dispatch future.
@@ -105,6 +106,7 @@ pub(crate) fn pending_endpoint_after_responses_admission(
         execution_mode,
         pending_owner_symbol,
         request_purpose,
+        client_frame_sink,
         payload,
     ))
 }
@@ -120,6 +122,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     mut execution_mode: V3EntryProtocolExecutionMode,
     pending_owner_symbol: Option<String>,
     request_purpose: V3RequestPurpose,
+    client_frame_sink: Option<routecodex_v3_runtime::V3CommittedClientFrameSink>,
     payload: Value,
 ) -> Response<Body> {
     let client_keepalive_interval = Some(Duration::from_millis(state.server.http_sse_keepalive_ms));
@@ -418,26 +421,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         .await;
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-        let server_tool_scope = match build_responses_relay_server_tool_scope(
-            &request_headers,
-            Some(&payload),
-            &request_id,
-            &state.server,
-            &path,
-        ) {
-            Ok(scope) => scope,
-            Err(message) => {
-                return error_output_response_for_responses_request_with_project_path(
-                    &state.server,
-                    &path,
-                    &request_id,
-                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                    &request_headers,
-                    Some(&payload),
-                    request_console_project_path.as_deref(),
-                );
-            }
-        };
         let console_payload = payload.clone();
         let runtime_input = V3ResponsesRelayRuntimeInput {
             server_id: state.server.id.clone(),
@@ -460,19 +443,19 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         // snapshot stages are disabled. Successful requests still persist only
         // explicitly enabled intermediate stages.
         let plan = responses_protocol_plan.as_ref();
-        let mut output = match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+        let mut output = match execute_v3_responses_relay_runtime_with_default_transport_health(
             &state.manifest,
             runtime_input,
             &state.provider_health,
-            &state.responses_relay_server_tool_state,
-            server_tool_scope.clone(),
             V3ResponsesRelayProviderSnapshotCapture::new(true, true),
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
             plan.map(|plan| plan.decision.target.clone()),
             plan.map(|plan| plan.expanded.clone()),
             BTreeSet::new(),
-            plan.map_or_else(V3ResponsesRelayRuntimeSeeds::default, |plan| plan.relay_runtime_seeds()),
+            plan.map_or_else(V3ResponsesRelayRuntimeSeeds::default, |plan| {
+                plan.relay_runtime_seeds()
+            }),
         )
         .await
         {
@@ -557,6 +540,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 Some(handoff.request_execution_control),
                 Some(provider_failure_event_sink.clone()),
                 Some(route_selection_event_sink.clone()),
+                client_frame_sink.clone(),
                 request_purpose,
             )
             .await;
@@ -623,7 +607,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         client_keepalive_interval,
                     );
                     return match client_response_capture {
-                        Some(capture) => capture.observe_response(response),
+                        Some(capture) => capture.defer_into(response),
                         None => response,
                     };
                 }
@@ -739,6 +723,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             None,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
+            client_frame_sink,
             request_purpose,
         )
         .await;
@@ -832,7 +817,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     client_keepalive_interval,
                 );
                 match client_response_capture {
-                    Some(capture) => capture.observe_response(response),
+                    Some(capture) => capture.defer_into(response),
                     None => response,
                 }
             }
@@ -1091,70 +1076,47 @@ fn execute_v3_provider_request_dry_run_branch<'a>(
             return foundation_output_response(output);
         }
         if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-            let server_tool_scope = match build_responses_relay_server_tool_scope(
-                request_headers,
-                Some(&payload),
-                &request_id,
-                &state.server,
-                &path,
-            ) {
-                Ok(scope) => scope,
-                Err(message) => {
-                    return error_output_response_for_responses_request_with_project_path(
-                        &state.server,
-                        &path,
-                        &request_id,
-                        project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                        request_headers,
-                        Some(&payload),
-                        request_console_project_path,
+            let output = match execute_v3_responses_relay_dry_run_orchestration_outcome(
+                &state.manifest,
+                V3ResponsesRelayRuntimeInput {
+                    server_id: state.server.id.clone(),
+                    failure_session_scope: provider_failure_session_scope,
+                    request_id: request_id.clone(),
+                    payload: payload.clone(),
+                },
+            )
+            .await
+            {
+                V3ResponsesRelayDryRunOutcome::Foundation(output) => output,
+                V3ResponsesRelayDryRunOutcome::DirectHandoff(handoff) => {
+                    let fixture = V3DryRunFixture {
+                        fixture_id: request_id.clone(),
+                        server_id: state.server.id.clone(),
+                        method: method.clone(),
+                        path: path.clone(),
+                        request_payload: handoff.request_payload,
+                        response_payload: json!({
+                            "object": "response",
+                            "status": "completed",
+                            "output_text": "routecodex provider-request dry-run stopped before provider send",
+                            "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
+                        }),
+                    };
+                    let mut output =
+                        execute_v3_responses_direct_dry_run_runtime_with_initial_target(
+                            fixture,
+                            &state.manifest,
+                            &state.debug,
+                            &handoff.plan,
+                        )
+                        .await;
+                    prepend_v3_protocol_plan_trace_to_foundation_output(
+                        &mut output,
+                        &handoff.node_trace,
                     );
+                    output
                 }
             };
-            let output =
-                match execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state(
-                    &state.manifest,
-                    V3ResponsesRelayRuntimeInput {
-                        server_id: state.server.id.clone(),
-                        failure_session_scope: provider_failure_session_scope,
-                        request_id: request_id.clone(),
-                        payload: payload.clone(),
-                    },
-                    &state.responses_relay_server_tool_state,
-                    server_tool_scope,
-                )
-                .await
-                {
-                    V3ResponsesRelayDryRunOutcome::Foundation(output) => output,
-                    V3ResponsesRelayDryRunOutcome::DirectHandoff(handoff) => {
-                        let fixture = V3DryRunFixture {
-                            fixture_id: request_id.clone(),
-                            server_id: state.server.id.clone(),
-                            method: method.clone(),
-                            path: path.clone(),
-                            request_payload: handoff.request_payload,
-                            response_payload: json!({
-                                "object": "response",
-                                "status": "completed",
-                                "output_text": "routecodex provider-request dry-run stopped before provider send",
-                                "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
-                            }),
-                        };
-                        let mut output =
-                            execute_v3_responses_direct_dry_run_runtime_with_initial_target(
-                                fixture,
-                                &state.manifest,
-                                &state.debug,
-                                &handoff.plan,
-                            )
-                            .await;
-                        prepend_v3_protocol_plan_trace_to_foundation_output(
-                            &mut output,
-                            &handoff.node_trace,
-                        );
-                        output
-                    }
-                };
             let raw_input_items = payload
                 .get("input")
                 .and_then(Value::as_array)
@@ -1460,7 +1422,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                 requested_stream,
             );
             return match client_response_capture {
-                Some(capture) => capture.observe_response(response),
+                Some(capture) => capture.defer_into(response),
                 None => response,
             };
         }
@@ -1604,7 +1566,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
             );
             let response = anthropic_relay_output_response(output, requested_stream);
             return match client_response_capture {
-                Some(capture) => capture.observe_response(response),
+                Some(capture) => capture.defer_into(response),
                 None => response,
             };
         }
@@ -1715,7 +1677,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                 requested_stream,
             );
             return match client_response_capture {
-                Some(capture) => capture.observe_response(response),
+                Some(capture) => capture.defer_into(response),
                 None => response,
             };
         }

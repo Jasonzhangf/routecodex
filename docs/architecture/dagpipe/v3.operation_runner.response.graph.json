@@ -1,7 +1,7 @@
 {
   "id": "v3.operation_runner.response",
   "version": "1",
-  "description": "0e129d0: normalize and inverse-project terminal semantics losslessly. An explicit non-stop, incomplete or unknown reason never becomes stop. A genuine original Responses normal completion may map to the Chat protocol's normal terminal when the target protocol requires it; canonical lifecycle status, payload content and transport end are not completion witnesses. A native Chat response with a missing reason stays missing. Every complete buffered attempt, including Chat JSON and materialized SSE, runs post-governance deliverability admission before client projection. Empty and unharvestable governance failures retain their typed identity across the Relay codec/core boundary into the separate Error chain. Actual failures preserve source/cause/status and exit through the separate typed Error chain for candidate recovery, never client success. Observation is read-only and must not overwrite actual reasons.",
+  "description": "0e129d0: normalize and inverse-project terminal semantics losslessly. An explicit non-stop, incomplete or unknown reason never becomes stop. A genuine original Responses normal completion may map to the Chat protocol's normal terminal when the target protocol requires it; canonical lifecycle status, payload content and transport end are not completion witnesses. A native Chat response with a missing reason stays missing. Every complete buffered attempt, including Chat JSON and materialized SSE, runs post-governance deliverability admission before client projection. Empty and unharvestable governance failures retain their typed identity across the Relay codec/core boundary into the separate Error chain. Actual failures preserve source/cause/status and exit through the separate typed Error chain for candidate recovery, never client success. Observation is read-only and must not overwrite actual reasons. The Chat Process execution disposition carries client_commit or refill_requested; refill_requested launches a new Runtime execution through the normal request mainline and this static response DAG has no back-edge.",
   "inputs": [
     { "id": "provider-raw", "schema": "Object", "schema_ref": "v3.operation_runner.arc.provider_raw" }
   ],
@@ -45,7 +45,7 @@
       "iterator": "Whole",
       "resources": {
         "reads": ["v3.operation_runner.attempt_declaration_map", "v3.operation_runner.explicit_history_pairing", "v3.operation_runner.response_provenance", "v3.operation_runner.tool_thinking_turn_context"],
-        "writes": ["v3.operation_runner.response_tool_binding", "v3.operation_runner.execution_disposition", "v3.operation_runner.servertool_sidecar_plan"]
+        "writes": ["v3.operation_runner.response_tool_binding", "v3.operation_runner.execution_disposition"]
       }
     },
     {

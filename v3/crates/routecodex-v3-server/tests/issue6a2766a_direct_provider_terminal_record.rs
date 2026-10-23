@@ -98,7 +98,7 @@ endpoints = ["responses"]
 
 [servers.owned.execution]
 allowed_modes = ["direct"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.inxk]

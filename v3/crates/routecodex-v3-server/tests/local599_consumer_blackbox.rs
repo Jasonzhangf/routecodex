@@ -13,7 +13,7 @@
 //! `ProviderResponsesTransport` performs the real HTTP round trip, the shared
 //! transport handoff broker is the real control resource that rejects an
 //! illegal attempt-state transition, and the public Runtime
-//! `execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state`
+//! `execute_v3_responses_relay_runtime_with_transport_health`
 //! is the consumer entry. Nothing mocks the Error exit and no product fault
 //! switch or injection framework is used. The only test-owned component is a
 //! single transport wrapper that drives one genuine broker transition per
@@ -49,9 +49,8 @@ use routecodex_v3_provider_responses::{
     V3ProviderTransportAttemptState,
 };
 use routecodex_v3_runtime::{
-    execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state,
-    V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
-    V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState,
+    execute_v3_responses_relay_runtime_with_transport_health, V3ResponsesRelayClientBody,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 
@@ -431,20 +430,6 @@ fn local599_health(
     V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest)
 }
 
-fn local599_server_tool_state() -> V3ResponsesRelayServerToolState {
-    V3ResponsesRelayServerToolState::default()
-}
-
-fn local599_scope(request_id: &str) -> V3ResponsesRelayServerToolScope {
-    V3ResponsesRelayServerToolScope::new(
-        "/v1/responses",
-        request_id,
-        format!("conversation-{request_id}"),
-        SERVER_PORT,
-        "local599-group",
-    )
-}
-
 fn health_snapshot(handle: &V3ResponsesRelayProviderHealthHandle) -> Vec<Value> {
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -490,13 +475,11 @@ async fn run_local599_case(
     let manifest = local599_manifest(&base_url, true);
     let transport = build_local599_transport(mode, upstream.clone());
     let health = local599_health(&manifest);
-    let output = execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state(
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
         &manifest,
         local599_input(request_id),
         &transport,
         &health,
-        &local599_server_tool_state(),
-        local599_scope(request_id),
     )
     .await
     .expect("local599 runtime must return a typed output");

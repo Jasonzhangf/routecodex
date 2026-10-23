@@ -1,7 +1,7 @@
 use crate::{
     V3EntryProtocolBindingAuthoringConfig, V3EntryProtocolExecutionMode, V3HubFixedNode,
-    V3HubHookAuthoringConfig, V3HubHookPhase, V3HubHookProfile, V3HubHookRequirement,
-    V3HubResourceAuthoringConfig, V3HubResourceKind, V3HubResourceScope, V3HubV1AuthoringConfig,
+    V3HubHookAuthoringConfig, V3HubHookPhase, V3HubHookRequirement, V3HubResourceAuthoringConfig,
+    V3HubResourceKind, V3HubResourceScope, V3HubV1AuthoringConfig,
     V3ServerExecutionAuthoringConfig,
 };
 use std::collections::BTreeMap;
@@ -143,12 +143,6 @@ fn default_hub_v1_hooks() -> Vec<V3HubHookAuthoringConfig> {
         for phase in V3HubHookPhase::ALL {
             let optional_disabled = node == V3HubFixedNode::V3HubReqInbound02Normalized
                 && phase == V3HubHookPhase::Exit;
-            let servertool_profile = phase == V3HubHookPhase::Entry
-                && matches!(
-                    node,
-                    V3HubFixedNode::V3HubReqChatProcess04Governed
-                        | V3HubFixedNode::V3HubRespChatProcess03Governed
-                );
             let allowed_resources = match (node, phase) {
                 (V3HubFixedNode::V3HubReqInbound02Normalized, V3HubHookPhase::Entry) => {
                     vec!["metadata_center".to_string()]
@@ -174,11 +168,6 @@ fn default_hub_v1_hooks() -> Vec<V3HubHookAuthoringConfig> {
                 order,
                 allowed_resources,
                 forbidden_resources,
-                profile: if servertool_profile {
-                    Some(V3HubHookProfile::Servertool)
-                } else {
-                    None
-                },
             });
             order += 1;
         }
@@ -191,7 +180,7 @@ pub(crate) fn default_server_execution() -> V3ServerExecutionAuthoringConfig {
         allowed_modes: vec!["direct".to_string(), "relay".to_string()],
         allowed_invocation_sources: vec![
             "client".to_string(),
-            "servertool_followup".to_string(),
+            "refill".to_string(),
             "dry_run".to_string(),
         ],
         allowed_transports: vec!["json".to_string(), "sse".to_string()],

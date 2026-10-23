@@ -11,7 +11,7 @@ use serde_json::json;
 
 const TEST_LONGCONTEXT_THRESHOLD_TOKENS: Option<u64> = Some(180_000);
 
-fn manifest_mode_b_websearch_for_routing_facts() -> routecodex_v3_config::V3Config05ManifestPublished
+fn manifest_with_websearch_for_routing_facts() -> routecodex_v3_config::V3Config05ManifestPublished
 {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
@@ -29,8 +29,6 @@ auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
 [providers.mm.models.MiniMax-M3]
 wire_name = "MiniMax-M3"
 capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
 [route_groups.controlled.pools.web_search]
 selection = { strategy = "priority" }
 match = { precedence = 20, required_capabilities = ["web_search"] }
@@ -74,7 +72,7 @@ fn v3_routing_facts_keep_latest_chat_image_after_text_only_turn() {
         build_v3_chat_req_04_standardized_from_v3_server_03(raw).expect("chat req04 normalize");
     let facts = build_v3_router_request_facts_from_v3_req_04_chat(
         &normalized,
-        &manifest_mode_b_websearch_for_routing_facts(),
+        &manifest_with_websearch_for_routing_facts(),
     );
 
     assert!(

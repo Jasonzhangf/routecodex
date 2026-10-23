@@ -54,6 +54,88 @@ export function parseCodexExecEvents(stdout) {
   return events;
 }
 
+function expectedFinalText(fixture) {
+  const finalTurn = fixture?.turns?.at(-1);
+  const must = finalTurn?.expected_client_must ?? {};
+  return must['output.1.content.0.text'] ?? must['output.0.content.0.text'] ?? null;
+}
+
+function declaredCodexFollowupAttemptCount(fixture) {
+  const followup = fixture?.turns?.[1];
+  if (Number.isInteger(followup?.declared_attempt_count)) return followup.declared_attempt_count;
+  return null;
+}
+
+function messageText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return null;
+  const parts = content
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (part && typeof part.text === 'string') return part.text;
+      return '';
+    })
+    .join('');
+  return parts || null;
+}
+
+function refillInstruction() {
+  return '继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。';
+}
+
+function validateRefillFollowupCapture(refillCapture, originalCapture) {
+  const messages = chatHistory(refillCapture);
+  const originalMessages = chatHistory(originalCapture);
+  const calls = messages.flatMap((message, messageIndex) => (
+    message?.role === 'assistant' && Array.isArray(message.tool_calls)
+      ? message.tool_calls.map((call) => ({ call, messageIndex }))
+      : []
+  ));
+  if (calls.length !== 1) {
+    return { ok: false, diagnostic: `refill provider request must contain exactly one assistant tool call, observed ${calls.length}` };
+  }
+  if (calls[0].call.function?.name !== 'exec_command' || calls[0].call.id !== 'call_int_1') {
+    return { ok: false, diagnostic: 'refill provider request must preserve the original assistant tool call' };
+  }
+  const tools = messages.filter((message) => message?.role === 'tool');
+  const originalTools = originalMessages.filter((message) => message?.role === 'tool');
+  if (tools.length !== 1 || originalTools.length !== 1) {
+    return { ok: false, diagnostic: `refill provider request must preserve exactly one matched tool output, observed ${tools.length}` };
+  }
+  if (tools[0].tool_call_id !== originalTools[0].tool_call_id || tools[0].content !== originalTools[0].content) {
+    return { ok: false, diagnostic: 'refill provider request must preserve the original matched tool output' };
+  }
+  const assistantAfterTool = messages.filter((message) => message?.role === 'assistant' && message.content !== undefined);
+  if (assistantAfterTool.length !== 1 || messageText(assistantAfterTool[0].content) !== 'done') {
+    return { ok: false, diagnostic: 'refill provider request must append the first attempt assistant message' };
+  }
+  const finalUser = messages.at(-1);
+  if (finalUser?.role !== 'user' || messageText(finalUser.content) !== refillInstruction()) {
+    return { ok: false, diagnostic: 'refill provider request must end with the exact refill instruction' };
+  }
+  const originalBody = originalCapture?.body ?? {};
+  const refillBody = refillCapture?.body ?? {};
+  for (const field of ['model', 'stream', 'include']) {
+    if (JSON.stringify(refillBody[field]) !== JSON.stringify(originalBody[field])) {
+      return { ok: false, diagnostic: `refill provider request must preserve original ${field}` };
+    }
+  }
+  const refillTools = Array.isArray(refillBody.tools) ? refillBody.tools : [];
+  const originalToolsDeclared = Array.isArray(originalBody.tools) ? originalBody.tools : [];
+  if (JSON.stringify(refillTools) !== JSON.stringify(originalToolsDeclared)) {
+    return { ok: false, diagnostic: 'refill provider request must preserve the original tool declarations' };
+  }
+  return {
+    ok: true,
+    diagnostic: null,
+    observation: {
+      preserved_tool_call: calls[0].call.id,
+      appended_assistant_text: messageText(assistantAfterTool[0].content),
+      refill_instruction: messageText(finalUser.content),
+    },
+  };
+}
+
 function commandExecutions(events) {
   return events.filter((event) => event?.type === 'item.completed'
     && event?.item?.type === 'command_execution');
@@ -681,7 +763,7 @@ export async function runCodexRealExec({
     diagnostic.push(error.message);
   }
   const finalOutcome = validateCodexFinalOutcome(events, {
-    expectedText: fixture?.turns?.at(-1)?.expected_client_must?.['output.0.content.0.text'],
+    expectedText: expectedFinalText(fixture),
   });
   if (!finalOutcome.ok) diagnostic.push(finalOutcome.diagnostic);
 
@@ -694,8 +776,13 @@ export async function runCodexRealExec({
       diagnostic.push('provider request must preserve the exact real consumer user prompt');
     }
   }
-  if ((providerWindows[1] ?? []).length !== 1) {
-    diagnostic.push(`follow-up provider turn must have exactly one business attempt, observed ${(providerWindows[1] ?? []).length}`);
+  if ((providerWindows[1] ?? []).length < 1) {
+    diagnostic.push(`follow-up provider turn must have at least one business attempt, observed ${(providerWindows[1] ?? []).length}`);
+  } else {
+    const declared = declaredCodexFollowupAttemptCount(fixture);
+    if (Number.isInteger(declared) && (providerWindows[1] ?? []).length !== declared) {
+      diagnostic.push(`follow-up provider turn must have exactly ${declared} business attempts, observed ${(providerWindows[1] ?? []).length}`);
+    }
   }
 
   const commandResult = validateCodexCommandExecution(events, {
@@ -705,7 +792,7 @@ export async function runCodexRealExec({
   if (!commandResult.ok) diagnostic.push(commandResult.diagnostic);
   const execution = commandResult.ok ? commandResult.executions[0] : null;
   let followup = null;
-  if (execution && (providerWindows[1] ?? []).length === 1) {
+  if (execution && (providerWindows[1] ?? []).length >= 1) {
     const callId = fixture.tool_followup.expected_call_id;
     const originalClientOutput = readOriginalClientFunctionCallOutput({
       sampleRoot,
@@ -719,6 +806,11 @@ export async function runCodexRealExec({
       originalClientOutput,
     });
     if (!followup.ok) diagnostic.push(followup.diagnostic);
+    if ((providerWindows[1] ?? []).length > 1 && followup.ok) {
+      const refill = validateRefillFollowupCapture(providerWindows[1][1], providerWindows[1][0]);
+      if (!refill.ok) diagnostic.push(refill.diagnostic);
+      followup.refill = refill.observation;
+    }
   }
 
   const runRoot = result.workdir ? join(result.workdir, '..') : join(evidenceRoot, 'codex-real-exec');

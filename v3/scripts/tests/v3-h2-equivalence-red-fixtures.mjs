@@ -44,7 +44,8 @@ for (const fixture of fixtures) {
     for (const dir of ['scripts', 'v3', 'docs']) {
       cpSync(resolve(repoRoot, dir), join(root, dir), {
         recursive: true,
-        filter: (source) => !source.includes('/target/'),
+        filter: (source) =>
+          !source.includes('/target/') && !source.includes('/build-control/'),
       });
     }
     cpSync(resolve(repoRoot, 'package.json'), join(root, 'package.json'));

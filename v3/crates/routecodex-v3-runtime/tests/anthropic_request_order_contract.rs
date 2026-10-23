@@ -20,7 +20,7 @@ use routecodex_v3_runtime::{
     compile_v3_hub_relay_request_hooks,
     execute_v3_anthropic_relay_runtime_with_client_headers_provider_health,
     run_v3_anthropic_relay_runtime_req_inbound, V3AnthropicRelayRuntimeInput, V3HubEntryProtocol,
-    V3HubInvocationSource, V3HubServertoolRequestProfile, V3HubTransportIntent,
+    V3HubInvocationSource, V3HubRequestHookProfile, V3HubTransportIntent,
     V3ProviderFailureRuntimeHealth,
 };
 use serde_json::{json, Value};
@@ -101,8 +101,7 @@ fn normalized_and_governed_bodies(payload: &Value) -> (Value, Value) {
     let normalized =
         run_v3_anthropic_relay_runtime_req_inbound(req01).expect("anthropic request normalizes");
     let normalized_body = normalized.payload().clone();
-    let profile = V3HubServertoolRequestProfile::enabled(["servertool.request"])
-        .with_tool_thinking_enabled(true);
+    let profile = V3HubRequestHookProfile::enabled().with_tool_thinking_enabled(true);
     let governed = compile_v3_hub_relay_request_hooks()
         .run_from_normalized(normalized, &profile)
         .expect("anthropic request governance succeeds")
@@ -133,7 +132,7 @@ endpoints = ["anthropic"]
 
 [servers.{scope}.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.default_target]

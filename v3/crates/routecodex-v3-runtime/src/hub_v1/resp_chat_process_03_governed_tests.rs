@@ -18,7 +18,7 @@ fn relay_serialized_tool_opaque_envelope_keeps_embedded_thinking() {
     let outcome = govern_v3_hub_relay_response(relay_control_marker_chat_resp02(json!({
         "id":"opaque", "object":"chat.completion", "model":"wire-test", "choices":[{"index":0,"message":{"role":"assistant","content":text},"finish_reason":"stop"}]
     })), &profile).unwrap();
-    let (governed, _, _) = outcome.into_parts();
+    let governed = outcome.into_governed();
     let message = &governed.previous.previous.previous.payload.0["choices"][0]["message"];
     assert_eq!(message["content"], text);
     assert!(message.get("reasoning_content").is_none());
@@ -72,7 +72,7 @@ fn relay_control_marker_resp03_strips_orphan_labels_and_preserves_chat_tool() {
         &V3HubRelayResponseHookProfile::empty(),
     )
     .expect("Resp03 must govern the observed Chat marker shape");
-    let (governed, _, _) = outcome.into_parts();
+    let governed = outcome.into_governed();
     let payload = governed.previous.previous.previous.payload.0.as_ref();
     let message = &payload["choices"][0]["message"];
 
@@ -118,7 +118,7 @@ fn relay_control_marker_resp03_preserves_literal_and_code_examples() {
             &V3HubRelayResponseHookProfile::empty(),
         )
         .expect("literal marker examples must remain governable");
-        let (governed, _, _) = outcome.into_parts();
+        let governed = outcome.into_governed();
         let payload = governed.previous.previous.previous.payload.0.as_ref();
         assert_eq!(
             payload["choices"][0]["message"]["content"], content,
@@ -295,7 +295,7 @@ fn resp03_removes_provider_model_identity_instructions_but_keeps_client_instruct
         &V3HubRelayResponseHookProfile::empty(),
     )
     .expect("Resp03 must govern provider response");
-    let (governed, _, _) = outcome.into_parts();
+    let governed = outcome.into_governed();
     let identity_payload = governed.previous.previous.previous.payload.0.as_ref();
     assert!(
         !identity_payload.to_string().contains("gpt-5.6-sol"),
@@ -309,7 +309,7 @@ fn resp03_removes_provider_model_identity_instructions_but_keeps_client_instruct
         &V3HubRelayResponseHookProfile::empty(),
     )
     .expect("Resp03 must keep ordinary instructions");
-    let (governed, _, _) = outcome.into_parts();
+    let governed = outcome.into_governed();
     let ordinary_payload = governed.previous.previous.previous.payload.0.as_ref();
     assert_eq!(ordinary_payload["instructions"], ordinary);
     assert_eq!(ordinary_payload["model"], "client-visible-model");

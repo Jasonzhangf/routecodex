@@ -64,7 +64,7 @@ routing_group = "chatwire"
 endpoints = ["responses"]
 [servers.chatwire.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.chatwire]

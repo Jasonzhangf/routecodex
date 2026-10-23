@@ -1271,7 +1271,6 @@ dependencies = [
  "routecodex-v3-runtime",
  "routecodex-v3-server",
  "serde_json",
- "servertool-core",
  "tempfile",
  "tokio",
 ]
@@ -1329,7 +1328,6 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
- "servertool-core",
  "thiserror 1.0.69",
 ]
 
@@ -1420,7 +1418,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "servertool-core",
  "thiserror 1.0.69",
  "tiktoken-rs",
  "tokio",
@@ -1636,15 +1633,6 @@ dependencies = [
  "ryu",
  "serde",
  "unsafe-libyaml",
-]
-
-[[package]]
-name = "servertool-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 1.0.69",
 ]
 
 [[package]]

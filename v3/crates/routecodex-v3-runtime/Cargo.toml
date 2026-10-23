@@ -18,7 +18,6 @@ routecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses
 routecodex-v3-target = { path = "../routecodex-v3-target" }
 routecodex-v3-virtual-router = { path = "../routecodex-v3-virtual-router" }
 provider-compat-core.workspace = true
-servertool-core.workspace = true
 reqwest.workspace = true
 regex.workspace = true
 serde.workspace = true
@@ -32,4 +31,5 @@ tiktoken-rs.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+routecodex-v3-config = { path = "../routecodex-v3-config", features = ["test-hooks"] }
 routecodex-v3-oauth = { path = "../routecodex-v3-oauth" }

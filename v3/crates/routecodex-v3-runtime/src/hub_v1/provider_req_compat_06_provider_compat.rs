@@ -1664,89 +1664,6 @@ mod tests {
     }
 
     #[test]
-    fn openai_chat_relay_projects_responses_web_search_with_image_to_local_servertool_function() {
-        let mut selected_target = selected_candidate(V3HubProviderWireProtocol::OpenAiChat);
-        selected_target.web_search_execution_mode =
-            V3WebSearchExecutionMode::MetadataCenterLocalSearch;
-        selected_target
-            .model_capabilities
-            .push("web_search".to_string());
-        let req07 = relay_req07_for_entry_with_candidate(
-            V3HubEntryProtocol::Responses,
-            json!({
-                "model": "client-route-alias",
-                "input": "search images",
-                "tools": [{
-                    "type": "web_search",
-                    "external_web_access": true,
-                    "search_content_types": ["text", "image"],
-                    "search_context_size": "medium"
-                }]
-            }),
-            V3HubProviderWireProtocol::OpenAiChat,
-            selected_target,
-        )
-        .expect("Mode B candidate must pass OpenAI Chat Node06");
-
-        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).expect(
-            "Mode B OpenAI Chat relay must project built-in web search to local websearch function",
-        );
-        let payload = req_compat.provider_semantic_payload();
-        assert!(payload.get("web_search_options").is_none(), "{payload}");
-        let web_search = payload["tools"]
-            .as_array()
-            .and_then(|tools| {
-                tools.iter().find(|tool| {
-                    tool.pointer("/function/name").and_then(Value::as_str) == Some("websearch")
-                })
-            })
-            .expect("Mode B canonical local websearch function");
-        assert_eq!(
-            web_search["function"]["parameters"]["properties"]["search_content_types"]["items"]
-                ["enum"],
-            json!(["text", "image"])
-        );
-        assert_eq!(
-            web_search["function"]["parameters"]["properties"]["search_content_types"]["default"],
-            json!(["text", "image"])
-        );
-    }
-
-    #[test]
-    fn minimax_openai_chat_profile_accepts_local_websearch_function_projection() {
-        let mut selected_target = selected_candidate(V3HubProviderWireProtocol::OpenAiChat);
-        selected_target.web_search_execution_mode =
-            V3WebSearchExecutionMode::ServertoolSearchBackend;
-        selected_target
-            .model_capabilities
-            .push("web_search".to_string());
-        selected_target.compatibility_profile = Some("chat:minimax".to_string());
-        let req07 = relay_req07_for_entry_with_candidate(
-            V3HubEntryProtocol::Responses,
-            json!({
-                "model": "client-route-alias",
-                "input": "search images",
-                "tools": [{
-                    "type": "web_search",
-                    "external_web_access": true,
-                    "search_content_types": ["text", "image"]
-                }]
-            }),
-            V3HubProviderWireProtocol::OpenAiChat,
-            selected_target,
-        )
-        .expect("MiniMax candidate must pass OpenAI Chat Node06");
-
-        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect("MiniMax Chat compat must accept Mode B local websearch function");
-        assert!(req_compat.provider_semantic_payload()["tools"]
-            .as_array()
-            .is_some_and(|tools| tools.iter().any(|tool| {
-                tool.pointer("/function/name").and_then(Value::as_str) == Some("websearch")
-            })));
-    }
-
-    #[test]
     fn relay_protocols_bind_selected_wire_model_before_provider_compat() {
         for protocol in [
             V3HubProviderWireProtocol::Responses,
@@ -1797,7 +1714,7 @@ mod tests {
                 "parameters": {"type":"object","properties":{}}
             }]
         });
-        super::super::servertool_hooks::inject_v3_tool_thinking_guidance_at_req04(
+        super::super::tool_thinking_hooks::inject_v3_tool_thinking_guidance_at_req04(
             &mut payload,
             0,
             true,

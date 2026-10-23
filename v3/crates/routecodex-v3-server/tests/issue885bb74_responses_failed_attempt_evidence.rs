@@ -148,8 +148,7 @@ async fn issue885bb74_responses_failure_sink_matches_final_observation() {
         build_v3_server_03_http_request_raw,
         execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
         register_responses_direct_hooks, V3ProviderFailureRuntimeHealth,
-        V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
-        V3ResponsesDirectServerToolState, V3RuntimeProviderFailureEventSink,
+        V3ResponsesDirectRuntimeSharedState, V3RuntimeProviderFailureEventSink,
     };
     let (_home, _lock) = LOCK.lock().await;
     std::env::set_var("OWNED885_KEY", "owned885-secret");
@@ -162,9 +161,7 @@ async fn issue885bb74_responses_failure_sink_matches_final_observation() {
     let sink: V3RuntimeProviderFailureEventSink = Arc::new(move |_, event| {
         captured.lock().unwrap().push(event.clone());
     });
-    let state = V3ResponsesDirectServerToolState::default();
     let shared = V3ResponsesDirectRuntimeSharedState::new(
-        &state,
         V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest),
     )
     .with_provider_failure_event_sink(Some(sink));
@@ -194,13 +191,6 @@ async fn issue885bb74_responses_failure_sink_matches_final_observation() {
             shared,
             &manifest,
             raw,
-            V3ResponsesDirectServerToolScope::new(
-                "/v1/responses",
-                "session885",
-                "conversation885",
-                port,
-                "evidence885",
-            ),
             register_responses_direct_hooks(),
             &debug,
             1000,

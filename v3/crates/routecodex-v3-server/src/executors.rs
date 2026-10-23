@@ -411,7 +411,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             v3_entry_request_wants_sse(request_headers, &console_payload),
         );
         return match client_response_capture {
-            Some(capture) => capture.observe_response(response),
+            Some(capture) => capture.defer_into(response),
             None => response,
         };
     }
@@ -548,7 +548,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         V3SseClientProtocol::OpenAiChat,
     );
     match client_response_capture {
-        Some(capture) => capture.observe_response(response),
+        Some(capture) => capture.defer_into(response),
         None => response,
     }
 }
@@ -690,7 +690,7 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
         );
         let response = anthropic_relay_output_response(relay_output, requested_stream);
         return match client_response_capture {
-            Some(capture) => capture.observe_response(response),
+            Some(capture) => capture.defer_into(response),
             None => response,
         };
     }
@@ -765,7 +765,7 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
         V3SseClientProtocol::Anthropic,
     );
     match client_response_capture {
-        Some(capture) => capture.observe_response(response),
+        Some(capture) => capture.defer_into(response),
         None => response,
     }
 }
@@ -909,7 +909,7 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
             requested_stream,
         );
         return match client_response_capture {
-            Some(capture) => capture.observe_response(response),
+            Some(capture) => capture.defer_into(response),
             None => response,
         };
     }
@@ -984,7 +984,7 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
         V3SseClientProtocol::Gemini,
     );
     match client_response_capture {
-        Some(capture) => capture.observe_response(response),
+        Some(capture) => capture.defer_into(response),
         None => response,
     }
 }

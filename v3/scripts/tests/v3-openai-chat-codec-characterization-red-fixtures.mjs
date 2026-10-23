@@ -17,7 +17,7 @@ const failures = [];
 for (const [name, relative, from, to, diagnostic] of fixtures) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-openai-chat-codec-red-'));
   try {
-    for (const item of ['v3', 'docs', 'scripts', 'package.json']) cpSync(resolve(repoRoot, item), join(root, item), { recursive: true, filter: source => !source.includes('/target/') });
+    for (const item of ['v3', 'docs', 'scripts', 'package.json']) cpSync(resolve(repoRoot, item), join(root, item), { recursive: true, filter: source => !source.includes('/target/') && !source.includes('/build-control/') });
     const target = join(root, relative);
     const source = readFileSync(target, 'utf8');
     if (!source.includes(from)) throw new Error(`${name}: fixture source missing`);

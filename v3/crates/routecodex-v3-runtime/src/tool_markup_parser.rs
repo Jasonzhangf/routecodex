@@ -34,6 +34,22 @@ const MINIMAX_PREFIX: &str = "]<]minimax[>[";
 const MINIMAX_OPEN: &str = "]<]minimax[>[<tool_call>";
 const MINIMAX_CLOSE: &str = "]<]minimax[>[</tool_call>";
 
+/// Every standalone text label this owner removes even when no tool is
+/// declared. A client-visible prefix that already contains one of these can
+/// still be rewritten by the complete-attempt DSML owner, so it must never be
+/// flushed ahead of that owner.
+///
+/// This is the single source for the DSML part of the commit probe's
+/// governed-marker set; the probe adds its own thinking markers separately. The
+/// two must not drift, because a label the owner removes but the probe ignores
+/// would reach a committed client prefix untouched.
+pub(crate) fn governed_text_markers() -> Vec<&'static str> {
+    let mut markers = vec![OPEN, CLOSE, BARE_DSML, ASCII_TOOL_CALLS, ORPHAN_TOOL_CLOSE];
+    markers.extend_from_slice(ANALYSIS_CLOSINGS);
+    markers.extend_from_slice(CLOSING_FRAGMENTS);
+    markers
+}
+
 // Parse the observed invoke child-tag dialects. The error bool identifies
 // an unfinished declared invocation; unknown/opaque envelopes remain business
 // text. Structural prefixes are consumed here, never stripped from values.
@@ -180,6 +196,14 @@ impl ToolMarkupDeclarations {
 
     pub(crate) fn remove(&mut self, wire_name: &str) {
         self.tools.remove(wire_name);
+    }
+
+    /// True when no declared tool can match provider markup. An empty
+    /// declaration set is not an identity rewrite: the registered DSML owner
+    /// still removes the standalone protocol labels it owns, so callers must
+    /// keep running that hook instead of treating this state as a no-op.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.tools.is_empty()
     }
 
     fn get(&self, wire_name: &str) -> Option<&ToolMarkupIdentity> {

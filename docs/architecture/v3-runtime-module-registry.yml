@@ -62,10 +62,6 @@ modules:
     owner_feature_id: v3.virtual_router_target_interpreter
     owned_paths:
       - v3/crates/routecodex-v3-virtual-router/**
-  - module_id: v3.servertool_core
-    owner_feature_id: v3.servertool_center_skeleton
-    owned_paths:
-      - v3/crates/servertool-core/**
   - module_id: v3.agent_memory
     owner_feature_id: v3.memory_raw_capture
     owned_paths:

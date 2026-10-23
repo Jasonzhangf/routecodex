@@ -1,0 +1,27 @@
+%%{init: {"theme":"base","themeVariables":{"clusterBkg":"#F8FAFC","clusterBorder":"#CBD5E1","lineColor":"#475569"}}}%%
+flowchart TD
+  S([客户端请求]):::boundary --> M{执行模式}:::decision
+  M -->|Direct| D[注册 Direct 请求治理]:::action
+  M -->|Relay| Q[Inbound 与 Req04 普通工具及 servertool 治理]:::action
+  Q --> O[标准 Outbound 与 Provider Compat]:::action
+  D --> P[Provider 正常传输与完整 attempt 缓冲]:::action
+  O --> P
+  P --> R{响应 owner}:::decision
+  R -->|Direct| RD[Direct 响应治理及搜索控制]:::action
+  R -->|Relay| RR[Resp03 普通工具及 servertool 混合治理]:::action
+  RD --> K{是否命中专用行为}:::decision
+  RR --> K
+  K -->|CLI projection| C[改写为 exec_command descriptor]:::action
+  K -->|本地搜索| H[(搜索 Center 与 sidecar 状态)]:::data
+  H --> X[执行搜索与结果回填]:::action
+  K -->|普通响应| V[正常 continuation 与客户端投影]:::action
+  C --> V
+  X --> V
+  V --> E([客户端业务响应]):::success
+  classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+  classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
+  classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
+  classDef data fill:#F1EAFE,stroke:#7C3AED,color:#0F172A,stroke-width:1.5px
+  classDef success fill:#E8F7EE,stroke:#16A34A,color:#0F172A,stroke-width:1.5px
+  classDef failure fill:#FDECEC,stroke:#DC2626,color:#0F172A,stroke-width:1.5px
+  linkStyle default stroke:#475569

@@ -85,7 +85,7 @@ const cases = [
   {
     name: 'Relay WebSocket unplanned branch dispatch removed',
     file: 'v3/crates/routecodex-v3-server/src/websocket.rs',
-    from: '        None => {\n            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(',
+    from: '        None => {\n            execute_v3_responses_relay_runtime_with_default_transport_health(',
     to: '        None => {\n            execute_v3_responses_relay_runtime_without_health(',
     diagnostic: /planned and unplanned WebSocket Relay Runtime entry calls/,
   },

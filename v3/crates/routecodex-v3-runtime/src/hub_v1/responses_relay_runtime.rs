@@ -1,7 +1,4 @@
-use super::web_search_hop::{
-    apply_v3_responses_relay_web_search_control_completion,
-    project_web_search_result_into_finalized, resolve_web_search_mode_and_backend,
-};
+use super::common::V3ChatProcessRefillDisposition;
 use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
@@ -53,7 +50,9 @@ mod responses_relay_json_hooks;
 mod responses_relay_runtime_inner;
 #[path = "responses_relay_types.rs"]
 mod responses_relay_types;
-use responses_relay_runtime_inner::execute_v3_responses_relay_runtime_inner;
+use responses_relay_runtime_inner::{
+    execute_v3_responses_relay_runtime_inner, execute_v3_responses_relay_runtime_inner_with_refill,
+};
 pub(crate) use responses_relay_runtime_inner::{
     find_responses_tool_output_ids, V3ResponsesRelayToolOutputIds,
 };
@@ -110,8 +109,7 @@ pub(crate) use responses_openai_chat_conversion::build_v3_responses_reasoning_it
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
 pub use responses_relay_dry_run::{
-    execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state,
-    execute_v3_responses_relay_dry_run_runtime_with_server_tool_state,
+    execute_v3_responses_relay_dry_run_orchestration_outcome,
     project_v3_responses_relay_runtime_failure,
 };
 pub(crate) use responses_relay_failures::provider_response_stream_relay_failure;
@@ -153,25 +151,16 @@ pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state<
-    T: ResponsesTransport,
->(
+pub async fn execute_v3_responses_relay_runtime_with_transport_health<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayServerToolScope,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
-        Some(V3ResponsesRelayServerToolExecution {
-            control: server_tool_state,
-            scope,
-            commit_effects: true,
-        }),
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         true,
@@ -185,12 +174,10 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayServerToolScope,
     provider_snapshots: V3ResponsesRelayProviderSnapshotCapture,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
@@ -201,31 +188,131 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
-    let mut output = execute_v3_responses_relay_runtime_inner(
-        manifest,
-        input,
-        &transport,
-        Some(V3ResponsesRelayServerToolExecution {
-            control: server_tool_state,
-            scope,
-            commit_effects: true,
-        }),
-        provider_health.runtime_health(),
-        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
-        true,
-        provider_failure_event_sink,
-        route_selection_event_sink,
-        initial_selected_target,
-        initial_expanded,
-        initial_request_local_excluded_candidates,
-        initial_relay_seeds,
-    )
-    .await?;
-    output.provider_snapshots = Some(snapshots.into_payload(
-        provider_snapshots.provider_request,
-        provider_snapshots.provider_response,
-    ));
-    Ok(output)
+    let control = match initial_relay_seeds.request_execution_control.clone() {
+        Some(control) => control,
+        None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
+            .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))?,
+    };
+    let max_refills = v3_chat_process_refill_max_consecutive();
+    let mut payload = input.payload.clone();
+    let mut accumulated_items: Vec<Value> = Vec::new();
+    let mut accumulated_usage: Option<V3RuntimeUsageSummary> = None;
+    let mut accumulated_attempts: Option<usize> = None;
+    let mut rounds = 0usize;
+    loop {
+        let mut seeds = initial_relay_seeds.clone();
+        seeds.request_execution_control = Some(control.clone());
+        if rounds > 0 {
+            // The original client execution owns the route-policy commit. A
+            // refill must not commit the same pending transaction twice.
+            seeds.route_policy_pending = None;
+            // Each execution owns an independent timing terminal. Reusing the
+            // original accumulator would make the first refill's
+            // `finish_runtime()` observe an already-finished state.
+            seeds.observability_accumulator = None;
+        }
+        let execution_input = V3ResponsesRelayRuntimeInput {
+            payload: payload.clone(),
+            ..input.clone()
+        };
+        let invocation_source = if rounds == 0 {
+            V3HubInvocationSource::Client
+        } else {
+            V3HubInvocationSource::Refill
+        };
+        let chat_process_refill = V3ResponsesRelayRefillSignal::default();
+        let mut output = execute_v3_responses_relay_runtime_inner_with_refill(
+            manifest,
+            execution_input,
+            &transport,
+            provider_health.runtime_health(),
+            V3ResponsesRelayRetryPolicy::from_manifest(manifest),
+            true,
+            provider_failure_event_sink.clone(),
+            route_selection_event_sink.clone(),
+            initial_selected_target.clone(),
+            initial_expanded.clone(),
+            initial_request_local_excluded_candidates.clone(),
+            seeds,
+            invocation_source,
+            chat_process_refill.clone(),
+        )
+        .await?;
+        let chat_process_refill = chat_process_refill.take();
+        if let Some(attempts) = output
+            .observability
+            .as_ref()
+            .and_then(|observability| observability.attempts)
+        {
+            accumulated_attempts = Some(accumulated_attempts.unwrap_or(0).saturating_add(attempts));
+        }
+        if chat_process_refill == Some(V3ChatProcessRefillDisposition::RequestRefill) {
+            if let Some(finalized) = output.finalized_response.as_ref() {
+                if let Ok(next_payload) =
+                    build_v3_chat_process_refill_continuation_request(&payload, finalized)
+                {
+                    // Request-local cancellation witness: the control carries no
+                    // independent cancel flag, so the residence deadline is the
+                    // only one. An expired deadline delivers the current real
+                    // result instead of launching another execution.
+                    if control.deadline_unix_ms().is_ok() && control.try_admit_refill(max_refills) {
+                        // A refill is a new execution of the Runtime mainline:
+                        // it owns its own provider transport attempt allowance
+                        // while the request-scoped refill budget and residence
+                        // deadline stay unchanged.
+                        control.begin_refill_execution();
+                        accumulated_items
+                            .extend(collect_v3_chat_process_business_output_items(finalized));
+                        accumulate_v3_chat_process_refill_usage(
+                            &mut accumulated_usage,
+                            extract_v3_runtime_usage_summary(finalized),
+                        );
+                        payload = next_payload;
+                        rounds += 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        if rounds > 0 {
+            if let Some(mut finalized) = output.finalized_response.take() {
+                // The refill loop only accumulates usage when it launches the
+                // next execution. Fold the final execution's usage in before
+                // write-back so the delivered total covers every round.
+                accumulate_v3_chat_process_refill_usage(
+                    &mut accumulated_usage,
+                    extract_v3_runtime_usage_summary(&finalized),
+                );
+                merge_v3_chat_process_refill_output_items(&mut finalized, &accumulated_items);
+                if let Some(usage) = accumulated_usage.as_ref() {
+                    write_v3_chat_process_refill_usage(&mut finalized, usage);
+                }
+                output.finalized_response = Some(finalized.clone());
+                output.client_body = project_v3_responses_relay_client_body(
+                    v3_responses_relay_transport_intent_from_stream_field(&input.payload),
+                    finalized,
+                    crate::shared::v3_strip_client_response_id_enabled_for_server(
+                        manifest,
+                        &input.server_id,
+                    ),
+                    control.attempt_budget(),
+                )?;
+            }
+            if let Some(observability) = output.observability.as_mut() {
+                if accumulated_usage.is_some() {
+                    observability.usage = accumulated_usage.clone();
+                }
+                if accumulated_attempts.is_some() {
+                    observability.attempts = accumulated_attempts;
+                }
+            }
+        }
+        output.provider_snapshots = Some(snapshots.into_payload(
+            provider_snapshots.provider_request,
+            provider_snapshots.provider_response,
+        ));
+        return Ok(output);
+    }
 }
 
 pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTransport>(
@@ -240,7 +327,6 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         manifest,
         input,
         transport,
-        None,
         provider_health.runtime_health(),
         retry_policy,
         true,
@@ -267,7 +353,6 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         manifest,
         input,
         transport,
-        None,
         provider_health.runtime_health(),
         retry_policy,
         true,
@@ -279,12 +364,6 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
-}
-
-pub(crate) struct V3ResponsesRelayServerToolExecution<'state> {
-    pub(crate) control: &'state V3ResponsesRelayServerToolState,
-    pub(crate) scope: V3ResponsesRelayServerToolScope,
-    pub(crate) commit_effects: bool,
 }
 
 async fn handle_v3_responses_relay_provider_failure(

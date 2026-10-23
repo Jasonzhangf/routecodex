@@ -1,7 +1,6 @@
 use crate::*;
 use axum::body::{Body, BodyDataStream, Bytes};
 use axum::http::Response;
-use futures_util::StreamExt;
 use routecodex_v3_runtime::hub_v1::{V3AnthropicRelayClientBody, V3GeminiRelayClientBody};
 use routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput;
 use serde_json::{json, Value};
@@ -144,14 +143,6 @@ fn persist_v3_stream_observation_provider_response(
 }
 
 impl V3LiveSnapSseRecorderCore {
-    pub(crate) fn append_chunk(&self, bytes: &[u8]) -> Result<(), String> {
-        self.raw_sse
-            .lock()
-            .map_err(|error| error.to_string())?
-            .append(bytes);
-        Ok(())
-    }
-
     fn persist_terminal(&self, stream_error: Option<&str>) -> Result<(), String> {
         let raw_sse = self
             .raw_sse
@@ -211,57 +202,109 @@ impl V3LiveSnapSseRecorderCore {
     }
 }
 
-/// Records the bytes of an already projected SSE client response.
+/// Carries a created client-response recorder to the client transport boundary.
 ///
-/// The runtime and transport owners have finished projecting keepalive,
-/// committed-stream, and protocol framing before this observer runs. Capturing
-/// the final body keeps `rawSse` equal to the client-visible wire instead of a
-/// provider-side prefix.
-pub(crate) struct V3LiveSnapFinalSseResponseCapture {
+/// The runtime response body is not the client wire once first-frame commit
+/// exists: the committed channel emits the frames the runtime already flushed and
+/// only then drains the sealed outcome body. The recorder therefore travels on the
+/// response and the transport boundary wraps the final client body.
+#[derive(Clone)]
+pub(crate) struct V3LiveSnapPendingClientCapture {
     core: V3LiveSnapSseRecorderCore,
 }
 
-struct V3LiveSnapFinalSseBodyStream {
+/// Lets the committed client channel hand a deferred recorder to the boundary.
+///
+/// The channel response exists before the runtime outcome does, so the outcome
+/// response cannot carry the recorder into that response. The channel moves the
+/// recorder into this slot when the outcome arrives; the transport boundary reads
+/// the same slot when it wraps the final client body.
+#[derive(Clone)]
+pub(crate) struct V3LiveSnapClientWireCaptureSlot {
+    core: Arc<Mutex<Option<V3LiveSnapSseRecorderCore>>>,
+}
+
+impl V3LiveSnapClientWireCaptureSlot {
+    pub(crate) fn new() -> Self {
+        Self {
+            core: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub(crate) fn adopt(&self, core: V3LiveSnapSseRecorderCore) {
+        if let Ok(mut slot) = self.core.lock() {
+            *slot = Some(core);
+        }
+    }
+
+    fn take(&self) -> Option<V3LiveSnapSseRecorderCore> {
+        self.core.lock().ok().and_then(|mut slot| slot.take())
+    }
+
+    /// Adopt the recorder the runtime attached to its projected outcome.
+    pub(crate) fn adopt_from_response(&self, response: &mut Response<Body>) {
+        let Some(pending) = response
+            .extensions_mut()
+            .remove::<V3LiveSnapPendingClientCapture>()
+        else {
+            return;
+        };
+        self.adopt(pending.core);
+    }
+}
+
+struct V3LiveSnapClientWireBodyStream {
     inner: Pin<Box<BodyDataStream>>,
+    /// The recorder a response owner attached directly. Its own buffer is reused,
+    /// so a poisoned recorder mutex still fails only the optional sample.
     core: Option<V3LiveSnapSseRecorderCore>,
+    /// The recorder the committed client channel adopts when the outcome arrives.
+    slot: Option<V3LiveSnapClientWireCaptureSlot>,
+    raw_sse: Arc<Mutex<V3DebugBoundedTextCapture>>,
     finished: bool,
 }
 
-impl futures_util::Stream for V3LiveSnapFinalSseBodyStream {
+impl V3LiveSnapClientWireBodyStream {
+    fn persist_terminal(&mut self, stream_error: Option<&str>) {
+        let core = self
+            .core
+            .take()
+            .or_else(|| self.slot.as_ref().and_then(|slot| slot.take()));
+        let Some(mut core) = core else {
+            return;
+        };
+        // The recorded wire belongs to the transport, so the terminal record must
+        // persist these exact bytes instead of the recorder's own buffer.
+        core.raw_sse = Arc::clone(&self.raw_sse);
+        if let Err(error) = core.persist_terminal(stream_error) {
+            eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
+        }
+    }
+}
+
+impl futures_util::Stream for V3LiveSnapClientWireBodyStream {
     type Item = Result<Bytes, axum::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
         match this.inner.as_mut().poll_next(cx) {
             Poll::Ready(Some(Ok(bytes))) => {
-                if let Some(core) = this.core.as_ref() {
-                    if let Err(error) = core.append_chunk(&bytes) {
-                        eprintln!("[v3-sse-snapshot] client response capture failed: {error}");
-                    }
+                if let Ok(mut raw_sse) = this.raw_sse.lock() {
+                    raw_sse.append(&bytes);
+                } else {
+                    eprintln!("[v3-sse-snapshot] client response capture failed: poisoned mutex");
                 }
                 Poll::Ready(Some(Ok(bytes)))
             }
             Poll::Ready(Some(Err(error))) => {
-                if let Some(core) = this.core.take() {
-                    let capture_error_text = error.to_string();
-                    if let Err(capture_error) =
-                        core.persist_terminal(Some(capture_error_text.as_str()))
-                    {
-                        eprintln!(
-                            "[v3-sse-snapshot] client response finalize failed: {capture_error}"
-                        );
-                    }
-                }
+                let capture_error_text = error.to_string();
                 this.finished = true;
+                this.persist_terminal(Some(capture_error_text.as_str()));
                 Poll::Ready(Some(Err(error)))
             }
             Poll::Ready(None) => {
-                if let Some(core) = this.core.take() {
-                    if let Err(error) = core.persist_terminal(None) {
-                        eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
-                    }
-                }
                 this.finished = true;
+                this.persist_terminal(None);
                 Poll::Ready(None)
             }
             Poll::Pending => Poll::Pending,
@@ -269,19 +312,78 @@ impl futures_util::Stream for V3LiveSnapFinalSseBodyStream {
     }
 }
 
-impl Drop for V3LiveSnapFinalSseBodyStream {
+impl Drop for V3LiveSnapClientWireBodyStream {
     fn drop(&mut self) {
         if self.finished {
             return;
         }
-        if let Some(core) = self.core.take() {
-            if let Err(error) =
-                core.persist_terminal(Some("client disconnected before response stream completed"))
-            {
-                eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
-            }
-        }
+        self.finished = true;
+        self.persist_terminal(Some("client disconnected before response stream completed"));
     }
+}
+
+/// Carry a pending client-response recorder onto a replacement response.
+///
+/// A transport-owner response may be replaced before the client transport
+/// boundary runs, for example when a model outcome has no client payload and the
+/// transport breaks. The replacement carries the same client wire, so the recorder
+/// must move with it instead of being dropped with the replaced response.
+pub(crate) fn transfer_v3_live_client_capture(from: &mut Response<Body>, to: &mut Response<Body>) {
+    if let Some(pending) = from
+        .extensions_mut()
+        .remove::<V3LiveSnapPendingClientCapture>()
+    {
+        to.extensions_mut().insert(pending);
+    }
+}
+
+/// Wrap the final client SSE wire so the sample records exactly those bytes.
+///
+/// The transport owner has finished projecting keepalive, committed-stream, and
+/// protocol framing before this wrapper runs. A response without a recorder, and
+/// any non-SSE response, passes through unchanged, so an unsampled request pays
+/// no per-chunk cost.
+pub(crate) fn observe_v3_live_client_wire(mut response: Response<Body>) -> Response<Body> {
+    let pending = response
+        .extensions_mut()
+        .remove::<V3LiveSnapPendingClientCapture>();
+    let slot = response
+        .extensions_mut()
+        .remove::<V3LiveSnapClientWireCaptureSlot>();
+    if pending.is_none() && slot.is_none() {
+        return response;
+    }
+    let is_sse = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/event-stream"));
+    if !is_sse {
+        return response;
+    }
+    let raw_sse = match pending.as_ref() {
+        Some(pending) => Arc::clone(&pending.core.raw_sse),
+        None => Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+    };
+    let (parts, body) = response.into_parts();
+    let stream = V3LiveSnapClientWireBodyStream {
+        inner: Box::pin(body.into_data_stream()),
+        core: pending.map(|pending| pending.core),
+        slot,
+        raw_sse,
+        finished: false,
+    };
+    Response::from_parts(parts, Body::from_stream(stream))
+}
+
+/// Builds the client-response sample recorder a runtime or endpoint owner
+/// attaches to its projected response.
+///
+/// The recorder travels to the transport boundary via
+/// `V3LiveSnapPendingClientCapture`, so the final body wrap records the exact
+/// client wire even when a committed client channel frames the payload.
+pub(crate) struct V3LiveSnapFinalSseResponseCapture {
+    core: V3LiveSnapSseRecorderCore,
 }
 
 impl V3LiveSnapFinalSseResponseCapture {
@@ -457,22 +559,23 @@ impl V3LiveSnapFinalSseResponseCapture {
         }))
     }
 
+    /// Attach the recorder so the transport boundary wraps the final client wire.
+    ///
+    /// The runtime response body is not the client wire once first-frame commit
+    /// exists, so a body wrap here would seal in the un-flushed remainder. The
+    /// recorder travels on the response instead; `observe_v3_live_client_wire`
+    /// reads it at the transport boundary and the same path still captures a
+    /// plain response that never went through a committed channel.
+    pub(crate) fn defer_into(self, mut response: Response<Body>) -> Response<Body> {
+        response
+            .extensions_mut()
+            .insert(V3LiveSnapPendingClientCapture { core: self.core });
+        response
+    }
+
+    #[cfg(test)]
     pub(crate) fn observe_response(self, response: Response<Body>) -> Response<Body> {
-        let is_sse = response
-            .headers()
-            .get("content-type")
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("text/event-stream"));
-        if !is_sse {
-            return response;
-        }
-        let (parts, body) = response.into_parts();
-        let stream = V3LiveSnapFinalSseBodyStream {
-            inner: Box::pin(body.into_data_stream()),
-            core: Some(self.core),
-            finished: false,
-        };
-        Response::from_parts(parts, Body::from_stream(stream))
+        observe_v3_live_client_wire(self.defer_into(response))
     }
 
     #[cfg(test)]
@@ -1300,7 +1403,7 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             .unwrap_or(false),
     );
     match client_response_capture {
-        Some(capture) => capture.observe_response(response),
+        Some(capture) => capture.defer_into(response),
         None => response,
     }
 }

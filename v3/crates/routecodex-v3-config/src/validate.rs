@@ -234,18 +234,6 @@ fn compile_hub_v1(
                 hook.hook_id
             )));
         }
-        if hook.profile == Some(V3HubHookProfile::Servertool)
-            && !matches!(
-                hook.node,
-                V3HubFixedNode::V3HubReqChatProcess04Governed
-                    | V3HubFixedNode::V3HubRespChatProcess03Governed
-            )
-        {
-            return Err(validation(format!(
-                "hub_v1 servertool profile is forbidden at node {}",
-                hook.node.node_id()
-            )));
-        }
         hooks.push(V3HubHookManifest {
             hook_id: hook.hook_id,
             node: hook.node,
@@ -256,7 +244,6 @@ fn compile_hub_v1(
             order: hook.order,
             allowed_resources: allowed.into_iter().collect(),
             forbidden_resources: forbidden.into_iter().collect(),
-            profile: hook.profile,
         });
     }
     for node in V3HubFixedNode::ALL {
@@ -595,7 +582,7 @@ fn compile_server_execution(
             server_id,
             "allowed_invocation_sources",
             authoring.allowed_invocation_sources,
-            &["client", "servertool_followup", "dry_run"],
+            &["client", "refill", "dry_run"],
         )?,
         allowed_transports: closed_list(
             server_id,
@@ -925,25 +912,21 @@ fn compile_models(
                 )));
             }
         }
-        match (
-            model.web_search_execution_mode,
-            model.web_search_backend.as_deref(),
-        ) {
-            (mode, binding)
-                if mode.is_metadata_center_local_search()
-                    && binding.is_none_or(|value| value.trim().is_empty()) =>
-            {
+        if model
+            .web_search_execution_mode
+            .is_metadata_center_local_search()
+        {
+            return Err(validation(format!(
+                "provider {provider_id} model {id} web_search_execution_mode = {} is no longer supported; RouteCodex has no local search backend and executes no search itself. Provider-owned hosted web_search stays available via web_search_execution_mode = native_remote_search_tool_mix or native_remote_search_search_only.",
+                model.web_search_execution_mode.as_str()
+            )));
+        }
+        if let Some(binding) = model.web_search_backend.as_deref() {
+            if !binding.trim().is_empty() {
                 return Err(validation(format!(
-                    "provider {provider_id} model {id} metadata_center_local_search requires exactly one web_search_backend binding"
+                    "provider {provider_id} model {id} declares web_search_backend = {binding}, which is no longer supported; RouteCodex has no local search backend. Remove web_search_backend and keep provider-owned hosted web_search."
                 )));
             }
-            (mode, Some(_)) if !mode.is_metadata_center_local_search() => {
-                return Err(validation(format!(
-                    "provider {provider_id} model {id} declares web_search_backend but execution mode {} does not use a local search backend",
-                    mode.as_str()
-                )));
-            }
-            _ => {}
         }
         if !(10_000..=100_000).contains(&model.context_token_estimate_scale_bps) {
             return Err(validation(format!(
@@ -958,7 +941,6 @@ fn compile_models(
                 aliases: model.aliases,
                 capabilities: model.capabilities,
                 web_search_execution_mode: model.web_search_execution_mode,
-                web_search_backend_binding: model.web_search_backend,
                 supports_streaming: model.supports_streaming,
                 supports_thinking: model.supports_thinking,
                 thinking: model.thinking,

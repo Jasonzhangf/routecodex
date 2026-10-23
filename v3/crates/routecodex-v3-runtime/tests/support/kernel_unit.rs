@@ -1,7 +1,6 @@
 use super::*;
 use async_trait::async_trait;
 use routecodex_v3_config::*;
-use routecodex_v3_hooks::{ControlRequest, ControlResponse};
 use routecodex_v3_provider_responses::{
     adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease},
     V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureCooldownScope,
@@ -9,14 +8,7 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use serde_json::json;
-use servertool_core::web_search_contract::{
-    WebSearchHookOutcome, WebSearchResult, WebSearchResultStatus,
-};
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixListener;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::V3_PROVIDER_ACTION_ISOLATED_DELAY_MS;
@@ -2132,7 +2124,7 @@ port = 4444
 routing_group = "tcp_lifecycle"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {{ request_max_attempts = 8, attempt_max_bytes = 67108864, attempt_max_frames = 262144, request_max_bytes = 67108864, process_max_bytes = 536870912, residence_timeout_ms = 600000 }}
 
@@ -3285,212 +3277,3 @@ async fn matched_optional_failure_uses_captured_default_without_router_reentry()
     );
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
 }
-
-/// direct 模式 Mode B websearch 全链：Req04 激活（web_search 声明本地化为
-/// websearch）、Resp03 拦截剥离、typed hooks sidecar 搜索、hosted
-/// web_search_call + 原 call_id 配对投影、状态机 SearchResultCaptured。
-struct WebSearchHopTransport {
-    sends: Arc<std::sync::atomic::AtomicUsize>,
-}
-#[async_trait]
-impl ResponsesTransport for WebSearchHopTransport {
-    async fn send(
-        &self,
-        request: V3Transport13ResponsesHttpRequest,
-    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        self.sends.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        // 主模型响应：本地 websearch function_call（Mode B 需拦截）。
-        Ok(V3ProviderResp14Raw::from_json(
-            request.request_id(),
-            request.provider_id(),
-            200,
-            vec![V3ProviderResponseHeader {
-                name: "content-type".to_string(),
-                value: b"application/json".to_vec(),
-            }],
-            br#"{"id":"resp_main","output":[{"type":"function_call","name":"websearch","call_id":"call_ws_1","arguments":"{\"query\":\"routecodex\"}"}]}"#
-                .to_vec(),
-        ))
-    }
-}
-
-fn web_search_sidecar_socket_path(label: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    PathBuf::from("/tmp").join(format!("rcc-{label}-{nonce}.sock"))
-}
-
-fn serve_direct_web_search_sidecar(
-    socket_path: PathBuf,
-) -> thread::JoinHandle<servertool_core::web_search_contract::WebSearchHookRequest> {
-    let listener = UnixListener::bind(&socket_path).expect("bind direct sidecar test socket");
-    thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept direct sidecar request");
-        let mut line = String::new();
-        BufReader::new(stream.try_clone().expect("clone direct sidecar stream"))
-            .read_line(&mut line)
-            .expect("read direct sidecar request");
-        let request: ControlRequest =
-            serde_json::from_str(line.trim()).expect("decode direct sidecar request");
-        let ControlRequest::ExecuteWebSearch { request } = request else {
-            panic!("expected ExecuteWebSearch");
-        };
-        let response = ControlResponse::ok(json!({
-            "outcome": WebSearchHookOutcome::Completed(WebSearchResult {
-                call_id: request.call_id.clone(),
-                status: WebSearchResultStatus::Completed,
-                content: Some("search result for routecodex".to_string()),
-                sources: Vec::new(),
-                metadata: None,
-                error: None,
-            })
-        }));
-        writeln!(
-            stream,
-            "{}",
-            serde_json::to_string(&response).expect("encode direct sidecar response")
-        )
-        .expect("write direct sidecar response");
-        *request
-    })
-}
-
-fn direct_web_search_mode_b_manifest() -> V3Config05ManifestPublished {
-    let authoring = parse_v3_config_02_authoring(
-        r#"
-version = 3
-
-[servers.test]
-bind = "127.0.0.1"
-port = 4444
-routing_group = "default"
-[servers.test.execution]
-allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
-allowed_transports = ["json", "sse"]
-
-[providers.openai]
-type = "responses"
-base_url = "http://127.0.0.1:9/v1"
-default_model = "gpt-test"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
-
-[providers.openai.models.gpt-test]
-supports_streaming = true
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "openai.gpt-search"
-capabilities = ["text", "web_search"]
-
-[providers.openai.models.gpt-search]
-supports_streaming = true
-capabilities = ["text"]
-
-[forwarders.responses]
-model = "client-model"
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "openai", model = "gpt-test", priority = 1 }]
-
-[route_groups.default.pools.default]
-selection = { strategy = "priority" }
-targets = [
-  { kind = "forwarder", id = "responses", priority = 1 },
-  { kind = "provider_model", provider = "openai", model = "gpt-search", priority = 2 },
-]
-"#,
-    )
-    .unwrap();
-    compile_v3_config_05_manifest(authoring).unwrap()
-}
-
-#[tokio::test]
-async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
-    let manifest = direct_web_search_mode_b_manifest();
-    let socket_path = web_search_sidecar_socket_path("direct-sidecar");
-    let sidecar = serve_direct_web_search_sidecar(socket_path.clone());
-    let server_tool_state = V3ResponsesDirectServerToolState::default()
-        .with_hooks_sidecar_socket(Some(socket_path.clone()));
-    let sends = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let scope = V3ResponsesDirectServerToolScope::new(
-        "/v1/responses",
-        "session-ws-direct",
-        "conversation-ws-direct",
-        4444,
-        "default",
-    );
-    let raw = test_responses_raw(
-        "default",
-        "req-ws-direct",
-        "exec-ws-direct",
-        json!({
-            "model": "client-model",
-            "input": "search routecodex",
-            "tools": [{"type": "web_search"}]
-        }),
-    );
-    let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::new()
-            .with_server_tool_state(&server_tool_state, scope.clone())
-            .with_now_epoch_ms(1_000),
-        &manifest,
-        raw,
-        crate::register_responses_direct_hooks(),
-        &WebSearchHopTransport {
-            sends: sends.clone(),
-        },
-    )
-    .await;
-    let request = sidecar.join().expect("join direct sidecar worker");
-    let _ = std::fs::remove_file(&socket_path);
-    assert_eq!(output.client_payload.status, 200, "{output:?}");
-    assert_eq!(
-        sends.load(std::sync::atomic::Ordering::SeqCst),
-        1,
-        "typed sidecar execution must not issue a second provider attempt"
-    );
-    assert_eq!(request.call_id, "call_ws_1");
-    assert_eq!(request.query, "routecodex");
-    let value = match output.client_payload.body {
-        V3ClientBody::Json(value) => value,
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
-            panic!("direct JSON response must remain JSON")
-        }
-    };
-    let output_arr = value["output"].as_array().expect("output array");
-    // 拦截剥离：客户端看不到本地 websearch function_call。
-    assert!(!output_arr.iter().any(|item| {
-        item.get("type").and_then(Value::as_str) == Some("function_call")
-            && item.get("name").and_then(Value::as_str) == Some("websearch")
-    }));
-    // hosted web_search_call 等价结果（Codex 契约）。
-    let call = output_arr
-        .iter()
-        .find(|item| item.get("type").and_then(Value::as_str) == Some("web_search_call"))
-        .expect("hosted web_search_call projected");
-    assert_eq!(call["status"], "completed");
-    assert_eq!(call["action"]["type"], "search");
-    assert_eq!(call["action"]["query"], "routecodex");
-    assert_eq!(call["results"][0]["text"], "search result for routecodex");
-    // 原 call_id 配对 function_call_output。
-    let paired = output_arr
-        .iter()
-        .find(|item| item.get("type").and_then(Value::as_str) == Some("function_call_output"))
-        .expect("paired function_call_output");
-    assert_eq!(paired["call_id"], "call_ws_1");
-    assert_eq!(paired["output"], "search result for routecodex");
-    // ServerToolCenter websearch 桶状态：SearchResultCaptured。
-    let state = server_tool_state
-        .web_search_load_for_scope(&scope)
-        .expect("center load")
-        .expect("websearch state present");
-    assert_eq!(
-        state.phase(),
-        crate::hub_v1::V3WebSearchCenterPhase::SearchResultCaptured
-    );
-    assert_eq!(state.query(), Some("routecodex"));
-    assert_eq!(state.original_call_id(), Some("call_ws_1"));
-}
-
-#[path = "../../src/kernel/tests/direct_websearch_mode_b.rs"]
-mod direct_websearch_mode_b;

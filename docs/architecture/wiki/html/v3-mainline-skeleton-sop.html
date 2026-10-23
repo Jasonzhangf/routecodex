@@ -71,7 +71,7 @@ flowchart TD
   S0[&quot;&lt;b&gt;V3ProviderRespInbound01Raw&lt;/b&gt;&lt;br/&gt;&lt;small&gt;provider raw response/event bytes already received&lt;/small&gt;&quot;]
   S1[&quot;&lt;b&gt;ProviderRespCompat02ProviderCompat&lt;/b&gt;&lt;br/&gt;&lt;small&gt;provider-specific compat before Hub parse&lt;/small&gt;&quot;]
   S2[&quot;&lt;b&gt;V3HubRespInbound02Normalized&lt;/b&gt;&lt;br/&gt;&lt;small&gt;Hub response semantic input&lt;/small&gt;&quot;]
-  S3[&quot;&lt;b&gt;V3HubRespChatProcess03Governed&lt;/b&gt;&lt;br/&gt;&lt;small&gt;response tool/servertool governance owner&lt;/small&gt;&quot;]
+  S3[&quot;&lt;b&gt;V3HubRespChatProcess03Governed&lt;/b&gt;&lt;br/&gt;&lt;small&gt;response tool governance owner&lt;/small&gt;&quot;]
   S4[&quot;&lt;b&gt;V3HubRespOutbound05ClientSemantic&lt;/b&gt;&lt;br/&gt;&lt;small&gt;client protocol projection only&lt;/small&gt;&quot;]
   S5[&quot;&lt;b&gt;V3ServerRespOutbound06ClientFrame&lt;/b&gt;&lt;br/&gt;&lt;small&gt;HTTP/SSE frame handoff only&lt;/small&gt;&quot;]
   S0 --&gt;|compat first| S1 --&gt;|normalize| S2 --&gt;|govern at Resp03| S3 --&gt;|project| S4 --&gt;|frame/stream| S5
@@ -114,7 +114,7 @@ flowchart TD
         <article class="logic-card">
     <div class="node-card-top"><span>Resp03</span></div>
     <h3>Response Chat Process owner</h3>
-    <p>Text harvest, tool frame repair, finish_reason branch, servertool, and ordinary tool governance live here.</p>
+    <p>Text harvest, tool frame repair, finish_reason branch, and ordinary tool governance live here.</p>
   </article>
         <article class="logic-card">
     <div class="node-card-top"><span>Resp03 / RespOutbound / Server frame</span></div>
@@ -158,7 +158,7 @@ flowchart TD
 
     <section class="panel">
       <h2>SSE Edge SOP</h2>
-      <div class="callout"><strong>SSE is transport only.</strong> It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only. It must not parse event/data JSON, required_action, terminal status, tool calls, continuation, servertool, routing, retry, or error-policy semantics.</div>
+      <div class="callout"><strong>SSE is transport only.</strong> It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only. It must not parse event/data JSON, required_action, terminal status, tool calls, continuation, routing, retry, or error-policy semantics.</div>
     </section>
 
     <section class="panel">

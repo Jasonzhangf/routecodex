@@ -30,7 +30,7 @@ use crate::provider_failure_runtime_policy::{
     V3RuntimeProviderAdmission,
 };
 use futures_util::StreamExt;
-use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
+use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderRequestHeader, V3ProviderResponseBody,
@@ -315,13 +315,12 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
     /// provider_target 的 provider_type 校验（gemini = Some("Gemini")，其余 None）。
     const EXPECTED_PROVIDER_TYPE: Option<&'static str>;
 
-    /// 请求侧 hook profile（gemini 固定 disabled；openai_chat Mode B web-search
-    /// 按请求 model 的编译期 mode 启用）。
+    /// 请求侧 hook profile.
     fn request_hook_profile(
         manifest: &V3Config05ManifestPublished,
         server_id: &str,
         payload: &Value,
-    ) -> Result<V3HubServertoolRequestProfile, V3RelayCoreError>;
+    ) -> Result<V3HubRequestHookProfile, V3RelayCoreError>;
 
     /// ReqInbound02 归一化（anthropic 特化：responses 语义轴断言 + anthropic 请求
     /// 结构归一化；其余协议用默认共享 builder）。
@@ -354,8 +353,6 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         transport_intent: V3HubTransportIntent,
         trace: &mut Vec<&'static str>,
         compatibility_profile: Option<&str>,
-        web_search_execution_mode: V3WebSearchExecutionMode,
-        web_search_state: Option<&V3WebSearchCenterState>,
         retain_response_cipher: bool,
         tool_thinking_enabled: bool,
         expected_model_id: &str,
@@ -372,15 +369,12 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         permit: Option<V3ProviderActionPermit>,
     ) -> Self::SseOutcome;
     /// SSE 流投影（协议特定 unfold 状态机；wire protocol 由骨架传入）。
-    /// `Err(V3RelayCoreError::WebSearchIntercepted)` 表示治理层拦截（fail-fast，不进失败链）。
     /// `retain_response_cipher`：同上，请求侧路由决策产物，响应侧 Resp03 消费。
     fn project_sse(
         request_id: &str,
         provider: V3ProviderSseStream,
         provider_wire_protocol: V3HubProviderWireProtocol,
         compatibility_profile: Option<String>,
-        web_search_execution_mode: V3WebSearchExecutionMode,
-        web_search_state: Option<V3WebSearchCenterState>,
         retain_response_cipher: bool,
         tool_thinking_enabled: bool,
         stream_observation: V3RuntimeStreamObservation,
@@ -622,7 +616,6 @@ where
         .run_from_normalized(req02, &request_hook_profile)
         .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
     trace.push("V3HubReqChatProcess04Governed");
-    let request_web_search_state = request_outcome.web_search_state().cloned();
     let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
     let req04 = request_outcome.into_governed();
     let mut req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
@@ -1199,8 +1192,6 @@ where
                         V3HubTransportIntent::Json,
                         &mut trace,
                         selected_target_compatibility_profile.as_deref(),
-                        selected.candidate.web_search_execution_mode,
-                        request_web_search_state.as_ref(),
                         retain_response_cipher,
                         request_tool_thinking_enabled,
                         &selected_target_model_id,
@@ -1212,9 +1203,6 @@ where
                 };
                 let client_response = match projection {
                     Ok(client_response) => client_response,
-                    Err(V3RelayCoreError::WebSearchIntercepted(message)) => {
-                        return Err(V3RelayCoreError::WebSearchIntercepted(message));
-                    }
                     Err(error) => {
                         let (mut failure, response_processing_code) = if !has_business_content {
                             (
@@ -1502,16 +1490,11 @@ where
                                 V3HubTransportIntent::Sse,
                                 &mut trace,
                                 selected_target_compatibility_profile.as_deref(),
-                                selected.candidate.web_search_execution_mode,
-                                request_web_search_state.as_ref(),
                                 retain_response_cipher,
                                 request_tool_thinking_enabled,
                                 &selected_target_model_id,
                             ) {
                                 Ok(client) => Ok((client, snapshot)),
-                                Err(error @ V3RelayCoreError::WebSearchIntercepted(_)) => {
-                                    return Err(error)
-                                }
                                 Err(error) => Err(provider_response_governance_failure(
                                     error,
                                     request_id,
@@ -1599,8 +1582,6 @@ where
                     idle_guarded_stream,
                     provider_wire_protocol,
                     selected_target_compatibility_profile,
-                    selected.candidate.web_search_execution_mode,
-                    request_web_search_state.clone(),
                     retain_response_cipher,
                     request_tool_thinking_enabled,
                     stream_observation.clone(),
@@ -1617,10 +1598,6 @@ where
                     ),
                 ) {
                     Ok(sse) => sse,
-                    Err(error @ V3RelayCoreError::WebSearchIntercepted(_)) => {
-                        drop(provider_action_permit.take());
-                        return Err(error);
-                    }
                     Err(error) => {
                         let mut failure = provider_runtime_failure(
                             V3ProviderError::ResponseBody {
@@ -1794,25 +1771,19 @@ where
                                 "V3RuntimeStreamObservation relay control failure: {error}"
                             )));
                         }
-                        V3RelayAttemptCollectFailure::ProviderResponseBody(reason) => {
-                            if reason.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
-                                drop(provider_action_permit.take());
-                                return Err(V3RelayCoreError::WebSearchIntercepted(reason));
-                            }
-                            (
-                                provider_runtime_failure(
-                                    V3ProviderError::ResponseBody {
-                                        request_id: request_id.to_string(),
-                                        provider_id: selected_target_provider_id.clone(),
-                                        reason: format!(
-                                            "provider response event codec failed: {reason}"
-                                        ),
-                                    },
-                                    &selected_target_provider_id,
-                                ),
-                                None,
-                            )
-                        }
+                        V3RelayAttemptCollectFailure::ProviderResponseBody(reason) => (
+                            provider_runtime_failure(
+                                V3ProviderError::ResponseBody {
+                                    request_id: request_id.to_string(),
+                                    provider_id: selected_target_provider_id.clone(),
+                                    reason: format!(
+                                        "provider response event codec failed: {reason}"
+                                    ),
+                                },
+                                &selected_target_provider_id,
+                            ),
+                            None,
+                        ),
                         V3RelayAttemptCollectFailure::ProviderTransport(reason) => (
                             provider_runtime_failure(
                                 V3ProviderError::Transport {

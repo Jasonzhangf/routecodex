@@ -147,6 +147,36 @@ test('runCase dispatches codex-real-exec through the injected real-client execut
           stream: true,
         },
       },
+      {
+        attempt_kind: 'business',
+        turn: 1,
+        path: '/v1/chat/completions',
+        method: 'POST',
+        raw_body: '{}',
+        headers: { authorization: TEST_PROVIDER_AUTH },
+        captured_at_epoch_ms: 30,
+        body: {
+          model: 'chat-model',
+          messages: [
+            { role: 'user', content: 'Run the exec_command tool call returned by the server exactly once. Report the command result after it completes.' },
+            {
+              role: 'assistant',
+              tool_calls: [{
+                id: 'call_int_1',
+                type: 'function',
+                function: { name: 'exec_command', arguments: expectedArguments },
+              }],
+            },
+            { role: 'tool', tool_call_id: 'call_int_1', content: functionCallOutput },
+            { role: 'assistant', content: 'done' },
+            {
+              role: 'user',
+              content: '继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。',
+            },
+          ],
+          stream: true,
+        },
+      },
     );
     return {
       child_pid: 5151,

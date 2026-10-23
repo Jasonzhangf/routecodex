@@ -10,7 +10,7 @@ use routecodex_v3_runtime::{
     build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
     build_v3_router_request_facts_for_entry, compile_v3_hub_relay_request_hooks,
     execute_v3_responses_relay_runtime, V3HubEntryProtocol, V3HubInvocationSource,
-    V3HubServertoolRequestProfile, V3HubTransportIntent, V3ResponsesRelayClientBody,
+    V3HubRequestHookProfile, V3HubTransportIntent, V3ResponsesRelayClientBody,
     V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
@@ -95,7 +95,7 @@ routing_group = "request_order"
 endpoints = ["responses"]
 [servers.request_order.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {{}}
 [providers.order]
@@ -134,7 +134,7 @@ async fn responses_relay_routes_normalized_request_before_tool_thinking_governan
     let governed_request = compile_v3_hub_relay_request_hooks()
         .run_from_normalized(
             req02,
-            &V3HubServertoolRequestProfile::enabled([]).with_tool_thinking_enabled(true),
+            &V3HubRequestHookProfile::enabled().with_tool_thinking_enabled(true),
         )
         .expect("tool_thinking governance must accept the normalized request")
         .payload()

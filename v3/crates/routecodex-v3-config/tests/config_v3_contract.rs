@@ -2,9 +2,8 @@
 use routecodex_v3_config::{
     compile_v3_config_05_manifest, default_v3_config_path, parse_v3_config_02_authoring,
     resolve_v3_http_sse_keepalive_ms, V3ConfigStore, V3HubFixedNode, V3HubHookPhase,
-    V3HubHookProfile, V3HubHookRequirement, V3ProviderDispositionStepManifest,
-    V3ProviderErrorRetryMode, V3RouteTargetKind, V3SelectionStrategy,
-    V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS,
+    V3HubHookRequirement, V3ProviderDispositionStepManifest, V3ProviderErrorRetryMode,
+    V3RouteTargetKind, V3SelectionStrategy, V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS,
 };
 use std::fs;
 
@@ -423,8 +422,7 @@ default_model = "local-model"
 auth = { type = "api_key", entries = [{ alias = "key", env = "LOCAL_KEY" }] }
 [providers.local.models.local-model]
 capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "servertool_search_backend"
-web_search_backend = "local.search"
+web_search_execution_mode = "native_remote_search_search_only"
 
 [providers.plain]
 type = "openai_chat"
@@ -467,14 +465,7 @@ targets = [
         manifest.providers["local"].models["local-model"]
             .web_search_execution_mode
             .as_str(),
-        "servertool_search_backend"
-    );
-    assert_eq!(
-        manifest.providers["local"].models["local-model"]
-            .web_search_backend_binding
-            .as_deref(),
-        Some("local.search"),
-        "Mode B must compile exactly one backend binding"
+        "native_remote_search_search_only"
     );
     assert_eq!(
         manifest.providers["plain"].models["plain-model"]
@@ -579,55 +570,6 @@ targets = [
 }
 
 #[test]
-fn metadata_center_local_search_requires_exactly_one_backend_binding() {
-    let source = r#"
-version = 3
-
-[servers.test]
-bind = "127.0.0.1"
-port = 4444
-routing_group = "default"
-
-[providers.local]
-type = "openai_chat"
-base_url = "http://local.invalid/v1"
-default_model = "local-model"
-auth = { type = "api_key", entries = [{ alias = "key", env = "LOCAL_KEY" }] }
-[providers.local.models.local-model]
-capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-
-[route_groups.default.pools.default]
-selection = { strategy = "priority" }
-targets = [
-  { kind = "provider_model", provider = "local", model = "local-model", priority = 1 }
-]
-"#;
-    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap())
-        .expect_err("metadata_center_local_search without backend binding must fail");
-    assert!(
-        error
-            .to_string()
-            .contains("requires exactly one web_search_backend binding"),
-        "unexpected error: {error}"
-    );
-
-    let source_with_backend = source.replace(
-        "web_search_execution_mode = \"metadata_center_local_search\"",
-        "web_search_execution_mode = \"metadata_center_local_search\"\nweb_search_backend = \"local.search\"",
-    );
-    let manifest =
-        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source_with_backend).unwrap())
-            .expect("metadata_center_local_search with backend binding must compile");
-    assert_eq!(
-        manifest.providers["local"].models["local-model"]
-            .web_search_backend_binding
-            .as_deref(),
-        Some("local.search")
-    );
-}
-
-#[test]
 fn same_model_name_across_providers_must_resolve_to_same_web_search_mode() {
     // 红测：同名 model 在两个 provider 声明不同 web_search_execution_mode 时
     // 编译期 fail-fast（Req04 Mode B 判定按请求 model 名解析，pool 直连扫描
@@ -648,8 +590,7 @@ default_model = "shared-model"
 auth = { type = "api_key", entries = [{ alias = "key", env = "ALPHA_KEY" }] }
 [providers.alpha.models.shared-model]
 capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "alpha.search"
+web_search_execution_mode = "native_remote_search_search_only"
 
 [providers.beta]
 type = "openai_chat"
@@ -1453,17 +1394,6 @@ fn compiles_hub_v1_declarations_without_request_branch_decisions() {
                 .any(|hook| hook.node == node && hook.phase == phase));
         }
     }
-    let servertool = hub
-        .hooks
-        .iter()
-        .filter(|hook| hook.profile == Some(V3HubHookProfile::Servertool))
-        .collect::<Vec<_>>();
-    assert_eq!(servertool.len(), 2);
-    assert!(servertool.iter().all(|hook| matches!(
-        hook.node,
-        V3HubFixedNode::V3HubReqChatProcess04Governed
-            | V3HubFixedNode::V3HubRespChatProcess03Governed
-    )));
     assert!(!format!("{hub:?}").contains("selected_target"));
     assert!(!format!("{hub:?}").contains("selected_execution_mode"));
 }
@@ -1550,7 +1480,7 @@ fn rejects_invalid_hub_v1_declarations_fail_fast() {
 }
 
 #[test]
-fn enforces_hook_resource_profile_and_optional_contracts() {
+fn enforces_hook_resource_and_optional_contracts() {
     let implicit_permissions = HUB_V1_DECLARATION.replacen(
         ", allowed_resources = [], forbidden_resources = []",
         ", forbidden_resources = []",
@@ -1583,13 +1513,6 @@ fn enforces_hook_resource_profile_and_optional_contracts() {
                 "node = \"V3HubReqInbound02Normalized\", phase = \"entry\", requirement = \"required\", enabled = false, priority",
             ),
             "required hook",
-        ),
-        (
-            HUB_V1_DECLARATION.replace(
-                "node = \"V3HubReqInbound02Normalized\", phase = \"exit\"",
-                "node = \"V3HubReqInbound02Normalized\", phase = \"exit\", profile = \"servertool\"",
-            ),
-            "servertool profile is forbidden",
         ),
     ];
     for (invalid, expected) in cases {
@@ -1890,7 +1813,7 @@ hooks = [
   { hook_id = "hub_v1.V3HubReqInbound01ClientRaw.exit.not_implemented", node = "V3HubReqInbound01ClientRaw", phase = "exit", requirement = "required", priority = 0, order = 1, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqInbound02Normalized.entry.not_implemented", node = "V3HubReqInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 2, allowed_resources = ["metadata_center"], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqInbound02Normalized.exit.not_implemented", node = "V3HubReqInbound02Normalized", phase = "exit", requirement = "optional", enabled = false, priority = 0, order = 3, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.entry.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "entry", requirement = "required", priority = 0, order = 4, allowed_resources = [], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.entry.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "entry", requirement = "required", priority = 0, order = 4, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqChatProcess04Governed.exit.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "exit", requirement = "required", priority = 0, order = 5, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqExecution05Planned.entry.not_implemented", node = "V3HubReqExecution05Planned", phase = "entry", requirement = "required", priority = 0, order = 6, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqExecution05Planned.exit.not_implemented", node = "V3HubReqExecution05Planned", phase = "exit", requirement = "required", priority = 0, order = 7, allowed_resources = [], forbidden_resources = [] },
@@ -1910,7 +1833,7 @@ hooks = [
   { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.exit.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 21, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespInbound02Normalized.entry.not_implemented", node = "V3HubRespInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 22, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespInbound02Normalized.exit.not_implemented", node = "V3HubRespInbound02Normalized", phase = "exit", requirement = "required", priority = 0, order = 23, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespChatProcess03Governed.exit.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "exit", requirement = "required", priority = 0, order = 25, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.entry.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "entry", requirement = "required", priority = 0, order = 26, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.exit.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "exit", requirement = "required", priority = 0, order = 27, allowed_resources = [], forbidden_resources = [] },
@@ -1922,12 +1845,12 @@ hooks = [
 const HUB_V1_SERVER_EXECUTION: &str = r#"
 [servers.primary.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [servers.secondary.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 "#;
 
