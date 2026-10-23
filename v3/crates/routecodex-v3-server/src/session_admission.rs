@@ -124,6 +124,14 @@ impl V3ServerRequestActivityGate {
     /// The returned guard keeps maintenance active for the caller; dropping it
     /// wakes every waiting dispatch.
     pub(crate) async fn begin_maintenance(self: &Arc<Self>) -> V3ServerMaintenanceGuard {
+        let guard = self.pause_dispatch().await;
+        guard.wait_for_quiescence().await;
+        guard
+    }
+
+    /// Pause new dispatch without waiting for accepted business requests.
+    /// Existing responses keep their original connection and delivery rights.
+    pub(crate) async fn pause_dispatch(self: &Arc<Self>) -> V3ServerMaintenanceGuard {
         loop {
             let notified = self.notify.notified();
             tokio::pin!(notified);
@@ -145,11 +153,9 @@ impl V3ServerRequestActivityGate {
             }
             notified.await;
         }
-        let guard = V3ServerMaintenanceGuard {
+        V3ServerMaintenanceGuard {
             gate: Arc::clone(self),
-        };
-        guard.wait_for_quiescence().await;
-        guard
+        }
     }
 }
 
@@ -439,6 +445,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_activity_gate_pause_does_not_drain_active_permit() {
+        let gate = Arc::new(V3ServerRequestActivityGate::default());
+        let _active = gate.admit().await;
+        let pause = timeout(Duration::from_secs(1), gate.pause_dispatch())
+            .await
+            .expect("restart pause must not wait for an active request");
+        let mut queued = Box::pin(gate.admit());
+        assert!(timeout(Duration::from_millis(25), &mut queued)
+            .await
+            .is_err());
+        drop(pause);
+        timeout(Duration::from_secs(1), queued)
+            .await
+            .expect("cancelled pause must restore admission with the old request still active");
+    }
+
+    #[tokio::test]
     async fn request_activity_gate_maintenance_waits_for_active_permit() {
         let gate = Arc::new(V3ServerRequestActivityGate::default());
         let permit = gate.admit().await;
@@ -454,7 +477,7 @@ mod tests {
         drop(permit);
         timeout(Duration::from_secs(1), maintenance)
             .await
-            .expect("restart preparation must resume after the response body closes")
+            .expect("graceful maintenance must resume after the response body closes")
             .expect("activity waiter must not panic");
     }
 

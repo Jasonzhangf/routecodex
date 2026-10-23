@@ -864,13 +864,13 @@ chains:
       side_channel_reads: [v3.debug.codex_sample_persist_failure]
       side_channel_writes: []
     semantic_contract:
-    - Caller holds the accepted typed ControlRestartPlan; aggregate first owns reversible maintenance admission and quiescence through Body EOF, Hyper tail submission and actual Front write/flush completion, then delegates reversible sample cutoff and complete drain to Debug, then delegates checkpoint mutation to Front freeze. Control peer EOF cancels preflight and releases maintenance without cancelling Front writes. Lifecycle retains the returned guard through native exec and drops it on rejection; historical diagnostics are report data, not restart admission truth.
+    - Caller holds the accepted typed ControlRestartPlan; aggregate reversibly pauses new dispatch without waiting for accepted business responses, quiesces probe ownership, then delegates reversible sample cutoff and bounded drain to Debug and checkpoint mutation to Front freeze. Control peer EOF cancels preflight and releases the pause without cancelling Front writes. Lifecycle retains the returned guard through native exec and drops it on rejection; interrupted responses remain detectable transport loss and historical diagnostics are report data, not restart admission truth.
   - step_id: v3-restart-quiesce-live
     from_node: V3LifecycleRestartPrepared
     to_node: V3Front08ClientTerminalOrError
     caller_symbol: V3ServerAggregateHandle::prepare_exec_attempt
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: V3ServerRequestActivityGate::begin_maintenance
+    callee_symbol: V3ServerRequestActivityGate::pause_dispatch
     callee_file: v3/crates/routecodex-v3-server/src/session_admission.rs
     status: anchored
     owner_feature_id: v3.managed_server_lifecycle
@@ -6608,7 +6608,7 @@ chains:
 
 - chain_id: v3.client_sse_head_commit
   owner_feature_id: v3.client_sse_head_commit
-  summary: A streamed client request commits the HTTP SSE response head and transport keepalives at the Server boundary while the Runtime still buffers the full provider attempt, and an exec replacement drains in-flight client responses before closing their transports.
+  summary: A streamed client request commits the HTTP SSE response head and transport keepalives at the Server boundary while the Runtime still buffers the full provider attempt. Exec replacement pauses new dispatch without draining accepted business responses; replacement may interrupt their transports detectably without fabricated completion or RCC replay.
   manifest: docs/architecture/manifests/v3.client_sse_head_commit.mainline.yml
   entry_contract:
     node: V3ServerSseHeadCommit01ClientHead

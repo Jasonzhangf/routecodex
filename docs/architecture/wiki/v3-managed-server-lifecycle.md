@@ -3,6 +3,16 @@
 This review surface owns process control only. The RouteCodex V3 Runtime remains the sole request and
 response business lifecycle.
 
+Formal restart pauses new business dispatch without waiting for accepted requests
+to finish. The `exec_accepted_plan` node in `v3.managed_restart` retains reversible
+admission ownership, stops probe owners and performs bounded diagnostic persistence,
+then executes the replacement or retains the original owner on preparation failure.
+The existing five-node SESE graph needs no separate request-state transfer path.
+An accepted response may still complete on its valid original connection during
+preparation. Successful exec can interrupt remaining transports; clients detect that
+interruption and decide whether to retry. RCC does not replay interrupted requests
+or fabricate a successful completion.
+
 ```mermaid
 flowchart LR
   A[V3Lifecycle01ValidatedConfig] --> B[V3Lifecycle02InstanceDeclared]

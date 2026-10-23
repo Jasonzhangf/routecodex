@@ -7723,10 +7723,10 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
     assert!(timeout(Duration::from_millis(100), &mut queued)
         .await
         .is_err());
-    let mut preparation = Box::pin(handle.prepare_exec_attempt());
-    assert!(timeout(Duration::from_millis(100), &mut preparation)
+    let preparation = timeout(Duration::from_secs(2), handle.prepare_exec_attempt())
         .await
-        .is_err());
+        .expect("exec preparation must not wait for the held business response")
+        .unwrap();
     release.add_permits(1);
     let first_body = timeout(Duration::from_secs(5), first)
         .await
@@ -7734,10 +7734,6 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
         .unwrap();
     assert_eq!(first_body.matches("event: response.completed").count(), 1);
     assert_responses_sse_delivered_business_text(&first_body, "held response released");
-    let preparation = timeout(Duration::from_secs(5), preparation)
-        .await
-        .unwrap()
-        .unwrap();
     // The session permit has now dropped. The queued request must still wait
     // at the aggregate maintenance gate rather than entering Runtime.
     assert!(timeout(Duration::from_millis(100), &mut queued)

@@ -593,9 +593,36 @@
         "version": 1
       },
       "version": 22
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "我觉得简单一点，不等待，直接重启，重启过程的损失就自动客户端处理重发，旧响应回来不拒绝",
+          "role": "user",
+          "source": "Codex chat 01a15eb0-0200-7b53-83c5-2a205c956632, user instruction 2026-10-21"
+        },
+        "base_version": 1,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "req-20261021-c642945-immediate-restart",
+        "requirement_id": "routecodex-managed-restart-live-continuity",
+        "text": "正式 restart 不等待在途业务请求排空，直接切换运行代际。重启造成的请求或连接损失由客户端检测并按客户端策略重试，RCC 不代替客户端重发原请求，不伪造成功或错误业务响应。旧请求的响应若仍可经有效的原绑定和连接交付，不得仅因运行代际变化拒绝；已关闭的连接不承诺恢复。取消此前要求的新代无损接管全部在途处理状态、TLS/future 和回传的交付前提。保留正式 restart 单一入口、控制面与业务面分离、真实重启结果、请求绑定与可检测传输中断。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "我觉得简单一点，不等待，直接重启，重启过程的损失就自动客户端处理重发，旧响应回来不拒绝",
+          "role": "user",
+          "source": "Codex chat 01a15eb0-0200-7b53-83c5-2a205c956632, user instruction 2026-10-21"
+        },
+        "requirement_id": "routecodex-managed-restart-live-continuity",
+        "status": "active",
+        "text": "正式 restart 不等待在途业务请求排空，直接切换运行代际。重启造成的请求或连接损失由客户端检测并按客户端策略重试，RCC 不代替客户端重发原请求，不伪造成功或错误业务响应。旧请求的响应若仍可经有效的原绑定和连接交付，不得仅因运行代际变化拒绝；已关闭的连接不承诺恢复。取消此前要求的新代无损接管全部在途处理状态、TLS/future 和回传的交付前提。保留正式 restart 单一入口、控制面与业务面分离、真实重启结果、请求绑定与可检测传输中断。",
+        "version": 2
+      },
+      "version": 23
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 22
+  "version": 23
 }
