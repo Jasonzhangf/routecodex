@@ -259,8 +259,88 @@
           {
             "data": "[DONE]"
           }
-        ]
+        ],
+    "attempts": [
+      {
+            "protocol": "openai_chat",
+            "mode": "sse",
+            "status": 200,
+            "content_type": "text/event-stream",
+            "sse_events": [
+              {
+                "data": {
+                  "id": "chatcmpl_integer_followup",
+                  "object": "chat.completion.chunk",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "delta": {
+                        "role": "assistant",
+                        "content": "done"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "data": {
+                  "id": "chatcmpl_integer_followup",
+                  "object": "chat.completion.chunk",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "delta": {},
+                      "finish_reason": "stop"
+                    }
+                  ]
+                }
+              },
+              {
+                "data": "[DONE]"
+              }
+            ]
       },
+      {
+            "protocol": "openai_chat",
+            "mode": "sse",
+            "status": 200,
+            "content_type": "text/event-stream",
+            "sse_events": [
+              {
+                "data": {
+                  "id": "chatcmpl_integer_followup",
+                  "object": "chat.completion.chunk",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "delta": {
+                        "role": "assistant",
+                        "content": "done"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "data": {
+                  "id": "chatcmpl_integer_followup",
+                  "object": "chat.completion.chunk",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "delta": {},
+                      "finish_reason": "stop"
+                    }
+                  ]
+                }
+              },
+              {
+                "data": "[DONE]"
+              }
+            ]
+      }
+    ]
+  },
       "expected_client_must": {
         "status": "completed",
         "output.0.content.0.text": "done"

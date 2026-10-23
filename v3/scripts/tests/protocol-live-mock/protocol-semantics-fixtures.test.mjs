@@ -51,12 +51,13 @@ test('Responses completion observes all output messages in order without duplica
 test('Responses client SSE oracles require message text and Responses status', () => {
   for (const name of ['responses-to-chat-sse.json', 'responses-to-anthropic-sse.json', 'responses-to-gemini-sse.json']) {
     const fixture = JSON.parse(readFileSync(fixturePath(name), 'utf8'));
-    const item = { id: 'msg_independent', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'ok', annotations: [] }] };
-    const check = (changed, status = 'completed') => assertClientResult({ status: 200, headers: { 'content-type': 'text/event-stream' }, bodyText: frame('response.completed', { type: 'response.completed', response: { status, output: [changed] } }), error: null, aborted: false, truncated: false, complete: true, response_ended: true }, fixture.expected_client, 'responses', { parseClientBody, findSemanticTerminal });
-    assert.equal(check(item).ok, true, name);
-    assert.equal(check({ ...item, content: [] }).ok, false, name);
-    assert.equal(check({ type: 'output_text', text: 'ok' }).ok, false, name);
-    assert.equal(check(item, 'incomplete').ok, false, name);
+    const first = { id: 'msg_independent_a', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'ok', annotations: [] }] };
+    const second = { id: 'msg_independent_b', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'refill-ok', annotations: [] }] };
+    const check = (output, status = 'completed') => assertClientResult({ status: 200, headers: { 'content-type': 'text/event-stream' }, bodyText: frame('response.completed', { type: 'response.completed', response: { status, output } }), error: null, aborted: false, truncated: false, complete: true, response_ended: true }, fixture.expected_client, 'responses', { parseClientBody, findSemanticTerminal });
+    assert.equal(check([first, second]).ok, true, name);
+    assert.equal(check([{ ...first, content: [] }, second]).ok, false, name);
+    assert.equal(check([{ type: 'output_text', text: 'ok' }, second]).ok, false, name);
+    assert.equal(check([first, second], 'incomplete').ok, false, name);
   }
 });
 
