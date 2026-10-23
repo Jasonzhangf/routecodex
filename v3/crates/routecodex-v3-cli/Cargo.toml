@@ -23,6 +23,7 @@ axum.workspace = true
 libc.workspace = true
 provider-compat-core = { path = "../provider-compat-core" }
 reqwest.workspace = true
+routecodex-v3-config = { path = "../routecodex-v3-config", features = ["test-hooks"] }
 routecodex-v3-debug = { path = "../routecodex-v3-debug" }
 routecodex-v3-runtime = { path = "../routecodex-v3-runtime" }
 serde_json.workspace = true

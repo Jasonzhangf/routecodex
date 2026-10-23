@@ -69,7 +69,7 @@
   "expected_client": {
     "transport": "complete",
     "status": 200,
-    "body_must": {"text": "refill-ok", "status": "completed", "output_items.0.type": "message", "output_items.0.role": "assistant", "output_items.0.content.0.type": "output_text", "output_items.0.content.0.text": "refill-ok"},
+    "body_must": {"text": "okrefill-ok", "status": "completed", "output_items.0.type": "message", "output_items.0.role": "assistant", "output_items.0.content.0.type": "output_text", "output_items.0.content.0.text": "ok", "output_items.1.type": "message", "output_items.1.role": "assistant", "output_items.1.content.0.type": "output_text", "output_items.1.content.0.text": "refill-ok"},
     "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
     "semantic_terminal_required": true,
     "semantic_terminal_count": 1

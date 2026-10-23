@@ -238,16 +238,17 @@ pub fn v3_internal_chat_process_refill_policy() -> &'static V3InternalChatProces
 
 /// Test-only injection of the typed refill limit.
 ///
-/// The hook and its backing atomic exist only when the `test-hooks` cargo
-/// feature is enabled. That feature is requested solely from dev-dependencies,
-/// so a shipped build has exactly one source: the compiled `internal.toml`
-/// value. It is not a user config, server override, environment variable or
-/// dynamic API in a production binary. `u32::MAX` means "no override".
-#[cfg(feature = "test-hooks")]
+/// The hook and its backing atomic are compiled only for this crate's own unit
+/// tests or when the `test-hooks` cargo feature is enabled. The feature is
+/// requested solely from dev-dependencies, so a shipped binary still has one
+/// source: the compiled `internal.toml` value. It is not a user config, server
+/// override, environment variable or dynamic API in a production binary.
+/// `u32::MAX` means "no override".
+#[cfg(any(test, feature = "test-hooks"))]
 static CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(u32::MAX);
 
-#[cfg(feature = "test-hooks")]
+#[cfg(any(test, feature = "test-hooks"))]
 #[doc(hidden)]
 pub fn v3_test_only_set_chat_process_refill_max_override(value: Option<u32>) {
     CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE.store(
@@ -258,10 +259,10 @@ pub fn v3_test_only_set_chat_process_refill_max_override(value: Option<u32>) {
 
 /// Effective compiled limit.
 ///
-/// Production builds read only the compiled policy. With `test-hooks` the
-/// process-wide test injection may stand in for public-entry tests.
+/// Production builds read only the compiled policy. Unit tests and `test-hooks`
+/// builds may exercise public-entry tests with a process-wide override.
 pub fn v3_effective_chat_process_refill_max() -> u32 {
-    #[cfg(feature = "test-hooks")]
+    #[cfg(any(test, feature = "test-hooks"))]
     {
         let override_value =
             CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE.load(std::sync::atomic::Ordering::SeqCst);

@@ -826,32 +826,62 @@ impl Deref for V3HubRespChatProcess03Outcome {
 /// Source-explicit non-empty summary fact for refill gating.
 ///
 /// Provenance contract: only a provider-mapped explicit summary field counts.
-/// For the Responses canonical payload this is `output[]` items of type
-/// `reasoning` whose `summary[]` entries carry a non-empty `text`. RCC-synthesized
-/// reasoning/toolreason content, ordinary assistant body text (`output_text`,
-/// `content[].text`, `reasoning_content`, provider `thinking`) and request-side
-/// summary policy never count.
+/// The fact is recognized in the two provider-native shapes that the runtime
+/// reads before governance:
+/// - Responses canonical: `output[]` items of type `reasoning` whose `summary[]`
+///   entries carry a non-empty `text`.
+/// - OpenAI Chat native: `choices[].message.reasoning.summary[]` entries with a
+///   non-empty `text`.
+/// RCC-synthesized reasoning/toolreason content, ordinary assistant body text
+/// (`output_text`, `content[].text`, `reasoning_content`, provider `thinking`),
+/// native full-reasoning `reasoning.content`, and request-side summary policy
+/// never count.
 pub(crate) fn has_v3_source_explicit_nonempty_summary(payload: &Value) -> bool {
+    has_responses_source_explicit_summary(payload)
+        || has_openai_chat_source_explicit_summary(payload)
+}
+
+fn has_nonempty_summary_text(summaries: Option<&Value>) -> bool {
+    summaries
+        .and_then(Value::as_array)
+        .map(|summaries| {
+            summaries.iter().any(|summary| {
+                summary
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(|text| !text.trim().is_empty())
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn has_responses_source_explicit_summary(payload: &Value) -> bool {
     payload
         .get("output")
         .and_then(Value::as_array)
         .map(|items| {
             items.iter().any(|item| {
-                if item.get("type").and_then(Value::as_str) != Some("reasoning") {
-                    return false;
-                }
-                item.get("summary")
-                    .and_then(Value::as_array)
-                    .map(|summaries| {
-                        summaries.iter().any(|summary| {
-                            summary
-                                .get("text")
-                                .and_then(Value::as_str)
-                                .map(|text| !text.trim().is_empty())
-                                .unwrap_or(false)
-                        })
-                    })
-                    .unwrap_or(false)
+                item.get("type").and_then(Value::as_str) == Some("reasoning")
+                    && has_nonempty_summary_text(item.get("summary"))
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn has_openai_chat_source_explicit_summary(payload: &Value) -> bool {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .map(|choices| {
+            choices.iter().any(|choice| {
+                let reasoning = choice
+                    .get("message")
+                    .and_then(|message| message.get("reasoning"));
+                // Only the explicit `summary` field counts. Native full
+                // reasoning (`reasoning.content`), `reasoning_content` and
+                // `reasoning_text` are not summaries.
+                has_nonempty_summary_text(reasoning.and_then(|reasoning| reasoning.get("summary")))
             })
         })
         .unwrap_or(false)

@@ -979,9 +979,7 @@ pub(crate) struct V3DirectSseGovernedFacts {
 /// provider observation is a bounded diagnostic (2 MiB) that also predates
 /// governance, so a harvested tool call never appears there and a long stream
 /// loses its terminal. The sealed frames are the governed client projection.
-pub(crate) fn inspect_direct_sse_governed_frames(
-    frames: &[Vec<u8>],
-) -> V3DirectSseGovernedFacts {
+pub(crate) fn inspect_direct_sse_governed_frames(frames: &[Vec<u8>]) -> V3DirectSseGovernedFacts {
     let mut facts = V3DirectSseGovernedFacts::default();
     for segment in split_direct_sse_committed_chunks(frames) {
         let Some(value) = segment.value.as_ref() else {
@@ -1079,7 +1077,10 @@ pub(crate) fn rewrite_direct_sse_terminal_output_items(
                         response_value["output"] = serde_json::Value::Array(merged);
                     }
                     if let Some(usage) = usage {
-                        crate::hub_v1::write_v3_chat_process_refill_usage(&mut response_value, usage);
+                        crate::hub_v1::write_v3_chat_process_refill_usage(
+                            &mut response_value,
+                            usage,
+                        );
                     }
                     *response = response_value;
                 }

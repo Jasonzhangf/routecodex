@@ -635,6 +635,24 @@ fn refill_source_summary_requires_explicit_nonempty_reasoning_summary() {
     let with_summary =
         json!({"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"done"}]}]});
     assert!(has_v3_source_explicit_nonempty_summary(&with_summary));
+    let native_chat_summary = json!({
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "reasoning": {
+                    "summary": [{"type": "summary_text", "text": "provider summary"}],
+                    "content": [{"type": "reasoning_text", "text": "full reasoning"}],
+                    "encrypted_content": "opaque"
+                },
+                "content": "answer"
+            },
+            "finish_reason": "stop"
+        }]
+    });
+    assert!(has_v3_source_explicit_nonempty_summary(
+        &native_chat_summary
+    ));
     for ignored in [
         json!({"output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}]}),
         json!({"output":[{"type":"reasoning","summary":[]}]}),
@@ -642,6 +660,9 @@ fn refill_source_summary_requires_explicit_nonempty_reasoning_summary() {
         json!({"output":[{"type":"reasoning","summary":"done"}]}),
         json!({"reasoning_content":"done"}),
         json!({"output":[{"type":"reasoning","text":"reasoning body"}]}),
+        json!({"choices":[{"message":{"reasoning":{"content":[{"type":"reasoning_text","text":"full reasoning only"}]}}}]}),
+        json!({"choices":[{"message":{"reasoning_content":"full reasoning only"}}]}),
+        json!({"choices":[{"message":{"reasoning":{"summary":[{"type":"summary_text","text":"  "}]}}}]}),
         json!({}),
     ] {
         assert!(
