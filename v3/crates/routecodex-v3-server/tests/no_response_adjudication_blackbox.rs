@@ -10682,7 +10682,12 @@ async fn refill_concurrent_cancel_public() {
     assert_eq!(status, StatusCode::OK, "{survivor_body}");
     let survivor_messages = client_responses_payload(&survivor_body)["output"]
         .as_array()
-        .map(|items| items.iter().filter(|item| item["type"] == "message").count())
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| item["type"] == "message")
+                .count()
+        })
         .unwrap_or(0);
     assert_eq!(
         survivor_messages, 2,
