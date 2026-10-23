@@ -662,6 +662,7 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
                 &mut rewritten,
                 self.strip_client_response_id,
                 self.retain_response_cipher,
+                provider_protocol,
                 &self.namespace_tool_identities,
             );
         } else {
@@ -669,6 +670,7 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
                 &mut rewritten,
                 self.strip_client_response_id,
                 self.retain_response_cipher,
+                provider_protocol,
             );
         }
         if self.deepseek_console_go {

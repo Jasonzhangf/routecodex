@@ -2258,7 +2258,7 @@ mod tests {
     }
 
     #[test]
-    fn response_cipher_policy_strips_codex_cipher_but_keeps_anthropic_signature() {
+    fn response_cipher_policy_strips_all_non_tool_cipher_without_typed_anthropic_source() {
         let mut payload = json!({
             "status": "completed",
             "output": [
@@ -2276,13 +2276,63 @@ mod tests {
                 },
                 {
                     "type": "reasoning",
+                    "id": "rs_uuid",
+                    "encrypted_content": "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0",
+                    "summary": [{"type": "summary_text", "text": "uuid visible"}]
+                },
+                {
+                    "type": "reasoning",
+                    "id": "rs_opaque",
+                    "encrypted_content": "113833ee-native-cipher",
+                    "summary": [{"type": "summary_text", "text": "opaque visible"}]
+                },
+                {
+                    "type": "reasoning",
                     "id": "rs_sig",
                     "encrypted_content": "anthropic-signature-value",
                     "summary": [{"type": "summary_text", "text": "signed"}]
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "encrypted_content": "tool-output-business-value",
+                    "output": [{
+                        "encrypted_content": "nested-tool-output-business-value"
+                    }]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "name": "echo",
+                    "arguments": {
+                        "encrypted_content": "structured-tool-argument-business-value",
+                        "nested": {"encrypted_content": "nested-tool-argument-business-value"}
+                    }
+                },
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_3",
+                    "name": "freeform",
+                    "input": {
+                        "encrypted_content": "custom-tool-input-business-value"
+                    }
+                },
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_3",
+                    "output": {
+                        "encrypted_content": "custom-tool-output-business-value"
+                    }
+                },
+                {
+                    "type": "tool_search_call",
+                    "arguments": {
+                        "encrypted_content": "tool-search-argument-business-value"
+                    }
                 }
             ]
         });
-        apply_v3_response_cipher_policy(&mut payload, false);
+        apply_v3_response_cipher_policy(&mut payload, false, false);
         assert!(
             !payload.to_string().contains("rsn_CIPHERTEXT"),
             "rsn_ cipher must be stripped"
@@ -2291,19 +2341,123 @@ mod tests {
             !payload.to_string().contains("gAAAA_cipher"),
             "gAAAA cipher must be stripped"
         );
-        assert_eq!(
-            payload["output"][2]["encrypted_content"], "anthropic-signature-value",
-            "non-rsn_/gAAAA signature carrier is not Codex cipher and must be kept"
+        assert!(
+            !payload
+                .to_string()
+                .contains("411bd3dd-47a6-49c0-8eef-6a826f349bf6-0"),
+            "UUID-shaped cipher must be stripped"
+        );
+        assert!(
+            !payload.to_string().contains("113833ee-native-cipher"),
+            "opaque cipher must be stripped"
+        );
+        assert!(
+            !payload.to_string().contains("anthropic-signature-value"),
+            "cipher shape must not infer an Anthropic source"
         );
         assert_eq!(payload["output"][0]["summary"][0]["text"], "plain");
         assert_eq!(payload["output"][1]["content"][0]["text"], "visible");
+        assert_eq!(payload["output"][2]["summary"][0]["text"], "uuid visible");
+        assert_eq!(payload["output"][3]["summary"][0]["text"], "opaque visible");
+        assert_eq!(
+            payload["output"][5]["encrypted_content"], "tool-output-business-value",
+            "function_call_output is business data and must be preserved"
+        );
+        assert_eq!(
+            payload["output"][5]["output"][0]["encrypted_content"],
+            "nested-tool-output-business-value",
+            "the complete function_call_output business subtree must be preserved"
+        );
+        assert_eq!(
+            payload["output"][6]["arguments"]["encrypted_content"],
+            "structured-tool-argument-business-value",
+            "function_call structured arguments are business data"
+        );
+        assert_eq!(
+            payload["output"][6]["arguments"]["nested"]["encrypted_content"],
+            "nested-tool-argument-business-value",
+            "the complete function_call arguments subtree must be preserved"
+        );
+        assert_eq!(
+            payload["output"][7]["input"]["encrypted_content"],
+            "custom-tool-input-business-value",
+            "custom_tool_call input is business data"
+        );
+        assert_eq!(
+            payload["output"][8]["output"]["encrypted_content"],
+            "custom-tool-output-business-value",
+            "custom_tool_call_output is business data"
+        );
+        assert_eq!(
+            payload["output"][9]["arguments"]["encrypted_content"],
+            "tool-search-argument-business-value",
+            "tool_search_call arguments are business data"
+        );
 
         let mut retained =
             json!({"output": [{"type": "reasoning", "encrypted_content": "rsn_KEEP"}]});
-        apply_v3_response_cipher_policy(&mut retained, true);
+        apply_v3_response_cipher_policy(&mut retained, true, false);
         assert_eq!(
             retained["output"][0]["encrypted_content"], "rsn_KEEP",
             "retain=true must keep cipher verbatim"
+        );
+
+        let mut anthropic =
+            json!({"output": [{"type": "reasoning", "encrypted_content": "typed-signature"}]});
+        apply_v3_response_cipher_policy(&mut anthropic, false, true);
+        assert_eq!(
+            anthropic["output"][0]["encrypted_content"], "typed-signature",
+            "typed Anthropic source must keep its signature verbatim"
+        );
+    }
+
+    #[test]
+    fn chat_reasoning_cipher_policy_keeps_business_values_and_strips_codex_shapes() {
+        let mut payload = json!({
+            "output": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "preserved cipher",
+                    "summary": [{"type": "summary_text", "text": "business reasoning"}]
+                },
+                {"type": "reasoning", "encrypted_content": "rsn_CODEX_CIPHER"},
+                {"type": "reasoning", "encrypted_content": "gAAAA_CODEX_CIPHER"},
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "encrypted_content": "tool-business-cipher"
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "arguments": {
+                        "encrypted_content": "rsn_CALL_ARGUMENT_BUSINESS",
+                        "nested": {"encrypted_content": "gAAAA_CALL_ARGUMENT_BUSINESS"}
+                    }
+                }
+            ]
+        });
+
+        apply_v3_chat_reasoning_cipher_policy(&mut payload, false);
+
+        assert_eq!(
+            payload["output"][0]["encrypted_content"], "preserved cipher",
+            "OpenAI Chat reasoning business shape must survive JSON admission"
+        );
+        assert!(payload["output"][1].get("encrypted_content").is_none());
+        assert!(payload["output"][2].get("encrypted_content").is_none());
+        assert_eq!(
+            payload["output"][3]["encrypted_content"], "tool-business-cipher",
+            "function_call_output remains business data on Chat wire"
+        );
+        assert_eq!(
+            payload["output"][4]["arguments"]["encrypted_content"], "rsn_CALL_ARGUMENT_BUSINESS",
+            "tool calls must not lose codex-shaped structured argument values"
+        );
+        assert_eq!(
+            payload["output"][4]["arguments"]["nested"]["encrypted_content"],
+            "gAAAA_CALL_ARGUMENT_BUSINESS",
+            "the complete Chat tool argument subtree must be preserved"
         );
     }
 

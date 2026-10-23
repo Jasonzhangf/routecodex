@@ -67,12 +67,6 @@ pub(crate) fn run_json_response_hooks_with_invocation_source(
     // `provider_protocol` stays the canonical semantic protocol so ProviderRespCompat02
     // and normalization keep their existing meaning. The raw wire protocol is carried
     // separately as a typed witness that only the Resp03 source-provenance gate reads.
-    let source_provider_protocol =
-        if input.provider_response_transport_intent == V3HubTransportIntent::Sse {
-            input.source_provider_protocol
-        } else {
-            input.provider_protocol
-        };
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         normalized_provider_value,
         V3ProviderRespInbound01RawContext::new(
@@ -82,7 +76,7 @@ pub(crate) fn run_json_response_hooks_with_invocation_source(
             invocation_source,
             input.provider_response_transport_intent,
         )
-        .with_source_provider_protocol(source_provider_protocol)
+        .with_source_provider_protocol(input.source_provider_protocol)
         .with_compatibility_profile(input.compatibility_profile)
         .with_opencode_zen_tcm_bridge(input.opencode_zen_tcm_bridge.cloned())
         .with_custom_tool_function_binding(input.custom_tool_function_binding.cloned()),

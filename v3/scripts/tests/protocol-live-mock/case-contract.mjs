@@ -29,9 +29,11 @@ export function describeTurns(fixture) {
       index,
       turn_id: turn?.turn_id ?? null,
       request: isFirst ? (turn?.client_request ?? fixture.client_request) : turn?.client_request ?? null,
-      providerExpected: turn?.expected_provider_exact
-        ? { ...laterTurnProviderShape(fixture.expected_provider ?? {}), exact: turn.expected_provider_exact }
-        : (isFirst ? fixture.expected_provider : null),
+      providerExpected: isPlainObject(turn?.expected_provider)
+        ? turn.expected_provider
+        : turn?.expected_provider_exact
+          ? { ...laterTurnProviderShape(fixture.expected_provider ?? {}), exact: turn.expected_provider_exact }
+          : (isFirst ? fixture.expected_provider : null),
       clientExpected: describeClientExpected(fixture, turn, isFirst),
       upstream: isFirst
         ? (fixture.upstream_response ?? turn?.upstream_response ?? null)

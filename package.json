@@ -153,6 +153,8 @@
     "test:v3-responses-inbound-websocket-proxy-red-fixtures": "node v3/scripts/tests/v3-responses-inbound-websocket-proxy-red-fixtures.mjs",
     "verify:v3-live-provider-compat-parity": "node v3/scripts/architecture/verify-v3-live-provider-compat-parity.mjs",
     "test:v3-live-provider-compat-parity-red-fixtures": "node v3/scripts/tests/v3-live-provider-compat-parity-red-fixtures.mjs",
+    "test:v3-response-cipher-source-provenance": "npm --prefix v3 run test:v3-response-cipher-source-provenance",
+    "test:v3-fe1ec4b-response-cipher-public": "node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs --case fe1ec4b-responses-ciphertext-json-sse-two-turn && node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs --case fe1ec4b-responses-tool-cipher-json-sse-followup && node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs --case fe1ec4b-responses-anthropic-signature-json && node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs --case fe1ec4b-responses-anthropic-signature-sse && node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs --case fe1ec4b-chat-wire-reasoning-cipher-relay-json && node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs --case fe1ec4b-responses-source-cipher-relay-json",
     "test:v3-protocol-live-mock-matrix-selftest": "node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs --selftest",
     "run:v3-protocol-live-mock-matrix": "node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs",
     "test:protocol-live-mock-support": "npm --prefix v3 run test:v3-protocol-live-mock-support",

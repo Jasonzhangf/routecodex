@@ -48,9 +48,30 @@ pub(crate) fn apply_v3_direct_response_projection_hooks(
     payload: &mut serde_json::Value,
     strip_client_response_id: bool,
     retain_response_cipher: bool,
+    provider_protocol: V3HubProviderWireProtocol,
 ) {
     if !retain_response_cipher {
-        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(payload, false);
+        match provider_protocol {
+            // Anthropic signature 由 typed wire witness 保留，不按密文形状猜测来源。
+            V3HubProviderWireProtocol::Anthropic => {
+                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+                    payload, false, true,
+                );
+            }
+            // Responses wire 全剥非工具密文（fe1ec4b 契约），function_call_output 保留。
+            V3HubProviderWireProtocol::Responses => {
+                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+                    payload, false, false,
+                );
+            }
+            // Chat wire 的 reasoning 业务形状必须存活（b878f6c 契约）；只清理
+            // Codex 本地密文前缀，其余 opaque 值原样进入客户端。
+            V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Gemini => {
+                routecodex_v3_provider_responses::apply_v3_chat_reasoning_cipher_policy(
+                    payload, false,
+                );
+            }
+        }
     }
     if strip_client_response_id {
         crate::shared::strip_v3_response_id_from_json_body(payload);
@@ -64,12 +85,14 @@ pub(crate) fn apply_v3_direct_response_projection_hooks_with_identities(
     payload: &mut serde_json::Value,
     strip_client_response_id: bool,
     retain_response_cipher: bool,
+    provider_protocol: V3HubProviderWireProtocol,
     namespace_tool_identities: &std::collections::HashMap<String, (String, String)>,
 ) {
     apply_v3_direct_response_projection_hooks(
         payload,
         strip_client_response_id,
         retain_response_cipher,
+        provider_protocol,
     );
     crate::hub_v1::restore_v3_responses_namespace_identities(payload, namespace_tool_identities);
 }
@@ -422,22 +445,84 @@ mod tests {
             "output": [
                 {
                     "type": "reasoning",
-                    "encrypted_content": "rsn_reasoning_cipher"
+                    "encrypted_content": "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0",
+                    "summary": [{"type": "summary_text", "text": "plain reasoning"}]
                 },
                 {
                     "type": "function_call_output",
                     "call_id": "call_1",
-                    "encrypted_content": "rsn_opaque_function_output"
+                    "encrypted_content": "113833ee-native-cipher"
                 }
             ]
         });
 
-        apply_v3_direct_response_projection_hooks(&mut payload, false, false);
+        apply_v3_direct_response_projection_hooks(
+            &mut payload,
+            false,
+            false,
+            V3HubProviderWireProtocol::Responses,
+        );
 
         assert!(payload["output"][0].get("encrypted_content").is_none());
         assert_eq!(
-            payload["output"][1]["encrypted_content"],
-            "rsn_opaque_function_output"
+            payload["output"][0]["summary"][0]["text"],
+            "plain reasoning"
         );
+        assert_eq!(
+            payload["output"][1]["encrypted_content"],
+            "113833ee-native-cipher"
+        );
+    }
+
+    #[test]
+    fn direct_response_projection_keeps_signature_for_typed_anthropic_source() {
+        let mut payload = json!({
+            "output": [{
+                "type": "reasoning",
+                "encrypted_content": "typed-anthropic-signature",
+                "summary": [{"type": "summary_text", "text": "signed thought"}]
+            }]
+        });
+
+        apply_v3_direct_response_projection_hooks(
+            &mut payload,
+            false,
+            false,
+            V3HubProviderWireProtocol::Anthropic,
+        );
+
+        assert_eq!(
+            payload["output"][0]["encrypted_content"],
+            "typed-anthropic-signature"
+        );
+        assert_eq!(payload["output"][0]["summary"][0]["text"], "signed thought");
+    }
+
+    #[test]
+    fn direct_response_projection_preserves_chat_wire_business_cipher() {
+        let mut payload = json!({
+            "output": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "preserved cipher",
+                    "summary": [{"type": "summary_text", "text": "chat reasoning"}]
+                },
+                {"type": "reasoning", "encrypted_content": "rsn_CODEX_CIPHER"}
+            ]
+        });
+
+        apply_v3_direct_response_projection_hooks(
+            &mut payload,
+            false,
+            false,
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+
+        assert_eq!(
+            payload["output"][0]["encrypted_content"],
+            "preserved cipher"
+        );
+        assert_eq!(payload["output"][0]["summary"][0]["text"], "chat reasoning");
+        assert!(payload["output"][1].get("encrypted_content").is_none());
     }
 }

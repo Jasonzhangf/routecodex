@@ -1016,7 +1016,7 @@ data: {"type":"response.output_text.delta","delta":"progress"}
 }
 
 #[tokio::test]
-async fn responses_sse_projects_anthropic_thinking_from_response_governance() {
+async fn responses_sse_strips_untyped_signature_from_anthropic_client_governance() {
     let scope = "anthropic_thinking_sse";
     let output = execute_v3_anthropic_relay_runtime(
         &manifest(scope),
@@ -1044,13 +1044,16 @@ async fn responses_sse_projects_anthropic_thinking_from_response_governance() {
     let events = output.client_response["events"]
         .as_array()
         .expect("Anthropic SSE events");
+    assert!(
+        events.iter().all(|event| {
+            event["data"]["delta"]["type"] != "signature_delta"
+                || event["data"]["delta"]["signature"] != "resp04-signature"
+        }),
+        "a Responses provider must not become a typed Anthropic signature source"
+    );
     assert!(events.iter().any(|event| {
-        event["event"] == "content_block_delta"
-            && event["data"]["delta"]
-                == json!({
-                    "type":"signature_delta",
-                    "signature":"resp04-signature"
-                })
+        event["data"]["delta"]["type"] == "thinking_delta"
+            && event["data"]["delta"]["thinking"] == "signed thought"
     }));
     let observability = output
         .observability

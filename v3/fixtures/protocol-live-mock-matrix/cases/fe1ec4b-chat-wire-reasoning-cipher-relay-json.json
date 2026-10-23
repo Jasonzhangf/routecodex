@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "case_id": "fe1ec4b-chat-wire-reasoning-cipher-relay-json",
+  "cell": {
+    "entry_protocol": "responses",
+    "provider_protocol": "openai_chat",
+    "transport": "json",
+    "mode": "relay"
+  },
+  "public_entry": {
+    "kind": "http-listener",
+    "consumer": "node-http",
+    "endpoint": "/v1/responses",
+    "isolation": "task-owned-loopback-listener"
+  },
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "model": "mock.chat-model",
+      "input": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "preserve opaque chat reasoning and strip codex marker"
+            }
+          ]
+        }
+      ],
+      "stream": false
+    }
+  },
+  "expected_provider": {
+    "paths": [
+      "/v1/chat/completions"
+    ],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "model": "chat-model",
+      "messages.0.content": [
+        {
+          "type": "text",
+          "text": "preserve opaque chat reasoning and strip codex marker"
+        }
+      ],
+      "stream": false
+    },
+    "body_must_not": [
+      "routecodex_internal",
+      "metadata_center",
+      "debug_snapshot"
+    ],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "openai_chat",
+    "mode": "json",
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "id": "chatcmpl_fe1ec4b_chat_cipher",
+      "object": "chat.completion",
+      "model": "chat-model",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "reasoning": {
+              "summary": [
+                {
+                  "type": "summary_text",
+                  "text": "opaque chat reasoning"
+                }
+              ],
+              "encrypted_content": "opaque-chat-business-cipher"
+            },
+            "content": ""
+          },
+          "finish_reason": "stop"
+        },
+        {
+          "index": 1,
+          "message": {
+            "role": "assistant",
+            "reasoning": {
+              "summary": [
+                {
+                  "type": "summary_text",
+                  "text": "codex marker reasoning"
+                }
+              ],
+              "encrypted_content": "rsn_CODEX_LOCAL_CIPHER"
+            },
+            "content": "chat answer"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "completion_tokens": 5,
+        "total_tokens": 16
+      }
+    }
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {
+      "status": "completed",
+      "output.0.type": "reasoning",
+      "output.0.encrypted_content": "opaque-chat-business-cipher",
+      "output.0.summary.0.text": "opaque chat reasoning",
+      "output.1.type": "reasoning",
+      "output.1.summary.0.text": "codex marker reasoning",
+      "output.2.content.0.text": "chat answer"
+    },
+    "body_must_not": [
+      "rsn_CODEX_LOCAL_CIPHER",
+      "provider_error",
+      "internal_error",
+      "routecodex_internal",
+      "metadata_center"
+    ],
+    "semantic_terminal_required": true
+  },
+  "assertions": {
+    "provider_attempt_count": 1,
+    "probe_attempts_may_occur": true,
+    "no_control_leakage": true
+  },
+  "source": {
+    "files": [
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_provider_tests.rs"
+    ],
+    "tests": [
+      "v3/scripts/tests/v3-protocol-live-mock-matrix.mjs::--case fe1ec4b-chat-wire-reasoning-cipher-relay-json"
+    ],
+    "adaptation": "An OpenAI Chat provider returns one opaque business reasoning cipher and one Codex local rsn_ marker. Responses Relay must preserve the opaque value while stripping the local marker before client projection."
+  },
+  "contract_differences": []
+}
