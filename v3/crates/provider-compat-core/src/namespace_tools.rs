@@ -148,9 +148,18 @@ pub fn flatten_namespace_tool_for_provider(
         })?;
 
     let mut flattened = Vec::with_capacity(children.len());
+    let mut namespace_descriptions = Vec::new();
+    if let Some(description) = namespace
+        .get("description")
+        .and_then(Value::as_str)
+        .filter(|description| !description.is_empty())
+    {
+        namespace_descriptions.push(description.to_owned());
+    }
     flatten_namespace_children(
         protocol,
         &namespace_name,
+        &mut namespace_descriptions,
         children,
         &format!("provider namespace tool {namespace_name}"),
         &mut flattened,
@@ -161,6 +170,7 @@ pub fn flatten_namespace_tool_for_provider(
 fn flatten_namespace_children(
     protocol: &str,
     namespace_name: &str,
+    namespace_descriptions: &mut Vec<String>,
     children: &[Value],
     path: &str,
     flattened: &mut Vec<Value>,
@@ -186,18 +196,30 @@ fn flatten_namespace_children(
                     .ok_or_else(|| format!("{path}.tools[{index}] requires non-empty tools"))?;
                 let nested_path = format!("{path}.tools[{index}]");
                 let qualified_namespace = format!("{namespace_name}__{nested_name}");
+                let nested_description = child
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .filter(|description| !description.is_empty());
+                if let Some(description) = nested_description {
+                    namespace_descriptions.push(description.to_owned());
+                }
                 flatten_namespace_children(
                     protocol,
                     &qualified_namespace,
+                    namespace_descriptions,
                     nested_children,
                     &nested_path,
                     flattened,
                 )?;
+                if nested_description.is_some() {
+                    namespace_descriptions.pop();
+                }
             }
             Some("function") => {
                 flatten_namespace_function(
                     protocol,
                     namespace_name,
+                    namespace_descriptions,
                     child,
                     &format!("{path}.tools[{index}]"),
                     flattened,
@@ -207,6 +229,7 @@ fn flatten_namespace_children(
                 flatten_namespace_custom(
                     protocol,
                     namespace_name,
+                    namespace_descriptions,
                     child,
                     &format!("{path}.tools[{index}]"),
                     flattened,
@@ -225,6 +248,7 @@ fn flatten_namespace_children(
 fn flatten_namespace_custom(
     protocol: &str,
     namespace_name: &str,
+    namespace_descriptions: &[String],
     child: &Map<String, Value>,
     child_path: &str,
     flattened: &mut Vec<Value>,
@@ -239,6 +263,14 @@ fn flatten_namespace_custom(
             "name".into(),
             Value::String(format!("{namespace_name}__{name}")),
         );
+        let source_description = child.get("description").cloned();
+        if source_description.as_ref().map_or(true, Value::is_string) {
+            if let Some(description) =
+                compose_namespace_description(namespace_descriptions, source_description)
+            {
+                native.insert("description".into(), description);
+            }
+        }
         flattened.push(Value::Object(native));
         return Ok(());
     }
@@ -259,6 +291,7 @@ fn flatten_namespace_custom(
     if description.as_ref().is_some_and(|value| !value.is_string()) {
         return Err(format!("{child_path}.description must be a string"));
     }
+    description = compose_namespace_description(namespace_descriptions, description);
     if let Some(format) = child.get("format") {
         match format.as_object() {
             Some(value)
@@ -311,6 +344,7 @@ pub fn openai_chat_freeform_custom_tool_parameters() -> Value {
 fn flatten_namespace_function(
     protocol: &str,
     namespace_name: &str,
+    namespace_descriptions: &[String],
     child: &Map<String, Value>,
     child_path: &str,
     flattened: &mut Vec<Value>,
@@ -337,6 +371,7 @@ fn flatten_namespace_function(
         "a string",
         Value::is_string,
     )?;
+    let description = compose_namespace_description(namespace_descriptions, description);
     let parameters = read_optional_namespace_child_field(
         &child_path,
         child,
@@ -362,6 +397,29 @@ fn flatten_namespace_function(
         strict,
     ));
     Ok(())
+}
+
+fn compose_namespace_description(
+    namespace_descriptions: &[String],
+    leaf_description: Option<Value>,
+) -> Option<Value> {
+    let namespace_descriptions: Vec<&str> = namespace_descriptions
+        .iter()
+        .map(String::as_str)
+        .filter(|description| !description.is_empty())
+        .collect();
+    if namespace_descriptions.is_empty() {
+        return leaf_description;
+    }
+    let mut parts = namespace_descriptions;
+    if let Some(leaf) = leaf_description
+        .as_ref()
+        .and_then(Value::as_str)
+        .filter(|description| !description.is_empty())
+    {
+        parts.push(leaf);
+    }
+    Some(Value::String(parts.join("\n\n")))
 }
 
 fn read_optional_namespace_child_field(
@@ -826,5 +884,164 @@ mod tests {
         let function = json!({"type":"function","name":"exec","parameters":openai_chat_freeform_custom_tool_parameters()});
         let custom = json!({"type":"custom","name":"exec","format":{"type":"text"}});
         assert_distinct_bound_identities(&json!({"tools":[function,custom]}), 2);
+    }
+
+    #[test]
+    fn composes_namespace_and_leaf_descriptions_in_order() {
+        let flattened = flatten_namespace_tool_for_provider("openai-chat", &json!({
+            "type":"namespace",
+            "name":"functions",
+            "description":"Namespace docs.",
+            "tools":[{"type":"function","name":"run","description":"Leaf docs.","parameters":{"type":"object"}}]
+        }))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            flattened[0]["function"]["description"],
+            "Namespace docs.\n\nLeaf docs."
+        );
+    }
+
+    #[test]
+    fn nested_namespace_descriptions_survive_once_in_order() {
+        let flattened = flatten_namespace_tool_for_provider("openai-chat", &json!({
+            "type":"namespace",
+            "name":"outer",
+            "description":"Outer docs.",
+            "tools":[{
+                "type":"namespace",
+                "name":"inner",
+                "description":"Inner docs.",
+                "tools":[{"type":"function","name":"run","description":"Leaf docs.","parameters":{"type":"object"}}]
+            }]
+        }))
+        .unwrap()
+        .unwrap();
+        let description = flattened[0]["function"]["description"].as_str().unwrap();
+        assert_eq!(description, "Outer docs.\n\nInner docs.\n\nLeaf docs.");
+        assert_eq!(description.matches("docs.").count(), 3);
+    }
+
+    #[test]
+    fn missing_namespace_description_preserves_leaf_description() {
+        let flattened = flatten_namespace_tool_for_provider("openai-chat", &json!({
+            "type":"namespace",
+            "name":"functions",
+            "tools":[{"type":"function","name":"run","description":"Leaf docs.","parameters":{"type":"object"}}]
+        }))
+        .unwrap()
+        .unwrap();
+        assert_eq!(flattened[0]["function"]["description"], "Leaf docs.");
+    }
+
+    #[test]
+    fn missing_leaf_description_preserves_namespace_description() {
+        let flattened = flatten_namespace_tool_for_provider(
+            "openai-chat",
+            &json!({
+                "type":"namespace",
+                "name":"functions",
+                "description":"Namespace docs.",
+                "tools":[{"type":"function","name":"run","parameters":{"type":"object"}}]
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(flattened[0]["function"]["description"], "Namespace docs.");
+    }
+
+    #[test]
+    fn sibling_namespaces_compose_each_leaf_only_with_its_own_ancestors() {
+        let flattened = flatten_namespace_tool_for_provider("openai-chat", &json!({
+            "type":"namespace",
+            "name":"outer",
+            "description":"Outer docs.",
+            "tools":[
+                {
+                    "type":"namespace",
+                    "name":"left",
+                    "description":"Left docs.",
+                    "tools":[{"type":"function","name":"a","description":"A leaf.","parameters":{"type":"object"}}]
+                },
+                {
+                    "type":"namespace",
+                    "name":"right",
+                    "description":"Right docs.",
+                    "tools":[{"type":"function","name":"b","description":"B leaf.","parameters":{"type":"object"}}]
+                }
+            ]
+        }))
+        .unwrap()
+        .unwrap();
+        assert_eq!(flattened.len(), 2);
+        let left = flattened
+            .iter()
+            .find(|tool| tool["function"]["name"] == "outer__left__a")
+            .unwrap();
+        let right = flattened
+            .iter()
+            .find(|tool| tool["function"]["name"] == "outer__right__b")
+            .unwrap();
+        assert_eq!(
+            left["function"]["description"],
+            "Outer docs.\n\nLeft docs.\n\nA leaf."
+        );
+        assert_eq!(
+            right["function"]["description"],
+            "Outer docs.\n\nRight docs.\n\nB leaf."
+        );
+    }
+
+    #[test]
+    fn custom_grammar_projection_keeps_documentation_and_compatibility_annotation() {
+        let tools = flatten_namespace_tool_for_provider(
+            "openai-chat",
+            &json!({
+                "type":"namespace",
+                "name":"functions",
+                "description":"Namespace docs.",
+                "tools":[{
+                    "type":"custom",
+                    "name":"exec",
+                    "description":"Leaf docs.",
+                    "format":{"type":"grammar","syntax":"lark","definition":"start: WORD"}
+                }]
+            }),
+        )
+        .expect("registered Chat custom compatibility")
+        .unwrap();
+        assert_eq!(tools[0]["function"]["name"], "functions__exec");
+        assert_eq!(
+            tools[0]["function"]["parameters"],
+            openai_chat_freeform_custom_tool_parameters()
+        );
+        assert_eq!(
+            tools[0]["function"]["description"],
+            "Namespace docs.\n\nLeaf docs.\nRouteCodex Chat custom-tool compatibility: source grammar syntax=lark definition=start: WORD; Chat function tools do not enforce this grammar. Put the exact raw string in input."
+        );
+    }
+
+    #[test]
+    fn responses_custom_namespace_keeps_documentation_and_format() {
+        let flattened = flatten_namespace_tool_for_provider(
+            "openai-responses",
+            &json!({
+                "type":"namespace",
+                "name":"functions",
+                "description":"Namespace docs.",
+                "tools":[{
+                    "type":"custom",
+                    "name":"exec",
+                    "description":"Leaf docs.",
+                    "format":{"type":"text"}
+                }]
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(flattened[0]["type"], "custom");
+        assert_eq!(flattened[0]["name"], "functions__exec");
+        assert_eq!(flattened[0]["description"], "Namespace docs.\n\nLeaf docs.");
+        assert_eq!(flattened[0]["format"], json!({"type":"text"}));
     }
 }

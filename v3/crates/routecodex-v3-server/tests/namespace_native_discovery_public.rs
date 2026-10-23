@@ -51,6 +51,11 @@ const SEARCH_LIMIT: i64 = 4;
 
 const DISCOVERED_NAMESPACE: &str = "namespace_probe";
 const DISCOVERED_LEAF: &str = "echo_nonce";
+const DISCOVERED_NAMESPACE_DESCRIPTION: &str =
+    "Namespace documentation: safe discovered nonce tools.";
+const DISCOVERED_LEAF_DESCRIPTION: &str = "safe nonce echo handler";
+const DISCOVERED_COMPOSED_DESCRIPTION: &str =
+    "Namespace documentation: safe discovered nonce tools.\n\nsafe nonce echo handler";
 const ECHO_CALL_ID: &str = "toolu_echo_nonce";
 const NONCE: &str = "NS_ROUTE_CODEX_20261014_SAFE";
 
@@ -302,10 +307,11 @@ fn discovered_tool_declarations() -> Value {
         {
             "type": "namespace",
             "name": DISCOVERED_NAMESPACE,
+            "description": DISCOVERED_NAMESPACE_DESCRIPTION,
             "tools": [{
                 "type": "function",
                 "name": DISCOVERED_LEAF,
-                "description": "safe nonce echo handler",
+                "description": DISCOVERED_LEAF_DESCRIPTION,
                 "parameters": {
                     "type": "object",
                     "properties": {"nonce": {"type": "string"}},
@@ -338,11 +344,9 @@ fn wire_tool<'a>(body: &'a Value, name: &str) -> Option<&'a Value> {
 /// the provider actually received. The allocator spelling is never an oracle:
 /// the fixture matches the complete declared schema and uses the bound name.
 fn discovered_wire_name(body: &Value) -> Option<&str> {
-    let declarations = discovered_tool_declarations();
-    let expected = &declarations[0]["tools"][0];
+    let expected = discovered_schema();
     let mut matches = body["tools"].as_array()?.iter().filter(|tool| {
-        tool["description"] == expected["description"]
-            && tool["input_schema"] == expected["parameters"]
+        tool["description"] == DISCOVERED_COMPOSED_DESCRIPTION && tool["input_schema"] == expected
     });
     let name = matches.next()?["name"].as_str()?;
     (matches.next().is_none() && !name.is_empty()).then_some(name)
@@ -350,17 +354,6 @@ fn discovered_wire_name(body: &Value) -> Option<&str> {
 
 fn discovered_schema() -> Value {
     discovered_tool_declarations()[0]["tools"][0]["parameters"].clone()
-}
-
-fn discovered_tool_matches_schema(tool: &Value) -> bool {
-    matches!(tool.get("type").and_then(Value::as_str), Some("namespace"))
-        && tool["name"] == DISCOVERED_NAMESPACE
-        && tool["tools"].as_array().is_some_and(|tools| {
-            tools.len() == 1
-                && tools[0]["type"] == "function"
-                && tools[0]["name"] == DISCOVERED_LEAF
-                && tools[0]["parameters"] == discovered_schema()
-        })
 }
 
 /// Reject the historical inferai conflict while preserving the actual
@@ -406,39 +399,56 @@ fn answer_discovery_consistency(body: &Value) -> Response<Body> {
 
 fn validate_discovery_consistency(body: &Value) -> Result<(), String> {
     let expected = discovered_schema();
-    for declaration in body["input"]
+    let mut retained = body["input"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|item| item["type"] == "tool_search_output")
         .flat_map(|item| item["tools"].as_array().unwrap().iter())
-    {
-        let native = discovered_tool_matches_schema(declaration);
-        let flat = declaration["type"] == "function"
-            && declaration["parameters"] == expected
-            && declaration["name"]
-                .as_str()
-                .is_some_and(|name| !name.is_empty());
-        if !native && !flat {
-            return Err(format!(
-                "discovered input declaration was inconsistent: {declaration}"
-            ));
-        }
-        for tool in body["tools"].as_array().unwrap().iter() {
-            if tool["type"] != "function" {
-                continue;
-            }
-            if native && tool["parameters"] == expected {
-                return Err(format!(
-                    "retained discovery and promoted flat declaration conflict: {body}"
-                ));
-            }
-            if flat && tool["parameters"] == expected && tool != declaration {
-                return Err(format!(
-                    "discovered leaf declaration retained without its namespace: {body}"
-                ));
-            }
-        }
+        .filter(|tool| tool["type"] == "function" && tool["parameters"] == expected);
+    let Some(declaration) = retained.next() else {
+        return Err(format!(
+            "retained tool_search_output did not expose the flattened discovered declaration: {body}"
+        ));
+    };
+    if retained.next().is_some() {
+        return Err(format!(
+            "retained tool_search_output exposed more than one matching discovered declaration: {body}"
+        ));
+    }
+    if declaration["description"] != DISCOVERED_COMPOSED_DESCRIPTION {
+        return Err(format!(
+            "retained discovery declaration lost the composed namespace and leaf description: {declaration}"
+        ));
+    }
+    let name = declaration["name"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| format!("retained discovery declaration has no wire name: {declaration}"))?;
+    let mut promoted_declarations = body["tools"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|tool| tool["type"] == "function" && tool["name"] == name);
+    let Some(promoted) = promoted_declarations.next() else {
+        return Err(format!(
+            "retained discovery declaration has no promoted tool: {body}"
+        ));
+    };
+    if promoted_declarations.next().is_some() {
+        return Err(format!(
+            "retained discovery declaration maps to more than one promoted tool: {body}"
+        ));
+    }
+    if promoted != declaration {
+        return Err(format!(
+            "retained discovery and promoted flat declaration differ: retained={declaration} promoted={promoted}"
+        ));
+    }
+    if promoted["description"] != DISCOVERED_COMPOSED_DESCRIPTION {
+        return Err(format!(
+            "promoted discovery declaration lost the composed namespace and leaf description: {promoted}"
+        ));
     }
     if !body["input"].as_array().unwrap().iter().any(|item| {
         item["type"] == "tool_search_output"
@@ -450,6 +460,63 @@ fn validate_discovery_consistency(body: &Value) -> Result<(), String> {
         return Err("native tool_search paired result was not forwarded".to_string());
     }
     Ok(())
+}
+
+fn assert_captured_discovery_description(body: &Value) {
+    let expected = discovered_schema();
+    let retained: Vec<&Value> = body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["type"] == "tool_search_output" && item["call_id"] == SEARCH_CALL_ID)
+        .flat_map(|item| item["tools"].as_array().unwrap().iter())
+        .filter(|tool| tool["type"] == "function" && tool["parameters"] == expected)
+        .collect();
+    assert_eq!(
+        retained.len(),
+        1,
+        "one retained discovered declaration: {body}"
+    );
+    let retained = retained[0];
+    assert_eq!(
+        retained["description"], DISCOVERED_COMPOSED_DESCRIPTION,
+        "retained discovery declaration lost the composed description: {retained}"
+    );
+    let promoted: Vec<&Value> = body["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|tool| tool["type"] == "function" && tool["name"] == retained["name"])
+        .collect();
+    assert_eq!(
+        promoted.len(),
+        1,
+        "one promoted declaration for the retained identity: {body}"
+    );
+    assert_eq!(
+        promoted[0], retained,
+        "retained discovery and promoted declaration must match exactly"
+    );
+    let description = retained["description"].as_str().unwrap();
+    assert_eq!(description, DISCOVERED_COMPOSED_DESCRIPTION);
+    assert_eq!(
+        description
+            .matches(DISCOVERED_NAMESPACE_DESCRIPTION)
+            .count(),
+        1,
+        "namespace documentation must appear once: {description}"
+    );
+    assert_eq!(
+        description.matches(DISCOVERED_LEAF_DESCRIPTION).count(),
+        1,
+        "leaf documentation must appear once: {description}"
+    );
+    let namespace_position = description.find(DISCOVERED_NAMESPACE_DESCRIPTION).unwrap();
+    let leaf_position = description.find(DISCOVERED_LEAF_DESCRIPTION).unwrap();
+    assert!(
+        namespace_position < leaf_position,
+        "namespace documentation must precede leaf documentation: {description}"
+    );
 }
 
 fn wire_tool_has_property(body: &Value, name: &str, property: &str) -> bool {
@@ -891,6 +958,7 @@ async fn responses_discovery_declaration_consistency_json_public() {
     .await;
     let capture = capture(&mut captures, "CONSISTENCY_JSON").await;
     assert_eq!(capture["path"], "/v1/responses");
+    assert_captured_discovery_description(&capture["body"]);
     assert!(
         validate_discovery_consistency(&capture["body"]).is_ok(),
         "final declaration conflict: {}",
@@ -951,6 +1019,7 @@ async fn responses_discovery_declaration_consistency_sse_public() {
     .await;
     let capture = capture(&mut captures, "CONSISTENCY_SSE").await;
     assert_eq!(capture["path"], "/v1/responses");
+    assert_captured_discovery_description(&capture["body"]);
     assert!(
         validate_discovery_consistency(&capture["body"]).is_ok(),
         "final declaration conflict: {}",
