@@ -1717,6 +1717,9 @@ features:
   owner_scope: Controlled /v1/chat/completions Relay through the sole Hub v1 Req01-Req09 and Resp01-Resp06 lifecycle
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_complete_chat_sse.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server/issueff1e031_chat_markup.rs
   - v3/crates/routecodex-v3-server/src/executors.rs
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -1757,6 +1760,7 @@ features:
   - Exact provider/model pins retain their declared scope; failure does not admit an unrelated default-pool provider.
   - Seeded continuation preserves declared exhaustion and cumulative attempt/deadline admission; an exhausted request breaks only its own transport without provider error payload or fabricated completion.
   required_gates:
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server openai_chat_responses_ff1e031_ -- --nocapture --test-threads=1
   - npm run test:v3-openai-chat-relay-runtime-integration
   - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_relay_handoff -- --nocapture --test-threads=1
   - npm run test:v3-h2-chat-direct-isolation

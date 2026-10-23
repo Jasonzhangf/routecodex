@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 93 functional paths, 573 caller edges.
+Generated view: 93 functional paths, 576 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -64,7 +64,7 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|2 edges / 2 paths| module_v3_error
   module_v3_runtime__hub_v1 -->|8 edges / 6 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|41 edges / 8 paths| module_v3_runtime
-  module_v3_runtime__hub_v1 -->|138 edges / 30 paths| module_v3_runtime__hub_v1
+  module_v3_runtime__hub_v1 -->|141 edges / 30 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|1 edges / 1 paths| module_provider_compat_core
   module_v3_runtime -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
   module_v3_runtime -->|3 edges / 3 paths| module_routecodex_v3_route_classifier
@@ -121,7 +121,7 @@ flowchart TD
 | v3-runtime::hub_v1 | v3-error | 2 | `v3.provider_global_subscription_probe`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime::hub_v1 | v3-provider-responses | 8 | `v3-provider-admission-lease-lifecycle`<br/>`v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
 | v3-runtime::hub_v1 | v3-runtime | 41 | `v3.openai_chat_relay.controlled_runtime`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_tool_markup.relay_parser_bindings`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime::hub_v1 | v3-runtime::hub_v1 | 138 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.protocol_conversion.gemini_standard_bridge`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.relay_parser_bindings`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.gemini_materialization`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime::hub_v1 | v3-runtime::hub_v1 | 141 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.protocol_conversion.gemini_standard_bridge`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.relay_parser_bindings`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.gemini_materialization`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | provider-compat-core | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
 | v3-runtime | routecodex-v3-route-classifier | 3 | `v3.route_classifier.facts_classification`<br/>`v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
@@ -1172,11 +1172,18 @@ flowchart TD
     c_28_v3_provider_tool_markup_relay_parser_bindings_3["v3-runtime::hub_v1<br/>govern_thinking<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs</small>"]
     c_28_v3_provider_tool_markup_relay_parser_bindings_5["v3-runtime::hub_v1<br/>run_json_response_hooks<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs</small>"]
     c_28_v3_provider_tool_markup_relay_parser_bindings_6["v3-runtime::hub_v1<br/>V3HubRelaySerializedToolContext::from_registry<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
+    c_28_v3_provider_tool_markup_relay_parser_bindings_7["v3-runtime::hub_v1<br/>project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small>"]
+    c_28_v3_provider_tool_markup_relay_parser_bindings_8["v3-runtime::hub_v1<br/>govern_complete_chat_sse_with_context<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_complete_chat_sse.rs</small>"]
+    c_28_v3_provider_tool_markup_relay_parser_bindings_9["v3-runtime::hub_v1<br/>harvest_chat_text<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs</small>"]
+    c_28_v3_provider_tool_markup_relay_parser_bindings_10["v3-runtime::hub_v1<br/>govern_complete_chat_sse<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
   end
   c_28_v3_provider_tool_markup_relay_parser_bindings_0 -->|v3-tool-markup-relay-parser<br/>V3HubRespInbound02Normalized → V3HubRespChatProcess03Governed| c_28_v3_provider_tool_markup_relay_parser_bindings_1
   c_28_v3_provider_tool_markup_relay_parser_bindings_2 -->|v3-tool-markup-relay-harvest-parser<br/>V3HubRespInbound02Normalized → V3HubRespChatProcess03Governed| c_28_v3_provider_tool_markup_relay_parser_bindings_1
   c_28_v3_provider_tool_markup_relay_parser_bindings_3 -->|v3-tool-markup-relay-thinking-grammar<br/>V3HubRespInbound02Normalized → V3HubRespChatProcess03Governed| c_28_v3_provider_tool_markup_relay_parser_bindings_4
   c_28_v3_provider_tool_markup_relay_parser_bindings_5 -->|v3-tool-markup-relay-attempt-context<br/>V3HubRespInbound02Normalized → V3HubRespChatProcess03Governed| c_28_v3_provider_tool_markup_relay_parser_bindings_6
+  c_28_v3_provider_tool_markup_relay_parser_bindings_7 -->|v3-tool-markup-chat-attempt-context<br/>V3HubRespInbound02Normalized → V3HubRespChatProcess03Governed| c_28_v3_provider_tool_markup_relay_parser_bindings_6
+  c_28_v3_provider_tool_markup_relay_parser_bindings_8 -->|v3-tool-markup-chat-complete-sse-context<br/>V3HubRespInbound02Normalized → V3HubRespChatProcess03Governed| c_28_v3_provider_tool_markup_relay_parser_bindings_9
+  c_28_v3_provider_tool_markup_relay_parser_bindings_10 -->|v3-tool-markup-chat-complete-sse-attempt-context<br/>V3HubRespInbound02Normalized → V3HubRespChatProcess03Governed| c_28_v3_provider_tool_markup_relay_parser_bindings_6
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -1185,6 +1192,9 @@ flowchart TD
 | `v3-tool-markup-relay-harvest-parser` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | scan<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs</small> | scan_tool_markup<br/><small>routecodex-v3-runtime/src/tool_markup_parser.rs</small> | `v3.anthropic_control_text_resp03` |
 | `v3-tool-markup-relay-thinking-grammar` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | govern_thinking<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs</small> | project_v3_thinking_tag_text_with_tools<br/><small>routecodex-v3-runtime/src/shared_direct_thinking_compat.rs</small> | `v3.anthropic_control_text_resp03` |
 | `v3-tool-markup-relay-attempt-context` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | run_json_response_hooks<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs</small> | V3HubRelaySerializedToolContext::from_registry<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.anthropic_control_text_resp03` |
+| `v3-tool-markup-chat-attempt-context` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | V3HubRelaySerializedToolContext::from_registry<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.openai_chat_relay_runtime_integration` |
+| `v3-tool-markup-chat-complete-sse-context` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | govern_complete_chat_sse_with_context<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_complete_chat_sse.rs</small> | harvest_chat_text<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs</small> | `v3.openai_chat_relay_runtime_integration` |
+| `v3-tool-markup-chat-complete-sse-attempt-context` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | govern_complete_chat_sse<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | V3HubRelaySerializedToolContext::from_registry<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.openai_chat_relay_runtime_integration` |
 
 ## v3.protocol_conversion_field_parity.outbound_helper_bindings
 

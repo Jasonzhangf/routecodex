@@ -356,6 +356,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         retain_response_cipher: bool,
         tool_thinking_enabled: bool,
         expected_model_id: &str,
+        namespace_registry: &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
     ) -> Result<Value, V3RelayCoreError>;
     /// 构建 SSE provider outcome。
     fn build_sse_outcome(
@@ -857,6 +858,7 @@ where
                     routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse
                 }
             });
+        let namespace_registry = req_compat.namespace_registry.clone();
         let (req08, _) = match build_v3_provider_req_outbound_08_wire_from_compat_06(
             req_compat,
             request_id,
@@ -1195,6 +1197,7 @@ where
                         retain_response_cipher,
                         request_tool_thinking_enabled,
                         &selected_target_model_id,
+                        &namespace_registry,
                     )
                 } else {
                     Err(V3RelayCoreError::Target(
@@ -1493,6 +1496,7 @@ where
                                 retain_response_cipher,
                                 request_tool_thinking_enabled,
                                 &selected_target_model_id,
+                                &namespace_registry,
                             ) {
                                 Ok(client) => Ok((client, snapshot)),
                                 Err(error) => Err(provider_response_governance_failure(
@@ -1713,7 +1717,7 @@ where
                 };
                 if stream_failure.is_none() && C::ENTRY_PROTOCOL == V3HubEntryProtocol::OpenAiChat {
                     if let Err(error) = compile_v3_hub_relay_response_hooks()
-                        .govern_complete_chat_sse(&mut committed_attempt)
+                        .govern_complete_chat_sse(&mut committed_attempt, &namespace_registry)
                     {
                         stream_failure = Some(match error {
                             V3RelayCompleteResponseError::Governance(error) => {

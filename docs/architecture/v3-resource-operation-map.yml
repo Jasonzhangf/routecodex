@@ -1122,8 +1122,9 @@ resources:
       source: immutable exact-attempt NamespaceToolIdentityRegistry supplied by the existing request/outbound owner
       content: parser declaration kinds, parameter encoding kinds and exact wire-name to client namespace/leaf association; no arguments or routing decisions
       failure: typed UnharvestableToolMarkup reaches Runtime as internal code 500-231 and the existing Error graph, never as client payload state
+      chat_entry: the same attempt registry supplies both complete JSON and registered complete Chat SSE Resp03 governance; fragments never reconstruct declarations
     allowed_writers: [V3HubRelaySerializedToolContext::from_registry]
-    allowed_readers: [V3HubRespChatProcess03Governed, govern_v3_hub_relay_response]
+    allowed_readers: [V3HubRespChatProcess03Governed, govern_v3_hub_relay_response, project_json_response, govern_complete_chat_sse_with_context, harvest_chat_text]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, payload_writer, sse_framer]
     may_enter_provider_body: false
     may_enter_client_body: false

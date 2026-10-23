@@ -275,7 +275,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>93 functional paths</span>
-        <span>573 caller edges</span>
+        <span>576 caller edges</span>
       </div>
     </header>
 
@@ -468,7 +468,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>15</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>470</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>473</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -1004,7 +1004,7 @@ flowchart TD
             <span class="chain-id">v 3.provider_tool_markup.relay_parser_bindings</span>
             <span>V3HubRespInbound02Normalized → V3HubRespChatProcess03Governed</span>
             <span><code>v3.provider_tool_markup.relay_parser_bindings</code></span>
-            <span>4 edges · 2 resources · v3-runtime, v3-runtime::hub_v1</span>
+            <span>7 edges · 2 resources · v3-runtime, v3-runtime::hub_v1</span>
           </a>
 <a class="branch-card" href="#chain-v3_protocol_conversion_field_parity_outbound_helper_bindings">
             <span class="chain-id">v 3.protocol_conversion_field_parity.outbound_helper_bindings</span>
@@ -2456,7 +2456,7 @@ flowchart TD
       <summary>
         <span class="summary-main">v 3.provider_tool_markup.relay_parser_bindings</span>
         <span class="summary-sub">V3HubRespInbound02Normalized → V3HubRespChatProcess03Governed</span>
-        <span class="summary-sub">4 edges · <code>v3.provider_tool_markup.relay_parser_bindings</code> · V3HubRespInbound02Normalized → V3HubRespChatProcess03Governed</span>
+        <span class="summary-sub">7 edges · <code>v3.provider_tool_markup.relay_parser_bindings</code> · V3HubRespInbound02Normalized → V3HubRespChatProcess03Governed</span>
       </summary>
       <div class="branch-body">
         <p class="chain-summary">Relay Resp03 consumes the same pure grammar and its typed attempt context inside the existing response stage, with one payload rewrite owner and no new runtime stage.</p>
@@ -2476,6 +2476,9 @@ flowchart TD
   n_v3_provider_tool_markup_relay_parser_bindings_0 --&gt;|v3-tool-markup-relay-harvest-parser&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime| n_v3_provider_tool_markup_relay_parser_bindings_1
   n_v3_provider_tool_markup_relay_parser_bindings_0 --&gt;|v3-tool-markup-relay-thinking-grammar&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime| n_v3_provider_tool_markup_relay_parser_bindings_1
   n_v3_provider_tool_markup_relay_parser_bindings_0 --&gt;|v3-tool-markup-relay-attempt-context&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_provider_tool_markup_relay_parser_bindings_1
+  n_v3_provider_tool_markup_relay_parser_bindings_0 --&gt;|v3-tool-markup-chat-attempt-context&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_provider_tool_markup_relay_parser_bindings_1
+  n_v3_provider_tool_markup_relay_parser_bindings_0 --&gt;|v3-tool-markup-chat-complete-sse-context&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_provider_tool_markup_relay_parser_bindings_1
+  n_v3_provider_tool_markup_relay_parser_bindings_0 --&gt;|v3-tool-markup-chat-complete-sse-attempt-context&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_provider_tool_markup_relay_parser_bindings_1
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
   class n_v3_provider_tool_markup_relay_parser_bindings_0,n_v3_provider_tool_markup_relay_parser_bindings_1 node;</pre>
@@ -2487,6 +2490,9 @@ flowchart TD
 <tr><td><code>v3-tool-markup-relay-harvest-parser</code></td><td><code>V3HubRespInbound02Normalized</code><br/>→ <code>V3HubRespChatProcess03Governed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.relay_response.tool_markup_context</code></div></td><td><code>scan</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs</small></td><td><code>scan_tool_markup</code><br/><small>routecodex-v3-runtime/src/tool_markup_parser.rs</small></td></tr>
 <tr><td><code>v3-tool-markup-relay-thinking-grammar</code></td><td><code>V3HubRespInbound02Normalized</code><br/>→ <code>V3HubRespChatProcess03Governed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div></td><td><code>govern_thinking</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs</small></td><td><code>project_v3_thinking_tag_text_with_tools</code><br/><small>routecodex-v3-runtime/src/shared_direct_thinking_compat.rs</small></td></tr>
 <tr><td><code>v3-tool-markup-relay-attempt-context</code></td><td><code>V3HubRespInbound02Normalized</code><br/>→ <code>V3HubRespChatProcess03Governed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.relay_response.tool_markup_context</code></div></td><td><code>run_json_response_hooks</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs</small></td><td><code>V3HubRelaySerializedToolContext::from_registry</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td></tr>
+<tr><td><code>v3-tool-markup-chat-attempt-context</code></td><td><code>V3HubRespInbound02Normalized</code><br/>→ <code>V3HubRespChatProcess03Governed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.relay_response.tool_markup_context</code></div></td><td><code>project_json_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small></td><td><code>V3HubRelaySerializedToolContext::from_registry</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td></tr>
+<tr><td><code>v3-tool-markup-chat-complete-sse-context</code></td><td><code>V3HubRespInbound02Normalized</code><br/>→ <code>V3HubRespChatProcess03Governed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.relay_response.tool_markup_context</code></div></td><td><code>govern_complete_chat_sse_with_context</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_complete_chat_sse.rs</small></td><td><code>harvest_chat_text</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_tool_markup.rs</small></td></tr>
+<tr><td><code>v3-tool-markup-chat-complete-sse-attempt-context</code></td><td><code>V3HubRespInbound02Normalized</code><br/>→ <code>V3HubRespChatProcess03Governed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.relay_response.tool_markup_context</code></div></td><td><code>govern_complete_chat_sse</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td><td><code>V3HubRelaySerializedToolContext::from_registry</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td></tr>
 </tbody>
 </table>
       </div>
