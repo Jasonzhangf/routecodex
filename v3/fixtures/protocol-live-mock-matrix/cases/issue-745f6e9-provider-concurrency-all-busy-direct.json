@@ -90,7 +90,27 @@
               "response": {
                 "id": "resp_concurrency_direct",
                 "status": "completed",
-                "output": [],
+                "output": [
+                  {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                      {
+                        "type": "output_text",
+                        "text": "held response released"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "reasoning",
+                    "summary": [
+                      {
+                        "type": "summary_text",
+                        "text": "concurrency holder completed"
+                      }
+                    ]
+                  }
+                ],
                 "usage": {
                   "input_tokens": 5,
                   "output_tokens": 3,
