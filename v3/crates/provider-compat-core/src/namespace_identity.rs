@@ -302,14 +302,14 @@ impl NamespaceToolIdentityRegistry {
             body["tools"] = Value::Array(self.project_tools(protocol, tools)?);
         }
         self.project_references(body);
-        self.project_input_tool_declarations(body, protocol)?;
+        self.project_discovered_tool_declarations(body, protocol)?;
         Ok(())
     }
 
-    /// Project each retained declaration surface with the complete request's
+    /// Project each retained discovery surface with the complete request's
     /// binding. A discovered declaration and its promoted top-level declaration
     /// must use the same wire name, kind and schema.
-    pub fn project_input_tool_declarations(
+    pub fn project_discovered_tool_declarations(
         &self,
         body: &mut Value,
         protocol: &str,
@@ -320,10 +320,7 @@ impl NamespaceToolIdentityRegistry {
             .into_iter()
             .flatten()
         {
-            if !matches!(
-                item.get("type").and_then(Value::as_str),
-                Some("tool_search_output" | "additional_tools")
-            ) {
+            if item.get("type").and_then(Value::as_str) != Some("tool_search_output") {
                 continue;
             }
             let Some(tools) = item.get("tools").and_then(Value::as_array) else {
@@ -1081,8 +1078,15 @@ mod tests {
             "input":[{"type":"tool_search_output","call_id":"search","opaque":{"keep":true},
                 "tools":[{"type":"namespace","name":"n","tools":[
                     {"type":"function","name":"f","parameters":{"type":"object","required":["nonce"]}}
-                ]}]}]
+                ]}]},
+                {"type":"additional_tools","role":"developer","tools":[
+                    {"type":"namespace","name":"functions","tools":[
+                        {"type":"custom","name":"exec","format":{"type":"text"}}
+                    ]}
+                ]}
+            ]
         });
+        let additional = request["input"][1].clone();
         let registry =
             NamespaceToolIdentityRegistry::from_request(&request, "openai-responses").unwrap();
         let name = registry
@@ -1103,9 +1107,13 @@ mod tests {
         assert_eq!(discovered, promoted);
         assert_eq!(request["input"][0]["call_id"], "search");
         assert_eq!(request["input"][0]["opaque"], json!({"keep":true}));
+        assert_eq!(
+            request["input"][1], additional,
+            "TCM declarations remain opaque in history"
+        );
         let once = request.clone();
         registry
-            .project_input_tool_declarations(&mut request, "openai-responses")
+            .project_discovered_tool_declarations(&mut request, "openai-responses")
             .unwrap();
         assert_eq!(request, once);
     }
