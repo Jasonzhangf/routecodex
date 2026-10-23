@@ -1,5 +1,23 @@
 use super::*;
 
+/// Concatenate the client-visible text carried by the projected delta events.
+///
+/// The committed client channel carries raw provider SSE frames, so the residue
+/// and the DSML label can only be judged after decoding each `data:` payload.
+fn projected_delta_text(frames: &[Vec<u8>]) -> String {
+    let mut text = String::new();
+    for frame in frames {
+        for event in parse_direct_sse_json_frames(frame) {
+            if event["type"] == "response.output_text.delta" {
+                if let Some(delta) = event["delta"].as_str() {
+                    text.push_str(delta);
+                }
+            }
+        }
+    }
+    text
+}
+
 fn expect_ordinary_source<T>(
     result: crate::shared::V3DirectSourceResult<T>,
 ) -> V3Error01SourceRaised {
@@ -1777,18 +1795,18 @@ async fn first_frame_commit_snapshot_carrier_collision_holds_residue() {
     );
     let run =
         run_early_commit_attempt_with_hooks(chunks.clone(), Some((&registry, &context))).await;
-    let streamed = String::from_utf8(run.frames.concat()).unwrap();
+    let projected = projected_delta_text(&run.frames);
     assert!(run.committed, "the clean visible prefix must commit");
     assert!(
         run.failed,
         "the post-commit owner rewrite must end the attempt detectably"
     );
     assert!(
-        !streamed.contains("tool_calls"),
-        "the close label must not reach the client: {streamed}"
+        !projected.contains("DSML"),
+        "the close label must not reach the client: {projected:?}"
     );
     assert!(
-        !streamed.contains(">\n"),
-        "the bare close residue must not reach the client: {streamed}"
+        !projected.contains('>'),
+        "the bare close residue must not reach the client: {projected:?}"
     );
 }

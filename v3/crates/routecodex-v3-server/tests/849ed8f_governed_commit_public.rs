@@ -496,6 +496,23 @@ fn completed_output_texts(wire: &[u8]) -> Vec<String> {
     texts
 }
 
+/// Concatenate the client-visible text carried by the projected delta events.
+///
+/// The wire body is JSON, so the DSML label and a `>\n` residue only appear in
+/// the decoded delta values; a raw substring scan over the chunked body cannot
+/// see them.
+fn projected_delta_text(wire: &[u8]) -> String {
+    let mut text = String::new();
+    for event in response_sse_events(&decoded_chunked_body(wire)) {
+        if event["type"] == "response.output_text.delta" {
+            if let Some(delta) = event["delta"].as_str() {
+                text.push_str(delta);
+            }
+        }
+    }
+    text
+}
+
 fn assert_no_client_error(text: &str) {
     assert!(
         !text.contains("\"error\"")
@@ -623,6 +640,14 @@ async fn snapshot_carrier_collision_does_not_release_split_marker_early() {
     assert!(!text.contains("<thinking>"), "{text}");
     assert!(!text.contains("</thinking>"), "{text}");
     assert!(!text.contains("secret"), "{text}");
+    assert!(
+        !text.contains("response.completed"),
+        "the bounded truncation must not project completion: {text}"
+    );
+    assert!(
+        !text.ends_with("0\r\n\r\n"),
+        "normal chunked completion leaked: {text}"
+    );
     assert_no_client_error(&text);
     assert!(
         ended.is_ok()
@@ -641,11 +666,16 @@ async fn snapshot_carrier_collision_does_not_release_bare_residue_early() {
     let (wire, ended) =
         raw_request(&entry, "849ed8f-snapshot-residue", "snapshot-bare-residue").await;
     let text = wire_text(&wire);
+    let projected = projected_delta_text(&wire);
 
     assert!(text.contains("hello"), "{text}");
     assert!(
-        !text.contains("tool_calls"),
-        "the close label must never reach the client: {text}"
+        !projected.contains('>'),
+        "the bare close residue must never reach the client: {projected:?}"
+    );
+    assert!(
+        !projected.contains("DSML"),
+        "the close label must never reach the client: {projected:?}"
     );
     assert!(
         !text.contains("response.completed"),
