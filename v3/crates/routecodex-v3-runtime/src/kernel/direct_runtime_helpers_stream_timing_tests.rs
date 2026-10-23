@@ -1805,9 +1805,12 @@ async fn first_frame_commit_snapshot_carrier_collision_holds_residue() {
         run_early_commit_attempt_with_hooks(chunks.clone(), Some((&registry, &context))).await;
     let projected = projected_delta_text(&run.frames);
     assert!(run.committed, "the clean visible prefix must commit");
+    // The DSML owner preserves the flushed prefix and continues the item from
+    // the delivered text, so this attempt now seals instead of breaking the
+    // transport; only the residue and label stay out of the client stream.
     assert!(
-        run.failed,
-        "the post-commit owner rewrite must end the attempt detectably"
+        !run.failed,
+        "the preserved-prefix owner rewrite must seal the attempt"
     );
     assert!(
         !projected.contains("DSML"),
@@ -1817,4 +1820,25 @@ async fn first_frame_commit_snapshot_carrier_collision_holds_residue() {
         !projected.contains('>'),
         "the bare close residue must not reach the client: {projected:?}"
     );
+    let events: Vec<_> = run
+        .frames
+        .iter()
+        .flat_map(|frame| parse_direct_sse_json_frames(frame))
+        .collect();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["type"] == "response.output_text.delta"
+                && event["item_id"] == "msg_0")
+            .count(),
+        1,
+        "the delivered prefix must not be re-emitted: {events:?}"
+    );
+    let terminal = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .expect("terminal event");
+    let output = terminal["response"]["output"].as_array().unwrap();
+    assert_eq!(output[0]["content"][0]["text"], "hello\n", "{terminal}");
+    assert_eq!(output[1]["content"][0]["text"], "ordinary", "{terminal}");
 }

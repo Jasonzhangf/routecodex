@@ -251,6 +251,50 @@ fn scenario(input: &str, model: &str) -> Vec<String> {
             in_progress(json!([message("clean-prefix")])),
             completed(json!([])),
         ],
+        // The public proof that a declared-tool request projects its first
+        // business delta before the provider terminal. The fixture upstream
+        // holds the terminal back 500ms; the gate under test decides whether
+        // the delta reaches the client socket during that hold.
+        "tool-request-progressive" => vec![
+            delta(0, 0, "early-progressive-text"),
+            text_done(0, 0, "early-progressive-text"),
+            completed(json!([message("early-progressive-text")])),
+        ],
+        // A declared-tool request whose first output text is already tool
+        // markup the complete-attempt DSML owner harvests. The commit probe
+        // must never certify this prefix, because the terminal rewrite would
+        // then have to change an already-flushed client frame.
+        "tool-declared-markup" => {
+            let call = "<tool_call>write_file<arg_key>path</arg_key><arg_value>/tmp/out.txt</arg_value></tool_call>";
+            vec![
+                delta(0, 0, call),
+                text_done(0, 0, call),
+                completed(json!([message(call)])),
+            ]
+        }
+        // The demonstrated malformed alternate opener. It is a declared-tool
+        // harvest entry point even though it never contains `<tool_call>`, so
+        // the declared-tool probe extension must hold it until the owner
+        // harvests the whole alternate invocation at the terminal.
+        "tool-alternate-opener-markup" => {
+            let call = "Done.\n<|exec_command\">\n<cmd>printf 42</cmd>\n</exec_command>";
+            vec![
+                delta(0, 0, call),
+                text_done(0, 0, call),
+                completed(json!([message(call)])),
+            ]
+        }
+        // The declared fullwidth envelope written on one line. The standalone
+        // OPEN label of the base marker set is line-scoped, so only the
+        // declared-tool INVOKE extension catches this harvest shape.
+        "tool-one-line-fullwidth-markup" => {
+            let call = "Go.\n<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name=\"write_file\"><｜｜DSML｜｜ parameter name=\"path\" string=\"true\">/tmp/out.txt</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>";
+            vec![
+                delta(0, 0, call),
+                text_done(0, 0, call),
+                completed(json!([message(call)])),
+            ]
+        }
         _ if model == "wire-recover" => vec![completed(json!([message("recovered")]))],
         _ => vec![completed(json!([message("sibling-success")]))],
     }
@@ -264,10 +308,31 @@ async fn upstream(
     let input = body["input"].as_str().unwrap_or_default();
     let model = body["model"].as_str().unwrap_or_default();
     let frames = scenario(input, model);
-    let stream = stream::iter(
-        frames
-            .into_iter()
-            .map(|frame| Ok::<_, Infallible>(Bytes::from(frame))),
+    // The progressive case holds every frame after the first 500ms apart, so
+    // the delta can only reach the client before the terminal if the gate
+    // under test projects it during the provider hold.
+    let delay = if input == "tool-request-progressive" {
+        Some(Duration::from_millis(500))
+    } else {
+        None
+    };
+    let stream = stream::unfold(
+        (frames.into_iter(), delay, 0usize),
+        |(mut frames, delay, index)| async move {
+            let frame = match frames.next() {
+                Some(frame) => frame,
+                None => return None,
+            };
+            if index > 0 {
+                if let Some(delay) = delay {
+                    tokio::time::sleep(delay).await;
+                }
+            }
+            Some((
+                Ok::<_, Infallible>(Bytes::from(frame)),
+                (frames, delay, index + 1),
+            ))
+        },
     );
     Response::builder()
         .status(StatusCode::OK)
@@ -402,6 +467,14 @@ async fn raw_request(
         "stream": true
     })
     .to_string();
+    raw_request_body(entry, session, body).await
+}
+
+async fn raw_request_body(
+    entry: &Entry,
+    session: &str,
+    body: String,
+) -> (Vec<u8>, std::io::Result<usize>) {
     let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
         .await
         .unwrap();
@@ -415,6 +488,70 @@ async fn raw_request(
         .await
         .expect("public request must terminate before the fixture watchdog");
     (wire, ended)
+}
+
+/// Read the public stream incrementally and record when the first projected
+/// business delta and the terminal event reach the socket.
+///
+/// The gate under test decides the projection moment, not the byte content, so
+/// a whole-body read cannot observe it. Every provider attempt is buffered and
+/// released at the terminal unless the first-frame commit gate opens; the
+/// arrival gap between the first business delta and `response.completed` is the
+/// only public proof of progressive projection.
+async fn timed_request(
+    entry: &Entry,
+    session: &str,
+    input: &str,
+    tools: Value,
+) -> TimedWire {
+    let body = json!({
+        "model": "test",
+        "input": input,
+        "stream": true,
+        "tools": tools
+    })
+    .to_string();
+    let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
+        .await
+        .unwrap();
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: {session}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    socket.write_all(request.as_bytes()).await.unwrap();
+
+    let started = std::time::Instant::now();
+    let mut wire = Vec::new();
+    let mut first_delta_at = None;
+    let mut completed_at = None;
+    loop {
+        let mut chunk = [0u8; 4096];
+        let count = match timeout(Duration::from_secs(8), socket.read(&mut chunk)).await {
+            Ok(Ok(0)) => break,
+            Ok(Ok(count)) => count,
+            Ok(Err(_)) => break,
+            Err(_) => break,
+        };
+        wire.extend_from_slice(&chunk[..count]);
+        let seen = String::from_utf8_lossy(&wire);
+        if first_delta_at.is_none() && seen.contains("response.output_text.delta") {
+            first_delta_at = Some(started.elapsed());
+        }
+        if completed_at.is_none() && seen.contains("response.completed") {
+            completed_at = Some(started.elapsed());
+        }
+    }
+    TimedWire {
+        wire,
+        first_delta_at,
+        completed_at,
+    }
+}
+
+struct TimedWire {
+    wire: Vec<u8>,
+    first_delta_at: Option<Duration>,
+    completed_at: Option<Duration>,
 }
 
 fn wire_text(wire: &[u8]) -> String {
@@ -689,22 +826,35 @@ async fn snapshot_carrier_collision_does_not_release_bare_residue_early() {
         !text.contains('>') && !text.contains("DSML"),
         "any projected event form must not carry the residue or label: {text}"
     );
+    // The committed prefix is the first visible delta. The DSML owner removes
+    // the bare close residue from the held tail while keeping the delivered
+    // frame byte-identical, so the attempt now completes instead of breaking
+    // the transport: the append-only precondition of the post-commit failure
+    // path (the owner cannot project the tail without rewriting a flushed
+    // frame) does not hold for this shape.
     assert!(
-        !text.contains("response.completed"),
-        "the bounded truncation must not project completion: {text}"
+        text.contains("response.completed"),
+        "the preserved-prefix rewrite must complete the attempt: {text}"
     );
     assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+        text.ends_with("0\r\n\r\n"),
+        "the completed attempt must end the chunked body: {text}"
     );
+    assert_eq!(
+        text.matches("\"delta\":\"hello\\n\"").count(),
+        1,
+        "the delivered prefix must not be re-emitted: {text}"
+    );
+    let events = response_sse_events(&decoded_chunked_body(&wire));
+    let terminal = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .expect("terminal event");
+    let output = terminal["response"]["output"].as_array().unwrap();
+    assert_eq!(output[0]["content"][0]["text"], "hello\n", "{terminal}");
+    assert_eq!(output[1]["content"][0]["text"], "ordinary", "{terminal}");
     assert_no_client_error(&text);
-    assert!(
-        ended.is_ok()
-            || ended
-                .as_ref()
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
-        "unexpected transport ending: {ended:?}"
-    );
+    assert!(ended.is_ok(), "unexpected transport ending: {ended:?}");
     entry.stop().await;
 }
 
@@ -762,6 +912,171 @@ async fn interleaved_carriers_hold_thinking_marker_without_leaking() {
                 .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
         "unexpected transport ending: {ended:?}"
     );
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn declared_tool_request_projects_first_business_delta_before_terminal() {
+    let _guard = TEST_LOCK.lock().await;
+    let entry = start(false).await;
+    // The DSH harness always declares tools and omits `tool_choice`, so a
+    // declared-tool request is the normal live shape. The declared name is a
+    // plain function tool, like the harness injected tools.
+    let tools = json!([{
+        "type": "function",
+        "name": "write_file",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"]
+        }
+    }]);
+    let timed = timed_request(
+        &entry,
+        "849ed8f-tool-first-frame",
+        "tool-request-progressive",
+        tools,
+    )
+    .await;
+    let text = wire_text(&timed.wire);
+
+    assert!(text.contains("early-progressive-text"), "{text}");
+    let first_delta_at = timed
+        .first_delta_at
+        .expect("the first business delta must reach the client");
+    let completed_at = timed
+        .completed_at
+        .expect("the attempt must project its terminal");
+    let lead = completed_at.saturating_sub(first_delta_at);
+    assert!(
+        lead >= Duration::from_millis(300),
+        "a declared-tool request must project its first business delta before the provider terminal; measured delta={first_delta_at:?} terminal={completed_at:?} lead={lead:?}"
+    );
+    assert_no_client_error(&text);
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn declared_tool_text_markup_is_held_then_harvested_without_leak() {
+    let _guard = TEST_LOCK.lock().await;
+    let entry = start(false).await;
+    // The same declaration shape the first-frame test uses. The provider text
+    // is a serialized declaration-shaped call, which the complete-attempt DSML
+    // owner harvests into a real function_call item. If the commit probe ever
+    // certified the raw markup prefix, the terminal rewrite would have to
+    // change already-flushed client frames and the transport would break.
+    let tools = json!([{
+        "type": "function",
+        "name": "write_file",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"]
+        }
+    }]);
+    let timed = timed_request(&entry, "849ed8f-tool-markup", "tool-declared-markup", tools).await;
+    let text = wire_text(&timed.wire);
+
+    assert!(
+        text.contains("response.completed"),
+        "the harvested attempt must complete normally: {text}"
+    );
+    assert!(
+        text.contains("function_call") && text.contains("write_file"),
+        "the declared call must reach the client as a function_call: {text}"
+    );
+    for residue in ["<tool_call>", "</tool_call>", "<arg_key>", "<arg_value>"] {
+        assert!(
+            !text.contains(residue),
+            "harvested markup residue {residue:?} leaked to the client: {text}"
+        );
+    }
+    assert_no_client_error(&text);
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn declared_tool_alternate_opener_is_held_then_harvested_without_leak() {
+    let _guard = TEST_LOCK.lock().await;
+    let entry = start(false).await;
+    // The alternate opener `<|name">` is a DSML harvest entry point that does
+    // not contain `<tool_call>`. The probe extension must hold the prefix for
+    // the declared-tool request, or the terminal rewrite would have to change
+    // an already-flushed frame containing the raw opener.
+    let tools = json!([{
+        "type": "function",
+        "name": "exec_command",
+        "parameters": {
+            "type": "object",
+            "properties": {"cmd": {"type": "string"}},
+            "required": ["cmd"]
+        }
+    }]);
+    let timed =
+        timed_request(&entry, "849ed8f-tool-alternate", "tool-alternate-opener-markup", tools).await;
+    let text = wire_text(&timed.wire);
+
+    assert!(
+        text.contains("response.completed"),
+        "the harvested attempt must complete normally: {text}"
+    );
+    assert!(
+        text.contains("function_call") && text.contains("exec_command"),
+        "the alternate call must reach the client as a function_call: {text}"
+    );
+    for residue in ["<|exec_command\">", "<cmd>", "</cmd>", "</exec_command>"] {
+        assert!(
+            !text.contains(residue),
+            "harvested alternate residue {residue:?} leaked to the client: {text}"
+        );
+    }
+    assert_no_client_error(&text);
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn declared_tool_one_line_fullwidth_markup_is_held_then_harvested_without_leak() {
+    let _guard = TEST_LOCK.lock().await;
+    let entry = start(false).await;
+    // The declared fullwidth envelope on one line does not equal the standalone
+    // OPEN label, so the base line-scoped marker never matches it. The
+    // declared-tool INVOKE marker must hold it instead.
+    let tools = json!([{
+        "type": "function",
+        "name": "write_file",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"]
+        }
+    }]);
+    let timed = timed_request(
+        &entry,
+        "849ed8f-tool-fullwidth",
+        "tool-one-line-fullwidth-markup",
+        tools,
+    )
+    .await;
+    let text = wire_text(&timed.wire);
+
+    assert!(
+        text.contains("response.completed"),
+        "the harvested attempt must complete normally: {text}"
+    );
+    assert!(
+        text.contains("function_call") && text.contains("write_file"),
+        "the one-line envelope call must reach the client as a function_call: {text}"
+    );
+    for residue in [
+        "<\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C} calls>",
+        "<\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C} invoke",
+    ] {
+        assert!(
+            !text.contains(residue),
+            "harvested fullwidth residue {residue:?} leaked to the client: {text}"
+        );
+    }
+    assert_no_client_error(&text);
     entry.stop().await;
 }
 
