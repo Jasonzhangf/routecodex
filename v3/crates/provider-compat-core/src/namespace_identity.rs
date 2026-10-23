@@ -302,6 +302,41 @@ impl NamespaceToolIdentityRegistry {
             body["tools"] = Value::Array(self.project_tools(protocol, tools)?);
         }
         self.project_references(body);
+        self.project_input_tool_declarations(body, protocol)?;
+        Ok(())
+    }
+
+    /// Project each retained declaration surface with the complete request's
+    /// binding. A discovered declaration and its promoted top-level declaration
+    /// must use the same wire name, kind and schema.
+    pub fn project_input_tool_declarations(
+        &self,
+        body: &mut Value,
+        protocol: &str,
+    ) -> Result<(), String> {
+        for item in body
+            .get_mut("input")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            if !matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("tool_search_output" | "additional_tools")
+            ) {
+                continue;
+            }
+            let Some(tools) = item.get("tools").and_then(Value::as_array) else {
+                continue;
+            };
+            let mut surface = Self::from_tools(tools)?;
+            for (key, identity) in &mut surface.by_identity {
+                if let Some(bound) = self.by_identity.get(key) {
+                    *identity = bound.clone();
+                }
+            }
+            item["tools"] = Value::Array(surface.project_tools(protocol, tools)?);
+        }
         Ok(())
     }
 
@@ -1037,6 +1072,42 @@ mod tests {
             registry.wire_name_for_client(None, "functions.exec", ToolKind::Custom),
             Some("functions__exec")
         );
+    }
+
+    #[test]
+    fn discovered_declaration_uses_complete_request_collision_binding() {
+        let mut request = json!({
+            "tools":[{"type":"function","name":"n__f","parameters":{"type":"object"}}],
+            "input":[{"type":"tool_search_output","call_id":"search","opaque":{"keep":true},
+                "tools":[{"type":"namespace","name":"n","tools":[
+                    {"type":"function","name":"f","parameters":{"type":"object","required":["nonce"]}}
+                ]}]}]
+        });
+        let registry =
+            NamespaceToolIdentityRegistry::from_request(&request, "openai-responses").unwrap();
+        let name = registry
+            .wire_name_for_client(Some("n"), "f", ToolKind::Function)
+            .unwrap();
+        assert_ne!(name, "n__f", "the plain declaration reserves its wire name");
+        registry
+            .project_request(&mut request, "openai-responses")
+            .unwrap();
+        let discovered = &request["input"][0]["tools"][0];
+        assert_eq!(discovered["name"], name);
+        let promoted = request["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .unwrap();
+        assert_eq!(discovered, promoted);
+        assert_eq!(request["input"][0]["call_id"], "search");
+        assert_eq!(request["input"][0]["opaque"], json!({"keep":true}));
+        let once = request.clone();
+        registry
+            .project_input_tool_declarations(&mut request, "openai-responses")
+            .unwrap();
+        assert_eq!(request, once);
     }
 
     #[test]
