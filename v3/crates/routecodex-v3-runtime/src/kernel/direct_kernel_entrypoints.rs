@@ -108,6 +108,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             .with_provider_health(shared_state.provider_health.clone())
             .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
             .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
+            .with_client_frame_sink(shared_state.client_frame_sink.clone())
             .with_request_execution_control(Some(control.clone()));
         if rounds == 0 {
             state = state.with_observability_accumulator(observability_accumulator.clone());

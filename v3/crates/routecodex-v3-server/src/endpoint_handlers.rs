@@ -91,6 +91,7 @@ pub(crate) fn pending_endpoint_after_responses_admission(
     execution_mode: V3EntryProtocolExecutionMode,
     pending_owner_symbol: Option<String>,
     request_purpose: V3RequestPurpose,
+    client_frame_sink: Option<routecodex_v3_runtime::V3CommittedClientFrameSink>,
     payload: Value,
 ) -> std::pin::Pin<Box<impl std::future::Future<Output = Response<Body>> + Send>> {
     // Avoid a second poll frame for the large protocol-dispatch future.
@@ -105,6 +106,7 @@ pub(crate) fn pending_endpoint_after_responses_admission(
         execution_mode,
         pending_owner_symbol,
         request_purpose,
+        client_frame_sink,
         payload,
     ))
 }
@@ -120,6 +122,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     mut execution_mode: V3EntryProtocolExecutionMode,
     pending_owner_symbol: Option<String>,
     request_purpose: V3RequestPurpose,
+    client_frame_sink: Option<routecodex_v3_runtime::V3CommittedClientFrameSink>,
     payload: Value,
 ) -> Response<Body> {
     let client_keepalive_interval = Some(Duration::from_millis(state.server.http_sse_keepalive_ms));
@@ -537,6 +540,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 Some(handoff.request_execution_control),
                 Some(provider_failure_event_sink.clone()),
                 Some(route_selection_event_sink.clone()),
+                client_frame_sink.clone(),
                 request_purpose,
             )
             .await;
@@ -603,7 +607,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         client_keepalive_interval,
                     );
                     return match client_response_capture {
-                        Some(capture) => capture.observe_response(response),
+                        Some(capture) => capture.defer_into(response),
                         None => response,
                     };
                 }
@@ -719,6 +723,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             None,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
+            client_frame_sink,
             request_purpose,
         )
         .await;
@@ -812,7 +817,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     client_keepalive_interval,
                 );
                 match client_response_capture {
-                    Some(capture) => capture.observe_response(response),
+                    Some(capture) => capture.defer_into(response),
                     None => response,
                 }
             }
@@ -1417,7 +1422,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                 requested_stream,
             );
             return match client_response_capture {
-                Some(capture) => capture.observe_response(response),
+                Some(capture) => capture.defer_into(response),
                 None => response,
             };
         }
@@ -1561,7 +1566,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
             );
             let response = anthropic_relay_output_response(output, requested_stream);
             return match client_response_capture {
-                Some(capture) => capture.observe_response(response),
+                Some(capture) => capture.defer_into(response),
                 None => response,
             };
         }
@@ -1672,7 +1677,7 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                 requested_stream,
             );
             return match client_response_capture {
-                Some(capture) => capture.observe_response(response),
+                Some(capture) => capture.defer_into(response),
                 None => response,
             };
         }

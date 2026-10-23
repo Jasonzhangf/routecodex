@@ -557,6 +557,7 @@ features:
   - pending_model_request
   - model_no_response_output
   - commit_model_transport_outcome
+  - transfer_v3_live_client_capture
   - V3ModelClientNoResponse
   - build_v3_server_startup_01_listener_set_from_config_05
   - build_v3_server_03_http_request_raw
@@ -4299,7 +4300,10 @@ features:
   - capture_v3_anthropic_relay_response
   - capture_v3_gemini_relay_response
   - V3LiveSnapFinalSseResponseCapture
-  - V3LiveSnapFinalSseBodyStream
+  - V3LiveSnapPendingClientCapture
+  - V3LiveSnapClientWireCaptureSlot
+  - V3LiveSnapClientWireBodyStream
+  - observe_v3_live_client_wire
   allowed_paths:
   - v3/crates/routecodex-v3-config
   - v3/crates/routecodex-v3-cli
@@ -5150,6 +5154,76 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_direct_sse_ -- --nocapture
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_boundary:
+    source_controlled: active
+    live_cutover: required
+    global_install_restart: required
+    agy_review: required
+
+- feature_id: v3.responses_first_frame_commit
+  status: active
+  change_risk: critical
+  owner_crate: routecodex-v3-runtime
+  owner_files:
+  - v3/crates/routecodex-v3-runtime/src/execution_control.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks_commit_probe.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  resource_bindings: [v3.sse.direct.full_attempt_buffer, v3.sse.client_frame_ledger, v3.error.chain]
+  entry_symbols:
+  - V3CommittedClientFrameSink
+  - V3CommittedClientSseBuilder::commit_client_stream
+  - collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames
+  - accept_v3_client_sse_transport
+  allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/execution_control.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks_commit_probe.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks_dsml.rs
+  - v3/crates/routecodex-v3-runtime/src/tool_markup_parser.rs
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  - v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream_timing_tests.rs
+  - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+  - v3/crates/routecodex-v3-server/src/websocket.rs
+  - v3/crates/routecodex-v3-server/src/tests/post_commit_sse_sdk_fault.rs
+  - v3/crates/routecodex-v3-server/tests/849ed8f_governed_commit_public.rs
+  - docs/architecture/dagpipe/graphs/responses-sse-client-frame-commit.graph.json
+  - docs/design/v3-responses-first-frame-commit-design.md
+  - docs/design/v3-responses-first-frame-commit-dag.md
+  - docs/architecture/wiki/v3-client-sse-head-commit.md
+  - docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+  - docs/architecture/dagpipe/modules.json
+  - docs/architecture/v3-unified-operation-runner-design.md
+  - AGENTS.md
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  - provider.wire_payload
+  - MetadataCenter
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib first_frame_commit_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib client_sse_first_frame_channel_
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test 849ed8f_governed_commit_public -- --test-threads=1
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-dagpipe-governance
   - git diff --check
   completion_boundary:
     source_controlled: active

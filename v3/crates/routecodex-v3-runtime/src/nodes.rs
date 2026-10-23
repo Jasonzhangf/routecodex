@@ -20,8 +20,8 @@ pub(crate) use crate::execution_control::{
 pub(crate) type V3SseAttemptStream =
     Pin<Box<dyn Stream<Item = crate::shared::V3DirectSourceResult<V3SseAttemptFrame>> + Send>>;
 pub use crate::execution_control::{
-    V3AttemptSuccessReceipt, V3CommittedClientSseStream, V3CommittedSseTerminal,
-    V3RequestExecutionControl,
+    V3AttemptSuccessReceipt, V3CommittedClientFrameSink, V3CommittedClientSseStream,
+    V3CommittedSseTerminal, V3RequestExecutionControl,
 };
 
 #[derive(Debug, Clone, PartialEq)]
