@@ -1913,6 +1913,15 @@ features:
 - feature_id: v3.protocol_conversion_field_parity
   status: runtime_active_live_verified_5520
   change_risk: high
+  assistant_text_projection_regression:
+    issue: aa8d483
+    owner: request_outbound_responses_items::normalize_responses_content_part_for_role
+    contract: canonical assistant text arrays use the registered output_text mapping without changing text, tools or paired history; strict Responses provider acceptance and actual client tool follow-up must succeed on the first candidate
+    tests:
+    - aa8d483_responses_relay_assistant_output_text_tool_roundtrip
+    - aa8d483_chat_to_responses_assistant_output_text_tool_roundtrip
+    - aa8d483_responses_direct_preserves_output_text_tool_roundtrip
+    command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test assistant_responses_projection_public aa8d483_ -- --nocapture --test-threads=1
   business_name_regression:
     issue: 03df769
     test: responses_direct_followup_preserves_function_strict_presence
