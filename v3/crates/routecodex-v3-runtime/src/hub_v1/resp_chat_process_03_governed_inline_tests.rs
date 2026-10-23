@@ -739,11 +739,12 @@ fn refill_collect_and_merge_preserve_order_and_last_round_authority() {
     let collected = collect_v3_chat_process_business_output_items(&round_one);
     assert_eq!(
         collected.len(),
-        2,
-        "reasoning is not re-sent: {collected:?}"
+        3,
+        "reasoning is real business content and is preserved: {collected:?}"
     );
     assert_eq!(collected[0]["content"][0]["text"], json!("one"));
-    assert_eq!(collected[1]["type"], json!("function_call"));
+    assert_eq!(collected[1]["type"], json!("reasoning"));
+    assert_eq!(collected[2]["type"], json!("function_call"));
 
     let mut last = json!({
         "id": "resp_2",
@@ -754,10 +755,11 @@ fn refill_collect_and_merge_preserve_order_and_last_round_authority() {
     });
     merge_v3_chat_process_refill_output_items(&mut last, &collected);
     let output = last["output"].as_array().expect("merged output");
-    assert_eq!(output.len(), 3, "{output:?}");
+    assert_eq!(output.len(), 4, "{output:?}");
     assert_eq!(output[0]["content"][0]["text"], json!("one"));
-    assert_eq!(output[1]["type"], json!("function_call"));
-    assert_eq!(output[2]["content"][0]["text"], json!("two"));
+    assert_eq!(output[1]["type"], json!("reasoning"));
+    assert_eq!(output[2]["type"], json!("function_call"));
+    assert_eq!(output[3]["content"][0]["text"], json!("two"));
     assert_eq!(last["id"], json!("resp_2"), "last round id survives");
     assert_eq!(last["status"], json!("completed"));
 }

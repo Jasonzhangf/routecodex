@@ -821,6 +821,70 @@ pub(crate) fn rewrite_direct_sse_terminal_usage(
     })
 }
 
+/// Rewrite the terminal frame's `response.usage` and extend
+/// `response.output` with every accumulated business item, while leaving every
+/// other segment byte-for-byte unchanged. The final execution keeps its own
+/// status and finish reason; only `output` is extended with prior rounds.
+pub(crate) fn rewrite_direct_sse_terminal_output_items(
+    segment: &[u8],
+    accumulated_items: &[serde_json::Value],
+    usage: Option<&crate::hub_v1::V3RuntimeUsageSummary>,
+) -> Vec<u8> {
+    rewrite_direct_sse_frame(segment, |mut value| {
+        let is_terminal = matches!(
+            value.get("type").and_then(serde_json::Value::as_str),
+            Some(
+                "response.completed" | "response.incomplete" | "response.done" | "response.failed"
+            )
+        );
+        if is_terminal {
+            if let Some(response) = value.get_mut("response") {
+                if response.is_object() {
+                    let mut response_value = std::mem::replace(response, serde_json::Value::Null);
+                    let already_array = response_value
+                        .get("output")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|items| !items.is_empty());
+                    if already_array && !accumulated_items.is_empty() {
+                        let mut merged = accumulated_items.to_vec();
+                        merged.extend(
+                            response_value
+                                .get("output")
+                                .and_then(serde_json::Value::as_array)
+                                .expect("output is a non-empty array by guard")
+                                .iter()
+                                .cloned(),
+                        );
+                        response_value["output"] = serde_json::Value::Array(merged);
+                    }
+                    if let Some(usage) = usage {
+                        crate::hub_v1::write_v3_chat_process_refill_usage(&mut response_value, usage);
+                    }
+                    *response = response_value;
+                }
+            }
+        }
+        value
+    })
+}
+
+/// Shift one delivered frame's round-local `output_index` into the accumulated
+/// multi-round sequence so two rounds cannot both claim index 0.
+pub(crate) fn shift_direct_sse_output_index(segment: &[u8], offset: usize) -> Vec<u8> {
+    if offset == 0 {
+        return segment.to_vec();
+    }
+    rewrite_direct_sse_frame(segment, |mut value| {
+        if let Some(index) = value
+            .get("output_index")
+            .and_then(serde_json::Value::as_u64)
+        {
+            value["output_index"] = serde_json::Value::from(index + offset as u64);
+        }
+        value
+    })
+}
+
 /// Raw-provider facts for the Direct SSE refill decision.
 ///
 /// These come from the buffered raw provider attempt bytes recorded before any

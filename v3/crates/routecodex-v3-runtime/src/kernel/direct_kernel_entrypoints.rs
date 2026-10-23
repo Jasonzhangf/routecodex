@@ -283,22 +283,53 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                                     )
                                 )
                             });
-                            let mut bytes = segment.bytes.clone();
-                            if is_terminal {
-                                if let Some(usage) = accumulated_usage.as_ref() {
-                                    bytes = direct_runtime_helpers_stream::rewrite_direct_sse_terminal_usage(
-                                        &segment.bytes,
-                                        usage,
-                                    );
-                                }
-                            }
+                            let bytes = if is_terminal {
+                                // The terminal response owns the whole
+                                // accumulated business list, not just the last
+                                // round.
+                                direct_runtime_helpers_stream::rewrite_direct_sse_terminal_output_items(
+                                    &segment.bytes,
+                                    &accumulated_items,
+                                    accumulated_usage.as_ref(),
+                                )
+                            } else {
+                                // Prior rounds already occupy indexes
+                                // 0..accumulated; do not let this round reuse them.
+                                direct_runtime_helpers_stream::shift_direct_sse_output_index(
+                                    &segment.bytes,
+                                    accumulated_items.len(),
+                                )
+                            };
                             delivered_sse_frames.push(bytes);
                         }
-                        if let Ok(committed) = rebuild_direct_committed_sse(
+                        match rebuild_direct_committed_sse(
                             &delivered_sse_frames,
                             control.attempt_budget(),
                         ) {
-                            output.client_payload.body = V3ClientBody::CommittedSse(committed);
+                            Ok(committed) => {
+                                output.client_payload.body = V3ClientBody::CommittedSse(committed);
+                            }
+                            Err(reason) => {
+                                // Assembling the multi-round delivery is the last
+                                // local step. A failure here is a real local
+                                // failure and must enter the typed Error chain;
+                                // it must never ship an empty 200 body as if the
+                                // request had succeeded.
+                                return direct_runtime_helpers_stream::source_failure_output(
+                                    direct_runtime_helpers_stream::runtime_source(
+                                        "V3ChatProcessRefillDeliveryAssembly",
+                                        reason,
+                                    ),
+                                    None,
+                                    vec![
+                                        "V3Config05ManifestPublished",
+                                        "V3Server03HttpRequestRaw",
+                                        "V3Req04StandardizedResponses",
+                                        "V3ChatProcessRefillDeliveryAssembly",
+                                    ],
+                                    &hook_registry,
+                                );
+                            }
                         }
                     }
                 }
@@ -335,6 +366,10 @@ fn append_direct_sse_intermediate_content(
     delivered: &mut Vec<Vec<u8>>,
     next_output_index: &mut usize,
 ) {
+    // `next_output_index` is the number of business items already accumulated
+    // from earlier rounds. Offset this round's frames so two rounds cannot both
+    // claim the same `output_index`.
+    let offset = *next_output_index;
     let mut kept = 0usize;
     for segment in segments {
         let is_content = segment.value.as_ref().is_some_and(|value| {
@@ -346,10 +381,15 @@ fn append_direct_sse_intermediate_content(
                 || event_type == "response.output_text.delta"
         });
         if is_content {
-            delivered.push(segment.bytes.clone());
+            delivered.push(direct_runtime_helpers_stream::shift_direct_sse_output_index(
+                &segment.bytes,
+                offset,
+            ));
             kept += 1;
         }
     }
+
+    let item_count = crate::hub_v1::collect_v3_chat_process_business_output_items(finalized).len();
 
     // A provider that streamed only a terminal event still owns real business
     // content. Surface it as output_item events so the client sees one stream
@@ -366,20 +406,28 @@ fn append_direct_sse_intermediate_content(
                 *next_output_index += 1;
             }
         }
+    } else {
+        *next_output_index = offset + item_count;
     }
 }
 
 fn rebuild_direct_committed_sse(
     frames: &[Vec<u8>],
     budget: crate::nodes::V3AttemptBudget,
-) -> Result<crate::nodes::V3CommittedClientSseStream, ()> {
-    let mut builder =
-        crate::nodes::V3CommittedClientSseBuilder::with_budget(budget).map_err(|_| ())?;
+) -> Result<crate::nodes::V3CommittedClientSseStream, String> {
+    let mut builder = crate::nodes::V3CommittedClientSseBuilder::with_budget(budget)
+        .map_err(|error| format!("failed to open the delivered SSE builder: {error:?}"))?;
     for frame in frames {
-        builder.push(frame.clone()).map_err(|_| ())?;
+        builder
+            .push(frame.clone())
+            .map_err(|error| format!("failed to append a delivered SSE frame: {error:?}"))?;
     }
-    builder.mark_last_frame_as_terminal().map_err(|_| ())?;
-    builder.seal_after_validated_terminal().map_err(|_| ())
+    builder
+        .mark_last_frame_as_terminal()
+        .map_err(|error| format!("failed to mark the delivered SSE terminal: {error:?}"))?;
+    builder
+        .seal_after_validated_terminal()
+        .map_err(|error| format!("failed to seal the delivered SSE stream: {error:?}"))
 }
 
 include!("direct_protocol_plan.rs");

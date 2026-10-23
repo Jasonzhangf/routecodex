@@ -1047,23 +1047,19 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
 
 /// Collect the business output items of one execution response, in order.
 ///
-/// Reasoning items are deliberately excluded: they are not re-sent as history
-/// (the next turn regenerates its own reasoning) and they must not be
-/// duplicated into the delivered business list. Every other item shape,
-/// including message content images/audio and hosted items, is kept verbatim.
+/// Every item shape is kept verbatim, including reasoning items: an earlier
+/// round's reasoning is real business content that the final standard result
+/// must still carry. Only the continuation *request* replays messages (see
+/// `build_v3_chat_process_refill_continuation_request`), because a provider
+/// regenerates its own reasoning for the next round and cannot accept an
+/// invented reasoning item without source identity.
 pub(crate) fn collect_v3_chat_process_business_output_items(
     finalized_response: &Value,
 ) -> Vec<Value> {
     finalized_response
         .get("output")
         .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter(|item| item.get("type").and_then(Value::as_str) != Some("reasoning"))
-                .cloned()
-                .collect()
-        })
+        .cloned()
         .unwrap_or_default()
 }
 

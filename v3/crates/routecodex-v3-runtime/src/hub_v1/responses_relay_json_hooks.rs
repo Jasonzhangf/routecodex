@@ -85,6 +85,16 @@ pub(crate) fn run_json_response_hooks_with_invocation_source(
     let hooks = compile_v3_hub_relay_response_hooks();
     let mut resp02 = hooks.normalize_with_context(resp01, None, Some(input.request_id))?;
     trace.push("ProviderRespCompat02ProviderCompat");
+    // Capture the provider's own explicit-summary fact from the *native*
+    // payload first. Two later stages can synthesize Responses-shaped
+    // `output[].reasoning.summary[].text` that the provider never sent: the
+    // Chat -> Responses conversion below maps `reasoning_content` into summary
+    // text, and `govern` can synthesize RCC reasoning/toolreason summary
+    // content. Neither may suppress the bounded refill decision.
+    let has_source_summary =
+        super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
+            resp02.provider_payload(),
+        );
     if input.provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
         let converted = build_v3_responses_provider_response_from_openai_chat_payload(
             resp02.provider_payload(),
@@ -96,12 +106,6 @@ pub(crate) fn run_json_response_hooks_with_invocation_source(
         )?);
     }
     trace.push("V3HubRespInbound02Normalized");
-    // Capture the provider's own summary fact before `govern` can synthesize
-    // RCC reasoning/toolreason summary content.
-    let has_source_summary =
-        super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
-            resp02.provider_payload(),
-        );
     let response_hook_profile = responses_relay_response_hook_profile(
         input.manifest,
         input.server_id,
