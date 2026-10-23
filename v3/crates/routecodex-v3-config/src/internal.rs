@@ -236,13 +236,18 @@ pub fn v3_internal_chat_process_refill_policy() -> &'static V3InternalChatProces
     &POLICY
 }
 
+/// Test-only injection of the typed refill limit.
+///
+/// The hook and its backing atomic exist only when the `test-hooks` cargo
+/// feature is enabled. That feature is requested solely from dev-dependencies,
+/// so a shipped build has exactly one source: the compiled `internal.toml`
+/// value. It is not a user config, server override, environment variable or
+/// dynamic API in a production binary. `u32::MAX` means "no override".
+#[cfg(feature = "test-hooks")]
 static CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(u32::MAX);
 
-/// Test-only injection of the typed refill limit. Production reading goes
-/// through the compiled `internal.toml` value below; this hook exists so public
-/// entry tests can exercise 0/1/3 without a second production config source.
-/// `u32::MAX` means "no override".
+#[cfg(feature = "test-hooks")]
 #[doc(hidden)]
 pub fn v3_test_only_set_chat_process_refill_max_override(value: Option<u32>) {
     CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE.store(
@@ -251,15 +256,20 @@ pub fn v3_test_only_set_chat_process_refill_max_override(value: Option<u32>) {
     );
 }
 
-/// Effective compiled limit. Only a test-injected override may change it.
+/// Effective compiled limit.
+///
+/// Production builds read only the compiled policy. With `test-hooks` the
+/// process-wide test injection may stand in for public-entry tests.
 pub fn v3_effective_chat_process_refill_max() -> u32 {
-    let override_value =
-        CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE.load(std::sync::atomic::Ordering::SeqCst);
-    if override_value == u32::MAX {
-        v3_internal_chat_process_refill_policy().max_consecutive_refills
-    } else {
-        override_value
+    #[cfg(feature = "test-hooks")]
+    {
+        let override_value =
+            CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE.load(std::sync::atomic::Ordering::SeqCst);
+        if override_value != u32::MAX {
+            return override_value;
+        }
     }
+    v3_internal_chat_process_refill_policy().max_consecutive_refills
 }
 
 pub fn classify_v3_internal_provider_error(
