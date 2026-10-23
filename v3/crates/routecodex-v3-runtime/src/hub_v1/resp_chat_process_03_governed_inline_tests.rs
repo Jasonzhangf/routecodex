@@ -898,7 +898,8 @@ fn refill_usage_accumulation_round_usage_missing_stays_unknown() {
     );
     accumulate_v3_chat_process_refill_usage(&mut accumulated, Some(summary(Some(10), Some(1))));
     assert_eq!(
-        accumulated.as_ref().unwrap().input_tokens, None,
+        accumulated.as_ref().unwrap().input_tokens,
+        None,
         "round-one usage must not be adopted when an earlier round lacked usage"
     );
     assert_eq!(accumulated.as_ref().unwrap().output_tokens, None);
