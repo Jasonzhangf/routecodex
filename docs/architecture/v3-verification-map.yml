@@ -498,6 +498,7 @@ features:
   - When the client supplied no output limit, the provider-declared model output cap is projected into the provider wire payload; a client-supplied output limit is never overwritten on any registered provider protocol.
   - When a provider-directory TOML declares `provider.v3.reasoning_effort`, the configured value becomes the final OpenAI Chat `reasoning_effort` or Responses `reasoning.effort` provider wire value; a configured `medium` overrides a client `xhigh`, and a configured `low` overrides the absence of a client effort.
   - When no provider reasoning-effort policy is declared, the client/protocol/compat effort result is preserved unchanged.
+  - OpenAI Chat targets in the declared free GLM Chat wire scope (xcreate-free, xcreate/openai_free, nvidia) whose selected model_id or wire_model basename starts with GLM remove prompt_cache_key and verbosity mechanically; non-GLM models, paid or unrelated hosts, and explicit compatibility profiles preserve their declared fields.
   - Explicit chat:opencode-zen-tcm binds the actual compatible executor and performs a reversible native bash/read to client executor to native-history conversion with unchanged call IDs and actual paired output/error content.
   - Original custom executor scripts and passable direct exec_command calls preserve complete UTF8 file contents, actual execution receipts and paired history through public Responses SSE entry.
   - Responses gateways that reject custom tool history accept the equivalent function-call wire shape, while public Responses JSON and SSE clients receive custom_tool_call items with unwrapped input.
@@ -507,6 +508,7 @@ features:
   - Compat does not own retry, provider switching or health; typed Error owns request-local compatibility handling.
   - Unsupported provider protocols (Anthropic, Gemini) with an explicit reasoning-effort policy fail Config compile before `V3Config05ManifestPublished`; the policy value never reaches runtime or provider wire for unsupported protocols.
   - Generic chat:glm Anthropic passthrough and other provider protocols never receive Goaichat private hosted-tool fields.
+  - GLM provider-wire-scoped field removal never applies to non-GLM models, Responses provider wire, paid or unrelated hosts, or explicit compatibility-profile behavior outside its declared result.
   - Goaichat compatibility never adds function envelopes to native hosted declarations, adds type/function envelopes to ordinary Anthropic declarations, or restores retired historical tools to the callable inventory.
   - Zen TCM aliases are never added without the real compatible executor or when its new calls are disabled; native declarations/calls, ordinary executor scripts and incompatible entry/protocol paths are preserved.
   - Missing or malformed alias arguments reach the real client executor for error/correction; Compat never fabricates execution receipts or reconstructs capability controls from the executable codec.
@@ -530,6 +532,12 @@ features:
     - zen_tcm_direct_shell_file_write_history_roundtrip
     - zen_tcm_free_tier_forces_upstream_stream_and_keeps_client_json
     - zen_tcm_provider_403_never_projects_an_error_payload_to_the_client
+  glm_model_scope_black_box_regression:
+    command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test xcreate_glm_prompt_cache_public -- --nocapture --test-threads=1
+    test_ids:
+    - xcreate_free_glm_chat_public_entry_omits_prompt_cache_key_and_completes_tool_followup
+    - nvidia_glm_chat_public_entry_omits_prompt_cache_key_and_verbosity
+    - unrelated_glm_chat_public_entry_preserves_prompt_cache_key_and_verbosity
   custom_tool_function_black_box_regression:
     command: npm run test:v3-custom-tool-function-compat-blackbox
     test_ids:
@@ -559,6 +567,7 @@ features:
   - npm run test:v3-provider-reasoning-effort-policy-blackbox
   - npm run test:v3-provider-reasoning-effort-policy-config-failures
   - npm run test:v3-opencode-zen-tcm-bridge-blackbox
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test xcreate_glm_prompt_cache_public -- --nocapture --test-threads=1
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
@@ -2037,6 +2046,9 @@ features:
   - Structured Anthropic system blocks normalize into request.anthropic_system_blocks; Anthropic outbound alone may reconstruct system, while Responses/OpenAI Chat/Gemini fail explicitly instead of flattening
     block-local cache semantics.
   - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before response governance.
+  - Responses response ciphertext policy removes encrypted_content from every non-tool business item when the client must not retain provider cipher, while preserving plain reasoning content and the complete function_call_output business subtree.
+  - Anthropic signature preservation is driven only by the typed sourceProviderProtocol witness from the actual provider wire; ciphertext text shape never establishes provider provenance.
+  - A legal Responses function_call_output output item in provider JSON or SSE remains business data and does not become a malformed provider event or candidate-switch trigger.
   - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
   - Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect.
   - Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire.
@@ -2124,6 +2136,12 @@ features:
   - responses_inbound_does_not_rewrite_string_session_id_schema
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
+  - fe1ec4b-responses-ciphertext-json-sse-two-turn
+  - fe1ec4b-responses-tool-cipher-json-sse-followup
+  - fe1ec4b-responses-anthropic-signature-json
+  - fe1ec4b-responses-anthropic-signature-sse
+  - fe1ec4b-chat-wire-reasoning-cipher-relay-json
+  - fe1ec4b-responses-source-cipher-relay-json
   - responses_function_call_history_keeps_mcp_namespace_on_openai_chat_provider_wire
   - native_tool_search_first_discovery_round_trip_through_anthropic
   - non_client_tool_search_controls_preserve_function_call_json_and_sse
@@ -2138,6 +2156,8 @@ features:
   required_gates:
   - npm run render:v3-protocol-semantic-field-matrix
   - npm run test:v3-protocol-conversion-field-parity
+  - npm run test:v3-response-cipher-source-provenance
+  - npm run test:v3-fe1ec4b-response-cipher-public
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_relay_json_projects_legacy_output_text_items_without_losing_fields
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test namespace_cross_protocol_public -- --nocapture
   - CARGO_NET_OFFLINE=true cargo test --locked --manifest-path v3/Cargo.toml -p routecodex-v3-server --test no_response_adjudication_blackbox is_error -- --nocapture

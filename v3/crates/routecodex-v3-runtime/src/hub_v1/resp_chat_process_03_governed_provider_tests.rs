@@ -35,10 +35,9 @@ fn responses_resp03_accepts_incomplete_terminal_with_optional_or_opaque_details(
 }
 
 #[test]
-fn resp03_recursive_strips_codex_ciphers_but_keeps_anthropic_signature() {
-    // recursive 层按值前缀区分：Codex 密文（rsn_ / gAAAA 开头）丢弃（客户端
-    // 透明无感知）；anthropic 链的 thinking signature 载体（redacted_thinking.data
-    // / thinking.signature，值不是 rsn_/gAAAA 前缀）保留给客户端做签名校验。
+fn resp03_recursive_strips_all_non_tool_cipher_without_typed_anthropic_source() {
+    // 响应安全边界不按密文形状判断来源。缺少 typed Anthropic source 时，
+    // 所有 reasoning encrypted_content 都必须删除，业务工具输出除外。
     let mut payload = json!({
         "id": "resp_mixed_ciphers",
         "status": "completed",
@@ -63,14 +62,19 @@ fn resp03_recursive_strips_codex_ciphers_but_keeps_anthropic_signature() {
             },
             {
                 "type": "reasoning",
-                "id": "rs_resp04",
-                "encrypted_content": "resp04-signature",
-                "summary": [{"type": "summary_text", "text": "resp04 plain"}]
+                "id": "rs_uuid",
+                "encrypted_content": "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0",
+                "summary": [{"type": "summary_text", "text": "uuid plain"}]
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "encrypted_content": "tool-output-business-value"
             }
         ]
     });
 
-    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false);
+    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false, false);
 
     let output = payload["output"].as_array().unwrap();
     // rsn_ / gAAAA Codex 密文剥离，明文 summary 保留。
@@ -86,39 +90,45 @@ fn resp03_recursive_strips_codex_ciphers_but_keeps_anthropic_signature() {
         output[1]
     );
     assert_eq!(output[1]["summary"][0]["text"], "gaaaa plain");
-    // anthropic thinking signature 载体必须保留（非 rsn_/gAAAA 前缀）。
-    assert_eq!(
-        output[2]["encrypted_content"], "sig-anthropic-signature",
-        "anthropic thinking signature 载体不得被剥离"
+    assert!(
+        output[2].get("encrypted_content").is_none(),
+        "cipher shape must not infer an Anthropic source"
     );
     assert_eq!(output[2]["summary"][0]["text"], "signed thought");
+    assert!(
+        output[3].get("encrypted_content").is_none(),
+        "UUID-shaped cipher must be stripped"
+    );
+    assert_eq!(output[3]["summary"][0]["text"], "uuid plain");
     assert_eq!(
-        output[3]["encrypted_content"], "resp04-signature",
-        "anthropic thinking signature 载体不得被剥离"
+        output[4]["encrypted_content"], "tool-output-business-value",
+        "function_call_output is business data and must be preserved"
     );
 }
 
 #[test]
-fn resp03_anthropic_signature_survives_govern_path() {
-    // anthropic 链的 thinking signature（非 rsn_/gAAAA 前缀）在完整 govern
-    // 路径（strip -> harvest -> repair）后仍保留，客户端可用它做签名校验。
+fn resp03_anthropic_source_witness_preserves_signature_after_canonical_projection() {
+    // Relay SSE 会把 Anthropic payload materialize 成 canonical Responses；
+    // source_provider_protocol 是唯一仍可证明原始 wire 来源的 typed witness。
     let payload = json!({
-        "id": "msg_anthropic_sig",
-        "type": "message",
-        "role": "assistant",
-        "content": [
-            {"type": "text", "text": "signed thought"},
-            {"type": "redacted_thinking", "data": "sig-anthropic-signature"}
-        ],
-        "stop_reason": "end_turn"
+        "id": "resp_anthropic_sig",
+        "status": "completed",
+        "output": [{
+            "type": "reasoning",
+            "encrypted_content": "sig-anthropic-signature",
+            "summary": [{"type": "summary_text", "text": "signed thought"}]
+        }]
     });
-    let resp01 = build_v3_provider_resp_inbound_01_raw(
+    let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         payload,
-        V3HubEntryProtocol::Responses,
-        V3HubProviderWireProtocol::Anthropic,
-        V3HubExecutionMode::Relay,
-        V3HubInvocationSource::Client,
-        V3HubTransportIntent::Json,
+        V3ProviderRespInbound01RawContext::new(
+            V3HubEntryProtocol::Responses,
+            V3HubProviderWireProtocol::Responses,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Sse,
+        )
+        .with_source_provider_protocol(V3HubProviderWireProtocol::Anthropic),
     );
     let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).unwrap();
     let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat).unwrap();
@@ -130,4 +140,55 @@ fn resp03_anthropic_signature_survives_govern_path() {
         "anthropic thinking signature 载体不得被剥离: {payload}"
     );
     assert!(payload.contains("signed thought"));
+}
+
+#[test]
+fn resp03_chat_wire_source_preserves_business_cipher_and_strips_codex_shaped() {
+    let payload = json!({
+        "id": "resp_chat_business",
+        "status": "completed",
+        "output": [
+            {
+                "type": "reasoning",
+                "encrypted_content": "preserved cipher",
+                "summary": [{"type": "summary_text", "text": "chat reasoning"}]
+            },
+            {
+                "type": "reasoning",
+                "encrypted_content": "rsn_CODEX_CIPHER",
+                "summary": [{"type": "summary_text", "text": "codex reasoning"}]
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "encrypted_content": "tool-business-cipher"
+            }
+        ]
+    });
+    let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+        payload,
+        V3ProviderRespInbound01RawContext::new(
+            V3HubEntryProtocol::Responses,
+            V3HubProviderWireProtocol::Responses,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        )
+        .with_source_provider_protocol(V3HubProviderWireProtocol::OpenAiChat),
+    );
+    let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).unwrap();
+    let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat).unwrap();
+    let stripped = strip_v3_resp03_encrypted_reasoning_content(resp02, false);
+    let payload = stripped.previous.previous.payload.0;
+    let output = payload["output"].as_array().unwrap();
+
+    assert_eq!(
+        output[0]["encrypted_content"], "preserved cipher",
+        "OpenAI Chat source business cipher must survive Resp03"
+    );
+    assert!(output[1].get("encrypted_content").is_none());
+    assert_eq!(
+        output[2]["encrypted_content"], "tool-business-cipher",
+        "function_call_output remains business data"
+    );
 }

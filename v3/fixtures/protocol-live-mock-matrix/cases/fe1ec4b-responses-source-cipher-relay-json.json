@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "case_id": "fe1ec4b-responses-source-cipher-relay-json",
+  "cell": {
+    "entry_protocol": "openai_chat",
+    "provider_protocol": "responses",
+    "transport": "json",
+    "mode": "relay"
+  },
+  "public_entry": {
+    "kind": "http-listener",
+    "consumer": "node-http",
+    "endpoint": "/v1/chat/completions",
+    "isolation": "task-owned-loopback-listener"
+  },
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "model": "mock.responses-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "strip responses source cipher in relay"
+        }
+      ],
+      "stream": false
+    }
+  },
+  "expected_provider": {
+    "paths": [
+      "/v1/responses"
+    ],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "model": "responses-model",
+      "input.0.content.0.text": "strip responses source cipher in relay",
+      "stream": false
+    },
+    "body_must_not": [
+      "routecodex_internal",
+      "metadata_center",
+      "debug_snapshot"
+    ],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "responses",
+    "mode": "json",
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "id": "resp_fe1ec4b_source_relay",
+      "object": "response",
+      "status": "completed",
+      "model": "responses-model",
+      "output": [
+        {
+          "id": "rs_fe1ec4b_source_relay",
+          "type": "reasoning",
+          "summary": [
+            {
+              "type": "summary_text",
+              "text": "responses source plan"
+            }
+          ],
+          "encrypted_content": "411bd3dd-47a6-49c0-8eef-6a826f349bf6-source"
+        },
+        {
+          "id": "msg_fe1ec4b_source_relay",
+          "type": "message",
+          "role": "assistant",
+          "status": "completed",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "relay answer"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {
+      "choices.0.message.content": "relay answer",
+      "choices.0.finish_reason": "stop"
+    },
+    "body_must_not": [
+      "411bd3dd-47a6-49c0-8eef-6a826f349bf6-source",
+      "provider_error",
+      "internal_error",
+      "routecodex_internal",
+      "metadata_center"
+    ],
+    "semantic_terminal_required": true
+  },
+  "assertions": {
+    "provider_attempt_count": 1,
+    "probe_attempts_may_occur": true,
+    "no_control_leakage": true
+  },
+  "source": {
+    "files": [
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_provider_tests.rs"
+    ],
+    "tests": [
+      "v3/scripts/tests/v3-protocol-live-mock-matrix.mjs::--case fe1ec4b-responses-source-cipher-relay-json"
+    ],
+    "adaptation": "A Responses provider returns non-tool reasoning ciphertext. Chat-to-Responses Relay must strip that source cipher before the Chat client projection."
+  },
+  "contract_differences": []
+}

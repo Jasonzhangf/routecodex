@@ -665,9 +665,12 @@ resources:
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderResp14Raw
-    identity: [requestId, providerId, statusCode]
+    identity: [requestId, providerId, statusCode, sourceProviderProtocol]
+    semantic_contract:
+      source_provenance: V3ProviderRespInbound01Raw carries the actual provider wire protocol as a typed witness; response governance may preserve Anthropic signatures only from that witness and never infer source protocol from ciphertext text shape.
+      business_output: A Responses function_call_output output item remains valid provider business data, including its complete nested output subtree; provider SSE classification must not reject it or trigger candidate recovery.
     allowed_writers: [V3ProviderResp14Raw, ProviderResponsesTransport::send_http]
-    allowed_readers: [V3Resp15ClientPayload, V3ProviderRespInbound01Raw, V3Error01SourceRaised, collect_direct_sse_attempt_after_terminal]
+    allowed_readers: [V3Resp15ClientPayload, V3ProviderRespInbound01Raw, V3Error01SourceRaised, collect_direct_sse_attempt_after_terminal, strip_v3_resp03_encrypted_reasoning_content]
     forbidden_writers: [V3Server16HttpFrame, V3Provider12ResponsesWirePayload]
     may_enter_provider_body: false
     may_enter_client_body: false

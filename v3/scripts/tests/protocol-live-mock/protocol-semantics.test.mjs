@@ -214,6 +214,52 @@ test('SSE tool fragments stay ordered and are never concatenated into a syntheti
   assert.equal(findSemanticTerminal('openai_chat', null, text), false);
 });
 
+test('Responses SSE reasoning keeps summary and encrypted_content in output_items', () => {
+  const raw = [
+    'event: response.output_item.done\n',
+    'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"typed thought"}],"encrypted_content":"typed-signature"}}\n\n',
+    'event: response.completed\n',
+    'data: {"type":"response.completed","response":{"status":"completed","output":[{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"typed thought"}],"encrypted_content":"typed-signature"}]}}\n\n',
+  ].join('');
+  const parsed = parseClientBody('responses', raw, 'text/event-stream');
+  assert.deepEqual(parsed.semantic.output_items, [{
+    id: 'rs_1',
+    type: 'reasoning',
+    summary: [{ type: 'summary_text', text: 'typed thought' }],
+    encrypted_content: 'typed-signature',
+  }]);
+});
+
+test('Responses SSE function_call_output keeps opaque business output', () => {
+  const output = {
+    receipt: 'business tool output preserved',
+    encrypted_content: 'tool-business-cipher',
+    nested: { opaque: 'keep-business-value' },
+  };
+  const raw = [
+    'event: response.output_item.done\n',
+    `data: ${JSON.stringify({
+      type: 'response.output_item.done',
+      output_index: 0,
+      item: { type: 'function_call_output', call_id: 'call_output', output },
+    })}\n\n`,
+    'event: response.completed\n',
+    `data: ${JSON.stringify({
+      type: 'response.completed',
+      response: {
+        status: 'completed',
+        output: [{ type: 'function_call_output', call_id: 'call_output', output }],
+      },
+    })}\n\n`,
+  ].join('');
+  const parsed = parseClientBody('responses', raw, 'text/event-stream');
+  assert.deepEqual(parsed.semantic.output_items, [{
+    type: 'function_call_output',
+    call_id: 'call_output',
+    output,
+  }]);
+});
+
 test('raw [DONE] alone never proves a semantic terminal', () => {
   const text = 'data: [DONE]\n\n';
   const frames = parseSse(text);

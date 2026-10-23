@@ -1223,6 +1223,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         V3HubInvocationSource::Client,
                         V3HubTransportIntent::Sse,
                     )
+                    .with_source_provider_protocol(provider_wire_protocol)
                     .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
                 );
                 let (client_response, servertool_followup_required, stream_observation) =
@@ -1485,6 +1486,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         V3HubInvocationSource::Client,
                         transport_intent,
                     )
+                    .with_source_provider_protocol(provider_wire_protocol)
                     .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
                 );
                 let (client_response, servertool_followup_required, stream_observation) =
