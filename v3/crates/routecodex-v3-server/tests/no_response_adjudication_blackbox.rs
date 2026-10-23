@@ -10097,3 +10097,220 @@ async fn refill_tool_call_stops_public() {
     }
     std::env::remove_var(KEY_ENV);
 }
+
+/// A refill round that ends in a real tool call must hand the client a genuine
+/// tool: complete arguments, real call ID and the real finish reason. The
+/// client then executes it and sends the paired result back on a later request,
+/// and the provider must receive that same call ID beside the original result.
+///
+/// Catches: a refill that fakes a tool, drops the call ID, or replays only the
+/// last round's content into the next request's history.
+#[tokio::test]
+async fn refill_default_one_tool_roundtrip_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let first_round = refill_round_wire(false, "REFILL_BEFORE_TOOL");
+    let tool_round = json!({
+        "id":"resp_refill_tool",
+        "object":"response",
+        "status":"completed",
+        "model":"wire-test",
+        "output":[
+            {
+                "id":"fc_refill_weather",
+                "type":"function_call",
+                "call_id":"call_refill_weather",
+                "name":"lookup_weather",
+                "arguments":"{\"city\":\"Paris\"}",
+                "status":"completed"
+            }
+        ]
+    });
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        first_round.clone(),
+        EntryOptions {
+            attempt_bodies: vec![first_round.clone(), tool_round.to_string()],
+            // The compiled default limit: original plus one refill.
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model":"test.test",
+                "input":"weather check through a refill",
+                "stream":false,
+                "tools":[{"type":"function","name":"lookup_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        attempts, 2,
+        "the default limit must produce exactly one refill: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "the refill chain must deliver: {consumed:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    let delivered = client_responses_payload(&consumed.body);
+    let call = delivered["output"]
+        .as_array()
+        .and_then(|items| {
+            items.iter().find(|item| {
+                item["type"] == "function_call" && item["call_id"] == "call_refill_weather"
+            })
+        })
+        .unwrap_or_else(|| panic!("refill tool call must reach the client: {delivered}"));
+    assert_eq!(
+        call["name"], "lookup_weather",
+        "the real tool name must survive: {delivered}"
+    );
+    assert_eq!(
+        call["arguments"], "{\"city\":\"Paris\"}",
+        "complete arguments must survive: {delivered}"
+    );
+    assert!(
+        consumed.body.contains("REFILL_BEFORE_TOOL"),
+        "the prior round's business content must reach the client: {delivered}"
+    );
+    assert_eq!(
+        delivered["status"], "completed",
+        "the real terminal must be preserved: {delivered}"
+    );
+
+    // The client executes the tool and sends the paired result back. The
+    // provider must see the same call ID as a paired history item.
+    let completion = text_response("REFILL_TOOL_FOLLOWUP_DONE").to_string();
+    let (endpoint2, handle2, mut captures2, _, shutdown2) = start_entry_configured(
+        "responses",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        completion.clone(),
+        EntryOptions {
+            attempt_bodies: vec![completion],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let (_, body2) = successful_transfer(
+        client()
+            .post(endpoint2)
+            .json(&json!({
+                "model":"test.test",
+                "input":[
+                    {"role":"user","content":"weather check through a refill"},
+                    {"type":"function_call","call_id":"call_refill_weather",
+                        "name":"lookup_weather","arguments":"{\"city\":\"Paris\"}"},
+                    {"type":"function_call_output","call_id":"call_refill_weather",
+                        "output":"sunny, 18C"}
+                ]
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    assert!(body2.contains("REFILL_TOOL_FOLLOWUP_DONE"), "{body2}");
+    let followup_wire = tokio::time::timeout(Duration::from_secs(2), captures2.recv())
+        .await
+        .expect("real upstream attempt")
+        .unwrap();
+    stop_entry(handle2, shutdown2).await;
+    let wire_text = followup_wire.to_string();
+    assert!(
+        wire_text.contains("call_refill_weather"),
+        "the provider must receive the client's call id: {followup_wire}"
+    );
+    assert!(
+        wire_text.contains("sunny, 18C"),
+        "the client's real tool result must reach the provider: {followup_wire}"
+    );
+    assert!(
+        wire_text.contains("lookup_weather"),
+        "the paired tool name must reach the provider: {followup_wire}"
+    );
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: the refill budget is per request. Two concurrent requests
+/// on one listener must each get the default limit, and an aborted client
+/// request must not consume the other request's allowance.
+#[tokio::test]
+async fn refill_concurrent_cancel_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        refill_round_wire(false, "CONCURRENT_R1"),
+        EntryOptions {
+            attempt_bodies: vec![
+                refill_round_wire(false, "CONCURRENT_R1"),
+                refill_round_wire(false, "CONCURRENT_R2"),
+                refill_round_wire(false, "CONCURRENT_R1"),
+                refill_round_wire(false, "CONCURRENT_R2"),
+            ],
+            // The compiled default limit applies to both requests.
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    // Both requests run concurrently; the first one is dropped by the client
+    // mid-flight, which must not charge the survivor's budget.
+    let survivor = tokio::spawn(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model":"test.test","input":"survivor request","stream":false
+            }))
+            .send(),
+    );
+    let cancelled = tokio::spawn(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model":"test.test","input":"first concurrent request","stream":false
+            }))
+            .send(),
+    );
+    cancelled.abort();
+    let joined = tokio::time::timeout(Duration::from_secs(30), survivor)
+        .await
+        .expect("the survivor must not hang behind a cancelled sibling")
+        .expect("join")
+        .expect("survivor request");
+    let status = joined.status();
+    let survivor_body = joined.text().await.expect("body");
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    stop_entry(handle, shutdown).await;
+    assert_eq!(status, StatusCode::OK, "{survivor_body}");
+    assert!(
+        survivor_body.contains("CONCURRENT_R1") && survivor_body.contains("CONCURRENT_R2"),
+        "the survivor must keep the full default refill: {survivor_body}"
+    );
+    assert!(
+        attempts >= 2,
+        "the survivor must have used its own budget: {attempts}"
+    );
+    assert!(
+        !survivor_body.contains("provider_response_empty"),
+        "no sibling cancellation may surface as a client error: {survivor_body}"
+    );
+    std::env::remove_var(KEY_ENV);
+}
