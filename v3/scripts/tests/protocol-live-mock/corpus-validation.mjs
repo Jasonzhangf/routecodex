@@ -421,6 +421,7 @@ function validateTurns(relative, value, findings) {
     const hasRequest = isObject(turn.client_request);
     const hasProvider = isObject(turn.expected_provider);
     const hasProviderExact = isObject(turn.expected_provider_exact);
+    const hasProviderExactAttempts = turn.expected_provider_exact_attempts !== undefined;
     const hasClientMust = isObject(turn.expected_client_must);
     if (index === 0 && hasProviderExact && typeof turn.expected_provider_exact === 'object') {
       fail('turns[0].expected_provider_exact must not redefine the top-level first provider shape');
@@ -434,6 +435,15 @@ function validateTurns(relative, value, findings) {
     }
     if (index > 0 && hasProvider && hasProviderExact) {
       fail(`turns[${index}] must not declare both expected_provider and expected_provider_exact`);
+    }
+    if (hasProviderExactAttempts) {
+      if (index === 0) fail('turns[0].expected_provider_exact_attempts is not allowed on the first turn');
+      if (!hasProviderExact) fail(`turns[${index}].expected_provider_exact_attempts requires expected_provider_exact`);
+      if (!Array.isArray(turn.expected_provider_exact_attempts) || turn.expected_provider_exact_attempts.length < 2) {
+        fail(`turns[${index}].expected_provider_exact_attempts must be an array with at least two entries`);
+      } else if (turn.expected_provider_exact_attempts.some((body) => !isObject(body))) {
+        fail(`turns[${index}].expected_provider_exact_attempts entries must be objects`);
+      }
     }
     if (hasRequest) validateClientRequest(`${relative}: turns[${index}].client_request`, turn.client_request, findings);
     if (hasProvider) validateExpectedProvider(`${relative}: turns[${index}].expected_provider`, turn.expected_provider, findings);
@@ -703,9 +713,10 @@ function validateSingularTextCase(relative, value, findings) {
   if (value.expected_provider?.body_must?.['tools.0.function.name'] !== 'functions__exec') {
     fail('singular-text expected provider tool name must be functions__exec');
   }
-  if (value.expected_client?.body_must?.['output.length'] !== 1
+  const singularOutputLength = value.expected_client?.body_must?.['output.length'];
+  if (singularOutputLength !== 2
     || value.expected_client?.body_must?.['output.0.type'] !== 'message') {
-    fail('singular-text client response must assert one assistant message');
+    fail(`singular-text client response must assert exactly two assistant messages, saw ${singularOutputLength}`);
   }
 }
 

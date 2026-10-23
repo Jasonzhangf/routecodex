@@ -23,7 +23,7 @@ import {
   parseJsonText,
   resolvePath,
 } from './assertions-common.mjs';
-import { parseSse } from './protocol-semantics.mjs';
+import { countSemanticTerminals, parseSse } from './protocol-semantics.mjs';
 
 /**
  * Assert the raw client result for one turn.
@@ -117,6 +117,13 @@ export function assertClientResult(clientResult, expected, entryProtocol, deps =
   if (expected?.semantic_terminal_required) {
     if (!evaluateSemanticTerminal(entryProtocol, roots, bodyText, deps, diagnostics)) {
       diagnostics.push('semantic terminal missing from client output');
+    }
+  }
+
+  if (Number.isInteger(expected?.semantic_terminal_count)) {
+    const observedCount = countSemanticTerminals(entryProtocol, roots[0] ?? null, bodyText);
+    if (observedCount !== expected.semantic_terminal_count) {
+      diagnostics.push(`semantic terminal count ${observedCount} != expected ${expected.semantic_terminal_count}`);
     }
   }
 

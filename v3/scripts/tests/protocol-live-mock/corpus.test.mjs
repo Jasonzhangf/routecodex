@@ -265,7 +265,7 @@ test('Codex replay fixtures preserve exact raw arguments and assertion-only nega
   assert.equal(singular.cell.mode, 'relay');
   assert.equal(singular.tool_followup, undefined);
   assert.equal(singular.expected_client.body_must['output.0.type'], 'message');
-  assert.equal(singular.expected_client.body_must['output.length'], 1);
+  assert.equal(singular.expected_client.body_must['output.length'], 2);
 });
 
 test('Codex replay mutations cannot weaken raw argument or execution authority contracts', () => {
