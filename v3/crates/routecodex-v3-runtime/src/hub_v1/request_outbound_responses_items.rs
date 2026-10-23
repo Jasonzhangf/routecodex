@@ -32,17 +32,17 @@ pub(super) fn normalize_responses_content_part_for_role(
             .flatten()
             .unwrap_or(hub_type)
         };
-        if is_assistant && part_type == "text" {
-            // Responses assistant content uses the registered `text` part type.
+        if is_assistant
+            && (part_type == "text" || part_type.is_empty() || part_type == "input_text")
+        {
+            row.insert(
+                "type".to_string(),
+                Value::String(responses_part_type("text").to_string()),
+            );
         } else if part_type == "text" || (!is_assistant && part_type.is_empty()) {
             row.insert(
                 "type".to_string(),
                 Value::String(responses_part_type("input_text").to_string()),
-            );
-        } else if is_assistant && (part_type.is_empty() || part_type == "input_text") {
-            row.insert(
-                "type".to_string(),
-                Value::String(responses_part_type("text").to_string()),
             );
         } else if part_type == "image_url" {
             row.insert(

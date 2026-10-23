@@ -54,12 +54,33 @@ fn responses_wire_wraps_apply_patch_custom_tool_with_toolreason_schema() {
 
 #[test]
 fn responses_wire_normalizes_system_text_parts_to_input_text() {
-    let payload = json!({"model": "gpt-test", "messages": [{"role": "system", "content": [{"type": "text", "text": "system guidance"}]}, {"role": "assistant", "content": [{"type": "text", "text": "assistant output"}]}]});
+    let payload = json!({"model": "gpt-test", "messages": [{"role": "system", "content": [{"type": "text", "text": "system guidance"}]}, {"role": "assistant", "content": [{"type": "text", "text": "assistant output", "opaque": {"keep": true}}]}]});
 
     let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
         .expect("Responses wire must normalize system content parts");
     assert_eq!(request["input"][0]["content"][0]["type"], "input_text");
-    assert_eq!(request["input"][1]["content"][0]["type"], "text");
+    assert_eq!(
+        request["input"][1]["content"][0],
+        json!({"type":"output_text","text":"assistant output","opaque":{"keep":true}})
+    );
+}
+
+#[test]
+fn responses_openai_chat_field_parity_assistant_text_representations() {
+    for content in [
+        json!(" preserved assistant text \n"),
+        json!([{"type":"text","text":" preserved assistant text \n"}]),
+        json!([{"type":"output_text","text":" preserved assistant text \n"}]),
+    ] {
+        let payload =
+            json!({"model":"gpt-test","messages":[{"role":"assistant","content":content}]});
+        let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect("assistant text must be representable in Responses");
+        assert_eq!(
+            request["input"][0]["content"],
+            json!([{"type":"output_text","text":" preserved assistant text \n"}])
+        );
+    }
 }
 
 #[test]
