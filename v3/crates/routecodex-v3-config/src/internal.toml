@@ -249,3 +249,5 @@ port = 8777
 # WebUI observability persistence guard: one persisted row must stay bounded.
 [observability]
   max_record_bytes = 104857600
+[chat_process.refill]
+max_consecutive_refills = 1

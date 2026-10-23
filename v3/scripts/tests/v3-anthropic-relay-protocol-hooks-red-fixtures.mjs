@@ -84,7 +84,7 @@ for (const [name, relative, from, to, diagnostic] of fixtures) {
     for (const directory of ['v3', 'scripts']) {
       cpSync(resolve(repoRoot, directory), join(root, directory), {
         recursive: true,
-        filter: (path) => !path.includes('/target/'),
+        filter: (path) => !path.includes('/target/') && !path.includes('/build-control/'),
       });
     }
     const target = join(root, relative);

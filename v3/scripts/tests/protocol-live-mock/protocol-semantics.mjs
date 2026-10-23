@@ -511,21 +511,33 @@ function hasJsonTerminalField(entryProtocol, data) {
 
 function hasSseTerminal(entryProtocol, frames) {
   if (!Array.isArray(frames)) return false;
-  for (const frame of frames) {
-    if (!isObject(frame)) continue;
-    const event = frame.event;
-    const data = frame.data;
-    if (entryProtocol === 'openai_chat') {
-      if (hasJsonTerminalField(entryProtocol, data)) return true;
-    } else if (entryProtocol === 'responses') {
-      if (event === 'response.failed' || (isObject(data) && data.type === 'error')) continue;
-      if ((event === 'response.completed' || event === 'response.incomplete') && (!isObject(data) || data.type === event || data.type === '')) return true;
-      if (hasJsonTerminalField(entryProtocol, data)) return true;
-    } else if (entryProtocol === 'anthropic') {
-      if (event === 'message_stop' && (data === '' || data === undefined || (isObject(data) && data.type === 'message_stop'))) return true;
-    } else if (entryProtocol === 'gemini') {
-      if (hasJsonTerminalField(entryProtocol, data)) return true;
+  return frames.some((frame) => sseFrameIsTerminal(entryProtocol, frame));
+}
+
+function countSseTerminals(entryProtocol, frames) {
+  if (!Array.isArray(frames)) return 0;
+  return frames.filter((frame) => sseFrameIsTerminal(entryProtocol, frame)).length;
+}
+
+function sseFrameIsTerminal(entryProtocol, frame) {
+  if (!isObject(frame)) return false;
+  const event = frame.event;
+  const data = frame.data;
+  if (entryProtocol === 'openai_chat') {
+    return hasJsonTerminalField(entryProtocol, data);
+  }
+  if (entryProtocol === 'responses') {
+    if (event === 'response.failed' || (isObject(data) && data.type === 'error')) return false;
+    if ((event === 'response.completed' || event === 'response.incomplete') && (!isObject(data) || data.type === event || data.type === '')) {
+      return true;
     }
+    return hasJsonTerminalField(entryProtocol, data);
+  }
+  if (entryProtocol === 'anthropic') {
+    return event === 'message_stop' && (data === '' || data === undefined || (isObject(data) && data.type === 'message_stop'));
+  }
+  if (entryProtocol === 'gemini') {
+    return hasJsonTerminalField(entryProtocol, data);
   }
   return false;
 }
@@ -547,4 +559,24 @@ export function findSemanticTerminal(entryProtocol, parsed, bodyText) {
     if (parsedBody !== null && hasJsonTerminalField(entryProtocol, parsedBody)) return true;
   }
   return isObject(parsed) && hasJsonTerminalField(entryProtocol, parsed);
+}
+
+/**
+ * Count protocol semantic terminals in the client body.
+ *
+ * The count follows the same parsed-JSON/event rules as
+ * `findSemanticTerminal`: marker text inside content, provider error frames,
+ * malformed JSON, and truncated streams never count. A whole-body JSON
+ * terminal counts once; an SSE stream counts each terminal frame.
+ */
+export function countSemanticTerminals(entryProtocol, parsed, bodyText) {
+  if (!SUPPORTED_PROTOCOLS.includes(entryProtocol)) return 0;
+  if (typeof bodyText === 'string' && bodyText.length > 0 && looksLikeSseText(bodyText)) {
+    return countSseTerminals(entryProtocol, parseSse(bodyText));
+  }
+  if (typeof bodyText === 'string' && bodyText.length > 0) {
+    const parsedBody = tryParseJson(bodyText);
+    if (parsedBody !== null) return hasJsonTerminalField(entryProtocol, parsedBody) ? 1 : 0;
+  }
+  return isObject(parsed) && hasJsonTerminalField(entryProtocol, parsed) ? 1 : 0;
 }

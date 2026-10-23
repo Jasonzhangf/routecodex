@@ -15,6 +15,11 @@ sha2.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 
+[features]
+# Test-only hooks (refill-limit injection). Requested only from dev-dependencies
+# so production builds keep the single compiled policy source.
+test-hooks = []
+
 [build-dependencies]
 serde.workspace = true
 serde_json.workspace = true

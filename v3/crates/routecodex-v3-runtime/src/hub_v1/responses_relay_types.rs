@@ -1,7 +1,9 @@
+use super::common::V3ChatProcessRefillDisposition;
 use super::*;
 use crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault;
 use routecodex_v3_error::V3Error01SourceRaised;
 use serde_json::Value;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 pub type V3ResponsesRelayClientStream = crate::nodes::V3CommittedClientSseStream;
@@ -40,6 +42,40 @@ pub struct V3ResponsesRelayRuntimeOutput {
     pub protocol_direct_handoff: Option<V3ResponsesProtocolDirectHandoff>,
 }
 
+/// Internal per-execution signal used by the bounded refill loop. It carries
+/// only the Chat Process disposition; it is never projected into a business
+/// payload or copied into a client response.
+#[derive(Clone, Default)]
+pub(crate) struct V3ResponsesRelayRefillSignal {
+    value: Arc<AtomicU8>,
+}
+
+impl V3ResponsesRelayRefillSignal {
+    const NONE: u8 = 0;
+    const DELIVER: u8 = 1;
+    const REQUEST_REFILL: u8 = 2;
+
+    pub(crate) fn clear(&self) {
+        self.value.store(Self::NONE, Ordering::Release);
+    }
+
+    pub(crate) fn set(&self, disposition: V3ChatProcessRefillDisposition) {
+        let value = match disposition {
+            V3ChatProcessRefillDisposition::Deliver => Self::DELIVER,
+            V3ChatProcessRefillDisposition::RequestRefill => Self::REQUEST_REFILL,
+        };
+        self.value.store(value, Ordering::Release);
+    }
+
+    pub(crate) fn take(&self) -> Option<V3ChatProcessRefillDisposition> {
+        match self.value.swap(Self::NONE, Ordering::AcqRel) {
+            Self::DELIVER => Some(V3ChatProcessRefillDisposition::Deliver),
+            Self::REQUEST_REFILL => Some(V3ChatProcessRefillDisposition::RequestRefill),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct V3ResponsesProtocolDirectHandoff {
     pub request_payload: Value,
@@ -54,7 +90,7 @@ pub struct V3ResponsesProtocolDirectHandoff {
 
 /// Carry-over inputs that seed a Relay run from an upstream Direct/protocol plan
 /// or Direct handoff. Grouped so the call sites stay compact.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct V3ResponsesRelayRuntimeSeeds {
     pub route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
     pub route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
@@ -647,71 +683,6 @@ fn semantic_terminal_from_response_status(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct V3ResponsesRelayServerToolScope {
-    pub(crate) entry_endpoint: String,
-    pub(crate) session_id: String,
-    pub(crate) conversation_id: String,
-    pub(crate) port: u16,
-    pub(crate) routing_group: String,
-}
-
-impl V3ResponsesRelayServerToolScope {
-    pub fn new(
-        entry_endpoint: impl Into<String>,
-        session_id: impl Into<String>,
-        conversation_id: impl Into<String>,
-        port: u16,
-        routing_group: impl Into<String>,
-    ) -> Self {
-        Self {
-            entry_endpoint: entry_endpoint.into(),
-            session_id: session_id.into(),
-            conversation_id: conversation_id.into(),
-            port,
-            routing_group: routing_group.into(),
-        }
-    }
-
-    pub(crate) fn has_client_session_scope(&self) -> bool {
-        let session_id = self.session_id.trim();
-        let conversation_id = self.conversation_id.trim();
-        if session_id.is_empty() || conversation_id.is_empty() {
-            return false;
-        }
-        !(session_id == conversation_id && session_id.starts_with("request:"))
-    }
-
-    pub fn web_search_hook_scope(
-        &self,
-    ) -> servertool_core::web_search_contract::WebSearchHookScope {
-        servertool_core::web_search_contract::WebSearchHookScope {
-            entry_endpoint: self.entry_endpoint.clone(),
-            session_id: self.session_id.clone(),
-            conversation_id: self.conversation_id.clone(),
-            port: self.port,
-            routing_group: self.routing_group.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct V3ResponsesRelayServerToolState {
-    pub(crate) center: V3ServerToolCenter,
-    hooks_sidecar_socket: Option<std::path::PathBuf>,
-}
-
-impl V3ResponsesRelayServerToolState {
-    pub fn with_hooks_sidecar_socket(mut self, socket_path: Option<std::path::PathBuf>) -> Self {
-        self.hooks_sidecar_socket = socket_path;
-        self
-    }
-
-    pub(crate) fn hooks_sidecar_socket(&self) -> Option<&std::path::Path> {
-        self.hooks_sidecar_socket.as_deref()
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct V3LiveSnapResponsesTransport<T> {
     pub(crate) inner: T,
@@ -1219,19 +1190,6 @@ pub enum V3ResponsesRelayRuntimeError {
     ProviderHealth(String),
     #[error("V3 Responses Relay JSON provider body is malformed: {0}")]
     ProviderJson(#[from] serde_json::Error),
-    #[error("web_search Mode B requires exactly one backend binding at runtime: {0}")]
-    WebSearchBackendBindingMissing(String),
-    #[error("web_search local search hop failed: {0}")]
-    WebSearchDispatchFailed(String),
-    #[error("web_search hooks sidecar failed [{code}] retryable={retryable}: {message}")]
-    WebSearchSidecarFailed {
-        call_id: String,
-        code: String,
-        message: String,
-        retryable: bool,
-    },
-    #[error("web_search local search hop returned no usable result: {0}")]
-    WebSearchResultUnavailable(String),
     #[error("V3 Responses Relay provider SSE transport failed: {0}")]
     ProviderSseTransport(String),
     #[error("V3 Responses Relay provider response event codec failed: {0}")]
@@ -1250,6 +1208,4 @@ pub enum V3ResponsesRelayRuntimeError {
         code: String,
         message: String,
     },
-    #[error("V3 Responses Relay server tool state lock is poisoned")]
-    ServerToolStatePoisoned,
 }

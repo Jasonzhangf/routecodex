@@ -23,6 +23,7 @@ tokio.workspace = true
 tower-service.workspace = true
 
 [dev-dependencies]
+routecodex-v3-config = { path = "../routecodex-v3-config", features = ["test-hooks"] }
 async-trait.workspace = true
 reqwest.workspace = true
 routecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses" }

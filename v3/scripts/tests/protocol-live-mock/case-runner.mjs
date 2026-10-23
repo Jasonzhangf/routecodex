@@ -37,6 +37,7 @@ import {
   isPlainObject,
   normalizeHeaders,
   observeClientResult,
+  providerExpectedForAttempt,
   requestHeaders,
   scriptedAttemptCount,
   text,
@@ -379,18 +380,7 @@ export async function runCase({
     if (turn.declaredAttemptCount !== null && business.length !== turn.declaredAttemptCount) {
       diagnostics.push(`provider attempt count ${business.length} != asserted ${turn.declaredAttemptCount} for turn ${turn.index + 1}`);
     }
-    if (turn.providerExpected) {
-      const providerResult = turn.providerExpected.auth_orders
-        ? assertProviderAttemptSequence(window, turn.providerExpected, {
-            providerProtocol,
-            noControlLeakage,
-          })
-        : assertProviderCaptures(window, 0, turn.providerExpected, {
-            providerProtocol,
-            noControlLeakage,
-          });
-      diagnostics.push(...providerResult.diagnostics);
-    }
+    diagnostics.push(...collectProviderExpectationDiagnostics(turn, window, business));
     if (turn.clientExpected) {
       const clientResult = assertClientResult(sent.observed, {
         ...turn.clientExpected,
@@ -473,6 +463,36 @@ export async function runCase({
     return diagnostics.length === 0;
   }
 
+  function collectProviderExpectationDiagnostics(turn, window, business) {
+    const diagnostics = [];
+    const byAttempt = turn.providerExpectedByAttempt;
+    if (Array.isArray(byAttempt) && byAttempt.length > 0) {
+      for (let index = 0; index < business.length; index += 1) {
+        const expected = providerExpectedForAttempt(turn, index);
+        if (!expected) continue;
+        const result = assertProviderCaptures(window, index, expected, {
+          providerProtocol,
+          noControlLeakage,
+        });
+        diagnostics.push(...result.diagnostics);
+      }
+      return diagnostics;
+    }
+    if (turn.providerExpected) {
+      const result = turn.providerExpected.auth_orders
+        ? assertProviderAttemptSequence(window, turn.providerExpected, {
+            providerProtocol,
+            noControlLeakage,
+          })
+        : assertProviderCaptures(window, 0, turn.providerExpected, {
+            providerProtocol,
+            noControlLeakage,
+          });
+      diagnostics.push(...result.diagnostics);
+    }
+    return diagnostics;
+  }
+
   function recordCodexAttempt(turn, window) {
     const business = window.filter((capture) => !EXCLUDED_ATTEMPT_KINDS.has(capture?.attempt_kind));
     if (business.length === 0) return;
@@ -511,18 +531,7 @@ export async function runCase({
     if (turn.declaredAttemptCount !== null && business.length !== turn.declaredAttemptCount) {
       diagnostics.push(`provider attempt count ${business.length} != asserted ${turn.declaredAttemptCount} for turn ${turn.index + 1}`);
     }
-    if (turn.providerExpected) {
-      const providerResult = turn.providerExpected.auth_orders
-        ? assertProviderAttemptSequence(window, turn.providerExpected, {
-            providerProtocol,
-            noControlLeakage,
-          })
-        : assertProviderCaptures(window, 0, turn.providerExpected, {
-            providerProtocol,
-            noControlLeakage,
-          });
-      diagnostics.push(...providerResult.diagnostics);
-    }
+    diagnostics.push(...collectProviderExpectationDiagnostics(turn, window, business));
     productDiagnostics.push(...diagnostics);
     const providerEvidence = writeEvidence(`${caseId}-turn-${turn.index + 1}-provider.json`, {
       case_id: caseId,

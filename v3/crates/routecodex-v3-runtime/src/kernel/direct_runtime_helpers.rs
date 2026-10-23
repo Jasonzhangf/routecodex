@@ -304,7 +304,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {{ residence_timeout_ms = {residence_timeout_ms} }}
 [providers.test]

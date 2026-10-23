@@ -18,23 +18,6 @@ await run(
   { timeoutMs: 45 * 60_000 },
 );
 await run(
-  'node',
-  [
-    'scripts/run-v3-cargo-test.mjs',
-    '--locked',
-    '-p',
-    'routecodex-v3-runtime',
-    '--lib',
-    'hub_v1::web_search_sidecar::tests::web_search_hook_sidecar_pending_connect_is_cancelled_without_thread_growth',
-    '--',
-    '--ignored',
-    '--exact',
-    '--test-threads=1',
-    '--nocapture',
-  ],
-  { timeoutMs: 45 * 60_000 },
-);
-await run(
   'npm',
   ['run', '--silent', 'test:v3-managed-server-lifecycle'],
   { tempDir: false },

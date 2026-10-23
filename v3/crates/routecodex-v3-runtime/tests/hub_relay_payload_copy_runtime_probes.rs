@@ -5,8 +5,8 @@ use routecodex_v3_runtime::{
     build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05,
     compile_v3_hub_relay_request_hooks, compile_v3_hub_relay_response_hooks, V3HubEntryProtocol,
     V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
-    V3HubRelayResponseHookProfile, V3HubRequestSemanticProtocol, V3HubResponseNormalizedKind,
-    V3HubServertoolRequestProfile, V3HubServertoolResponseAction, V3HubTransportIntent,
+    V3HubRelayResponseHookProfile, V3HubRequestHookProfile, V3HubRequestSemanticProtocol,
+    V3HubResponseNormalizedKind, V3HubTransportIntent,
 };
 use serde_json::{json, Value};
 
@@ -48,10 +48,7 @@ fn large_input(label: &str) -> Value {
 fn relay_json_moves_one_business_payload_through_req04() {
     let payload = large_input("json");
     let outcome = compile_v3_hub_relay_request_hooks()
-        .run(
-            request_raw(payload),
-            &V3HubServertoolRequestProfile::disabled(),
-        )
+        .run(request_raw(payload), &V3HubRequestHookProfile::disabled())
         .expect("Relay JSON request probe");
 
     let observed = outcome.payload();
@@ -102,13 +99,10 @@ fn relay_sse_keeps_one_canonical_payload_without_materializing_stream() {
     assert_eq!(resp02.normalized_kind(), V3HubResponseNormalizedKind::Sse);
 
     let resp03 = hooks
-        .govern(
-            resp02,
-            &V3HubRelayResponseHookProfile::new(["servertool.exec"]),
-        )
+        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
         .expect("SSE response governance");
     let resp05 =
-        build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03.into_parts().0);
+        build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03.into_governed());
     let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     assert_eq!(resp06.transport_intent(), V3HubTransportIntent::Sse);
     assert_eq!(

@@ -1,0 +1,28 @@
+%%{init: {"theme":"base","themeVariables":{"lineColor":"#475569"}}}%%
+flowchart TD
+  S([当前 typed 处置]):::boundary --> D{动作}:::decision
+  D -->|Deliver| F[提交完整累积业务候选及真实终态]:::action
+  F --> FIN[释放 attempt 与请求级资源]:::action
+  D -->|取消| CANCEL[取消当前执行与未启动续杯]:::failure
+  CANCEL --> FIN
+  D -->|真实错误| ERROR[交图5的既有 Error owner]:::action
+  D -->|RequestRefill| KEEP[(保留业务序列 原始 inverse 与配对历史)]:::data
+  KEEP --> BUILD[请求 Chat Process 构造标准续请求]:::action
+  BUILD -->|构造完成| CHECK{真正发起前状态}:::decision
+  BUILD -->|真实构造失败| ERROR
+  CHECK -->|已取消| CANCEL
+  CHECK -->|额度已耗尽| F
+  CHECK -->|可发起| COUNT[used 加1 创建新的 execution 身份]:::action
+  COUNT --> CLEAN[清理已消费 attempt 保留请求级控制]:::action
+  CLEAN --> MAIN[通过正常 Request 主线执行]:::action
+  MAIN --> RESULT[完整结果交外层下一次治理调用]:::action
+  FIN --> O([唯一输出：本动作回执]):::boundary
+  ERROR --> O
+  RESULT --> O
+  classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+  classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
+  classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
+  classDef data fill:#F1EAFE,stroke:#7C3AED,color:#0F172A,stroke-width:1.5px
+  classDef success fill:#E8F7EE,stroke:#16A34A,color:#0F172A,stroke-width:1.5px
+  classDef failure fill:#FDECEC,stroke:#DC2626,color:#0F172A,stroke-width:1.5px
+  linkStyle default stroke:#475569

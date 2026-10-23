@@ -226,7 +226,7 @@ async fn relay_routes_before_tool_schema_inflation_and_preserves_gemini_url_mode
     use routecodex_v3_runtime::{
         build_v3_hub_req_inbound_01_client_raw, build_v3_router_request_facts_for_entry,
         compile_v3_hub_relay_request_hooks, V3HubEntryProtocol, V3HubInvocationSource,
-        V3HubServertoolRequestProfile, V3HubTransportIntent,
+        V3HubRequestHookProfile, V3HubTransportIntent,
     };
     let scope = "gemini_pre_govern_route";
     let payload = json!({
@@ -245,13 +245,12 @@ async fn relay_routes_before_tool_schema_inflation_and_preserves_gemini_url_mode
     };
     let hooks = compile_v3_hub_relay_request_hooks();
     let normalized = hooks
-        .run(raw(), &V3HubServertoolRequestProfile::disabled())
+        .run(raw(), &V3HubRequestHookProfile::disabled())
         .unwrap();
     let governed = hooks
         .run(
             raw(),
-            &V3HubServertoolRequestProfile::enabled(["servertool.request"])
-                .with_tool_thinking_enabled(true),
+            &V3HubRequestHookProfile::enabled().with_tool_thinking_enabled(true),
         )
         .unwrap();
     let routing_tokens = |request: &Value| {

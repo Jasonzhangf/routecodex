@@ -16,6 +16,20 @@
     "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
     "exact": null
   },
+  "expected_provider_by_attempt": [
+    {},
+    {
+      "body_must": {
+        "model": "anthropic-model",
+        "stream": true,
+        "messages.0.role": "user",
+        "messages.1.role": "assistant",
+        "messages.1.content.0.text": "ok",
+        "messages.2.role": "user",
+        "messages.2.content.0.text": "继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。"
+      }
+    }
+  ],
   "upstream_response": {
     "protocol": "anthropic",
     "mode": "sse",
@@ -26,16 +40,49 @@
       {"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "ok"}}},
       {"event": "message_delta", "data": {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 2}}},
       {"event": "message_stop", "data": {"type": "message_stop"}}
+    ],
+    "attempts": [
+      {
+        "protocol": "anthropic",
+        "mode": "sse",
+        "status": 200,
+        "content_type": "text/event-stream",
+        "sse_events": [
+          {"event": "message_start", "data": {"type": "message_start", "message": {"id": "msg_responses_to_anthropic_sse", "type": "message", "role": "assistant", "content": [], "usage": {"input_tokens": 7, "output_tokens": 0}}}},
+          {"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "ok"}}},
+          {"event": "message_delta", "data": {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 2}}},
+          {"event": "message_stop", "data": {"type": "message_stop"}}
+        ]
+      },
+      {
+        "protocol": "anthropic",
+        "mode": "sse",
+        "status": 200,
+        "content_type": "text/event-stream",
+        "sse_events": [
+          {"event": "message_start", "data": {"type": "message_start", "message": {"id": "msg_responses_to_anthropic_sse", "type": "message", "role": "assistant", "content": [], "usage": {"input_tokens": 7, "output_tokens": 0}}}},
+          {"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "ok"}}},
+          {"event": "message_delta", "data": {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 2}}},
+          {"event": "message_stop", "data": {"type": "message_stop"}}
+        ],
+        "sse_events": [
+          {"event": "message_start", "data": {"type": "message_start", "message": {"id": "msg_responses_to_anthropic_sse", "type": "message", "role": "assistant", "content": [], "usage": {"input_tokens": 7, "output_tokens": 0}}}},
+          {"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "refill-ok"}}},
+          {"event": "message_delta", "data": {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 2}}},
+          {"event": "message_stop", "data": {"type": "message_stop"}}
+        ]
+      }
     ]
   },
   "expected_client": {
     "transport": "complete",
     "status": 200,
-    "body_must": {"text": "ok", "status": "completed", "output_items.0.type": "message", "output_items.0.role": "assistant", "output_items.0.content.0.type": "output_text", "output_items.0.content.0.text": "ok"},
+    "body_must": {"text": "okrefill-ok", "status": "completed", "output_items.0.type": "message", "output_items.0.role": "assistant", "output_items.0.content.0.type": "output_text", "output_items.0.content.0.text": "ok", "output_items.1.type": "message", "output_items.1.role": "assistant", "output_items.1.content.0.type": "output_text", "output_items.1.content.0.text": "refill-ok"},
     "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
-    "semantic_terminal_required": true
+    "semantic_terminal_required": true,
+    "semantic_terminal_count": 1
   },
-  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "assertions": {"provider_attempt_count": 2, "probe_attempts_may_occur": true, "no_control_leakage": true},
   "source": {
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/testdata/upstream_bodies/anthropic-to-responses.json"],

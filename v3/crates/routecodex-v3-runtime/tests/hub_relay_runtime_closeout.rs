@@ -2893,7 +2893,7 @@ routing_group = "__SCOPE__"
 endpoints = ["responses"]
 [servers.__SCOPE__.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.limited]
@@ -2953,7 +2953,7 @@ routing_group = "compat_reselect"
 endpoints = ["responses"]
 [servers.compat_reselect.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.limited]
@@ -3012,7 +3012,7 @@ routing_group = "compat_storm"
 endpoints = ["responses"]
 [servers.compat_storm.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.compat_storm_anthropic]
@@ -3073,7 +3073,7 @@ routing_group = "__SCOPE__"
 endpoints = ["responses"]
 [servers.__SCOPE__.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.limited]
@@ -3138,7 +3138,7 @@ routing_group = "__SCOPE__"
 endpoints = ["anthropic"]
 [servers.__SCOPE__.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.controlled]
@@ -3181,7 +3181,7 @@ routing_group = "controlled"
 endpoints = ["responses"]
 [servers.controlled.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.chat]

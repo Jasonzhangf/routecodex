@@ -118,21 +118,13 @@ const MAIN_SKELETON_NOTES = new Map([
     title: '05B Hub Relay 请求链',
     note: 'Client raw → Chat Process 治理 → provider semantic → provider wire。',
   }],
-  ['v3.servertool_center_skeleton', {
-    title: '06 Servertool / Hook Governance',
-    note: 'Req04 请求治理 + Resp03 响应治理；两者共享固定 hook slot。',
-  }],
   ['v3.hub_pipeline.v1.response', {
     title: '07 Hub Relay 响应链',
     note: 'Provider raw → RespInbound → RespChatProcess → client projection。',
   }],
-  ['v3.req04.tool_governance_restore', {
-    title: '06 Req04 Tool Governance / Restore',
-    note: '请求侧 Chat Process：治理工具列表/工具结果，注入必要 servertool 请求控制。',
-  }],
-  ['v3.resp03.tool_servertool_governance', {
-    title: '07 Resp03 Tool / Servertool Governance',
-    note: '响应侧 Chat Process：收割工具调用、处理 servertool/reasoning；唯一可治理响应语义的位置。',
+  ['v3.resp03_tool_governance_gap_closeout', {
+    title: '06 Chat Process Tool Governance',
+    note: 'Req04 请求治理 + Resp03 响应治理；工具语义只在 Chat Process 内出现。',
   }],
   ['v3.debug_error_foundation.mainline', {
     title: 'E Error handler / Health owner',
@@ -180,7 +172,7 @@ const CONTRACT_NODE_NOTES = new Map([
   ['V3ProviderRespInbound01Raw', ['Provider response raw', 'provider 响应进入 Hub 的唯一入口']],
   ['ProviderRespCompat02ProviderCompat', ['Provider response compat', 'provider 原始响应兼容解析']],
   ['V3HubRespInbound02Normalized', ['RespInbound 归一化', '只解析 provider raw，不做工具治理']],
-  ['V3HubRespChatProcess03Governed', ['Resp Chat Process', '响应侧工具收割、servertool、reasoning harvest 唯一治理点']],
+  ['V3HubRespChatProcess03Governed', ['Resp Chat Process', '响应侧工具收割与 reasoning harvest 唯一治理点']],
   ['V3HubRespOutbound05ClientSemantic', ['Client semantic', '按入口协议投影客户端语义']],
   ['V3ServerRespOutbound06ClientFrame', ['Server client frame', 'server 发送最终 client frame']],
   ['V3SseTransportIn01RawChunk', ['SSE raw chunk', '原始 transport bytes；只进入 framing，不读取 event/data 业务语义']],
@@ -211,7 +203,7 @@ const EDGE_STEP_NOTES = new Map([
   ['v3-rd-13', '解析 provider raw 后进入 Direct 专属投影准备'],
   ['v3-rd-14', 'Direct 投影准备完成，形成 client payload ready'],
   ['v3-rd-15', 'Direct ready payload 才能转成客户端 payload'],
-  ['v3-hub-resp-03', '响应侧工具/servertool/reasoning 治理唯一入口'],
+  ['v3-hub-resp-03', '响应侧工具/reasoning 治理唯一入口'],
   ['v3-de-12', 'Error03 action 写入 health cooldown/disable'],
   ['v3-de-13', 'provider health 投影成 target/router 可读 availability'],
   ['v3-de-14', 'provider send/transport failure 记录 provider failure'],
@@ -686,7 +678,7 @@ function chainCategory(chainId) {
   if (/config|entry_protocol|models|server\.startup|server\.managed_lifecycle/u.test(chainId)) return 'Foundation / entry';
   if (/responses_direct|responses\.websocket|responses\.inbound_websocket/u.test(chainId)) return 'Responses direct';
   if (/hub_pipeline|relay|protocol\.|protocol_conversion|anthropic_relay|openai_chat_relay|gemini_relay/u.test(chainId)) return 'Hub relay / protocol';
-  if (/servertool|tool_servertool|normalization_tool/u.test(chainId)) return 'Servertool / hooks';
+  if (/normalization_tool|tool_governance/u.test(chainId)) return 'Tool governance / hooks';
   if (/debug|error|live_provider_compat/u.test(chainId)) return 'Debug / error / compat';
   return 'Other branches';
 }
@@ -699,7 +691,7 @@ function selectedMainSkeletonChains(chains) {
     'v3.responses_direct.required_mainline',
     'v3.hub_pipeline.v1.request',
     'v3.hub_pipeline.v1.response',
-    'v3.servertool_center_skeleton',
+    'v3.resp03_tool_governance_gap_closeout',
     'v3.debug_error_foundation.mainline',
   ];
   const byId = new Map(chains.map((chain) => [chain?.chain_id, chain]));

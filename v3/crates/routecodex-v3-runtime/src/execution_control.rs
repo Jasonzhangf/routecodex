@@ -1,7 +1,7 @@
 use futures_util::Stream;
 use std::fmt;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
@@ -135,6 +135,44 @@ impl V3RequestExecutionControl {
         self.attempt_budget.clone()
     }
 
+    pub fn refill_used(&self) -> u32 {
+        self.attempt_budget
+            .inner
+            .refill_used
+            .load(Ordering::Acquire)
+    }
+
+    /// Consume one refill execution slot. Returns true only when a slot was
+    /// available (used < max) and was incremented atomically.
+    pub(crate) fn try_admit_refill(&self, max_consecutive_refills: u32) -> bool {
+        if max_consecutive_refills == 0 {
+            return false;
+        }
+        self.attempt_budget
+            .inner
+            .refill_used
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                (current < max_consecutive_refills).then_some(current + 1)
+            })
+            .is_ok()
+    }
+
+    /// Open one more execution of the same request.
+    ///
+    /// A bounded refill is a new execution of the Runtime mainline, so it owns
+    /// its own provider transport attempt allowance; the request-scoped refill
+    /// budget, residence deadline and resident-byte accounting stay unchanged.
+    pub(crate) fn begin_refill_execution(&self) {
+        self.attempt_budget
+            .inner
+            .transport_attempts
+            .store(0, Ordering::Release);
+        self.attempt_budget
+            .inner
+            .transport_attempt_limit
+            .store(0, Ordering::Release);
+    }
+
     pub fn deadline_unix_ms(&self) -> Result<u64, V3AttemptStoreError> {
         let now = Instant::now();
         if now >= self.attempt_budget.inner.deadline {
@@ -175,6 +213,7 @@ struct V3AttemptBudgetInner {
     limits: V3AttemptStoreLimits,
     transport_attempt_limit: AtomicUsize,
     transport_attempts: AtomicUsize,
+    refill_used: AtomicU32,
     request_resident_bytes: AtomicUsize,
     process_resident_bytes: V3ProcessResidentBytes,
     deadline: Instant,
@@ -246,6 +285,7 @@ impl V3AttemptBudget {
                 // admission then uses the configured request ceiling.
                 transport_attempt_limit: AtomicUsize::new(0),
                 transport_attempts: AtomicUsize::new(0),
+                refill_used: AtomicU32::new(0),
                 request_resident_bytes: AtomicUsize::new(0),
                 process_resident_bytes,
                 deadline: Instant::now() + limits.residence_timeout,
@@ -402,6 +442,11 @@ pub struct V3CommittedClientSseStream {
     inner: Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>,
     next_frame_index: usize,
     terminal_frame_index: usize,
+    /// Complete committed business result of the sealed attempt, shared with
+    /// the replay iterator instead of copied. Chat Process governance reads it
+    /// to decide bounded refill from the governed result; the client stream
+    /// keeps replaying exactly the same frames.
+    sealed_frames: Option<std::sync::Arc<Vec<Vec<u8>>>>,
 }
 
 /// Runtime-issued proof that one provider attempt reached a protocol-valid
@@ -440,7 +485,8 @@ impl V3AttemptSuccessReceipt {
 }
 
 struct V3ReservedCommittedSseReplay {
-    frames: std::iter::Skip<std::vec::IntoIter<Vec<u8>>>,
+    frames: std::sync::Arc<Vec<Vec<u8>>>,
+    next: usize,
     _reservation: V3AttemptReservation,
 }
 
@@ -448,7 +494,11 @@ impl Stream for V3ReservedCommittedSseReplay {
     type Item = Vec<u8>;
 
     fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(self.frames.next())
+        let item = self.frames.get(self.next).cloned();
+        if item.is_some() {
+            self.next += 1;
+        }
+        Poll::Ready(item)
     }
 }
 
@@ -480,6 +530,7 @@ impl V3CommittedClientSseStream {
     ) -> Self {
         let next_frame_index = self.next_frame_index;
         let terminal_frame_index = self.terminal_frame_index;
+        let sealed_frames = self.sealed_frames.clone();
         Self {
             inner: Box::pin(V3ObservedCommittedSseStream {
                 source: self,
@@ -489,7 +540,20 @@ impl V3CommittedClientSseStream {
             }),
             next_frame_index,
             terminal_frame_index,
+            sealed_frames,
         }
+    }
+
+    /// Every committed business frame of the sealed attempt, in order.
+    ///
+    /// The sealed stream only replays frames that were not already handed to
+    /// the client, so the intermediate refill decision cannot read the
+    /// delivered remainder and call it the complete result. This accessor
+    /// exposes the whole committed attempt that the seal validated.
+    pub(crate) fn sealed_frames(&self) -> std::sync::Arc<Vec<Vec<u8>>> {
+        self.sealed_frames
+            .clone()
+            .unwrap_or_else(|| std::sync::Arc::new(Vec::new()))
     }
 }
 
@@ -872,13 +936,17 @@ impl V3CommittedClientSseBuilder {
         // already handed to the client.
         let relative_terminal_frame_index =
             terminal_frame_index.saturating_sub(self.flushed_frames);
+        let sealed_frames = std::sync::Arc::new(self.frames);
+        let replay_frames = std::sync::Arc::clone(&sealed_frames);
         Ok(V3CommittedClientSseStream {
             inner: Box::pin(V3ReservedCommittedSseReplay {
-                frames: self.frames.into_iter().skip(self.flushed_frames),
+                frames: replay_frames,
+                next: self.flushed_frames,
                 _reservation: self.reservation,
             }),
             next_frame_index: 0,
             terminal_frame_index: relative_terminal_frame_index,
+            sealed_frames: Some(sealed_frames),
         })
     }
 }

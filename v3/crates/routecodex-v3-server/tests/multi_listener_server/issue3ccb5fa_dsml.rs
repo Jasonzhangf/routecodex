@@ -677,6 +677,9 @@ async fn run(case: DsmlCase, sse: bool) {
 
 async fn run_mode(case: DsmlCase, sse: bool, relay: bool) {
     let _guard = TEST_LOCK.lock().await;
+    // These cases count upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     std::env::set_var("V3_PROTOCOL_DECISION_KEY", "dsml-test-key");
     let fixture = if case.plain_invoke() {
         std::env::temp_dir()

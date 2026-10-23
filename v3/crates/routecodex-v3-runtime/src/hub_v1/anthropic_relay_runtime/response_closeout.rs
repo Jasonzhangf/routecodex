@@ -6,7 +6,7 @@ pub(super) async fn closeout_anthropic_relay_sse_response<F>(
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
     project_client_response: F,
-) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
+) -> Result<(Value, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
     F: FnOnce(&Value) -> Result<Value, V3AnthropicRelayRuntimeError> + Send + 'static,
 {
@@ -36,7 +36,7 @@ pub(super) fn closeout_anthropic_relay_response<F>(
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
     project_client_response: F,
-) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
+) -> Result<(Value, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
     F: FnOnce(&Value) -> Result<Value, V3AnthropicRelayRuntimeError> + Send + 'static,
 {
@@ -60,13 +60,12 @@ fn closeout_anthropic_relay_normalized_response<F>(
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
     project_client_response: F,
-) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
+) -> Result<(Value, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
     F: FnOnce(&Value) -> Result<Value, V3AnthropicRelayRuntimeError> + Send + 'static,
 {
     let hooks = compile_v3_hub_relay_response_hooks();
-    // 在 resp02 被 govern move 前克隆归一化 payload（含原始 tool_use——
-    // Mode B hosted web_search 透传分支需要未剥离的 web_search tool_use）。
+    // 在 resp02 被 govern move 前克隆归一化 payload（含原始 tool_use）。
     let resp02_payload = resp02.provider_raw().payload.0.clone();
     if !crate::hub_v1::v3_provider_json_attempt_has_deliverable_business_content(
         resp02.semantic_protocol(),
@@ -88,36 +87,7 @@ where
         .with_complete_provider_attempt(true);
     let resp03 = hooks.govern(resp02, &complete_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
-    let (resp03, web_search_transition, _web_search_hook_outcome) = resp03.into_parts();
-    let servertool_followup_required =
-        resp03.servertool_action() == V3HubServertoolResponseAction::FollowupRequired;
-    // Mode B 拦截：websearch call 已由 Resp03 剥离（web_search_transition 存在）。
-    // 区分两种形状：
-    // - hosted `web_search`（anthropic wire server tool `web_search_20250305`，
-    //   模型调用 name=web_search）——标准 Anthropic 工具调用协议，透传 tool_use
-    //   给客户端（claude code 等）执行搜索并回传结果；
-    // - 本地 `websearch`（function name=websearch，无客户端投影路径）——
-    //   禁止静默剥离，fail-fast。
-    if web_search_transition.is_some() {
-        // 区分两种形状：
-        // - hosted `web_search`（anthropic wire server tool `web_search_20250305`，
-        //   模型调用 name=web_search）——标准 Anthropic 工具调用协议，透传 tool_use
-        //   给客户端（claude code 等）执行搜索并回传结果；
-        // - 本地 `websearch`（function name=websearch，无客户端投影路径）——
-        //   禁止静默剥离，fail-fast。
-        let is_hosted_web_search = first_local_websearch_tool_call(&resp02_payload)?
-            .as_ref()
-            .is_some_and(|call| call.name.eq_ignore_ascii_case("web_search"));
-        if !is_hosted_web_search {
-            return Err(V3AnthropicRelayRuntimeError::WebSearchInterceptedUnprojected);
-        }
-        let client_payload = project_client_response(resp02_payload.as_ref())?;
-        return Ok((
-            client_payload,
-            servertool_followup_required,
-            stream_observation,
-        ));
-    }
+    let resp03 = resp03.into_governed();
     let projection_error = Arc::new(Mutex::new(None));
     let projection_error_for_operator = Arc::clone(&projection_error);
     let resp05 = try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
@@ -147,11 +117,7 @@ where
     let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     trace.push("V3ServerRespOutbound06ClientFrame");
     let client_response = resp06.into_client_payload();
-    Ok((
-        client_response,
-        servertool_followup_required,
-        stream_observation,
-    ))
+    Ok((client_response, stream_observation))
 }
 
 #[cfg(test)]

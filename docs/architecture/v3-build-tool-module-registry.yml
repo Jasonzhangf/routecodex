@@ -88,7 +88,6 @@ modules:
       - v3/tests
     referenced_paths:
       - v3/crates/provider-compat-core/**
-      - v3/crates/servertool-core/**
     allowed_dependencies:
       - node:child_process
       - node:crypto

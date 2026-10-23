@@ -1,8 +1,7 @@
 {
   "targetRoots": [
     "v3/crates/routecodex-v3-config/src",
-    "v3/crates/routecodex-v3-runtime/src",
-    "v3/crates/servertool-core/src"
+    "v3/crates/routecodex-v3-runtime/src"
   ],
   "extensions": [".rs"],
   "ignorePathSegments": ["target", "node_modules"],

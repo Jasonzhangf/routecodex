@@ -1,6 +1,7 @@
 {
   "id": "v3.operation_runner.request",
   "version": "1",
+  "description": "The invocation origin resource carries client, dry_run, and refill. A refill is a new execution that re-enters this same request mainline through the normal Runtime entry loop; the static DAG has no back-edge.",
   "inputs": [
     { "id": "source-request", "schema": "Any", "schema_ref": "v3.operation_runner.arc.source_request" }
   ],

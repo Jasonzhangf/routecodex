@@ -834,7 +834,7 @@ async fn controlled_responses_upstream(
                 return Response::builder()
                     .status(StatusCode::OK)
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"id":"resp_patch_followup","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}"#))
+                    .body(Body::from(r#"{"id":"resp_patch_followup","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]},{"type":"reasoning","summary":[{"type":"summary_text","text":"patch complete"}]}]}"#))
                     .unwrap();
             }
             let item = json!({
@@ -859,7 +859,7 @@ async fn controlled_responses_upstream(
                 .status(StatusCode::OK)
                 .header("content-type", "text/event-stream")
                 .body(Body::from(
-                    "event: response.created\ndata: {\"type\":\"response.created\",\"id\":\"h2_sse\"}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n",
+                    "event: response.created\ndata: {\"type\":\"response.created\",\"id\":\"h2_sse\"}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"sse complete\"}]}]}}\n\ndata: [DONE]\n\n",
                 ))
                 .unwrap()
         }

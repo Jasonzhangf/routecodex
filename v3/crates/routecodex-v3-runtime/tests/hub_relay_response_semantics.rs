@@ -6,7 +6,7 @@ use routecodex_v3_runtime::{
     compile_v3_hub_relay_response_hooks, V3HubEntryProtocol, V3HubExecutionMode,
     V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayResponseError,
     V3HubRelayResponseHookProfile, V3HubResponseNormalizedKind, V3HubResponseTerminality,
-    V3HubServertoolResponseAction, V3HubTransportIntent, V3ProviderRespInbound01RawContext,
+    V3HubTransportIntent, V3ProviderRespInbound01RawContext,
 };
 use serde_json::{json, Value};
 use std::{fs, path::Path};
@@ -114,7 +114,6 @@ fn passthrough_profile_does_not_harvest_minimax_text_tool_calls() {
 #[test]
 fn relay_hooks_normalize_and_govern_one_canonical_payload() {
     let hooks = compile_v3_hub_relay_response_hooks();
-    let profile = V3HubRelayResponseHookProfile::new(["servertool.exec"]);
     let resp02 = hooks
         .normalize(relay_raw(
             json!({
@@ -133,14 +132,10 @@ fn relay_hooks_normalize_and_govern_one_canonical_payload() {
     assert_eq!(resp02.normalized_kind(), V3HubResponseNormalizedKind::Json);
 
     let resp03 = hooks
-        .govern(resp02, &profile)
+        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
         .expect("Resp02 -> Resp03 Chat Process governance");
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
     assert_eq!(resp03.tool_call_count(), 1);
-    assert_eq!(
-        resp03.servertool_action(),
-        V3HubServertoolResponseAction::FollowupRequired
-    );
 
     assert_eq!(resp03.finalized_payload()["status"], "requires_action");
     assert_eq!(
@@ -237,10 +232,6 @@ fn resp03_preserves_completed_tool_call_response_before_tool_governance() {
 
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
     assert_eq!(resp03.tool_call_count(), 1);
-    assert_eq!(
-        resp03.servertool_action(),
-        V3HubServertoolResponseAction::None
-    );
     let payload = resp03.finalized_payload();
     assert_eq!(payload["status"], "completed");
     assert_eq!(payload["finish_reason"], "stop");
@@ -290,10 +281,7 @@ fn malformed_tool_call_fails_inside_response_chat_process() {
         ))
         .unwrap();
     assert!(matches!(
-        hooks.govern(
-            resp02,
-            &V3HubRelayResponseHookProfile::new(["servertool.exec"])
-        ),
+        hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty()),
         Err(V3HubRelayResponseError::MalformedToolCall { .. })
     ));
 }
@@ -348,10 +336,7 @@ fn missing_or_unknown_status_fails_inside_response_chat_process() {
             .normalize(relay_raw(payload, V3HubTransportIntent::Json))
             .unwrap();
         assert!(matches!(
-            hooks.govern(
-                resp02,
-                &V3HubRelayResponseHookProfile::new(["servertool.exec"])
-            ),
+            hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty()),
             Err(V3HubRelayResponseError::MissingStatus)
                 | Err(V3HubRelayResponseError::UnsupportedStatus { .. })
         ));
@@ -458,7 +443,7 @@ fn json_and_sse_use_the_same_single_response_exit() {
             .govern(resp02, &V3HubRelayResponseHookProfile::empty())
             .unwrap();
         let resp05 =
-            build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03.into_parts().0);
+            build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03.into_governed());
         let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
         assert_eq!(
             resp06.response_exit_node(),

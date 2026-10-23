@@ -350,7 +350,7 @@ function renderExecutionSection(serverId, mode, attemptStore) {
   const lines = [
     `[servers.${tomlKey(serverId)}.execution]`,
     `allowed_modes = ${tomlStringArray(allowedModes)}`,
-    'allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]',
+    'allowed_invocation_sources = ["client", "refill", "dry_run"]',
     'allowed_transports = ["json", "sse"]',
   ];
   if (attemptStore) {

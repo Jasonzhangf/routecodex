@@ -140,33 +140,6 @@ async fn execute_responses_direct_server_outcome_inner(
             );
         }
     };
-    let server_tool_scope = match build_responses_direct_server_tool_scope(
-        request_headers,
-        Some(&payload),
-        &request_id,
-        &state.server,
-        &path,
-    ) {
-        Ok(scope) => scope,
-        Err(message) => {
-            let frame = build_v3_server_16_http_frame_from_error_sdk_result(
-                "V3ServerReqChatProcess03Governed",
-                project_v3_server_boundary_error_via_sdk(
-                    V3ErrorSourceKind::RuntimeFailure,
-                    "V3ServerReqChatProcess03Governed",
-                    "responses_direct_server_tool_scope_incomplete",
-                    message,
-                    Some(598),
-                ),
-            );
-            return V3ResponsesDirectServerOutcome::DirectFrame(
-                project_v3_responses_direct_stream_error_frame_if_requested(
-                    frame,
-                    requested_stream,
-                ),
-            );
-        }
-    };
     let provider_failure_session_scope =
         match get_failure_session_scope(&state.server, request_headers, &request_id) {
             Ok(scope) => scope,
@@ -251,10 +224,7 @@ async fn execute_responses_direct_server_outcome_inner(
     let mut output = match responses_protocol_plan {
         Some(plan) => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
-                V3ResponsesDirectRuntimeSharedState::new(
-                    &state.responses_direct_server_tool_state,
-                    state.provider_health.runtime_health(),
-                )
+                V3ResponsesDirectRuntimeSharedState::new(state.provider_health.runtime_health())
                 .with_provider_failure_event_sink(
                     provider_failure_event_sink
                         .as_ref()
@@ -268,7 +238,6 @@ async fn execute_responses_direct_server_outcome_inner(
                 .with_client_frame_sink(client_frame_sink.clone()),
                 &state.manifest,
                 raw,
-                server_tool_scope,
                 register_responses_direct_hooks(),
                 &state.debug,
                 now_epoch_ms,
@@ -280,10 +249,7 @@ async fn execute_responses_direct_server_outcome_inner(
         }
         None => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
-                V3ResponsesDirectRuntimeSharedState::new(
-                    &state.responses_direct_server_tool_state,
-                    state.provider_health.runtime_health(),
-                )
+                V3ResponsesDirectRuntimeSharedState::new(state.provider_health.runtime_health())
                 .with_provider_failure_event_sink(
                     provider_failure_event_sink
                         .as_ref()
@@ -297,7 +263,6 @@ async fn execute_responses_direct_server_outcome_inner(
                 .with_client_frame_sink(client_frame_sink.clone()),
                 &state.manifest,
                 raw,
-                server_tool_scope,
                 register_responses_direct_hooks(),
                 &state.debug,
                 now_epoch_ms,
@@ -312,33 +277,6 @@ async fn execute_responses_direct_server_outcome_inner(
             request_id: request_id.clone(),
             payload: payload.clone(),
         };
-        let relay_server_tool_scope = match build_responses_relay_server_tool_scope(
-            request_headers,
-            Some(&payload),
-            &request_id,
-            &state.server,
-            &path,
-        ) {
-            Ok(scope) => scope,
-            Err(message) => {
-                let frame = build_v3_server_16_http_frame_from_error_sdk_result(
-                    "V3ServerReqChatProcess03Governed",
-                    project_v3_server_boundary_error_via_sdk(
-                        V3ErrorSourceKind::RuntimeFailure,
-                        "V3ServerReqChatProcess03Governed",
-                        "responses_relay_server_tool_scope_incomplete",
-                        message,
-                        Some(598),
-                    ),
-                );
-                return V3ResponsesDirectServerOutcome::DirectFrame(
-                    project_v3_responses_direct_stream_error_frame_if_requested(
-                        frame,
-                        requested_stream,
-                    ),
-                );
-            }
-        };
         let capture_provider_request = state
             .debug
             .should_capture_snapshot_stage("provider-request");
@@ -347,12 +285,10 @@ async fn execute_responses_direct_server_outcome_inner(
             .should_capture_snapshot_stage("provider-response");
         let relay_runtime_seeds = handoff.relay_runtime_seeds();
         let relay_result = if capture_provider_request || capture_provider_response {
-            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+            execute_v3_responses_relay_runtime_with_default_transport_health(
                 &state.manifest,
                 runtime_input,
                 &state.provider_health,
-                &state.responses_relay_server_tool_state,
-                relay_server_tool_scope,
                 V3ResponsesRelayProviderSnapshotCapture::new(
                     capture_provider_request,
                     capture_provider_response,
@@ -370,12 +306,10 @@ async fn execute_responses_direct_server_outcome_inner(
             )
             .await
         } else {
-            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+            execute_v3_responses_relay_runtime_with_default_transport_health(
                 &state.manifest,
                 runtime_input,
                 &state.provider_health,
-                &state.responses_relay_server_tool_state,
-                relay_server_tool_scope,
                 V3ResponsesRelayProviderSnapshotCapture::new(false, false),
                 provider_failure_event_sink
                     .as_ref()

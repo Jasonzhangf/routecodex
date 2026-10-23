@@ -188,6 +188,9 @@ async fn hosted_success(
 }
 
 async fn issue245_witness(stream: bool) {
+    // This case counts upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     DENIED_PROBE_RECOVERS.store(false, Ordering::SeqCst);
     DENIED_PROBE_FAILURES.store(0, Ordering::SeqCst);
     DENIED_PROBE_SUCCESSES.store(0, Ordering::SeqCst);

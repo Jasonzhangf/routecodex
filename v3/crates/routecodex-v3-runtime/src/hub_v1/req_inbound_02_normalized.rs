@@ -610,7 +610,7 @@ mod tests {
                 ]
             }),
             V3HubEntryProtocol::Responses,
-            V3HubInvocationSource::ServertoolFollowup,
+            V3HubInvocationSource::Refill,
             V3HubTransportIntent::Sse,
         );
 
@@ -622,7 +622,7 @@ mod tests {
         );
         assert_eq!(
             normalized.previous.invocation_source,
-            V3HubInvocationSource::ServertoolFollowup
+            V3HubInvocationSource::Refill
         );
         assert_eq!(
             normalized.previous.transport_intent,

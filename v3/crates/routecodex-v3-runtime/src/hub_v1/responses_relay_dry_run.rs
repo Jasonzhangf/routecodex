@@ -5,48 +5,20 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
 ) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None, None)
+    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None)
         .await
         .into_foundation()
 }
 
-pub async fn execute_v3_responses_relay_dry_run_runtime_with_server_tool_state(
+pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_initial_target(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayServerToolScope,
-) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_relay_dry_run_runtime_inner(
-        manifest,
-        input,
-        Some(V3ResponsesRelayServerToolExecution {
-            control: server_tool_state,
-            scope,
-            commit_effects: false,
-        }),
-        None,
-        None,
-    )
-    .await
-    .into_foundation()
-}
-
-pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_server_tool_state_and_initial_target(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayServerToolScope,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
 ) -> crate::V3FoundationRuntimeOutput {
     execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
-        Some(V3ResponsesRelayServerToolExecution {
-            control: server_tool_state,
-            scope,
-            commit_effects: false,
-        }),
         Some(initial_selected_target),
         Some(initial_expanded),
     )
@@ -54,30 +26,16 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_server_tool_
     .into_foundation()
 }
 
-pub async fn execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state(
+pub async fn execute_v3_responses_relay_dry_run_orchestration_outcome(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayServerToolScope,
 ) -> V3ResponsesRelayDryRunOutcome {
-    execute_v3_responses_relay_dry_run_runtime_inner(
-        manifest,
-        input,
-        Some(V3ResponsesRelayServerToolExecution {
-            control: server_tool_state,
-            scope,
-            commit_effects: false,
-        }),
-        None,
-        None,
-    )
-    .await
+    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None).await
 }
 
 pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
-    server_tool_state: Option<V3ResponsesRelayServerToolExecution<'_>>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
 ) -> V3ResponsesRelayDryRunOutcome {
@@ -97,7 +55,6 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
         &transport,
-        server_tool_state,
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         false,
@@ -247,18 +204,6 @@ pub fn project_v3_responses_relay_runtime_failure(
                         "V3ServerRespOutbound06ClientFrame",
                         "responses_relay_response_execution_control_error",
                         message,
-                    ),
-                    599,
-                    None,
-                ),
-                V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
-                    call_id,
-                    code,
-                    message,
-                    retryable: _,
-                } => (
-                    super::web_search_sidecar::web_search_sidecar_failure_source(
-                        &call_id, code, &message,
                     ),
                     599,
                     None,

@@ -489,7 +489,7 @@ fn resp03_govern_runtime_path_strips_all_non_tool_cipher_without_typed_anthropic
     ));
     let outcome = govern_v3_hub_relay_response(resp02, &V3HubRelayResponseHookProfile::empty())
         .expect("govern must succeed");
-    let (governed, _, _) = outcome.into_parts();
+    let governed = outcome.into_governed();
     let payload = payload_str(&governed);
     assert!(
         !payload.contains("411bd3dd-47a6-49c0-8eef-6a826f349bf6-0"),
@@ -505,7 +505,7 @@ fn resp03_govern_runtime_path_strips_all_non_tool_cipher_without_typed_anthropic
     let resp02 = build_resp02(payload_with("rsn_GPT_CIPHER", "gpt thought"));
     let profile = V3HubRelayResponseHookProfile::empty().with_retain_response_cipher(true);
     let outcome = govern_v3_hub_relay_response(resp02, &profile).expect("govern must succeed");
-    let (governed, _, _) = outcome.into_parts();
+    let governed = outcome.into_governed();
     assert!(
         payload_str(&governed).contains("rsn_GPT_CIPHER"),
         "gpt 单 provider 必须保留 encrypted_content 透传"
@@ -517,7 +517,7 @@ fn resp03_govern_runtime_path_strips_all_non_tool_cipher_without_typed_anthropic
     let resp02 = build_resp02(payload_with("resp04-signature", "signed"));
     let outcome = govern_v3_hub_relay_response(resp02, &V3HubRelayResponseHookProfile::empty())
         .expect("govern must succeed");
-    let (governed, _, _) = outcome.into_parts();
+    let governed = outcome.into_governed();
     let payload = payload_str(&governed);
     assert!(
         !payload.contains("resp04-signature"),
@@ -526,5 +526,329 @@ fn resp03_govern_runtime_path_strips_all_non_tool_cipher_without_typed_anthropic
     assert!(
         payload.contains("signed"),
         "明文 summary 必须保留: {payload}"
+    );
+}
+
+#[test]
+fn refill_decision_respects_zero_default_and_three() {
+    // 0 disables
+    assert_eq!(
+        decide_v3_chat_process_refill(&[], false, true, 0, 0),
+        V3ChatProcessRefillDisposition::Deliver
+    );
+    // default 1: original + at most one new execution
+    assert_eq!(
+        decide_v3_chat_process_refill(&[], false, true, 0, 1),
+        V3ChatProcessRefillDisposition::RequestRefill
+    );
+    assert_eq!(
+        decide_v3_chat_process_refill(&[], false, true, 1, 1),
+        V3ChatProcessRefillDisposition::Deliver
+    );
+    // 3: original + up to three
+    for used in 0..3 {
+        assert_eq!(
+            decide_v3_chat_process_refill(&[], false, true, used, 3),
+            V3ChatProcessRefillDisposition::RequestRefill,
+            "used={used}"
+        );
+    }
+    assert_eq!(
+        decide_v3_chat_process_refill(&[], false, true, 3, 3),
+        V3ChatProcessRefillDisposition::Deliver
+    );
+}
+
+#[test]
+fn refill_decision_stops_on_governed_tool_call() {
+    let tool_calls = vec![V3HubResponseToolCall {
+        call_id: "call_1".into(),
+        name: "echo".into(),
+        kind: V3HubRelayToolKind::Function,
+    }];
+    assert_eq!(
+        decide_v3_chat_process_refill(&tool_calls, false, true, 0, 1),
+        V3ChatProcessRefillDisposition::Deliver
+    );
+}
+
+#[test]
+fn refill_decision_stops_on_source_summary() {
+    assert_eq!(
+        decide_v3_chat_process_refill(&[], true, true, 0, 1),
+        V3ChatProcessRefillDisposition::Deliver
+    );
+}
+
+#[test]
+fn refill_decision_requires_a_completed_response() {
+    // Only a real completed business response is refillable. `incomplete`,
+    // `content_filter` and `failed` terminals are delivered as-is.
+    assert_eq!(
+        decide_v3_chat_process_refill(&[], false, false, 0, 3),
+        V3ChatProcessRefillDisposition::Deliver
+    );
+}
+
+#[test]
+fn refill_direct_tool_call_facts_use_the_shared_structural_extractor() {
+    let function_call = json!({
+        "output": [{
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "echo",
+            "arguments": "{}"
+        }]
+    });
+    let calls = collect_v3_governed_response_tool_calls(&function_call);
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(calls[0].call_id, "call_1");
+    assert_eq!(calls[0].name, "echo");
+    assert_eq!(calls[0].kind, V3HubRelayToolKind::Function);
+
+    // An item carrying a call_id with a call-shaped type also counts.
+    let custom_call = json!({
+        "output": [{"type": "custom_tool_call", "call_id": "call_2", "name": "patch"}]
+    });
+    assert_eq!(
+        collect_v3_governed_response_tool_calls(&custom_call).len(),
+        1
+    );
+
+    for ignored in [
+        json!({"output": []}),
+        json!({"output": [{"type": "message", "content": [{"type": "output_text", "text": "hi"}]}]}),
+        // An output is not a new tool call even when it carries a call_id.
+        json!({"output": [{"type": "function_call_output", "call_id": "call_1"}]}),
+        json!({"output": [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "t"}]}]}),
+        json!({}),
+    ] {
+        assert!(
+            collect_v3_governed_response_tool_calls(&ignored).is_empty(),
+            "{ignored}"
+        );
+    }
+}
+
+#[test]
+fn refill_source_summary_requires_explicit_nonempty_reasoning_summary() {
+    let with_summary =
+        json!({"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"done"}]}]});
+    assert!(has_v3_source_explicit_nonempty_summary(&with_summary));
+    let native_chat_summary = json!({
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "reasoning": {
+                    "summary": [{"type": "summary_text", "text": "provider summary"}],
+                    "content": [{"type": "reasoning_text", "text": "full reasoning"}],
+                    "encrypted_content": "opaque"
+                },
+                "content": "answer"
+            },
+            "finish_reason": "stop"
+        }]
+    });
+    assert!(has_v3_source_explicit_nonempty_summary(
+        &native_chat_summary
+    ));
+    for ignored in [
+        json!({"output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}]}),
+        json!({"output":[{"type":"reasoning","summary":[]}]}),
+        json!({"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"   "}]}]}),
+        json!({"output":[{"type":"reasoning","summary":"done"}]}),
+        json!({"reasoning_content":"done"}),
+        json!({"output":[{"type":"reasoning","text":"reasoning body"}]}),
+        json!({"choices":[{"message":{"reasoning":{"content":[{"type":"reasoning_text","text":"full reasoning only"}]}}}]}),
+        json!({"choices":[{"message":{"reasoning_content":"full reasoning only"}}]}),
+        json!({"choices":[{"message":{"reasoning":{"summary":[{"type":"summary_text","text":"  "}]}}}]}),
+        json!({}),
+    ] {
+        assert!(
+            !has_v3_source_explicit_nonempty_summary(&ignored),
+            "{ignored}"
+        );
+    }
+}
+
+#[test]
+fn refill_continuation_keeps_original_fields_and_appends_history_once() {
+    let original = json!({
+        "model": "gpt-test",
+        "instructions": "help the user",
+        "tools": [{"type": "function", "name": "echo"}],
+        "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "working"}]},
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "thinking"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(&original, &finalized)
+        .expect("continuation must build");
+    assert_eq!(continuation["model"], json!("gpt-test"));
+    assert_eq!(continuation["instructions"], json!("help the user"));
+    assert_eq!(
+        continuation["tools"],
+        json!([{"type": "function", "name": "echo"}])
+    );
+    let input = continuation["input"].as_array().expect("input array");
+    assert_eq!(
+        input.len(),
+        3,
+        "original + assistant + instruction: {input:?}"
+    );
+    assert_eq!(input[0]["role"], json!("user"));
+    assert_eq!(input[1]["role"], json!("assistant"));
+    assert_eq!(
+        input[1]["content"],
+        json!([{"type": "output_text", "text": "working"}])
+    );
+    assert_eq!(input[2]["role"], json!("user"));
+    assert_eq!(
+        input[2]["content"][0]["text"],
+        json!(V3_CHAT_PROCESS_REFILL_INSTRUCTION)
+    );
+}
+
+#[test]
+fn refill_continuation_normalizes_string_input_and_keeps_image_parts() {
+    let original = json!({
+        "model": "gpt-test",
+        "input": "finish the job"
+    });
+    let finalized = json!({
+        "output": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {"type": "output_text", "text": "saw it"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,AAAA"}
+                ]
+            }
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(&original, &finalized)
+        .expect("continuation must build");
+    let input = continuation["input"].as_array().expect("input array");
+    assert_eq!(input.len(), 3, "{input:?}");
+    assert_eq!(input[0]["role"], json!("user"));
+    assert_eq!(input[0]["content"][0]["text"], json!("finish the job"));
+    assert_eq!(input[1]["role"], json!("assistant"));
+    assert_eq!(
+        input[1]["content"][1],
+        json!({"type": "input_image", "image_url": "data:image/png;base64,AAAA"})
+    );
+}
+
+#[test]
+fn refill_collect_and_merge_preserve_order_and_last_round_authority() {
+    let round_one = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "one"}]},
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "hidden"}]},
+            {"type": "function_call", "name": "nope", "call_id": "c1", "arguments": "{}"}
+        ]
+    });
+    let collected = collect_v3_chat_process_business_output_items(&round_one);
+    assert_eq!(
+        collected.len(),
+        3,
+        "reasoning is real business content and is preserved: {collected:?}"
+    );
+    assert_eq!(collected[0]["content"][0]["text"], json!("one"));
+    assert_eq!(collected[1]["type"], json!("reasoning"));
+    assert_eq!(collected[2]["type"], json!("function_call"));
+
+    let mut last = json!({
+        "id": "resp_2",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "two"}]}
+        ]
+    });
+    merge_v3_chat_process_refill_output_items(&mut last, &collected);
+    let output = last["output"].as_array().expect("merged output");
+    assert_eq!(output.len(), 4, "{output:?}");
+    assert_eq!(output[0]["content"][0]["text"], json!("one"));
+    assert_eq!(output[1]["type"], json!("reasoning"));
+    assert_eq!(output[2]["type"], json!("function_call"));
+    assert_eq!(output[3]["content"][0]["text"], json!("two"));
+    assert_eq!(last["id"], json!("resp_2"), "last round id survives");
+    assert_eq!(last["status"], json!("completed"));
+}
+
+#[test]
+fn refill_usage_accumulation_never_fabricates_zero() {
+    let summary = |input: Option<u64>, output: Option<u64>| V3RuntimeUsageSummary {
+        input_tokens: input,
+        output_tokens: output,
+        ..V3RuntimeUsageSummary::default()
+    };
+    let mut accumulated = None;
+    accumulate_v3_chat_process_refill_usage(&mut accumulated, Some(summary(Some(3), Some(4))));
+    assert_eq!(accumulated.as_ref().unwrap().input_tokens, Some(3));
+    assert_eq!(accumulated.as_ref().unwrap().output_tokens, Some(4));
+    assert_eq!(
+        accumulated.as_ref().unwrap().total_tokens,
+        None,
+        "the helper never invents total_tokens from input/output"
+    );
+
+    accumulate_v3_chat_process_refill_usage(&mut accumulated, Some(summary(Some(3), Some(4))));
+    assert_eq!(accumulated.as_ref().unwrap().input_tokens, Some(6));
+    assert_eq!(accumulated.as_ref().unwrap().output_tokens, Some(8));
+
+    // A round missing one field makes that field unknown for the whole chain.
+    accumulate_v3_chat_process_refill_usage(&mut accumulated, Some(summary(Some(1), None)));
+    assert_eq!(accumulated.as_ref().unwrap().input_tokens, Some(7));
+    assert_eq!(accumulated.as_ref().unwrap().output_tokens, None);
+    assert_eq!(accumulated.as_ref().unwrap().total_tokens, None);
+
+    // A first merge with missing input_tokens never writes 0.
+    let mut fresh = None;
+    accumulate_v3_chat_process_refill_usage(&mut fresh, Some(summary(None, Some(2))));
+    assert_eq!(fresh.as_ref().unwrap().input_tokens, None);
+    assert_eq!(fresh.as_ref().unwrap().output_tokens, Some(2));
+    assert_eq!(fresh.as_ref().unwrap().total_tokens, None);
+}
+
+#[test]
+fn refill_usage_write_back_writes_only_observed_fields() {
+    let mut response = json!({
+        "status": "completed",
+        "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+    });
+    write_v3_chat_process_refill_usage(
+        &mut response,
+        &V3RuntimeUsageSummary {
+            input_tokens: Some(7),
+            output_tokens: None,
+            total_tokens: None,
+            cached_tokens: None,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+        },
+    );
+    let usage = response["usage"].as_object().expect("usage object");
+    assert_eq!(usage["input_tokens"], json!(7));
+    assert!(
+        !usage.contains_key("output_tokens"),
+        "missing round field must not be fabricated: {usage:?}"
+    );
+    assert!(!usage.contains_key("total_tokens"));
+
+    let mut empty = json!({"status": "completed"});
+    write_v3_chat_process_refill_usage(&mut empty, &V3RuntimeUsageSummary::default());
+    assert!(
+        !empty.as_object().expect("object").contains_key("usage"),
+        "all-missing usage must keep usage absent: {empty}"
     );
 }

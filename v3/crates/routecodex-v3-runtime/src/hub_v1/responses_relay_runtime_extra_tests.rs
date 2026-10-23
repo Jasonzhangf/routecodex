@@ -250,57 +250,6 @@ fn provider_response_projection_failure_projects_internal_599() {
 }
 
 #[test]
-fn internal_web_search_canonicalization_failure_is_not_client_invalid_request() {
-    let output = project_v3_responses_relay_runtime_failure(
-        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
-            "servertool followup canonicalization failed".to_string(),
-        ),
-        None,
-    );
-
-    assert_eq!(output.status, 598);
-    let body = match &output.client_body {
-        V3ResponsesRelayClientBody::Json(body) => body,
-        V3ResponsesRelayClientBody::Sse(_) => {
-            panic!("internal web search invariant failure must project as JSON")
-        }
-    };
-    assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
-    assert_ne!(body["error"]["code"], "invalid_responses_request");
-}
-
-#[test]
-fn web_search_sidecar_failure_preserves_typed_code_and_response_lane_without_control_leak() {
-    let output = project_v3_responses_relay_runtime_failure(
-        V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
-            call_id: "call_ws_1".to_string(),
-            code: "search_unavailable".to_string(),
-            message: "controlled failure".to_string(),
-            retryable: true,
-        },
-        None,
-    );
-
-    assert_eq!(output.status, 599);
-    let body = match &output.client_body {
-        V3ResponsesRelayClientBody::Json(body) => body,
-        V3ResponsesRelayClientBody::Sse(_) => {
-            panic!("typed web_search sidecar failure must project as JSON")
-        }
-    };
-    assert_eq!(body["error"]["code"], "search_unavailable");
-    assert_eq!(
-        body["error"]["message"],
-        "web_search hooks sidecar failed for call call_ws_1: controlled failure"
-    );
-    assert!(!body.to_string().contains("retryable"));
-    assert_eq!(
-        output.error_chain.as_deref(),
-        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
-    );
-}
-
-#[test]
 fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
     let upstream = routecodex_v3_error::V3ExternalHttpWitness::new(
         429,
@@ -1081,7 +1030,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 [providers.test]
 type = "anthropic"
@@ -1109,7 +1058,7 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
             payload: json!({"model":"test.test","input":"controlled response regression","stream":true,
                 "tools":[{"type":"function","name":"lookup","parameters":{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]}}]}),
         },
-        &RefusalTransport(raw.to_vec()), None,
+        &RefusalTransport(raw.to_vec()),
         V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest),
         V3ResponsesRelayRetryPolicy::default(), false,
         Some(Arc::new(|_, failure| eprintln!("refusal harness typed failure: {failure:?}"))),
