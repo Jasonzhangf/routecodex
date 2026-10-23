@@ -4093,6 +4093,8 @@ features:
     - refill_default_one_second_request_red
     - refill_summary_stops_public
     - refill_tool_call_stops_public
+    - refill_default_one_tool_roundtrip_public
+    - refill_concurrent_cancel_public
     command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox refill_ -- --test-threads=1 --nocapture
   required_gates:
   - npm run verify:v3-operation-runner-dagpipe
