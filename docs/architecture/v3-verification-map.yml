@@ -3740,7 +3740,8 @@ features:
   - Relay and Direct requests enter the same Front skeleton; the Front does not choose between them.
   - The accept skeleton does not parse provider business events or own routing, health, or retry.
   - A non-SSE inner response on an accepted SSE channel becomes an internal response-stage Error01-06 failure; it is never reinterpreted from payload bytes.
-  - A post-commit provider failure does not reroute or rebuild the current response; the lifecycle makes provider failure post-commit unreachable by withholding semantic commit until terminal success.
+  - A post-commit provider failure does not reroute or rebuild the current response; without first-frame commit the lifecycle makes provider failure post-commit unreachable by withholding semantic commit until terminal success, and with first-frame commit the committed channel ends silently without switching candidates or re-issuing the attempt.
+  - Delivered first-frame-commit frames are never rewritten, replaced, suppressed, or re-emitted; the ledger rejects whole-attempt rewrites after delivery.
   - Failed-attempt frames are discarded and cannot be concatenated with replacement-attempt frames.
   - New features cannot replace the accept channel, runtime worker, or projected-frame edge.
   required_gates:
@@ -4305,3 +4306,49 @@ features:
     source: Complete when the faithful-text public HTTP cases, runtime and error tests, and affected map/resource/mainline gates pass on the exact candidate.
     runtime: No live claim is made without installed-binary restart and same-entry replay.
     forbidden_claim: Do not claim live closure from source tests alone.
+
+- feature_id: v3.responses_first_frame_commit
+  status: source_active_live_verification_required
+  change_risk: critical
+  owner_kind: rust_v3_runtime_direct_sse_first_frame_commit
+  owner_scope: Client-facing first committable business frame crossing the SSE channel before provider terminal, append-only continuation, terminal closeout of the remainder, and silent transport break after delivery.
+  owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/execution_control.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
+  contract:
+  - docs/architecture/dagpipe/graphs/responses-sse-client-frame-commit.graph.json
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
+  - docs/architecture/wiki/v3-client-sse-head-commit.md
+  required_positive:
+  - The first committable business frame (visible output_text that the Direct content probe certifies) crosses the client SSE channel at its provider arrival time, before the provider terminal. Reasoning-only and whitespace-only prefixes never commit, so an empty attempt still recovers through the typed Error chain.
+  - The client stream carries exactly the fully buffered bytes whenever the registered complete-attempt owner preserves the committed prefix; otherwise the transport breaks before any further byte is projected.
+  - The request-level predicate only filters which attempts carry the content probe; the DSML and thinking whole-attempt rewrites run for the whole attempt. A governed marker observed before the commit prevents it. After the commit the probe only suspends projection and the owner decides the whole attempt at the terminal, so protected business text (fenced or inline code, quoted text) is delivered unchanged and governed text never reaches the client.
+  - After delivery, provider failure records provider health for the attempted identity, switches no candidate, re-issues no attempt, and ends the committed transport as a 200 SSE body break without an error frame, keepalive, or normal chunked terminator.
+  - A failed pre-commit attempt is still discarded before any replacement attempt is exposed; residence expiry still terminates through the typed Error chain.
+  required_negative:
+  - No frame is delivered before the content probe certifies the attempt as ungoverned visible text; a marker split across provider frames, a marker that only appears in the terminal snapshot, and a trailing marker prefix or bare `>` close-residue line all block the commit.
+  - A delivered frame is never rewritten, replaced, suppressed, or re-emitted; the attempt builder rejects any whole-attempt rewrite that would change an already-delivered frame.
+  - Post-delivery failure cools only the attempted provider.model.key identity, does not mutate untried identities, and does not emit a success receipt.
+  - The keepalive comment does not count as a committable business frame and is not used to fabricate a first-token time.
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib first_frame_commit_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_committed_client_projection_removes_memory_from_delta_done_completed -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_direct_sse_ -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib client_sse_first_frame_channel_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib commit_probe
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test e041a3b_response_timeout -- --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test 849ed8f_governed_commit_public -- --test-threads=1
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-dagpipe-governance
+  - npm run verify:v3-mainline-caller-flow
+  - git diff --check
+  completion_boundary:
+    source_controlled: true
+    live_cutover: required
+    global_install_restart: required
+    live_evidence: required
+    dsh_review: required

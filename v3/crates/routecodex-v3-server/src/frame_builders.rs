@@ -185,21 +185,31 @@ pub(crate) fn model_no_response_output(streaming: bool) -> Response<Body> {
 pub(crate) fn commit_model_transport_outcome(
     state: &V3ListenerState,
     connection: Option<V3FrontConnectionIdentity>,
-    response: Response<Body>,
+    mut response: Response<Body>,
 ) -> Response<Body> {
-    if let Some(outcome) = response.extensions().get::<V3ModelClientNoResponse>() {
-        append_v3_model_no_response_diagnostic(state, outcome);
-        // A model-entry outcome with no client payload breaks the client transport
-        // without a fabricated error. It carries no provider response head, so it has
-        // no provider-terminal witness to record.
-        return model_transport_break_response(
-            state,
-            connection,
-            routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
-            outcome.streaming,
-        );
-    }
-    response
+    let streaming = response
+        .extensions()
+        .get::<V3ModelClientNoResponse>()
+        .map(|outcome| {
+            append_v3_model_no_response_diagnostic(state, outcome);
+            outcome.streaming
+        });
+    let Some(streaming) = streaming else {
+        return response;
+    };
+    // A model-entry outcome with no client payload breaks the client transport
+    // without a fabricated error. It carries no provider response head, so it has
+    // no provider-terminal witness to record. The break response replaces this one,
+    // so any client-response sample recorder moves with it and the boundary still
+    // records the bytes the client receives.
+    let mut broken = model_transport_break_response(
+        state,
+        connection,
+        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        streaming,
+    );
+    transfer_v3_live_client_capture(&mut response, &mut broken);
+    broken
 }
 
 fn append_v3_model_no_response_diagnostic(

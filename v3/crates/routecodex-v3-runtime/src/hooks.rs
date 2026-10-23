@@ -193,6 +193,20 @@ impl V3HookRegistry {
                 .map_err(V3DirectCompleteResponseError::Normalization)
         })
     }
+
+    /// Same registered complete-attempt governance, also allowed after the
+    /// client commit point. The builder rejects the rewrite when it would
+    /// change a frame that was already flushed to the client.
+    pub(crate) fn project_complete_direct_sse_preserving_client_prefix(
+        &self,
+        builder: &mut crate::execution_control::V3CommittedClientSseBuilder,
+        context: &crate::direct_response_hooks::V3DirectDsmlContext,
+    ) -> Result<(), V3DirectCompleteResponseError> {
+        builder.rewrite_complete_attempt_preserving_client_prefix(|frames| {
+            (self.complete_response_sse)(frames, context)
+                .map_err(V3DirectCompleteResponseError::Normalization)
+        })
+    }
     pub fn hooks(&self) -> &'static [V3RegisteredHook] {
         self.hooks
     }

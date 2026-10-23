@@ -84,11 +84,25 @@ payload.
 ## Invariants
 
 - The Server owns the committed client SSE transport channel and its
-  transport-only keepalives; the Runtime still fully buffers the provider attempt
-  before any provider payload projection.
+  transport-only keepalives; the Runtime buffers the provider attempt until the
+  first committable business frame, then delivers frame-by-frame under an
+  append-only ledger that never rewrites, replaces, suppresses, or re-emits a
+  delivered frame.
 - Establishing the channel is not a semantic client commit.
-- No provider payload byte or provider status reaches the client before the
-  runtime outcome exists.
+- Without first-frame commit enabled, no provider payload byte or provider status
+  reaches the client before the runtime outcome exists; with it enabled, the
+  first committable business frame crosses at its provider arrival time and the
+  terminal remainder replays only the undelivered tail. The Direct content probe
+  certifies that frame: it requires visible output_text and no governed text
+  marker, so a reasoning-only or whitespace-only prefix never commits.
+- After the commit the probe is only a hold signal: while the newest text may
+  still be governed, the collector suspends projection, keeps those frames in the
+  attempt, and the registered complete-attempt owner decides the whole attempt at
+  the terminal. Protected business text (fenced or inline code, quoted text) is
+  delivered unchanged and governed text is never projected.
+- A post-commit provider failure records provider health for the attempted
+  identity and ends the transport as a 200 SSE body break: no error frame, no
+  keepalive, and no normal chunked terminator.
 - An outcome that arrives inside one keepalive interval returns the exact runtime
   status, headers, and body. The race adds no framing of its own.
 - A client never receives a provider error payload on the committed channel. The
@@ -146,7 +160,8 @@ while the client-visible silent-connection defect was being fixed:
 
 - a client must never receive an error return; errors are recorded and printed in
   the Error chain, and the provider switches inside the Runtime before any client
-  payload is committed;
+  payload is committed, while a failure after first-frame delivery ends the
+  committed channel silently without switching candidates;
 - the fix must conform to the declared `v3.direct_sse_accept_skeleton` contract
   instead of restoring the pre-runtime front commit path removed by `3a96357c3`.
 

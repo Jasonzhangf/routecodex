@@ -45,6 +45,15 @@ fn declared_parameter_kinds(source: &Value) -> HashMap<String, ToolMarkupParamKi
 }
 
 impl V3DirectDsmlContext {
+    /// True when no tool markup declaration can match provider output. The
+    /// complete-attempt DSML rewrite still removes the standalone protocol
+    /// labels for such requests, so it is not the identity; the caller must
+    /// leave the early commit to the Direct content probe, which refuses to
+    /// certify a prefix that carries a label.
+    pub(crate) fn has_no_declared_tools(&self) -> bool {
+        self.declarations.is_empty()
+    }
+
     /// Resolve dispatch identities through the single declaration owner
     /// (`NamespaceToolIdentityRegistry`) and bind them to the exact attempt
     /// inverse (provider wire name -> client namespace + leaf). The registry

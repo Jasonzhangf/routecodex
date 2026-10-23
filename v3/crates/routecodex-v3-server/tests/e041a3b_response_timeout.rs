@@ -58,16 +58,41 @@ async fn upstream(
 ) -> Response<Body> {
     let _ = captures.send(body.clone());
     let input = body["input"].as_str().unwrap_or_default();
-    if input.contains("deadline") && body["model"] != "wire-recover" {
+    if input.contains("committed-deadline") {
         let delta = json!({
             "type": "response.output_text.delta",
-            "delta": "deadline-business-delta",
-            "item_id": "msg_e041a3b_deadline",
+            "delta": "committed-business-delta",
+            "item_id": "msg_e041a3b_committed",
             "output_index": 0,
             "content_index": 0,
             "sequence_number": 1
         });
         let frame = format!("event: response.output_text.delta\ndata: {delta}\n\n");
+        let stream = stream::once(async move { Ok::<_, Infallible>(Bytes::from(frame)) })
+            .chain(stream::pending());
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(stream))
+            .unwrap();
+    }
+
+    if input.contains("deadline") && body["model"] != "wire-recover" {
+        // The initial SSE guard waits for the provider's first semantic event
+        // with the configured first-frame timeout, so a body that emits nothing
+        // never reaches the attempt collector's residence deadline. Emit one
+        // reasoning-only delta: it is a semantic event (clears the guard) but
+        // carries no visible business text, so the commit probe never commits
+        // the client channel and the attempt stays on the uncommitted path.
+        let reasoning = json!({
+            "type": "response.reasoning_summary_text.delta",
+            "delta": "deadline-reasoning",
+            "item_id": "rs_e041a3b_deadline",
+            "output_index": 0,
+            "summary_index": 0,
+            "sequence_number": 1
+        });
+        let frame = format!("event: response.reasoning_summary_text.delta\ndata: {reasoning}\n\n");
         let stream = stream::once(async move { Ok::<_, Infallible>(Bytes::from(frame)) })
             .chain(stream::pending());
         return Response::builder()
@@ -225,6 +250,29 @@ async fn raw_deadline_request(entry: &Entry) -> (Vec<u8>, Duration, std::io::Res
     let ended = timeout(Duration::from_secs(8), socket.read_to_end(&mut wire))
         .await
         .expect("deadline request must terminate before the fixture watchdog");
+    (wire, started.elapsed(), ended)
+}
+
+async fn raw_committed_request(entry: &Entry) -> (Vec<u8>, Duration, std::io::Result<usize>) {
+    let body = json!({
+        "model": "test.test",
+        "input": "committed-deadline",
+        "stream": true
+    })
+    .to_string();
+    let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
+        .await
+        .unwrap();
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: e041a3b-committed\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let started = Instant::now();
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let mut wire = Vec::new();
+    let ended = timeout(Duration::from_secs(8), socket.read_to_end(&mut wire))
+        .await
+        .expect("committed deadline request must terminate before the fixture watchdog");
     (wire, started.elapsed(), ended)
 }
 
@@ -460,5 +508,87 @@ async fn client_disconnect_releases_activity_without_provider_cooldown() {
         .unwrap();
     assert!(response.text().await.unwrap().contains("sibling-success"));
     eprintln!("e041a3b-client-cancel released=true cooldown=[] sibling=completed");
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn committed_first_frame_then_residence_deadline_breaks_transport_without_backup_dispatch() {
+    let _guard = TEST_LOCK.lock().await;
+    let mut entry = start_with(250, 5000, true, true).await;
+
+    let (wire, elapsed, ended) = raw_committed_request(&entry).await;
+    let wire_text = String::from_utf8_lossy(&wire);
+
+    eprintln!(
+        "e041a3b-committed elapsed_ms={} wire_bytes={} wire={} ended={ended:?}",
+        elapsed.as_millis(),
+        wire.len(),
+        wire_text
+    );
+
+    assert!(
+        elapsed <= Duration::from_millis(2000),
+        "committed deadline request took {elapsed:?}; expected the 250ms residence deadline, not the 5s provider timeout"
+    );
+    assert!(
+        elapsed >= Duration::from_millis(200),
+        "committed deadline request ended before the declared 250ms residence deadline: {elapsed:?}"
+    );
+    assert!(
+        wire_text.starts_with("HTTP/1.1 200") && wire_text.contains("text/event-stream"),
+        "unexpected client transport framing: {wire_text}"
+    );
+    assert_eq!(
+        wire_text.matches("committed-business-delta").count(),
+        1,
+        "client must receive the certified committed business delta exactly once: {wire_text}"
+    );
+    assert!(
+        !wire_text.contains("response.completed")
+            && !wire_text.contains("\"status\":\"completed\"")
+            && !wire_text.contains("\"error\"")
+            && !wire_text.contains("network_error")
+            && !wire_text.contains("598")
+            && !wire_text.contains("599")
+            && !wire_text.contains("502"),
+        "client received fake success or a provider/proxy error payload: {wire_text}"
+    );
+    assert!(
+        !wire.ends_with(b"0\r\n\r\n"),
+        "committed transport must break, not fake a normal chunked completion: {wire_text}"
+    );
+    assert!(
+        ended.is_ok()
+            || ended
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
+        "client transport ended abnormally without an acceptable reset: {ended:?}"
+    );
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-e041a3b"
+    );
+    assert!(
+        entry.captures.try_recv().is_err(),
+        "committed first frame dispatched backup after the client channel committed"
+    );
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({"model":"test.recover","input":"healthy-sibling","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let sibling = response.text().await.unwrap();
+    assert!(sibling.contains("sibling-success"));
+    assert!(sibling.contains("response.completed"));
+    eprintln!("e041a3b-committed sibling={sibling}");
+
     entry.stop().await;
 }

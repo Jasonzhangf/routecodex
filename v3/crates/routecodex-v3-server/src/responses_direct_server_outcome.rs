@@ -80,6 +80,7 @@ pub(super) fn execute_responses_direct_server_outcome<'a>(
     request_execution_control: Option<V3RequestExecutionControl>,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    client_frame_sink: Option<routecodex_v3_runtime::V3CommittedClientFrameSink>,
     request_purpose: V3RequestPurpose,
 ) -> std::pin::Pin<Box<impl std::future::Future<Output = V3ResponsesDirectServerOutcome> + Send + 'a>>
 {
@@ -98,6 +99,7 @@ pub(super) fn execute_responses_direct_server_outcome<'a>(
         request_execution_control,
         provider_failure_event_sink,
         route_selection_event_sink,
+        client_frame_sink,
         request_purpose,
     ))
 }
@@ -116,6 +118,7 @@ async fn execute_responses_direct_server_outcome_inner(
     request_execution_control: Option<V3RequestExecutionControl>,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    client_frame_sink: Option<routecodex_v3_runtime::V3CommittedClientFrameSink>,
     request_purpose: V3RequestPurpose,
 ) -> V3ResponsesDirectServerOutcome {
     let requested_stream = v3_request_wants_sse(request_headers, &payload);
@@ -261,7 +264,8 @@ async fn execute_responses_direct_server_outcome_inner(
                     route_selection_event_sink
                         .as_ref()
                         .map(std::sync::Arc::clone),
-                ),
+                )
+                .with_client_frame_sink(client_frame_sink.clone()),
                 &state.manifest,
                 raw,
                 server_tool_scope,
@@ -289,7 +293,8 @@ async fn execute_responses_direct_server_outcome_inner(
                     route_selection_event_sink
                         .as_ref()
                         .map(std::sync::Arc::clone),
-                ),
+                )
+                .with_client_frame_sink(client_frame_sink.clone()),
                 &state.manifest,
                 raw,
                 server_tool_scope,
@@ -423,6 +428,7 @@ async fn execute_responses_direct_server_outcome_inner(
                 Some(request_execution_control),
                 provider_failure_event_sink,
                 route_selection_event_sink,
+                client_frame_sink.clone(),
                 request_purpose,
             ))
             .await;
