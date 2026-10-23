@@ -1134,6 +1134,64 @@ async fn responses_relay_history_preserves_per_item_reasoning_summary_public() {
 }
 
 #[tokio::test]
+async fn responses_relay_legacy_reasoning_keeps_original_summary_whitespace_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["chat"] {
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "application/json",
+            text_response("LEGACY_WHITESPACE_ROUND").to_string(),
+            EntryOptions {
+                model_key: Some("gpt-5.6-sol".to_string()),
+                wire_model: Some("gpt-5.6-sol".to_string()),
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let consumed = consume_response(
+            client()
+                .post(endpoint.replace("/v1/responses", "/v1/chat/completions"))
+                .json(&json!({
+                    "model": "test.gpt-5.6-sol",
+                    "messages": [
+                        {"role":"user","content":"continue legacy reasoning"},
+                        {"role":"assistant","content":"prior answer","reasoning_content":"\n    return value\n"}
+                    ],
+                    "stream": false
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let captured = tokio::time::timeout(Duration::from_secs(2), captures.recv())
+            .await
+            .expect("real provider attempt")
+            .unwrap();
+        stop_entry(handle, shutdown).await;
+        assert!(
+            consumed.transport_error.is_none(),
+            "{process}: legacy reasoning history must deliver: {consumed:?}"
+        );
+        let reasoning: Vec<&Value> = captured["input"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{process}: provider request must carry input: {captured}"))
+            .iter()
+            .filter(|item| item["type"] == "reasoning")
+            .collect();
+        assert_eq!(reasoning.len(), 1, "{process}: {captured}");
+        assert_eq!(
+            reasoning[0]["summary"],
+            json!([{"type":"summary_text","text":"\n    return value\n"}]),
+            "{process}: legacy fallback must keep original text with whitespace"
+        );
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
 async fn issuee63d2f2_review_signed_gemini_thought_is_not_a_result() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");

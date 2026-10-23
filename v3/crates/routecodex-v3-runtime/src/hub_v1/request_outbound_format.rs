@@ -1312,8 +1312,7 @@ fn build_responses_reasoning_input_from_entry(entry: &Map<String, Value>) -> Val
         .cloned()
         .or_else(|| {
             let text = entry.get("text").and_then(Value::as_str);
-            match text.map(str::trim) {
-                Some("") => None,
+            match text.filter(|value| !value.trim().is_empty()) {
                 Some(value) => Some(vec![json!({"type":"summary_text","text":value})]),
                 None => None,
             }
