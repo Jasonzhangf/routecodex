@@ -349,10 +349,11 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
     let declared_tools = response_hook
         .as_ref()
         .is_some_and(|(_, context)| !context.has_no_declared_tools());
-    let mut commit_probe = crate::direct_response_hooks::V3DirectPrefixCommitProbe::new_with_declared_tools(
-        provider_protocol,
-        declared_tools,
-    );
+    let mut commit_probe =
+        crate::direct_response_hooks::V3DirectPrefixCommitProbe::new_with_declared_tools(
+            provider_protocol,
+            declared_tools,
+        );
     loop {
         let next = match tokio::time::timeout_at(deadline, stream.next()).await {
             Ok(next) => next,

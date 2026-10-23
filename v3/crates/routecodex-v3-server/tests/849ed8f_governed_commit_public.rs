@@ -498,12 +498,7 @@ async fn raw_request_body(
 /// released at the terminal unless the first-frame commit gate opens; the
 /// arrival gap between the first business delta and `response.completed` is the
 /// only public proof of progressive projection.
-async fn timed_request(
-    entry: &Entry,
-    session: &str,
-    input: &str,
-    tools: Value,
-) -> TimedWire {
+async fn timed_request(entry: &Entry, session: &str, input: &str, tools: Value) -> TimedWire {
     let body = json!({
         "model": "test",
         "input": input,
@@ -1012,8 +1007,13 @@ async fn declared_tool_alternate_opener_is_held_then_harvested_without_leak() {
             "required": ["cmd"]
         }
     }]);
-    let timed =
-        timed_request(&entry, "849ed8f-tool-alternate", "tool-alternate-opener-markup", tools).await;
+    let timed = timed_request(
+        &entry,
+        "849ed8f-tool-alternate",
+        "tool-alternate-opener-markup",
+        tools,
+    )
+    .await;
     let text = wire_text(&timed.wire);
 
     assert!(

@@ -449,7 +449,9 @@ mod tests {
     #[test]
     fn alternate_opener_holds_for_tool_requests() {
         let mut base = probe();
-        base.observe_event(&delta("Done.\n<|exec_command\">\n<cmd>ls</cmd>\n</exec_command>"));
+        base.observe_event(&delta(
+            "Done.\n<|exec_command\">\n<cmd>ls</cmd>\n</exec_command>",
+        ));
         assert!(
             base.is_committable(),
             "without a declared tool the malformed opener stays business text"

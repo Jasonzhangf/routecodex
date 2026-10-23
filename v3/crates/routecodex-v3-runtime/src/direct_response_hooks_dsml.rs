@@ -1179,7 +1179,10 @@ struct CarrierKinds {
 }
 
 fn original_carrier_kinds(
-    events: &[(routecodex_v3_sse::SseTransportIn03ValidatedFrameStream, Option<Value>)],
+    events: &[(
+        routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
+        Option<Value>,
+    )],
     association: &TerminalAssociation,
     plans: &[Replacement],
 ) -> HashMap<usize, CarrierKinds> {
@@ -1208,7 +1211,10 @@ fn original_carrier_kinds(
 }
 
 fn delivered_carrier_state(
-    events: &[(routecodex_v3_sse::SseTransportIn03ValidatedFrameStream, Option<Value>)],
+    events: &[(
+        routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
+        Option<Value>,
+    )],
     flushed: usize,
     association: &TerminalAssociation,
     plans: &[Replacement],
@@ -1284,7 +1290,8 @@ fn resume_emitted_items(
     delivered: Option<&DeliveredItem>,
     kinds: Option<&CarrierKinds>,
 ) -> bool {
-    let Some(delivered) = delivered.filter(|delivered| delivered.added || !delivered.parts.is_empty())
+    let Some(delivered) =
+        delivered.filter(|delivered| delivered.added || !delivered.parts.is_empty())
     else {
         emit_items(output, sequence, plan);
         return true;

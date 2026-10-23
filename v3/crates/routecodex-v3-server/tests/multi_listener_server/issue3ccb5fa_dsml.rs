@@ -1296,7 +1296,10 @@ async fn responses_direct_dsml_f665809_partial_attempt_exhaustion_is_transport_f
                     "network_error",
                     "\"error\"",
                 ] {
-                    assert!(!wire.contains(forbidden), "held markup or error leaked: {wire}");
+                    assert!(
+                        !wire.contains(forbidden),
+                        "held markup or error leaked: {wire}"
+                    );
                 }
             }
         }
