@@ -1247,11 +1247,41 @@ fn chat_assistant_reasoning_to_responses_input_item(row: &Map<String, Value>) ->
         .get("reasoning_content")
         .or_else(|| row.get("reasoning_text"))
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())?;
-    Some(json!({
-        "type": "reasoning",
-        "summary": [{"type": "summary_text", "text": text}]
-    }))
+        .filter(|value| !value.trim().is_empty());
+    let item_id = row
+        .get("routecodex_chat_extension")
+        .and_then(|extension| extension.get("responses_reasoning_item_id"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
+    let signature = row
+        .get("routecodex_chat_extension")
+        .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
+        .and_then(Value::as_str);
+    // An empty plaintext reasoning row is still a provider-origin reasoning
+    // item when it carries the item id or opaque cipher association captured
+    // from the Responses output; restore it verbatim so the cipher survives the
+    // chat continuation round trip.
+    if text.is_none() && item_id.is_none() && signature.is_none() {
+        return None;
+    }
+    let mut item = Map::new();
+    item.insert("type".to_string(), Value::String("reasoning".to_string()));
+    if let Some(text) = text {
+        item.insert(
+            "summary".to_string(),
+            json!([{"type": "summary_text", "text": text}]),
+        );
+    }
+    if let Some(item_id) = item_id {
+        item.insert("id".to_string(), Value::String(item_id.to_string()));
+    }
+    if let Some(signature) = signature {
+        item.insert(
+            "encrypted_content".to_string(),
+            Value::String(signature.to_string()),
+        );
+    }
+    Some(Value::Object(item))
 }
 
 /// 返回 (投影值, 丢弃记录) 的 non-error carrier 版本；丢弃记录同时来自

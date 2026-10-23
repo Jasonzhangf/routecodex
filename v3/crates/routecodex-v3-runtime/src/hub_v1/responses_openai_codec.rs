@@ -685,6 +685,29 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_payload_for_req_inb
     Ok(request)
 }
 
+/// Convert a finalized Responses `message` output item into a canonical Chat
+/// assistant message for a refill continuation history. The Chat Process owns
+/// continuation construction; this codec owns the Responses-to-Chat content
+/// projection, so the continuation reuses the exact same conversion the inbound
+/// canonicalization already applies.
+pub(crate) fn build_v3_chat_assistant_message_from_responses_output_item(
+    item: &Value,
+) -> Option<Value> {
+    let item = item.as_object()?;
+    build_v3_openai_chat_message_from_responses_message(item).ok()
+}
+
+/// Convert a finalized Responses `reasoning` output item into a canonical Chat
+/// assistant message carrying the provider-origin reasoning content and opaque
+/// signature association. RCC-synthesized reasoning has no provider identity
+/// and is omitted by the caller before this helper runs.
+pub(crate) fn build_v3_chat_assistant_reasoning_message_from_responses_output_item(
+    item: &Value,
+) -> Option<Value> {
+    let item = item.as_object()?;
+    build_v3_openai_chat_assistant_reasoning_message(item)
+}
+
 fn build_v3_openai_chat_message_from_responses_message(
     item: &Map<String, Value>,
 ) -> Result<Value, String> {
@@ -773,6 +796,26 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
             message["routecodex_chat_extension"] = json!({
                 "responses_reasoning_encrypted_content": signature
             });
+        }
+    }
+    // Carry the Responses reasoning item identity so an outbound Chat->Responses
+    // projection can restore a reasoning input item even when the plaintext
+    // summary is empty. A provider-origin reasoning item with an id and opaque
+    // cipher must survive a continuation round trip; an item without an id
+    // (synthesized, never source material) is not recorded.
+    if let Some(item_id) = item
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+    {
+        if let Some(extension) = message
+            .get_mut("routecodex_chat_extension")
+            .and_then(Value::as_object_mut)
+        {
+            extension.insert(
+                "responses_reasoning_item_id".to_string(),
+                Value::String(item_id.to_string()),
+            );
         }
     }
     Some(message)
