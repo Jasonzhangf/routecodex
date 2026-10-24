@@ -23,6 +23,16 @@
 //! not end with a marker prefix; a marker split across two provider frames is
 //! therefore never committed half-way.
 //!
+//! A request that declares tools adds one more owner behavior: the DSML owner
+//! can harvest declared tool markup into synthesized function items, replacing
+//! the source text span. That harvest has four entry points: the bounded
+//! `<tool_call>` grammar, the fullwidth envelope opener `<｜｜DSML｜｜ invoke`
+//! (whose one-line form does not equal the standalone label), the
+//! `]<]minimax[>[` provider prefix, and the demonstrated malformed alternate
+//! opener `<|name">`. The probe extends its marker set with all of them for
+//! such attempts, so a committed prefix never carries a span the owner later
+//! turns into a function call.
+//!
 //! The same probe stays active after the commit, but only as a hold signal.
 //! The collector suspends projection while the newest text may still be
 //! governed, keeps the frames inside the attempt, and lets the registered
@@ -124,9 +134,35 @@ pub(crate) struct V3DirectPrefixCommitProbe {
 
 impl V3DirectPrefixCommitProbe {
     pub(crate) fn new(protocol: V3HubProviderWireProtocol) -> Self {
+        Self::new_with_declared_tools(protocol, false)
+    }
+
+    /// Create the probe for one provider attempt.
+    ///
+    /// When the request declares tools, the DSML owner can harvest declared
+    /// tool markup into synthesized output items, replacing the source text
+    /// span. The base governed-marker set only covers labels the owner removes
+    /// without any declaration, so the probe extends it with the declared-tool
+    /// openers; a committed prefix must never carry a span that later turns
+    /// into a function call.
+    pub(crate) fn new_with_declared_tools(
+        protocol: V3HubProviderWireProtocol,
+        declared_tools: bool,
+    ) -> Self {
+        let mut markers = crate::direct_response_hooks::v3_direct_governed_text_markers();
+        if declared_tools {
+            markers.extend(
+                crate::tool_markup_parser::declared_tool_text_markers()
+                    .into_iter()
+                    .map(|text| V3GovernedTextMarker {
+                        text,
+                        scope: V3GovernedTextScope::Inline,
+                    }),
+            );
+        }
         Self {
             protocol,
-            markers: crate::direct_response_hooks::v3_direct_governed_text_markers(),
+            markers,
             visible_text: false,
             confirmed_marker: false,
             tails_by_carrier: std::collections::BTreeMap::new(),
@@ -370,6 +406,99 @@ mod tests {
             probe.is_committable(),
             "plain comparison operators are not governed markers"
         );
+    }
+
+    #[test]
+    fn declared_tool_open_is_governed_only_for_tool_requests() {
+        let mut base = probe();
+        base.observe_event(&delta("visible <tool_call>write_file</tool_call>"));
+        assert!(
+            base.is_committable(),
+            "without a declared tool the DSML owner cannot harvest the markup"
+        );
+
+        let mut with_tools = V3DirectPrefixCommitProbe::new_with_declared_tools(
+            V3HubProviderWireProtocol::Responses,
+            true,
+        );
+        with_tools.observe_event(&delta("visible <tool_call>write_file</tool_call>"));
+        assert!(!with_tools.is_committable());
+        assert!(
+            with_tools.confirmed_governed_marker(),
+            "a declared-tool opener must hold the prefix for the complete-attempt owner"
+        );
+    }
+
+    #[test]
+    fn declined_tool_open_split_across_deltas_holds_for_tool_requests() {
+        let mut with_tools = V3DirectPrefixCommitProbe::new_with_declared_tools(
+            V3HubProviderWireProtocol::Responses,
+            true,
+        );
+        with_tools.observe_event(&delta("visible "));
+        assert!(with_tools.is_committable());
+        with_tools.observe_event(&delta("<tool_"));
+        assert!(
+            !with_tools.is_committable(),
+            "an opener split across provider frames must not commit half-way"
+        );
+        with_tools.observe_event(&delta("call>write_file</tool_call>"));
+        assert!(!with_tools.is_committable());
+    }
+
+    #[test]
+    fn alternate_opener_holds_for_tool_requests() {
+        let mut base = probe();
+        base.observe_event(&delta(
+            "Done.\n<|exec_command\">\n<cmd>ls</cmd>\n</exec_command>",
+        ));
+        assert!(
+            base.is_committable(),
+            "without a declared tool the malformed opener stays business text"
+        );
+
+        let mut with_tools = V3DirectPrefixCommitProbe::new_with_declared_tools(
+            V3HubProviderWireProtocol::Responses,
+            true,
+        );
+        with_tools.observe_event(&delta("Done.\n<|exec_command\">"));
+        assert!(
+            !with_tools.is_committable(),
+            "the alternate opener is a declared-tool harvest entry point"
+        );
+        assert!(with_tools.confirmed_governed_marker());
+    }
+
+    #[test]
+    fn one_line_fullwidth_envelope_holds_for_tool_requests() {
+        use crate::tool_markup_parser::{CLOSE, END_INVOKE, END_PARAM, INVOKE, OPEN, PARAM};
+        let mut with_tools = V3DirectPrefixCommitProbe::new_with_declared_tools(
+            V3HubProviderWireProtocol::Responses,
+            true,
+        );
+        let one_line = format!(
+            "Go.\n{OPEN}{INVOKE} name=\"exec_command\">{PARAM} name=\"cmd\" string=\"true\">ls{END_PARAM}{END_INVOKE}{CLOSE}"
+        );
+        with_tools.observe_event(&delta(&one_line));
+        assert!(
+            !with_tools.is_committable(),
+            "the one-line fullwidth envelope is harvested, so it must hold"
+        );
+        assert!(with_tools.confirmed_governed_marker());
+    }
+
+    #[test]
+    fn minimax_prefix_split_across_deltas_holds_for_tool_requests() {
+        let mut with_tools = V3DirectPrefixCommitProbe::new_with_declared_tools(
+            V3HubProviderWireProtocol::Responses,
+            true,
+        );
+        with_tools.observe_event(&delta("visible ]<]minimax[>["));
+        assert!(
+            !with_tools.is_committable(),
+            "the minimax provider prefix must hold until its envelope follows"
+        );
+        assert!(with_tools.confirmed_governed_marker());
     }
 
     #[test]
