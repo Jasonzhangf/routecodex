@@ -1224,7 +1224,8 @@ pub(crate) fn apply_v3_chat_process_refill_accumulation(
 /// A missing or non-array `output` is left untouched.
 pub(crate) fn merge_v3_chat_process_refill_output_items(
     finalized_response: &mut Value,
-    accumulated: &[Value],) {
+    accumulated: &[Value],
+) {
     let Some(output) = finalized_response
         .get_mut("output")
         .and_then(Value::as_array_mut)

@@ -1992,18 +1992,20 @@ pub(crate) async fn execute_v3_relay_runtime_with_chat_process_refill<C, T>(
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
-) -> Result<(C::Output, Vec<V3RuntimeProviderFailureObservation>), (V3RelayCoreError, Vec<V3RuntimeProviderFailureObservation>)>
+) -> Result<
+    (C::Output, Vec<V3RuntimeProviderFailureObservation>),
+    (V3RelayCoreError, Vec<V3RuntimeProviderFailureObservation>),
+>
 where
     C: V3RelayProtocolCodec,
     T: ResponsesTransport,
 {
-    let request_execution_control =
-        super::relay_runtime_shared::relay_request_execution_control(
-            manifest,
-            server_id,
-            initial_handoff.as_ref(),
-        )
-        .map_err(|error| (error, Vec::new()))?;
+    let request_execution_control = super::relay_runtime_shared::relay_request_execution_control(
+        manifest,
+        server_id,
+        initial_handoff.as_ref(),
+    )
+    .map_err(|error| (error, Vec::new()))?;
     let max_refills =
         super::resp_chat_process_03_governed::v3_chat_process_refill_max_consecutive();
     let mut payload = initial_payload;
@@ -2040,14 +2042,13 @@ where
             // 没有发布 round：SSE 交付或失败出口。当前结果就是最终结果。
             return Ok((output, failure_events));
         };
-        let disposition =
-            super::resp_chat_process_03_governed::decide_v3_chat_process_refill(
-                &round.facts.tool_calls,
-                round.facts.has_source_summary,
-                round.response_completed,
-                carrier.request_execution_control.refill_used(),
-                max_refills,
-            );
+        let disposition = super::resp_chat_process_03_governed::decide_v3_chat_process_refill(
+            &round.facts.tool_calls,
+            round.facts.has_source_summary,
+            round.response_completed,
+            carrier.request_execution_control.refill_used(),
+            max_refills,
+        );
         let mut continued = false;
         if disposition == super::common::V3ChatProcessRefillDisposition::RequestRefill {
             if let Ok(next_payload) =

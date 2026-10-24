@@ -666,6 +666,12 @@ fn project_json_response_with_source(
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
     let mut resp02 = hooks.normalize_with_context(resp01, None, request_id)?;
+    // 续杯只看源显式 summary：必须在 Chat->Responses 转换与治理可能合成 summary
+    // 之前取自归一化后的原生 payload，否则转换写出的 summary 会被误判成源显式。
+    let source_has_summary = refill.is_some()
+        && super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
+            resp02.provider_payload(),
+        );
     match provider_protocol {
         V3HubProviderWireProtocol::OpenAiChat => {
             let canonical = super::responses_relay_runtime::build_v3_responses_provider_response_from_openai_chat_payload(
@@ -677,13 +683,6 @@ fn project_json_response_with_source(
     }
     trace.push("ProviderRespCompat02ProviderCompat");
     trace.push("V3HubRespInbound02Normalized");
-    // 续杯只看源显式 summary：必须在治理可能合成 summary 之前取自归一化后的原生
-    // payload。
-    let source_has_summary = refill.as_ref().is_some_and(|_| {
-        super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
-            resp02.provider_payload(),
-        )
-    });
     let resp03 = hooks.govern(
         resp02,
         &V3HubRelayResponseHookProfile::empty()
@@ -713,12 +712,11 @@ fn project_json_response_with_source(
             resp03,
             move |mut payload| {
                 if let Some(accumulated_items) = accumulated_items.as_deref() {
-                    super::resp_chat_process_03_governed::
-                        apply_v3_chat_process_refill_accumulation(
-                            &mut payload,
-                            accumulated_items,
-                            accumulated_usage.as_ref(),
-                        );
+                    super::resp_chat_process_03_governed::apply_v3_chat_process_refill_accumulation(
+                        &mut payload,
+                        accumulated_items,
+                        accumulated_usage.as_ref(),
+                    );
                 }
                 super::gemini_responses_codec::project_responses_to_gemini_client(
                     &payload,

@@ -792,7 +792,8 @@ async fn refill_gemini_relay_entry_bounded_refill_public() {
         "gemini relay entry must run exactly one refill: {consumed:?}"
     );
     assert!(
-        consumed.body.contains("GEMINI_RELAY_FIRST") && consumed.body.contains("GEMINI_RELAY_SECOND"),
+        consumed.body.contains("GEMINI_RELAY_FIRST")
+            && consumed.body.contains("GEMINI_RELAY_SECOND"),
         "both rounds must reach the gemini client: {consumed:?}"
     );
     assert_no_error_payload(&consumed.body);
