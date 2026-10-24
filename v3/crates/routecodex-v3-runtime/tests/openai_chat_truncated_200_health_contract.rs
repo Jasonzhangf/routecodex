@@ -59,7 +59,7 @@ routing_group = "{scope}"
 endpoints = ["openai_chat"]
 [servers.{scope}.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {{}}
 [providers.{scope}]

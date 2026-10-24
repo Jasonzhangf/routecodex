@@ -5172,7 +5172,6 @@ impl Default for EntryOptions {
             auth_entries: Vec::new(),
             pin_key: None,
             execution_mode: None,
-            status_override: None,
             capture_headers: false,
             model_key: None,
             wire_model: None,

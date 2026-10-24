@@ -29,7 +29,7 @@ routing_group = "__SCOPE__"
 endpoints = ["responses"]
 [servers.__SCOPE__.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.limited]
@@ -88,7 +88,7 @@ routing_group = "__SCOPE__"
 endpoints = ["responses"]
 [servers.__SCOPE__.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.limited]
