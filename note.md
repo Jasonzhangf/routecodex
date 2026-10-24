@@ -36229,3 +36229,14 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - 4444 实测：首帧 4.08s / 终态 8.76s，80 个正文增量分散 4.55s；但出现 2 个 response.created，判定为 Direct refill 拼装行为（本分支未改 Direct），记为观察项未关闭。
 - 文档与 map：DAG P2 状态段、verification-map owner_modules + relay 门禁均已同步。
 - 独立复审：已派（gpt-6.1-sol medium），结果待收。
+
+## 2026-10-24 849ed8f P2 第二轮 review 修复 + think 收割前移
+
+- 第二轮 review 判 FAIL 的两条阻断已修：提交后失败守卫从 provider 流失败分支移到 hook 失败分支（原先重复插在同一分支、hook 分支空守卫）；终态重建同时覆盖顶层 `output_text`。
+- B2（think 内联残留）改为按 owner 指示前移收割，不再作为产品取舍：投影器在流式到达时应用 `harvest_v3_think_text` 的同一条 `<think>` / `</think>` 规则，块内容只进 reasoning、正文只发块外文本，跨帧拆分的标记先扣住，流结束仍未闭合的块按整段语义留作正文。规则真源仍是 `resp_chat_process_03_governed::harvest_v3_think_text`（类型与访问器放开给 gate 用）。
+- 新红测 `relay_first_frame_commit_matches_the_whole_attempt_think_harvest`：对 5 个样本、每个字符切分点比对正文与 reasoning 文本与整段收割逐字相等。去掉前移逻辑后该测转红（`<think>plan</think>answer` 得到整段原文）。
+- 新红测 `relay_first_frame_commit_harvests_inline_think_blocks_like_chat_process`：跨三帧拆分的标记，客户端帧里不出现 think 标记与块内容，块内容只走 reasoning，终态正文为块前后拼接。
+- 提交门标记集改为 Relay 自己的整段 owner 派生（`new_with_governed_markers`，DSML 控制标记按行、think 标记内联），探测到治理文本时 `hold_client_flush` 而不是静默丢帧；对应红测 `relay_committed_marker_prefix_releases_tail_but_real_marker_breaks`。
+- hook 失败分支的提交后守卫需要原始失败值，handler 参数改为 `failure.clone()`（与 provider 流失败分支同形）。
+- 门禁：relay_first_frame_commit 11/11、responses_relay 207/207、client_sse 17/17、resp_chat_process 109/109、openai_chat_namespace_names 6/6、multi_listener_server 203/203、field-parity 5/5、architecture-ci 33/33、fmt 干净。
+- HEAD `5fbda9029` 已推送 PR #472；第三轮独立 review 已派；CI 待收。
