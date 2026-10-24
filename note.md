@@ -36240,3 +36240,21 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - hook 失败分支的提交后守卫需要原始失败值，handler 参数改为 `failure.clone()`（与 provider 流失败分支同形）。
 - 门禁：relay_first_frame_commit 11/11、responses_relay 207/207、client_sse 17/17、resp_chat_process 109/109、openai_chat_namespace_names 6/6、multi_listener_server 203/203、field-parity 5/5、architecture-ci 33/33、fmt 干净。
 - HEAD `5fbda9029` 已推送 PR #472；第三轮独立 review 已派；CI 待收。
+
+## 2026-10-24 第三轮 review（ffcommit-review）verdict：FAIL（对 HEAD 5fbda9029）
+
+- 阻断 1：parity 期望值比错 owner。Relay 的 Chat 响应在 Resp03 前已换成 Responses 语义负载，真 owner 是 `harvest_v3_responses_think_blocks` + `v3_resp03_reasoning_item`（每块一个 summary part、不插 \n），不是 chat 的 `append_v3_resp03_openai_chat_reasoning_content`。投影器插 `\n` 导致多块 reasoning 与终态发叉。
+- 阻断 2：`<thinking>` 家族由投影器第二套语法实现，与真 owner `project_v3_thinking_tag_text_with_tools` 的 protected ranges / opaque invocation / has_complete_tools 未闭合语义不一致，正文会被改写（引号内标签、`<think>a</thinking>b`、无工具未闭合）。
+- 阻断 3：提交后出现 standalone 控制标签时 finish 无条件断流，吞掉标签外正文；probe 不能当 owner。
+- 非阻断：close_round 跨轮保留 think 状态应改为每轮 flush+reset；observe_item_added 死代码；注释错位/错别字；parity gate 只比 delta 文本不比终态结构。
+- 已闭合：提交后失败不换候选、终态重建（在阻断 2 修好后成立）、hold_client_flush 不泄漏、Direct 无回归。
+- 现场：一个 codex exec worker（pid 9879）正在同一 worktree 修 r4 的 3 个 P1（reasoning 载荷、DSML 行级剥除、close_round 重置），未提交改动编译缺 payload 字段。结论仅对 HEAD 5fbda9029 成立。
+
+## 2026-10-24 r4 修复合入 + 门禁复跑
+
+- r4 worker（codex exec 9879）在同一 worktree 完成 3 个 P1 修复并提交：
+  `e18ffb138` 终态决策改由完整治理 owner 结果判断（探针只作 hold，不再凭 confirmed 直接断流；fenced/quoted 保留则正常完成）；reasoning 增量保完整业务载荷（encrypted_content 等进 item.done 与终态账本，可下一轮回传）；close_round 按本轮完整治理释放未闭合 think 块并重置扫描状态。
+  `8c059909b` 对齐 relay 并发 fixture 与交付顺序（provider 先 content 后 reasoning → 客户端 message 在前、reasoning 在后；JSON 整段路径同样如此，非提交路径回归）。
+  `16246057d` 锁定流式 reasoning 载荷交付（防未完成载荷提前 done）。
+- 门禁复跑（worker 退出后干净树）：fmt 干净；relay_first_frame_commit 17/17、responses_relay 215/215、client_sse 17/17、resp_chat_process 109/109、commit_probe 28/28、resp03_think_harvest 5/5、relay_first_frame_commit_public 4/4、openai_chat_namespace_names 6/6、field-parity 5/5、architecture-ci 33/33。
+- HEAD 已推 PR #472；CI test 仍 pending（本地与 CI 用同一 fixture，基督徒r4 改动含 fixture）。
