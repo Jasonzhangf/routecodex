@@ -36217,3 +36217,15 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
   - (b) 收敛方向反过来：已提交时把终态正文改写为已流出正文（投影器在 finish 覆写条目文本，按 类型+序号 对齐 id），收敛由构造保证，代价是 SSE 模式下 `<think>` 内联块不再被摘入 reasoning，形成模式相关的载荷语义差异。
 - 两项取舍都需要 owner 拍板；(b) 改动较小但留下可见语义差异，(a) 无差异但工作量与风险显著。
 - 已修：B2 提交后失败不换候选、B3 refill 轮次各自成条目（commit `f9ffca51c`）。未修：B1、终态 usage、strip_client_response_id、死代码、DAG 状态段、id 对齐、finish 状态映射。
+
+## 2026-10-23 849ed8f P2 三条阻断修复 + 候选上线实测
+
+- B1/B2/B3 三条阻断全部修完：提交后失败不换候选、refill 轮次各自成条目、终态由已流出条目重建并按 output_index 排序（收敛由构造保证）。
+- 红测证据：relay_first_frame_commit 5 条；去掉终态重建→"terminal introduces an item"红；去掉排序→"output index order got [148,411,279]"红；去掉守卫→提交后失败路径无覆盖（运行时级仍缺）。
+- 静态 gate：cargo fmt、verify:v3-resource-map、verify:v3-module-boundaries、verify:v3-dagpipe-governance、verify:v3-mainline-caller-flow 全绿。
+- 测试：relay_first_frame_commit 5/5、responses_relay 200/200、client_sse 17/17、multi_listener_server 192/192。
+- 构建 0.90.4935、安装、rccv3 restart 两次（第 2 次加载 output 排序修复）。
+- 7777 实测：首帧 20.94s / 终态 48.17s，89 个 output_text.delta 分散 27.19s、86 个不同到达时刻；终态带 usage；两轮 refill 各自成条目（rs_0,msg_1,rs_2,rs_3,msg_4）。
+- 4444 实测：首帧 4.08s / 终态 8.76s，80 个正文增量分散 4.55s；但出现 2 个 response.created，判定为 Direct refill 拼装行为（本分支未改 Direct），记为观察项未关闭。
+- 文档与 map：DAG P2 状态段、verification-map owner_modules + relay 门禁均已同步。
+- 独立复审：已派（gpt-6.1-sol medium），结果待收。

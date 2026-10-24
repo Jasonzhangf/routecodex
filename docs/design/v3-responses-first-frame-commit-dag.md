@@ -158,13 +158,31 @@ flowchart TD
    送到客户端通道;并断言工具参数字节挂起到块完整。
 6. 证据:`cargo test -p routecodex-v3-runtime --lib relay_first_frame_commit`、真实入口 7777 到达时间分布。
 
-状态(P2 进行中,未合入):逐事件投影已落在 `responses_relay_runtime/relay_client_frames.rs`。
+状态(P2 候选已构建安装并实测,未合入):逐事件投影落在 `responses_relay_runtime/relay_client_frames.rs`。
 openai_chat 线协议按上述映射逐帧出帧;提交谓词与 Direct 同构;工具参数挂起到 item 完成;
 终态帧在 seal 边界内。Relay refill 循环按请求持有同一投影状态,只在最终轮按合并后的响应
-seal 一次,避免提交后被下一轮重投影覆盖。请求级不提交条件为 memory raw capture 或
-tool thinking。gate `cargo test -p routecodex-v3-runtime --lib relay_first_frame_commit` 两条已绿,
-关闭提交谓词时两条同时红。受影响 relay 套件 197/197 绿。尚未做:真实入口 7777 逐帧到达时间
-回放、构建安装重启、独立 review、合入与远端回执。
+seal 一次,避免提交后被下一轮重投影覆盖。
+
+请求级不提交条件有四个:客户端未要 SSE、无客户端帧通道、memory raw capture、tool thinking,
+以及声明了工具(`tools` / `additional_tools` 非空)。工具声明属于第 3 项的改写风险:Resp03
+的工具治理会把序列化调用从正文搬进 tool_calls 条目,属于结构改写,已提交的正文无法撤回。
+
+三条已修的自洽性问题:
+1. 提交后失败不得换候选。两条 provider 失败分支在重试前检查已提交 sink,命中即按终态处置结束
+   该传输,不再进入下一候选重建响应头。
+2. refill 轮次各自成条目。投影器新增 `close_round`,外层 refill 在已提交轮次结束时关闭当前
+   message / reasoning / tool 条目,下一轮在新 output_index 开新条目。
+3. 终态与已流出字节收敛。Chat Process 在 Resp03 会摘取 think 块并删独立控制标记,发生在投影
+   之后。已提交时投影器记录每个已 announce 的条目,`finish` 用它们重建终态 `output`(同 id、
+   同顺序、同内容),并按 output_index 排序;改写只影响内部与 refill 决策,不再回头改写已交付帧。
+
+真实入口回放(0.90.4935,`rccv3 restart` 后):7777 首帧 20.94s、终态 48.17s,89 个
+`response.output_text.delta` 分散在 27.19 秒、86 个不同到达时刻;终态 output 带 usage。
+4444 首帧 4.08s、终态 8.76s,80 个正文增量分散在 4.55 秒。
+
+gate:`relay_first_frame_commit` 5 条绿(含轮次边界、终态重建、output 排序三条红测:去掉对应
+修复后各自转红);`responses_relay` 200/200、`client_sse` 17/17、`multi_listener_server`
+192/192。尚未做:独立 review、合入与远端回执、合并后复验。
 
 ### P3 完整性闸(工具参数与整段改写)
 
