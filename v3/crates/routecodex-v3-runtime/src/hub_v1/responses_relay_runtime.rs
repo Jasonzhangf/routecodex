@@ -395,6 +395,7 @@ async fn handle_v3_responses_relay_provider_failure(
             last_external_http: state.last_external_http,
         },
         failure.response_processing_code,
+        failure.attempt_source.clone(),
     )
     .await
     {
@@ -1435,6 +1436,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         )
         .expect_err("missing Error06 must produce the actual typed SDK fault");
         let failure = V3ResponsesRelayProviderFailure {
+            attempt_source: None,
             status: 502,
             provider_status: None,
             policy_error_type: "provider_request_compat_error".to_string(),

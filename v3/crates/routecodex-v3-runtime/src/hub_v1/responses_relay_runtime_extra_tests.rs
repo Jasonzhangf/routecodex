@@ -288,6 +288,7 @@ fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
     );
     let output = provider_failure_output(
         V3ResponsesRelayProviderFailure {
+            attempt_source: None,
             status: 429,
             provider_status: Some(429),
             policy_error_type: "rate_limit_error".to_string(),

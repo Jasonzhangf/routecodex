@@ -771,23 +771,25 @@ async fn responses_direct_policy_failure_consumer_preserves_cause_and_transport_
         protocol_relay_handoff: None,
     };
 
-    let terminal = responses_direct_server_outcome::take_responses_direct_terminal_outcome(
+    let terminal =
+        responses_direct_server_outcome::take_responses_direct_terminal_outcome(&mut output)
+            .expect("Direct policy failure must retain its provider terminal disposition");
+    terminal.publish_observations(
         &state,
+        None,
+        "responses",
         "/v1/responses",
         "direct-policy-failure-consumer",
-        &mut output,
-    )
-    .expect("Direct policy failure must retain its provider terminal disposition");
-    let responses_direct_server_outcome::V3ResponsesDirectServerOutcome::ProviderTerminal(
-        disposition,
-    ) = terminal
+    );
+    let responses_direct_server_outcome::V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) =
+        terminal
     else {
         panic!("Direct policy failure must use the provider terminal transport owner");
     };
     let response = provider_terminal_response(
         &state,
         None,
-        disposition,
+        terminal.disposition,
         true,
         V3ProviderTerminalEvidence {
             entry_protocol: "responses",

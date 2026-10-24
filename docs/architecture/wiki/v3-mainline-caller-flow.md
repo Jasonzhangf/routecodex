@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 93 functional paths, 575 caller edges.
+Generated view: 93 functional paths, 577 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -72,13 +72,13 @@ flowchart TD
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|8 edges / 5 paths| module_v3_error
   module_v3_runtime -->|24 edges / 8 paths| module_v3_provider_responses
-  module_v3_runtime -->|67 edges / 21 paths| module_v3_runtime
+  module_v3_runtime -->|68 edges / 21 paths| module_v3_runtime
   module_v3_runtime -->|44 edges / 13 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|3 edges / 1 paths| module_v3_target
   module_v3_runtime -->|5 edges / 2 paths| module_v3_virtual_router
   module_v3_server -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_server -->|2 edges / 2 paths| module_v3_config
-  module_v3_server -->|8 edges / 4 paths| module_v3_debug
+  module_v3_server -->|9 edges / 5 paths| module_v3_debug
   module_v3_server -->|2 edges / 2 paths| module_v3_error
   module_v3_server -->|7 edges / 5 paths| module_v3_runtime
   module_v3_server -->|7 edges / 5 paths| module_v3_runtime__hub_v1
@@ -129,13 +129,13 @@ flowchart TD
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime | v3-provider-responses | 24 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime | v3-runtime | 67 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.direct_parser_binding`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-runtime | 68 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.direct_parser_binding`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-runtime::hub_v1 | 44 | `v3.error.raw_wire_evidence`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 3 | `v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 5 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
 | v3-server | routecodex-v3-sse | 1 | `v3.sse.http_keepalive_boundary` |
 | v3-server | v3-config | 2 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.models.capability_catalog` |
-| v3-server | v3-debug | 8 | `v3.codex_sample_retention_snap_scope`<br/>`v3.managed_restart_attempt`<br/>`v3.server.internal_observability_projection`<br/>`v3.server.startup` |
+| v3-server | v3-debug | 9 | `v3.codex_sample_retention_snap_scope`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.managed_restart_attempt`<br/>`v3.server.internal_observability_projection`<br/>`v3.server.startup` |
 | v3-server | v3-error | 2 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 7 | `v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime::hub_v1 | 7 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
@@ -1535,75 +1535,80 @@ flowchart TD
     c_38_v3_debug_error_foundation_mainline_1["v3-debug<br/>V3DebugRuntime::start_trace<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
     c_38_v3_debug_error_foundation_mainline_2["v3-debug<br/>V3DebugRuntime::capture_raw_request<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
     c_38_v3_debug_error_foundation_mainline_3["v3-debug<br/>V3DebugRuntime::record_node_event<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_14["v3-debug<br/>V3DebugRuntime::build_dry_run_execution_plan<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_15["v3-debug<br/>V3DebugRuntime::start_snapshot_session<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_17["v3-debug<br/>V3DebugRuntime::build_dry_run_execution_plan<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_18["v3-debug<br/>V3DebugRuntime::start_snapshot_session<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
   end
   subgraph c_38_v3_debug_error_foundation_mainline_m_v3_error["v3-error"]
-    c_38_v3_debug_error_foundation_mainline_23["v3-error<br/>build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_24["v3-error<br/>build_v3_error_01_source_raised_internal<br/><small>routecodex-v3-error/src/lib.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_26["v3-error<br/>V3ProviderFailureSessionScope::new<br/><small>routecodex-v3-error/src/lib.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_26["v3-error<br/>build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_27["v3-error<br/>build_v3_error_01_source_raised_internal<br/><small>routecodex-v3-error/src/lib.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_29["v3-error<br/>V3ProviderFailureSessionScope::new<br/><small>routecodex-v3-error/src/lib.rs</small>"]
   end
   subgraph c_38_v3_debug_error_foundation_mainline_m_v3_provider_responses["v3-provider-responses"]
-    c_38_v3_debug_error_foundation_mainline_17["v3-provider-responses<br/>V3ProviderHealthStore::record_provider_failure_in_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_18["v3-provider-responses<br/>V3ProviderSessionAvailabilityReader::availability<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_19["v3-provider-responses<br/>V3ProviderHealthStore::availability_for_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_21["v3-provider-responses<br/>V3ProviderHealthStore::record_provider_success_in_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_28["v3-provider-responses<br/>V3ProviderResp14Raw::from_sse<br/><small>routecodex-v3-provider-responses/src/raw_response.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_20["v3-provider-responses<br/>V3ProviderHealthStore::record_provider_failure_in_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_21["v3-provider-responses<br/>V3ProviderSessionAvailabilityReader::availability<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_22["v3-provider-responses<br/>V3ProviderHealthStore::availability_for_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_24["v3-provider-responses<br/>V3ProviderHealthStore::record_provider_success_in_session<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_31["v3-provider-responses<br/>V3ProviderResp14Raw::from_sse<br/><small>routecodex-v3-provider-responses/src/raw_response.rs</small>"]
   end
   subgraph c_38_v3_debug_error_foundation_mainline_m_v3_runtime["v3-runtime"]
     c_38_v3_debug_error_foundation_mainline_0["v3-runtime<br/>execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_4["v3-runtime<br/>project_v3_server_boundary_error_via_sdk<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_5["v3-runtime<br/>raise_v3_source_via_err01<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_6["v3-runtime<br/>run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_7["v3-runtime<br/>run_v3_err02_classified_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err02_classified.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_8["v3-runtime<br/>run_v3_error_03_target_local_action_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err03_target_local_action.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_9["v3-runtime<br/>run_v3_error_04_target_exhaustion_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err04_target_exhaustion.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_10["v3-runtime<br/>execute_v3_operation_runner_error_err05_execution_decision<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err05_execution_decision.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_11["v3-runtime<br/>run_v3_error_06_terminal_projection_operator<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_12["v3-runtime<br/>execute_v3_operation_runner_error_err06_client_projected<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err06_client_projected.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_13["v3-runtime<br/>execute_v3_responses_direct_dry_run_runtime<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_16["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_failure_record<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_20["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_22["v3-runtime<br/>build_v3_provider_error_source<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_27["v3-runtime<br/>V3DryRunNoNetworkTransport::send<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_29["v3-runtime<br/>collect_v3_response_dry_run_client_payload<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_34["v3-runtime<br/>build_v3_relay_provider_attempt_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_4["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_with_refill<br/><small>routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_5["v3-runtime<br/>prepend_refill_observations<br/><small>routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_7["v3-runtime<br/>project_v3_server_boundary_error_via_sdk<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_8["v3-runtime<br/>raise_v3_source_via_err01<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_9["v3-runtime<br/>run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_10["v3-runtime<br/>run_v3_err02_classified_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err02_classified.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_11["v3-runtime<br/>run_v3_error_03_target_local_action_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err03_target_local_action.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_12["v3-runtime<br/>run_v3_error_04_target_exhaustion_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err04_target_exhaustion.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_13["v3-runtime<br/>execute_v3_operation_runner_error_err05_execution_decision<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err05_execution_decision.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_14["v3-runtime<br/>run_v3_error_06_terminal_projection_operator<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_15["v3-runtime<br/>execute_v3_operation_runner_error_err06_client_projected<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err06_client_projected.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_16["v3-runtime<br/>execute_v3_responses_direct_dry_run_runtime<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_19["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_failure_record<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_23["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_25["v3-runtime<br/>build_v3_provider_error_source<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_30["v3-runtime<br/>V3DryRunNoNetworkTransport::send<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_32["v3-runtime<br/>collect_v3_response_dry_run_client_payload<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_37["v3-runtime<br/>build_v3_relay_provider_attempt_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
   end
   subgraph c_38_v3_debug_error_foundation_mainline_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
-    c_38_v3_debug_error_foundation_mainline_30["v3-runtime::hub_v1<br/>V3ProviderRequestDryRunNoNetworkTransport::send<br/><small>routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_31["v3-runtime::hub_v1<br/>captured_provider_response_for_dry_run<br/><small>routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_32["v3-runtime::hub_v1<br/>execute_v3_anthropic_relay_response_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_33["v3-runtime::hub_v1<br/>V3AnthropicRelayRuntimeOutput::client_response<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_35["v3-runtime::hub_v1<br/>handle_provider_failure_with_response_code<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small>"]
-    c_38_v3_debug_error_foundation_mainline_36["v3-runtime::hub_v1<br/>build_v3_runtime_provider_failure_observation_from_policy_event<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_33["v3-runtime::hub_v1<br/>V3ProviderRequestDryRunNoNetworkTransport::send<br/><small>routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_34["v3-runtime::hub_v1<br/>captured_provider_response_for_dry_run<br/><small>routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_35["v3-runtime::hub_v1<br/>execute_v3_anthropic_relay_response_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_36["v3-runtime::hub_v1<br/>V3AnthropicRelayRuntimeOutput::client_response<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_38["v3-runtime::hub_v1<br/>handle_provider_failure_with_response_code<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_39["v3-runtime::hub_v1<br/>build_v3_runtime_provider_failure_observation_from_policy_event<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small>"]
   end
   subgraph c_38_v3_debug_error_foundation_mainline_m_v3_server["v3-server"]
-    c_38_v3_debug_error_foundation_mainline_25["v3-server<br/>build_v3_provider_failure_session_scope_for_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_6["v3-server<br/>publish_v3_responses_closeout_observations<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small>"]
+    c_38_v3_debug_error_foundation_mainline_28["v3-server<br/>build_v3_provider_failure_session_scope_for_request<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
   c_38_v3_debug_error_foundation_mainline_0 -->|v3-de-01<br/>V3Server03HttpRequestRaw → V3DebugTraceContextStarted| c_38_v3_debug_error_foundation_mainline_1
   c_38_v3_debug_error_foundation_mainline_0 -->|v3-de-02<br/>V3DebugTraceContextStarted → V3DebugRawCaptureStored| c_38_v3_debug_error_foundation_mainline_2
   c_38_v3_debug_error_foundation_mainline_0 -->|v3-de-03<br/>V3DebugTraceContextStarted → V3DebugEventLedgerRecorded| c_38_v3_debug_error_foundation_mainline_3
-  c_38_v3_debug_error_foundation_mainline_4 -->|v3-de-04<br/>V3Server03HttpRequestRaw → V3Error01SourceRaised| c_38_v3_debug_error_foundation_mainline_5
-  c_38_v3_debug_error_foundation_mainline_6 -->|v3-de-05<br/>V3Error01SourceRaised → V3Error02Classified| c_38_v3_debug_error_foundation_mainline_7
-  c_38_v3_debug_error_foundation_mainline_6 -->|v3-de-06<br/>V3Error02Classified → V3Error03TargetLocalAction| c_38_v3_debug_error_foundation_mainline_8
-  c_38_v3_debug_error_foundation_mainline_6 -->|v3-de-07<br/>V3Error03TargetLocalAction → V3Error04TargetExhaustionDecision| c_38_v3_debug_error_foundation_mainline_9
-  c_38_v3_debug_error_foundation_mainline_6 -->|v3-de-08<br/>V3Error04TargetExhaustionDecision → V3Error05ExecutionDecision| c_38_v3_debug_error_foundation_mainline_10
-  c_38_v3_debug_error_foundation_mainline_11 -->|v3-de-09<br/>V3Error05ExecutionDecision → V3Error06ClientProjected| c_38_v3_debug_error_foundation_mainline_12
-  c_38_v3_debug_error_foundation_mainline_13 -->|v3-de-10<br/>V3DryRunFixture → V3DryRunNoNetworkTerminalEffect| c_38_v3_debug_error_foundation_mainline_14
-  c_38_v3_debug_error_foundation_mainline_13 -->|v3-de-11<br/>V3DebugTraceContextStarted → V3DebugSnapshotSessionRegistered| c_38_v3_debug_error_foundation_mainline_15
-  c_38_v3_debug_error_foundation_mainline_16 -->|v3-de-12<br/>V3Error03TargetLocalAction → V3ProviderHealthStateMutated| c_38_v3_debug_error_foundation_mainline_17
-  c_38_v3_debug_error_foundation_mainline_18 -->|v3-de-13<br/>V3ProviderHealthStateMutated → V3ProviderAvailabilityProjected| c_38_v3_debug_error_foundation_mainline_19
-  c_38_v3_debug_error_foundation_mainline_16 -->|v3-de-14<br/>V3Transport13ResponsesHttpRequest → V3ProviderHealthStateMutated| c_38_v3_debug_error_foundation_mainline_17
-  c_38_v3_debug_error_foundation_mainline_20 -->|v3-de-15<br/>V3ProviderResp14Raw → V3ProviderHealthStateMutated| c_38_v3_debug_error_foundation_mainline_21
-  c_38_v3_debug_error_foundation_mainline_22 -->|v3-de-16<br/>V3ProviderError → V3Error01SourceRaised| c_38_v3_debug_error_foundation_mainline_23
-  c_38_v3_debug_error_foundation_mainline_22 -->|v3-de-17<br/>V3ProviderError → V3Error01SourceRaised| c_38_v3_debug_error_foundation_mainline_24
-  c_38_v3_debug_error_foundation_mainline_25 -->|v3-de-18<br/>V3Server03HttpRequestRaw → V3ProviderFailureSessionScope| c_38_v3_debug_error_foundation_mainline_26
-  c_38_v3_debug_error_foundation_mainline_27 -->|v3-de-19<br/>V3DryRunFixture → V3ProviderResp14Raw| c_38_v3_debug_error_foundation_mainline_28
-  c_38_v3_debug_error_foundation_mainline_13 -->|v3-de-20<br/>V3Resp15ClientPayload → V3DryRunResponseReplayCaptured| c_38_v3_debug_error_foundation_mainline_29
-  c_38_v3_debug_error_foundation_mainline_30 -->|v3-de-21<br/>V3DryRunFixture → V3ProviderResp14Raw| c_38_v3_debug_error_foundation_mainline_31
-  c_38_v3_debug_error_foundation_mainline_32 -->|v3-de-22<br/>V3AnthropicRelayRuntimeOutput → V3DryRunResponseReplayCaptured| c_38_v3_debug_error_foundation_mainline_33
-  c_38_v3_debug_error_foundation_mainline_34 -->|v3-de-23<br/>V3ProviderAttemptFailed → V3Error01SourceRaised| c_38_v3_debug_error_foundation_mainline_23
-  c_38_v3_debug_error_foundation_mainline_35 -->|v3-de-24<br/>V3Error01SourceRaised → V3RuntimeProviderFailureObservation| c_38_v3_debug_error_foundation_mainline_36
+  c_38_v3_debug_error_foundation_mainline_4 -->|v3-responses-refill-observation-compose-01<br/>V3ResponsesDirectRuntimeOutput → V3RuntimeProviderFailureObservation| c_38_v3_debug_error_foundation_mainline_5
+  c_38_v3_debug_error_foundation_mainline_6 -->|v3-responses-observation-closeout-01<br/>V3RuntimeProviderFailureObservation → V3DebugEventLedgerRecorded| c_38_v3_debug_error_foundation_mainline_3
+  c_38_v3_debug_error_foundation_mainline_7 -->|v3-de-04<br/>V3Server03HttpRequestRaw → V3Error01SourceRaised| c_38_v3_debug_error_foundation_mainline_8
+  c_38_v3_debug_error_foundation_mainline_9 -->|v3-de-05<br/>V3Error01SourceRaised → V3Error02Classified| c_38_v3_debug_error_foundation_mainline_10
+  c_38_v3_debug_error_foundation_mainline_9 -->|v3-de-06<br/>V3Error02Classified → V3Error03TargetLocalAction| c_38_v3_debug_error_foundation_mainline_11
+  c_38_v3_debug_error_foundation_mainline_9 -->|v3-de-07<br/>V3Error03TargetLocalAction → V3Error04TargetExhaustionDecision| c_38_v3_debug_error_foundation_mainline_12
+  c_38_v3_debug_error_foundation_mainline_9 -->|v3-de-08<br/>V3Error04TargetExhaustionDecision → V3Error05ExecutionDecision| c_38_v3_debug_error_foundation_mainline_13
+  c_38_v3_debug_error_foundation_mainline_14 -->|v3-de-09<br/>V3Error05ExecutionDecision → V3Error06ClientProjected| c_38_v3_debug_error_foundation_mainline_15
+  c_38_v3_debug_error_foundation_mainline_16 -->|v3-de-10<br/>V3DryRunFixture → V3DryRunNoNetworkTerminalEffect| c_38_v3_debug_error_foundation_mainline_17
+  c_38_v3_debug_error_foundation_mainline_16 -->|v3-de-11<br/>V3DebugTraceContextStarted → V3DebugSnapshotSessionRegistered| c_38_v3_debug_error_foundation_mainline_18
+  c_38_v3_debug_error_foundation_mainline_19 -->|v3-de-12<br/>V3Error03TargetLocalAction → V3ProviderHealthStateMutated| c_38_v3_debug_error_foundation_mainline_20
+  c_38_v3_debug_error_foundation_mainline_21 -->|v3-de-13<br/>V3ProviderHealthStateMutated → V3ProviderAvailabilityProjected| c_38_v3_debug_error_foundation_mainline_22
+  c_38_v3_debug_error_foundation_mainline_19 -->|v3-de-14<br/>V3Transport13ResponsesHttpRequest → V3ProviderHealthStateMutated| c_38_v3_debug_error_foundation_mainline_20
+  c_38_v3_debug_error_foundation_mainline_23 -->|v3-de-15<br/>V3ProviderResp14Raw → V3ProviderHealthStateMutated| c_38_v3_debug_error_foundation_mainline_24
+  c_38_v3_debug_error_foundation_mainline_25 -->|v3-de-16<br/>V3ProviderError → V3Error01SourceRaised| c_38_v3_debug_error_foundation_mainline_26
+  c_38_v3_debug_error_foundation_mainline_25 -->|v3-de-17<br/>V3ProviderError → V3Error01SourceRaised| c_38_v3_debug_error_foundation_mainline_27
+  c_38_v3_debug_error_foundation_mainline_28 -->|v3-de-18<br/>V3Server03HttpRequestRaw → V3ProviderFailureSessionScope| c_38_v3_debug_error_foundation_mainline_29
+  c_38_v3_debug_error_foundation_mainline_30 -->|v3-de-19<br/>V3DryRunFixture → V3ProviderResp14Raw| c_38_v3_debug_error_foundation_mainline_31
+  c_38_v3_debug_error_foundation_mainline_16 -->|v3-de-20<br/>V3Resp15ClientPayload → V3DryRunResponseReplayCaptured| c_38_v3_debug_error_foundation_mainline_32
+  c_38_v3_debug_error_foundation_mainline_33 -->|v3-de-21<br/>V3DryRunFixture → V3ProviderResp14Raw| c_38_v3_debug_error_foundation_mainline_34
+  c_38_v3_debug_error_foundation_mainline_35 -->|v3-de-22<br/>V3AnthropicRelayRuntimeOutput → V3DryRunResponseReplayCaptured| c_38_v3_debug_error_foundation_mainline_36
+  c_38_v3_debug_error_foundation_mainline_37 -->|v3-de-23<br/>V3ProviderAttemptFailed → V3Error01SourceRaised| c_38_v3_debug_error_foundation_mainline_26
+  c_38_v3_debug_error_foundation_mainline_38 -->|v3-de-24<br/>V3Error01SourceRaised → V3RuntimeProviderFailureObservation| c_38_v3_debug_error_foundation_mainline_39
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -1611,6 +1616,8 @@ flowchart TD
 | `v3-de-01` | `V3Server03HttpRequestRaw` → `V3DebugTraceContextStarted` | anchored | execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3DebugRuntime::start_trace<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-02` | `V3DebugTraceContextStarted` → `V3DebugRawCaptureStored` | anchored | execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3DebugRuntime::capture_raw_request<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-03` | `V3DebugTraceContextStarted` → `V3DebugEventLedgerRecorded` | anchored | execute_v3_foundation_pending_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3DebugRuntime::record_node_event<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
+| `v3-responses-refill-observation-compose-01` | `V3ResponsesDirectRuntimeOutput` → `V3RuntimeProviderFailureObservation` | anchored | execute_v3_responses_direct_runtime_kernel_with_refill<br/><small>routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs</small> | prepend_refill_observations<br/><small>routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs</small> | `v3.debug_error_foundation` |
+| `v3-responses-observation-closeout-01` | `V3RuntimeProviderFailureObservation` → `V3DebugEventLedgerRecorded` | anchored | publish_v3_responses_closeout_observations<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small> | V3DebugRuntime::record_node_event<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-04` | `V3Server03HttpRequestRaw` → `V3Error01SourceRaised` | anchored | project_v3_server_boundary_error_via_sdk<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | raise_v3_source_via_err01<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-05` | `V3Error01SourceRaised` → `V3Error02Classified` | anchored | run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | run_v3_err02_classified_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err02_classified.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-06` | `V3Error02Classified` → `V3Error03TargetLocalAction` | anchored | run_v3_error_02_to_05_decision_operators<br/><small>routecodex-v3-runtime/src/operation_runner/error_decision.rs</small> | run_v3_error_03_target_local_action_operator<br/><small>routecodex-v3-runtime/src/operation_runner/operators/err03_target_local_action.rs</small> | `v3.debug_error_foundation` |
@@ -2212,7 +2219,7 @@ flowchart TD
   subgraph c_52_v3_error_raw_wire_evidence_m_v3_server["v3-server"]
     c_52_v3_error_raw_wire_evidence_0["v3-server<br/>finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
     c_52_v3_error_raw_wire_evidence_1["v3-server<br/>persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
-    c_52_v3_error_raw_wire_evidence_4["v3-server<br/>take_responses_direct_terminal_outcome<br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small>"]
+    c_52_v3_error_raw_wire_evidence_4["v3-server<br/>publish_v3_responses_closeout_observations<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small>"]
     c_52_v3_error_raw_wire_evidence_5["v3-server<br/>persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small>"]
     c_52_v3_error_raw_wire_evidence_9["v3-server<br/>execute_v3_non_responses_protocol_branch<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
     c_52_v3_error_raw_wire_evidence_10["v3-server<br/>persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small>"]
@@ -2235,7 +2242,7 @@ flowchart TD
 | --- | --- | --- | --- | --- | --- |
 | `v3-responses-relay-error-evidence-01` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-direct-error-evidence-01` | `V3ProviderError` → `V3RuntimeProviderFailureObservation` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | build_v3_runtime_provider_failed_attempt_evidence_from_error<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs</small> | `v3.responses_direct_mvp_architecture` |
-| `v3-responses-direct-error-evidence-02` | `V3RuntimeProviderFailureObservation` → `V3ChatFailedAttemptEvidenceSerialized` | anchored | take_responses_direct_terminal_outcome<br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small> | persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-responses-direct-error-evidence-02` | `V3RuntimeProviderFailureObservation` → `V3ChatFailedAttemptEvidenceSerialized` | anchored | publish_v3_responses_closeout_observations<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small> | persist_v3_chat_failure_evidence_sources<br/><small>routecodex-v3-server/src/live_snapshot_projections.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-02` | `V3ErrorEvidencePersistQueued` → `V3ErrorEvidenceFlushOnTerminalFailure` | anchored | run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-responses-relay-error-evidence-03` | `V3ErrorEvidencePersistFailed` → `V3ErrorEvidencePersistFailureReported` | anchored | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
 | `v3-chat-relay-error-evidence-01` | `V3OpenAiChatRelayRuntimeOutput` → `V3ChatFailedAttemptEvidence` | anchored | execute_v3_non_responses_protocol_branch<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | persist_v3_chat_failure_evidence<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.error.raw_wire_evidence` |

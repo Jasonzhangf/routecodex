@@ -224,6 +224,10 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
     // arms still need it to record provider-private evidence.
     let evidence_request_id = request_id.clone();
     let execution_id = state.debug.next_execution_id(&state.server.id);
+    let execution_scope = state
+        .debug
+        .start_trace(&state.server.id, &request_id, &execution_id)
+        .ok();
     let entry_facts = V3ResponsesEntryFacts::project(&payload);
     let protocol_plan = None;
     let effective_execution_mode =
@@ -248,8 +252,15 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                 V3RequestPurpose::Conversation,
             )
             .await;
+            outcome.publish_observations(
+                state,
+                execution_scope.as_ref(),
+                "responses",
+                "/v1/responses",
+                &evidence_request_id,
+            );
             match outcome {
-                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
+                V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) => {
                     // A provider terminal never projects onto the client. The
                     // WebSocket client boundary is a transport break, exactly
                     // like the HTTP/SSE boundary: close without a payload. The
@@ -260,7 +271,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                     record_responses_websocket_provider_terminal_evidence(
                         state,
                         &evidence_request_id,
-                        &disposition,
+                        &terminal.disposition,
                     );
                     Err(())
                 }
@@ -289,8 +300,15 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                 protocol_plan.as_ref(),
             )
             .await;
+            outcome.publish_observations(
+                state,
+                execution_scope.as_ref(),
+                "responses",
+                "/v1/responses",
+                &evidence_request_id,
+            );
             match outcome {
-                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
+                V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) => {
                     // A provider terminal never projects onto the client. The
                     // WebSocket client boundary is a transport break, exactly
                     // like the HTTP/SSE boundary: close without a payload. The
@@ -301,7 +319,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                     record_responses_websocket_provider_terminal_evidence(
                         state,
                         &evidence_request_id,
-                        &disposition,
+                        &terminal.disposition,
                     );
                     Err(())
                 }
@@ -397,10 +415,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
         Err(error) => project_v3_responses_relay_runtime_failure(error, None),
     };
     if let Some(handoff) = relay_output.protocol_direct_handoff.take() {
-        let relay_trace = merge_v3_protocol_plan_trace(
-            relay_output.node_trace.clone(),
-            handoff.node_trace.clone(),
-        );
+        let relay_trace = relay_output.node_trace.clone();
         let mut relay_events = relay_output
             .observability
             .as_ref()
@@ -408,7 +423,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             .unwrap_or_default();
         relay_events.extend(handoff.provider_failure_events);
         let request_execution_control = handoff.request_execution_control;
-        let outcome = execute_responses_direct_server_outcome(
+        let mut outcome = execute_responses_direct_server_outcome(
             state,
             headers,
             "WEBSOCKET".to_string(),
@@ -426,24 +441,8 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             V3RequestPurpose::Conversation,
         )
         .await;
-        return match outcome {
-            V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
-                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition)
-            }
-            V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
-                prepend_v3_relay_handoff_trace_to_direct_frame(&mut frame, &relay_trace);
-                merge_v3_relay_handoff_provider_failure_events_into_direct_frame(
-                    &mut frame,
-                    relay_events,
-                );
-                V3ResponsesDirectServerOutcome::DirectFrame(frame)
-            }
-            V3ResponsesDirectServerOutcome::RelayOutput(mut output) => {
-                prepend_v3_protocol_plan_trace_to_responses_relay_output(&mut output, &relay_trace);
-                merge_v3_direct_handoff_provider_failure_events(&mut output, relay_events);
-                V3ResponsesDirectServerOutcome::RelayOutput(output)
-            }
-        };
+        outcome.prepend_observations(&relay_trace, relay_events);
+        return outcome;
     }
     V3ResponsesDirectServerOutcome::RelayOutput(relay_output)
 }
@@ -603,13 +602,6 @@ pub(crate) async fn send_responses_relay_websocket_output(
     socket: &mut WebSocket,
     output: V3ResponsesRelayRuntimeOutput,
 ) -> Result<(), ()> {
-    persist_v3_responses_relay_failure_sources(
-        state,
-        "responses",
-        "/v1/responses",
-        request_id,
-        &output,
-    );
     if let Some(disposition) = output.terminal_disposition.as_ref() {
         // A provider terminal never projects onto the client: close the socket
         // without a payload, exactly like the HTTP/SSE transport break. The
