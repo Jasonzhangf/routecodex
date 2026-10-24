@@ -2459,13 +2459,29 @@ fn strip_v3_responses_control_markers(
 }
 
 #[derive(Default)]
-struct V3ThinkHarvest {
+pub(crate) struct V3ThinkHarvest {
     visible_text: String,
     reasoning_segments: Vec<String>,
     changed: bool,
 }
 
-fn harvest_v3_think_text(text: &str) -> V3ThinkHarvest {
+impl V3ThinkHarvest {
+    /// Visible text left after harvesting, for the committed-projection parity
+    /// gate.
+    pub(crate) fn visible_text(&self) -> &str {
+        &self.visible_text
+    }
+
+    /// Harvested reasoning segments, in order.
+    pub(crate) fn reasoning_segments(&self) -> &[String] {
+        &self.reasoning_segments
+    }
+}
+
+/// Whole-attempt owner of the `think` block rule. The committed Relay client
+/// projection applies the same rule while the text arrives, so this function and
+/// `relay_client_frames` are bound by a parity gate.
+pub(crate) fn harvest_v3_think_text(text: &str) -> V3ThinkHarvest {
     let mut output = String::new();
     let mut reasoning_segments = Vec::new();
     let mut cursor = 0usize;

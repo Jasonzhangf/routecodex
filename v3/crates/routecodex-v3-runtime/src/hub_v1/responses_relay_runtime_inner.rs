@@ -1125,7 +1125,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     handle_v3_responses_relay_provider_failure(
                                         &failure_context,
                                         selected,
-                                        failure,
+                                        failure.clone(),
                                         &mut V3ResponsesRelayProviderRetryState {
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
@@ -1143,6 +1143,27 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 );
                                 if let Some(failure) = terminal_failure {
                                     return Ok(provider_failure_output(failure, trace, 0));
+                                }
+                                // A committed client channel already owns the
+                                // response head: a second candidate would append a
+                                // second response to the same stream. End this
+                                // transport silently and keep the typed cause.
+                                if initial_relay_seeds
+                                    .client_frame_sink
+                                    .as_ref()
+                                    .is_some_and(|sink| sink.is_committed())
+                                {
+                                    return Ok(provider_failure_output_with_observation(
+                                        attach_v3_provider_failure_events_to_failure(
+                                            terminalize_v3_responses_relay_provider_failure(
+                                                failure,
+                                                last_external_http.clone(),
+                                            ),
+                                            &provider_failure_events,
+                                        ),
+                                        trace,
+                                        None,
+                                    ));
                                 }
                                 continue;
                             }

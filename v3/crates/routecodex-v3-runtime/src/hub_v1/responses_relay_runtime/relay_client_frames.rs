@@ -14,7 +14,9 @@
 //! attempt seals.
 
 use super::*;
-use crate::direct_response_hooks::V3DirectPrefixCommitProbe;
+use crate::direct_response_hooks::{
+    V3DirectPrefixCommitProbe, V3GovernedTextMarker, V3GovernedTextScope,
+};
 use crate::hub_v1::V3HubProviderWireProtocol;
 use crate::nodes::{
     V3AttemptBudget, V3CommittedClientFrameSink, V3CommittedClientSseBuilder,
@@ -59,6 +61,51 @@ struct StreamedItem {
     output_index: usize,
     item_id: String,
     item: Value,
+}
+
+const THINK_OPEN: &str = "<think>";
+const THINK_CLOSE: &str = "</think>";
+
+/// The whole-attempt Relay governance owner for tool-free Chat text.
+///
+/// Relay always runs `harvest_v3_think_text` on the completed payload and, on
+/// the complete attempt, removes standalone DSML control labels through the
+/// same `scan_tool_markup` grammar. The commit probe derives its marker set
+/// from those two owners so a committed client prefix can never carry text
+/// that a later whole-attempt rewrite would change.
+fn relay_governed_text_markers() -> Vec<V3GovernedTextMarker> {
+    let mut markers: Vec<V3GovernedTextMarker> = crate::tool_markup_parser::governed_text_markers()
+        .into_iter()
+        .map(|text| V3GovernedTextMarker {
+            text,
+            scope: V3GovernedTextScope::Line,
+        })
+        .collect();
+    markers.push(V3GovernedTextMarker {
+        text: THINK_OPEN,
+        scope: V3GovernedTextScope::Inline,
+    });
+    markers.push(V3GovernedTextMarker {
+        text: THINK_CLOSE,
+        scope: V3GovernedTextScope::Inline,
+    });
+    markers
+}
+
+/// Longest suffix of `text` that is a proper prefix of a think marker. Holding
+/// it keeps a marker split across provider frames from reaching the client.
+fn held_marker_suffix_len(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    let mut held = 0usize;
+    for marker in [THINK_OPEN, THINK_CLOSE] {
+        let marker = marker.as_bytes();
+        for len in 1..marker.len() {
+            if bytes.len() >= len && &bytes[bytes.len() - len..] == &marker[..len] {
+                held = held.max(len);
+            }
+        }
+    }
+    held
 }
 
 fn relay_function_call_item(call: &OpenToolCallItem, status: &str) -> Value {
@@ -116,6 +163,13 @@ pub(crate) struct V3RelayChatClientStreamProjector {
     tool_calls: Vec<OpenToolCallItem>,
     governance: V3DirectPrefixCommitProbe,
     post_commit_governed: bool,
+    /// Chat Process harvests `<｜begin▁of▁thinking｜>` blocks out of the visible content on the
+    /// whole attempt. A committed stream cannot rewrite bytes it already sent,
+    /// so the projector applies the same rule while the text arrives: the block
+    /// never reaches the client as output text and becomes reasoning instead.
+    /// Text that might be the head of a marker is held until it is decided.
+    think_pending: String,
+    think_open: bool,
 }
 
 impl V3RelayChatClientStreamProjector {
@@ -136,8 +190,13 @@ impl V3RelayChatClientStreamProjector {
             message: None,
             refusal: None,
             tool_calls: Vec::new(),
-            governance: V3DirectPrefixCommitProbe::new(V3HubProviderWireProtocol::Responses),
+            governance: V3DirectPrefixCommitProbe::new_with_governed_markers(
+                V3HubProviderWireProtocol::Responses,
+                relay_governed_text_markers(),
+            ),
             post_commit_governed: false,
+            think_pending: String::new(),
+            think_open: false,
         }
     }
 
@@ -146,9 +205,6 @@ impl V3RelayChatClientStreamProjector {
     }
 
     fn push(&mut self, frame: Vec<u8>) -> Result<(), String> {
-        if self.post_commit_governed {
-            return Ok(());
-        }
         if self.committed {
             let builder = self
                 .builder
@@ -163,6 +219,9 @@ impl V3RelayChatClientStreamProjector {
     fn mark_post_commit_governed_if_needed(&mut self) {
         if self.committed && self.governance.governed_text_pending() {
             self.post_commit_governed = true;
+            if let Some(builder) = self.builder.as_mut() {
+                builder.hold_client_flush();
+            }
         }
     }
 
@@ -187,40 +246,36 @@ impl V3RelayChatClientStreamProjector {
     }
 
     fn observe_text(&mut self, output_index: usize, text: &str) {
-        self.governance
-            .observe_event(&json!({
-                "type": "response.output_text.delta",
-                "output_index": output_index,
-                "content_index": 0,
-                "delta": text,
-            }));
+        self.governance.observe_event(&json!({
+            "type": "response.output_text.delta",
+            "output_index": output_index,
+            "content_index": 0,
+            "delta": text,
+        }));
     }
 
     fn observe_tool_start(&mut self, output_index: usize, item: &Value) {
-        self.governance
-            .observe_event(&json!({
-                "type": "response.output_item.added",
-                "output_index": output_index,
-                "item": item,
-            }));
+        self.governance.observe_event(&json!({
+            "type": "response.output_item.added",
+            "output_index": output_index,
+            "item": item,
+        }));
     }
 
     fn observe_item_added(&mut self, output_index: usize, item: &Value) {
-        self.governance
-            .observe_event(&json!({
-                "type": "response.output_item.added",
-                "output_index": output_index,
-                "item": item,
-            }));
+        self.governance.observe_event(&json!({
+            "type": "response.output_item.added",
+            "output_index": output_index,
+            "item": item,
+        }));
     }
 
     fn observe_item_done(&mut self, output_index: usize, item: &Value) {
-        self.governance
-            .observe_event(&json!({
-                "type": "response.output_item.done",
-                "output_index": output_index,
-                "item": item,
-            }));
+        self.governance.observe_event(&json!({
+            "type": "response.output_item.done",
+            "output_index": output_index,
+            "item": item,
+        }));
     }
 
     fn reasoning_text_from_delta(delta: &Value) -> Option<String> {
@@ -284,9 +339,6 @@ impl V3RelayChatClientStreamProjector {
         let Some(choices) = chunk.get("choices").and_then(Value::as_array) else {
             return Ok(());
         };
-        if self.post_commit_governed {
-            return Ok(());
-        }
         for choice in choices {
             let Some(delta) = choice.get("delta") else {
                 continue;
@@ -309,19 +361,94 @@ impl V3RelayChatClientStreamProjector {
         self.try_commit()
     }
 
+    /// Split provider content into visible text and harvested reasoning, the way
+    /// Chat Process does on the whole attempt. The client never sees a `think`
+    /// block as output text, and a marker that is still partial is held.
     fn append_text(&mut self, text: &str) -> Result<(), String> {
-        if self.post_commit_governed {
+        self.think_pending.push_str(text);
+        loop {
+            if self.think_open {
+                let Some(position) = self.think_pending.find(THINK_CLOSE) else {
+                    return Ok(());
+                };
+                let block = self.think_pending[..position].to_string();
+                self.think_pending = self.think_pending[position + THINK_CLOSE.len()..].to_string();
+                self.think_open = false;
+                let block = block.trim();
+                if !block.is_empty() {
+                    // The whole-attempt owner joins harvested segments with a
+                    // newline in `reasoning_content`; one open reasoning item
+                    // keeps that shape.
+                    let joined = self
+                        .reasoning
+                        .as_ref()
+                        .map(|reasoning| !reasoning.text.is_empty())
+                        .unwrap_or(false);
+                    if joined {
+                        self.append_reasoning("\n")?;
+                    }
+                    self.append_reasoning(block)?;
+                }
+                continue;
+            }
+            let open = self.think_pending.find(THINK_OPEN);
+            let stray_close = self.think_pending.find(THINK_CLOSE);
+            match (open, stray_close) {
+                (Some(open), Some(close)) if close < open => {
+                    let visible = self.think_pending[..close].to_string();
+                    self.think_pending =
+                        self.think_pending[close + THINK_CLOSE.len()..].to_string();
+                    self.append_visible_text(&visible)?;
+                    continue;
+                }
+                (Some(open), _) => {
+                    let visible = self.think_pending[..open].to_string();
+                    self.think_pending = self.think_pending[open + THINK_OPEN.len()..].to_string();
+                    self.append_visible_text(&visible)?;
+                    self.think_open = true;
+                    continue;
+                }
+                (None, Some(close)) => {
+                    let visible = self.think_pending[..close].to_string();
+                    self.think_pending =
+                        self.think_pending[close + THINK_CLOSE.len()..].to_string();
+                    self.append_visible_text(&visible)?;
+                    continue;
+                }
+                (None, None) => {
+                    let held = held_marker_suffix_len(&self.think_pending);
+                    let release = self.think_pending.len() - held;
+                    let visible = self.think_pending[..release].to_string();
+                    self.think_pending = self.think_pending[release..].to_string();
+                    self.append_visible_text(&visible)?;
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    /// Release whatever the think scanner still holds: an unclosed block keeps
+    /// its content as raw visible text, exactly like the whole-attempt harvest,
+    /// and a held partial marker is ordinary text once the stream ended.
+    fn flush_think_pending(&mut self) -> Result<(), String> {
+        let pending = std::mem::take(&mut self.think_pending);
+        self.think_open = false;
+        self.append_visible_text(&pending)
+    }
+
+    fn append_visible_text(&mut self, text: &str) -> Result<(), String> {
+        if text.is_empty() {
             return Ok(());
         }
         self.close_reasoning()?;
         self.observe_text(
-            self.message.as_ref().map(|message| message.output_index).unwrap_or(self.next_output_index),
+            self.message
+                .as_ref()
+                .map(|message| message.output_index)
+                .unwrap_or(self.next_output_index),
             text,
         );
         self.mark_post_commit_governed_if_needed();
-        if self.post_commit_governed {
-            return Ok(());
-        }
         if self.message.is_none() {
             let output_index = self.next_output_index;
             self.next_output_index += 1;
@@ -379,9 +506,6 @@ impl V3RelayChatClientStreamProjector {
     }
 
     fn append_reasoning(&mut self, text: &str) -> Result<(), String> {
-        if self.post_commit_governed {
-            return Ok(());
-        }
         if self.reasoning.is_none() {
             let output_index = self.next_output_index;
             self.next_output_index += 1;
@@ -439,9 +563,6 @@ impl V3RelayChatClientStreamProjector {
 
     fn append_refusal(&mut self, text: &str) -> Result<(), String> {
         if text.is_empty() {
-            return Ok(());
-        }
-        if self.post_commit_governed {
             return Ok(());
         }
         self.close_message()?;
@@ -502,9 +623,6 @@ impl V3RelayChatClientStreamProjector {
     }
 
     fn append_tool_call(&mut self, call: &Value) -> Result<(), String> {
-        if self.post_commit_governed {
-            return Ok(());
-        }
         self.close_message()?;
         self.close_reasoning()?;
         self.close_refusal()?;
@@ -578,9 +696,6 @@ impl V3RelayChatClientStreamProjector {
         );
         self.observe_tool_start(output_index, &start_item);
         self.mark_post_commit_governed_if_needed();
-        if self.post_commit_governed {
-            return Ok(());
-        }
         self.push(frame)
     }
 
@@ -599,9 +714,6 @@ impl V3RelayChatClientStreamProjector {
         let Some(reasoning) = self.reasoning.take() else {
             return Ok(());
         };
-        if self.post_commit_governed {
-            return Ok(());
-        }
         let output_index = reasoning.output_index;
         let item_id = reasoning.item_id;
         let text = reasoning.text;
@@ -657,9 +769,6 @@ impl V3RelayChatClientStreamProjector {
         let Some(message) = self.message.take() else {
             return Ok(());
         };
-        if self.post_commit_governed {
-            return Ok(());
-        }
         let output_index = message.output_index;
         let item_id = message.item_id;
         let text = message.text;
@@ -717,9 +826,6 @@ impl V3RelayChatClientStreamProjector {
         let Some(refusal) = self.refusal.take() else {
             return Ok(());
         };
-        if self.post_commit_governed {
-            return Ok(());
-        }
         let output_index = refusal.output_index;
         let item_id = refusal.item_id;
         let text = refusal.text;
@@ -765,10 +871,6 @@ impl V3RelayChatClientStreamProjector {
     }
 
     fn close_tool_calls(&mut self) -> Result<(), String> {
-        if self.post_commit_governed {
-            self.tool_calls.clear();
-            return Ok(());
-        }
         for call in std::mem::take(&mut self.tool_calls) {
             if !call.added_emitted {
                 continue;
@@ -813,19 +915,19 @@ impl V3RelayChatClientStreamProjector {
     /// its items as separate entries. The client therefore receives one item per
     /// round; the next round opens new items at the next output indices.
     pub(crate) fn close_round(&mut self) -> Result<(), String> {
+        // The think scanner keeps its state across refill rounds: a block that
+        // opens in one round and closes in the next is still one block, exactly
+        // as the whole-attempt harvest would see after the merge.
         self.close_reasoning()?;
         self.close_message()?;
         self.close_refusal()?;
         self.close_tool_calls()
     }
 
-    /// The aggregate text the client can reconstruct from the announced items.
-    fn terminal_output_text(&self) -> String {
-        let mut ordered: Vec<&StreamedItem> = self.streamed_items.iter().collect();
-        ordered.sort_by_key(|entry| entry.output_index);
+    fn output_text_from_items(items: &[Value]) -> String {
         let mut text = String::new();
-        for entry in ordered {
-            if let Some(content) = entry.item.get("content").and_then(Value::as_array) {
+        for item in items {
+            if let Some(content) = item.get("content").and_then(Value::as_array) {
                 for part in content {
                     if part.get("type").and_then(Value::as_str) == Some("output_text") {
                         if let Some(part) = part.get("text").and_then(Value::as_str) {
@@ -836,6 +938,62 @@ impl V3RelayChatClientStreamProjector {
             }
         }
         text
+    }
+
+    /// True when two output items represent the same delivered business item.
+    /// The delivered copy already carries the exact bytes and identity the client
+    /// holds, so identity and terminal labels are ignored; only the business
+    /// carriers must match.
+    fn streamed_item_matches_terminal_item(streamed: &Value, terminal: &Value) -> bool {
+        let streamed_type = streamed.get("type").and_then(Value::as_str);
+        if streamed_type != terminal.get("type").and_then(Value::as_str) {
+            return false;
+        }
+        match streamed_type {
+            Some("message") => streamed.get("content") == terminal.get("content"),
+            Some("function_call" | "custom_tool_call" | "mcp_call") => {
+                streamed.get("call_id") == terminal.get("call_id")
+                    && streamed.get("name") == terminal.get("name")
+                    && streamed.get("arguments") == terminal.get("arguments")
+            }
+            Some("reasoning") => {
+                streamed.get("summary") == terminal.get("summary")
+                    || streamed.get("content") == terminal.get("content")
+            }
+            _ => streamed == terminal,
+        }
+    }
+
+    /// Reconcile the terminal `output` with the delivered ledger.
+    ///
+    /// Delivered items keep their exact bytes and ids. A terminal-only legal
+    /// item is appended exactly once; a reasoning item the client never saw is
+    /// not introduced, because it cannot be reconciled with a delivered
+    /// carrier. The finalized governed response is the source for that
+    /// terminal-only tail.
+    fn terminal_output_items_reconciled(&self, terminal_response: &Value) -> Vec<Value> {
+        let mut output = self.terminal_output_items();
+        let terminal_items = terminal_response
+            .get("output")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for terminal_item in terminal_items {
+            if output
+                .iter()
+                .any(|streamed| Self::streamed_item_matches_terminal_item(streamed, &terminal_item))
+            {
+                continue;
+            }
+            if terminal_item.get("type").and_then(Value::as_str) == Some("reasoning") {
+                // A reasoning item not announced to the client cannot be
+                // reconstructed as an incremental carrier. It belongs to the
+                // whole-attempt owner and stays out of the delivered ledger.
+                continue;
+            }
+            output.push(terminal_item);
+        }
+        output
     }
 
     /// Rebuild the terminal `output` from the announced items, ordered by output
@@ -862,10 +1020,16 @@ impl V3RelayChatClientStreamProjector {
         &mut self,
         terminal: &Value,
     ) -> Result<V3CommittedClientSseStream, String> {
+        self.flush_think_pending()?;
         self.close_reasoning()?;
         self.close_message()?;
         self.close_refusal()?;
         self.close_tool_calls()?;
+        if self.post_commit_governed && self.governance.confirmed_governed_marker() {
+            return Err(
+                "relay governed text arrived after the client channel was committed".to_string(),
+            );
+        }
         let mut builder = self
             .builder
             .take()
@@ -885,18 +1049,16 @@ impl V3RelayChatClientStreamProjector {
                 object.insert("id".to_string(), Value::String(self.response_id.clone()));
             }
         }
+        let terminal_output = self.terminal_output_items_reconciled(&terminal_response);
         if let Some(object) = terminal_response.as_object_mut() {
-            object.insert(
-                "output".to_string(),
-                Value::Array(self.terminal_output_items()),
-            );
+            object.insert("output".to_string(), Value::Array(terminal_output.clone()));
             // The aggregate text is a second view of the same business content.
             // Chat Process recomputes it after governance, so leaving the
             // governed value here would contradict the announced items.
             if object.contains_key("output_text") {
                 object.insert(
                     "output_text".to_string(),
-                    Value::String(self.terminal_output_text()),
+                    Value::String(Self::output_text_from_items(&terminal_output)),
                 );
             }
         }
