@@ -378,3 +378,165 @@ fn relay_tool_declaration_blocks_first_frame_commit_from_every_source() {
     ));
     assert!(!declares(json!({"tools": []})));
 }
+
+/// Reasoning may arrive as `reasoning.summary[]`, not only the legacy
+/// `reasoning_content` string. The projector must turn it into the same
+/// Responses reasoning item and include it in the terminal output.
+#[tokio::test]
+async fn relay_first_frame_commit_projects_reasoning_summary_before_terminal() {
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let mut projector = super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+        sink,
+        relay_test_budget(),
+    );
+
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_reasoning_summary",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"content": "answer"}, "finish_reason": null}],
+        }))
+        .expect("text chunk");
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_reasoning_summary",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"reasoning": {
+                "summary": [{"type": "summary_text", "text": "private plan"}]
+            }}, "finish_reason": null}],
+        }))
+        .expect("reasoning summary chunk");
+
+    let terminal = json!({
+        "id": "chatcmpl_reasoning_summary",
+        "object": "response",
+        "status": "completed",
+        "output": [
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "private plan"}]},
+            {"type": "message", "role": "assistant",
+             "content": [{"type": "output_text", "text": "answer"}]}
+        ],
+    });
+    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut frames = drain_frames(&mut receiver);
+    use futures_util::StreamExt;
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    assert!(
+        frames.iter().any(|frame| frame.contains("response.reasoning_summary_text.delta")
+            && frame.contains("private plan")),
+        "reasoning.summary[] must become a client-visible reasoning delta: {frames:?}"
+    );
+    let terminal_frame = frames
+        .iter()
+        .find(|frame| frame.contains("response.completed"))
+        .expect("terminal frame");
+    assert!(
+        terminal_frame.contains("\"type\":\"reasoning\"")
+            && terminal_frame.contains("\"private plan\""),
+        "terminal must include the streamed reasoning item: {terminal_frame}"
+    );
+}
+
+/// A provider refusal is legal business content. Once it is streamed it must
+/// not disappear from the terminal projection when the attempt seals.
+#[tokio::test]
+async fn relay_first_frame_commit_preserves_streamed_refusal_in_terminal() {
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let mut projector = super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+        sink,
+        relay_test_budget(),
+    );
+
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_refusal",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"content": "visible answer"}, "finish_reason": null}],
+        }))
+        .expect("text chunk");
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_refusal",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"refusal": "cannot comply"}, "finish_reason": null}],
+        }))
+        .expect("refusal chunk");
+
+    let terminal = json!({
+        "id": "chatcmpl_refusal",
+        "object": "response",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant",
+             "content": [{"type": "refusal", "refusal": "cannot comply"}]}
+        ],
+    });
+    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut frames = drain_frames(&mut receiver);
+    use futures_util::StreamExt;
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let terminal_frame = frames
+        .iter()
+        .find(|frame| frame.contains("response.completed"))
+        .expect("terminal frame");
+    assert!(
+        terminal_frame.contains("\"type\":\"refusal\"") && terminal_frame.contains("cannot comply"),
+        "terminal must keep the streamed refusal item: {terminal_frame}"
+    );
+}
+
+/// Whitespace is not visible business content: it must not commit the stream,
+/// and the first real text must recover the same attempt.
+#[tokio::test]
+async fn relay_first_frame_commit_ignores_whitespace_only_prefix() {
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let mut projector = super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+        sink,
+        relay_test_budget(),
+    );
+
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_whitespace",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"content": "  \n\t"}, "finish_reason": null}],
+        }))
+        .expect("whitespace chunk");
+    assert!(
+        !projector.is_committed(),
+        "whitespace alone must never commit the Relay stream"
+    );
+
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_whitespace",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"content": "real"}, "finish_reason": null}],
+        }))
+        .expect("real text chunk");
+    assert!(
+        projector.is_committed(),
+        "the first visible text after whitespace must commit the stream"
+    );
+    let frames = drain_frames(&mut receiver);
+    assert!(
+        frames.iter().any(|frame| frame.contains("real")),
+        "the real text delta must reach the client: {frames:?}"
+    );
+}

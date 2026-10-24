@@ -14,6 +14,8 @@
 //! attempt seals.
 
 use super::*;
+use crate::direct_response_hooks::V3DirectPrefixCommitProbe;
+use crate::hub_v1::V3HubProviderWireProtocol;
 use crate::nodes::{
     V3AttemptBudget, V3CommittedClientFrameSink, V3CommittedClientSseBuilder,
     V3CommittedClientSseStream,
@@ -29,6 +31,12 @@ struct OpenReasoningItem {
 }
 
 struct OpenMessageItem {
+    output_index: usize,
+    item_id: String,
+    text: String,
+}
+
+struct OpenRefusalItem {
     output_index: usize,
     item_id: String,
     text: String,
@@ -61,10 +69,12 @@ fn relay_function_call_item(call: &OpenToolCallItem, status: &str) -> Value {
         "call_id": call.call_id,
         "name": call.name,
     });
-    if let Some(arguments) = &call.arguments {
-        item.as_object_mut()
-            .expect("relay function call item is an object")
-            .insert("arguments".to_string(), Value::String(arguments.clone()));
+    if status != "in_progress" {
+        if let Some(arguments) = &call.arguments {
+            item.as_object_mut()
+                .expect("relay function call item is an object")
+                .insert("arguments".to_string(), Value::String(arguments.clone()));
+        }
     }
     item
 }
@@ -102,7 +112,10 @@ pub(crate) struct V3RelayChatClientStreamProjector {
     streamed_items: Vec<StreamedItem>,
     reasoning: Option<OpenReasoningItem>,
     message: Option<OpenMessageItem>,
+    refusal: Option<OpenRefusalItem>,
     tool_calls: Vec<OpenToolCallItem>,
+    governance: V3DirectPrefixCommitProbe,
+    post_commit_governed: bool,
 }
 
 impl V3RelayChatClientStreamProjector {
@@ -121,7 +134,10 @@ impl V3RelayChatClientStreamProjector {
             streamed_items: Vec::new(),
             reasoning: None,
             message: None,
+            refusal: None,
             tool_calls: Vec::new(),
+            governance: V3DirectPrefixCommitProbe::new(V3HubProviderWireProtocol::Responses),
+            post_commit_governed: false,
         }
     }
 
@@ -130,6 +146,9 @@ impl V3RelayChatClientStreamProjector {
     }
 
     fn push(&mut self, frame: Vec<u8>) -> Result<(), String> {
+        if self.post_commit_governed {
+            return Ok(());
+        }
         if self.committed {
             let builder = self
                 .builder
@@ -141,21 +160,19 @@ impl V3RelayChatClientStreamProjector {
         Ok(())
     }
 
+    fn mark_post_commit_governed_if_needed(&mut self) {
+        if self.committed && self.governance.governed_text_pending() {
+            self.post_commit_governed = true;
+        }
+    }
+
     /// Commit once a business carrier exists. The certification matches the
     /// Direct predicate: visible output text or a named tool-call start.
     fn try_commit(&mut self) -> Result<(), String> {
         if self.committed {
             return Ok(());
         }
-        let has_business = self
-            .message
-            .as_ref()
-            .is_some_and(|message| !message.text.is_empty())
-            || self
-                .tool_calls
-                .iter()
-                .any(|call| call.added_emitted && !call.name.is_empty());
-        if !has_business {
+        if !self.governance.is_committable() {
             return Ok(());
         }
         let mut builder = V3CommittedClientSseBuilder::with_budget(self.budget.clone())
@@ -167,6 +184,62 @@ impl V3RelayChatClientStreamProjector {
         self.builder = Some(builder);
         self.committed = true;
         Ok(())
+    }
+
+    fn observe_text(&mut self, output_index: usize, text: &str) {
+        self.governance
+            .observe_event(&json!({
+                "type": "response.output_text.delta",
+                "output_index": output_index,
+                "content_index": 0,
+                "delta": text,
+            }));
+    }
+
+    fn observe_tool_start(&mut self, output_index: usize, item: &Value) {
+        self.governance
+            .observe_event(&json!({
+                "type": "response.output_item.added",
+                "output_index": output_index,
+                "item": item,
+            }));
+    }
+
+    fn observe_item_added(&mut self, output_index: usize, item: &Value) {
+        self.governance
+            .observe_event(&json!({
+                "type": "response.output_item.added",
+                "output_index": output_index,
+                "item": item,
+            }));
+    }
+
+    fn observe_item_done(&mut self, output_index: usize, item: &Value) {
+        self.governance
+            .observe_event(&json!({
+                "type": "response.output_item.done",
+                "output_index": output_index,
+                "item": item,
+            }));
+    }
+
+    fn reasoning_text_from_delta(delta: &Value) -> Option<String> {
+        let delta = delta.as_object()?;
+        if !delta.contains_key("reasoning_content")
+            && !delta.contains_key("reasoning_text")
+            && !delta.contains_key("reasoning")
+        {
+            return None;
+        }
+        let item = super::build_v3_responses_reasoning_item_from_openai_chat_message(delta)?;
+        let summary = item.get("summary").and_then(Value::as_array)?;
+        let text = summary
+            .iter()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        (!text.is_empty()).then_some(text)
     }
 
     fn push_response_prefix_frames(&mut self) -> Result<(), String> {
@@ -211,23 +284,21 @@ impl V3RelayChatClientStreamProjector {
         let Some(choices) = chunk.get("choices").and_then(Value::as_array) else {
             return Ok(());
         };
+        if self.post_commit_governed {
+            return Ok(());
+        }
         for choice in choices {
             let Some(delta) = choice.get("delta") else {
                 continue;
             };
-            if let Some(text) = delta
-                .get("content")
-                .and_then(Value::as_str)
-                .filter(|text| !text.is_empty())
-            {
+            if let Some(text) = delta.get("content").and_then(Value::as_str) {
                 self.append_text(text)?;
             }
-            if let Some(reasoning) = delta
-                .get("reasoning_content")
-                .and_then(Value::as_str)
-                .filter(|text| !text.is_empty())
-            {
-                self.append_reasoning(reasoning)?;
+            if let Some(reasoning) = Self::reasoning_text_from_delta(delta) {
+                self.append_reasoning(&reasoning)?;
+            }
+            if let Some(refusal) = delta.get("refusal").and_then(Value::as_str) {
+                self.append_refusal(refusal)?;
             }
             if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
                 for call in calls {
@@ -239,7 +310,18 @@ impl V3RelayChatClientStreamProjector {
     }
 
     fn append_text(&mut self, text: &str) -> Result<(), String> {
+        if self.post_commit_governed {
+            return Ok(());
+        }
         self.close_reasoning()?;
+        self.observe_text(
+            self.message.as_ref().map(|message| message.output_index).unwrap_or(self.next_output_index),
+            text,
+        );
+        self.mark_post_commit_governed_if_needed();
+        if self.post_commit_governed {
+            return Ok(());
+        }
         if self.message.is_none() {
             let output_index = self.next_output_index;
             self.next_output_index += 1;
@@ -297,6 +379,9 @@ impl V3RelayChatClientStreamProjector {
     }
 
     fn append_reasoning(&mut self, text: &str) -> Result<(), String> {
+        if self.post_commit_governed {
+            return Ok(());
+        }
         if self.reasoning.is_none() {
             let output_index = self.next_output_index;
             self.next_output_index += 1;
@@ -352,9 +437,77 @@ impl V3RelayChatClientStreamProjector {
         ))
     }
 
-    fn append_tool_call(&mut self, call: &Value) -> Result<(), String> {
+    fn append_refusal(&mut self, text: &str) -> Result<(), String> {
+        if text.is_empty() {
+            return Ok(());
+        }
+        if self.post_commit_governed {
+            return Ok(());
+        }
         self.close_message()?;
         self.close_reasoning()?;
+        if self.refusal.is_none() {
+            let output_index = self.next_output_index;
+            self.next_output_index += 1;
+            let item_id = format!("msg_{output_index}");
+            self.push(super::build_v3_runtime_sse_json_frame(
+                "response.output_item.added",
+                &json!({
+                    "type": "response.output_item.added",
+                    "response_id": self.response_id,
+                    "output_index": output_index,
+                    "item": {
+                        "id": item_id,
+                        "type": "message",
+                        "status": "in_progress",
+                        "role": "assistant",
+                        "content": [],
+                    },
+                }),
+            ))?;
+            self.push(super::build_v3_runtime_sse_json_frame(
+                "response.content_part.added",
+                &json!({
+                    "type": "response.content_part.added",
+                    "response_id": self.response_id,
+                    "output_index": output_index,
+                    "item_id": item_id,
+                    "content_index": 0,
+                    "part": {"type": "refusal", "refusal": ""},
+                }),
+            ))?;
+            self.refusal = Some(OpenRefusalItem {
+                output_index,
+                item_id,
+                text: String::new(),
+            });
+        }
+        let refusal = self
+            .refusal
+            .as_mut()
+            .ok_or_else(|| "relay client stream lost its refusal item".to_string())?;
+        refusal.text.push_str(text);
+        let output_index = refusal.output_index;
+        let item_id = refusal.item_id.clone();
+        self.push(super::build_v3_runtime_sse_json_frame(
+            "response.refusal.delta",
+            &json!({
+                "type": "response.refusal.delta",
+                "response_id": self.response_id,
+                "output_index": output_index,
+                "item_id": item_id,
+                "delta": text,
+            }),
+        ))
+    }
+
+    fn append_tool_call(&mut self, call: &Value) -> Result<(), String> {
+        if self.post_commit_governed {
+            return Ok(());
+        }
+        self.close_message()?;
+        self.close_reasoning()?;
+        self.close_refusal()?;
         let wire_index = call.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
         let position = self
             .tool_calls
@@ -410,15 +563,24 @@ impl V3RelayChatClientStreamProjector {
         } else {
             call_entry.call_id.clone()
         };
+        let start_item = relay_function_call_item(call_entry, "in_progress");
+        let output_index = call_entry.output_index;
+        let response_id = self.response_id.clone();
+        let frame_item = start_item.clone();
         let frame = super::build_v3_runtime_sse_json_frame(
             "response.output_item.added",
             &json!({
                 "type": "response.output_item.added",
-                "response_id": self.response_id,
-                "output_index": call_entry.output_index,
-                "item": relay_function_call_item(call_entry, "in_progress"),
+                "response_id": response_id,
+                "output_index": output_index,
+                "item": frame_item,
             }),
         );
+        self.observe_tool_start(output_index, &start_item);
+        self.mark_post_commit_governed_if_needed();
+        if self.post_commit_governed {
+            return Ok(());
+        }
         self.push(frame)
     }
 
@@ -437,6 +599,9 @@ impl V3RelayChatClientStreamProjector {
         let Some(reasoning) = self.reasoning.take() else {
             return Ok(());
         };
+        if self.post_commit_governed {
+            return Ok(());
+        }
         let output_index = reasoning.output_index;
         let item_id = reasoning.item_id;
         let text = reasoning.text;
@@ -492,6 +657,9 @@ impl V3RelayChatClientStreamProjector {
         let Some(message) = self.message.take() else {
             return Ok(());
         };
+        if self.post_commit_governed {
+            return Ok(());
+        }
         let output_index = message.output_index;
         let item_id = message.item_id;
         let text = message.text;
@@ -545,7 +713,62 @@ impl V3RelayChatClientStreamProjector {
         ))
     }
 
+    fn close_refusal(&mut self) -> Result<(), String> {
+        let Some(refusal) = self.refusal.take() else {
+            return Ok(());
+        };
+        if self.post_commit_governed {
+            return Ok(());
+        }
+        let output_index = refusal.output_index;
+        let item_id = refusal.item_id;
+        let text = refusal.text;
+        let item = json!({
+            "id": item_id,
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [{"type": "refusal", "refusal": text}],
+        });
+        self.record_streamed_item(output_index, &item_id, item.clone());
+        self.observe_item_done(output_index, &item);
+        self.push(super::build_v3_runtime_sse_json_frame(
+            "response.refusal.done",
+            &json!({
+                "type": "response.refusal.done",
+                "response_id": self.response_id,
+                "output_index": output_index,
+                "item_id": item_id,
+                "refusal": text,
+            }),
+        ))?;
+        self.push(super::build_v3_runtime_sse_json_frame(
+            "response.content_part.done",
+            &json!({
+                "type": "response.content_part.done",
+                "response_id": self.response_id,
+                "output_index": output_index,
+                "item_id": item_id,
+                "content_index": 0,
+                "part": {"type": "refusal", "refusal": text},
+            }),
+        ))?;
+        self.push(super::build_v3_runtime_sse_json_frame(
+            "response.output_item.done",
+            &json!({
+                "type": "response.output_item.done",
+                "response_id": self.response_id,
+                "output_index": output_index,
+                "item": item,
+            }),
+        ))
+    }
+
     fn close_tool_calls(&mut self) -> Result<(), String> {
+        if self.post_commit_governed {
+            self.tool_calls.clear();
+            return Ok(());
+        }
         for call in std::mem::take(&mut self.tool_calls) {
             if !call.added_emitted {
                 continue;
@@ -592,6 +815,7 @@ impl V3RelayChatClientStreamProjector {
     pub(crate) fn close_round(&mut self) -> Result<(), String> {
         self.close_reasoning()?;
         self.close_message()?;
+        self.close_refusal()?;
         self.close_tool_calls()
     }
 
@@ -640,6 +864,7 @@ impl V3RelayChatClientStreamProjector {
     ) -> Result<V3CommittedClientSseStream, String> {
         self.close_reasoning()?;
         self.close_message()?;
+        self.close_refusal()?;
         self.close_tool_calls()?;
         let mut builder = self
             .builder
