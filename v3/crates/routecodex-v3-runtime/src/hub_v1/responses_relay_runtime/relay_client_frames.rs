@@ -326,7 +326,16 @@ impl V3RelayChatClientStreamProjector {
         {
             return None;
         }
-        super::build_v3_responses_reasoning_item_from_openai_chat_message(delta)
+        let mut item = super::build_v3_responses_reasoning_item_from_openai_chat_message(delta)
+            .unwrap_or_else(|| json!({"type": "reasoning"}));
+        if let Some(reasoning) = delta.get("reasoning") {
+            Self::merge_reasoning_payload(
+                item.as_object_mut()
+                    .expect("relay reasoning item is an object"),
+                reasoning,
+            );
+        }
+        Some(item)
     }
 
     fn reasoning_summary_text(item: &Value) -> String {

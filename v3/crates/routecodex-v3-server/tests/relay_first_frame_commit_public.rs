@@ -386,6 +386,37 @@ async fn relay_public_fenced_governed_marker_seals_when_owner_preserves_it() {
 }
 
 #[tokio::test]
+async fn relay_public_quoted_governed_marker_seals_when_owner_preserves_it() {
+    let _guard = TEST_LOCK.lock().await;
+    let plans = vec![vec![
+        chat_delta("Example:\n\""),
+        chat_delta("\n</\u{FF5C}DSML\u{FF5C}tool_calls>\n\""),
+        chat_stop(),
+        "data: [DONE]\n\n".to_string(),
+    ]];
+    let (entry, _captures) = start_with_plans(plans).await;
+    let body = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
+
+    assert!(
+        body.contains("</\u{FF5C}DSML\u{FF5C}tool_calls>"),
+        "the quoted marker is protected business text the owner preserves: {body}"
+    );
+    assert!(
+        body.contains("response.completed"),
+        "the attempt must seal with a completed terminal: {body}"
+    );
+    assert!(
+        !body.contains("\"error\"") && !body.contains("network_error"),
+        "the client must not receive a proxy-generated error: {body}"
+    );
+    entry.stop().await;
+}
+
+#[tokio::test]
 async fn relay_public_reasoning_cipher_survives_first_frame_and_echoes_next_turn() {
     let _guard = TEST_LOCK.lock().await;
     let cipher = "chat-cipher-opaque";
@@ -393,7 +424,8 @@ async fn relay_public_reasoning_cipher_survives_first_frame_and_echoes_next_turn
         vec![
             chat_delta_value(json!({"reasoning": {
                 "summary": [{"type": "summary_text", "text": "private plan"}],
-                "encrypted_content": cipher
+                "encrypted_content": cipher,
+                "provider_extension": {"opaque": "keep"}
             }})),
             chat_delta("answer"),
             chat_stop(),
@@ -431,6 +463,11 @@ async fn relay_public_reasoning_cipher_survives_first_frame_and_echoes_next_turn
         json!(cipher),
         "the first-frame SSE terminal must keep the reasoning cipher: {completed}"
     );
+    assert_eq!(
+        reasoning["provider_extension"],
+        json!({"opaque": "keep"}),
+        "the first-frame SSE terminal must keep the complete reasoning payload: {completed}"
+    );
 
     // The first request was already captured by the upstream; drain it so the
     // next-turn capture is the second request's provider body.
@@ -452,8 +489,8 @@ async fn relay_public_reasoning_cipher_survives_first_frame_and_echoes_next_turn
     let captured = captures.try_recv().ok();
     let captured_text = captured.map(|value| value.to_string()).unwrap_or_default();
     assert!(
-        captured_text.contains("private plan") || captured_text.contains(cipher),
-        "the next-turn provider request must keep the echoed reasoning: {captured_text}"
+        captured_text.contains("private plan"),
+        "the next-turn provider request must keep the echoed reasoning plaintext: {captured_text}"
     );
     entry.stop().await;
 }

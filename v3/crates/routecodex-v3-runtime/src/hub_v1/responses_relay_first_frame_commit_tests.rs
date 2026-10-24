@@ -565,6 +565,16 @@ async fn relay_first_frame_commit_projects_reasoning_summary_before_terminal() {
             && terminal_frame.contains("\"private plan\""),
         "terminal must include the streamed reasoning item: {terminal_frame}"
     );
+    let message_position = terminal_frame
+        .find("\"id\":\"msg_0\"")
+        .expect("terminal keeps the committed message");
+    let reasoning_position = terminal_frame
+        .find("\"id\":\"rs_1\"")
+        .expect("terminal keeps the later reasoning item");
+    assert!(
+        message_position < reasoning_position,
+        "terminal output must preserve the delivered output-index order: {terminal_frame}"
+    );
 }
 
 /// Resp03 harvests the `<thinking>` family too, through
@@ -936,7 +946,8 @@ async fn relay_reasoning_delta_preserves_encrypted_content_in_terminal() {
             "model": "chat-test",
             "choices": [{"index": 0, "delta": {"reasoning": {
                 "summary": [{"type": "summary_text", "text": "private plan"}],
-                "encrypted_content": "enc-opaque"
+                "encrypted_content": "enc-opaque",
+                "provider_extension": {"opaque": "keep"}
             }}, "finish_reason": null}],
         }))
         .expect("reasoning cipher chunk");
@@ -948,7 +959,8 @@ async fn relay_reasoning_delta_preserves_encrypted_content_in_terminal() {
         "output": [
             {"type": "reasoning", "summary": [{"type": "summary_text", "text": "private plan"}],
              "content": [{"type": "reasoning_text", "text": "private plan"}],
-             "encrypted_content": "enc-opaque"},
+             "encrypted_content": "enc-opaque",
+             "provider_extension": {"opaque": "keep"}},
             {"type": "message", "role": "assistant",
              "content": [{"type": "output_text", "text": "answer"}]}
         ],
@@ -964,8 +976,9 @@ async fn relay_reasoning_delta_preserves_encrypted_content_in_terminal() {
         .find(|frame| frame.contains("response.completed"))
         .expect("terminal frame");
     assert!(
-        terminal_frame.contains("\"encrypted_content\":\"enc-opaque\""),
-        "terminal reasoning must keep encrypted_content: {terminal_frame}"
+        terminal_frame.contains("\"encrypted_content\":\"enc-opaque\"")
+            && terminal_frame.contains("\"provider_extension\":{\"opaque\":\"keep\"}"),
+        "terminal reasoning must keep the complete business payload: {terminal_frame}"
     );
 }
 
