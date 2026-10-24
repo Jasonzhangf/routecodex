@@ -242,6 +242,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_transport_debug_core<
     hook_registry: V3HookRegistry,
     transport: &T,
     debug: &V3DebugRuntime,
+    node_publication: V3DirectDebugNodePublication,
 ) -> V3ResponsesDirectRuntimeOutput {
     let scope = match debug.start_trace(&raw.server_id, &raw.request_id, &raw.execution_id) {
         Ok(scope) => scope,
@@ -262,23 +263,29 @@ async fn execute_v3_responses_direct_runtime_kernel_with_transport_debug_core<
     )
     .await;
 
-    for node_id in &output.node_trace {
-        if let Err(error) = debug.record_node_event(
-            &scope,
-            *node_id,
-            "executed",
-            output
-                .error_chain
-                .as_ref()
-                .map(|chain| json!({"error_chain": chain})),
-        ) {
-            return debug_error_output("V3Debug01NodeEventRegistered", error, &hook_registry);
+    if node_publication == V3DirectDebugNodePublication::Runtime {
+        for node_id in &output.node_trace {
+            if let Err(error) = debug.record_node_event(
+                &scope,
+                *node_id,
+                "executed",
+                output
+                    .error_chain
+                    .as_ref()
+                    .map(|chain| json!({"error_chain": chain})),
+            ) {
+                return debug_error_output("V3Debug01NodeEventRegistered", error, &hook_registry);
+            }
         }
     }
     if let Err(error) =
         debug.capture_raw_response(&scope, client_payload_debug_value(&output.client_payload))
     {
-        return debug_error_output("V3Debug03RawResponseCaptured", error, &hook_registry);
+        if node_publication == V3DirectDebugNodePublication::ServerCloseout {
+            eprintln!("V3 Direct response capture failed; retaining the composed runtime outcome: {error}");
+        } else {
+            return debug_error_output("V3Debug03RawResponseCaptured", error, &hook_registry);
+        }
     }
     output
 }
@@ -468,6 +475,7 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         crate::register_responses_direct_hooks(),
         &transport,
         debug,
+        V3DirectDebugNodePublication::Runtime,
     )
     .await;
     if let Some(index) = output

@@ -988,7 +988,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             );
                     }
                 };
-                if source.source_kind != V3ErrorSourceKind::ProviderFailure {
+                if source.source_kind != V3ErrorSourceKind::ProviderFailure
+                    && !routecodex_v3_error::is_v3_recoverable_response_processing_source(&source)
+                {
                     drop(provider_action_permit.take());
                     return error_output(source, trace, &hook_registry);
                 }
@@ -1207,7 +1209,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         );
                     }
                 }
-                if !matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
+                if !matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure)
+                    && !routecodex_v3_error::is_v3_recoverable_response_processing_source(&source)
+                {
                     return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
                         Ok(source),
                         last_external_http.clone(),

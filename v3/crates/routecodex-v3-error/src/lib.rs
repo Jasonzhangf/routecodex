@@ -704,14 +704,14 @@ pub struct V3Error06ClientProjected {
 }
 
 fn internal_client_status(source: &V3Error01SourceRaised) -> u16 {
-    if is_v3_recoverable_response_processing_source(source)
-        && source.internal_error.as_ref().is_some_and(|error| {
-            error.internal_code
-                != V3InternalErrorCode::V3HubRelayResp03Processing
-                    .registry_entry()
-                    .code
-        })
-    {
+    if source.internal_error.as_ref().is_some_and(|error| {
+        [
+            V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup,
+            V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup,
+        ]
+        .iter()
+        .any(|code| error.internal_code == code.registry_entry().code)
+    }) {
         return 502;
     }
     match source.internal_error.as_ref().map(|error| error.lane) {
@@ -922,13 +922,16 @@ pub fn is_v3_retryable_transient_source(source: &V3Error01SourceRaised) -> bool 
     false
 }
 
-/// Returns whether a response-processing RuntimeFailure carries an exact
+/// Returns whether provider request/response processing carries an exact
 /// registered internal code that may recover by excluding the failed attempt
 /// and reselecting a later eligible candidate. The diagnostic reason string is
 /// never sufficient.
 pub fn is_v3_recoverable_response_processing_source(source: &V3Error01SourceRaised) -> bool {
     source.source_kind == V3ErrorSourceKind::RuntimeFailure
         && [
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3InternalErrorCode::V3Transport13ResponsesHttpRequest,
+            V3InternalErrorCode::V3ProviderResp14Raw,
             V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup,
             V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup,
             V3InternalErrorCode::V3HubRelayResp03Processing,

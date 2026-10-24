@@ -330,6 +330,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         },
                     };
                     let failure = V3ResponsesRelayProviderFailure {
+                        attempt_source: None,
                         status: 502,
                         provider_status: None,
                         policy_error_type: "selected_target_exhausted".to_string(),
@@ -500,6 +501,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             },
                         };
                         let failure = V3ResponsesRelayProviderFailure {
+                            attempt_source: None,
                             status: 502,
                             provider_status: None,
                             policy_error_type: "selected_target_exhausted".to_string(),

@@ -193,7 +193,10 @@ mod tests {
             "500-150"
         );
         assert_eq!(classified.class, "runtime_failure");
-        assert_eq!(classified.terminal_state, "already_terminal");
+        assert_eq!(
+            classified.terminal_state,
+            "non_terminal_if_candidates_remain"
+        );
         assert_ne!(classified.class, "provider_failure");
         assert_eq!(
             classified

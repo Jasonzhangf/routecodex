@@ -347,11 +347,13 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
     pub(crate) failed_attempt_evidence: Option<Arc<V3RuntimeProviderFailedAttemptEvidence>>,
     pub(crate) matched_policy: Option<V3ProviderFailureDirective>,
     pub(crate) response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
+    pub(crate) attempt_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
 }
 
 impl From<V3RelayErrorOperatorFault> for V3ResponsesRelayProviderFailure {
     fn from(fault: V3RelayErrorOperatorFault) -> Self {
         Self {
+            attempt_source: None,
             status: 599,
             provider_status: None,
             policy_error_type: fault.policy_failure.code.clone(),
