@@ -5,6 +5,7 @@ mod chat_extension_merge;
 mod tool_output;
 const ANTHROPIC_REASONING_EXTENSION: &str = "anthropic_reasoning";
 const ANTHROPIC_REASONING_BLOCKS_EXTENSION: &str = "anthropic_reasoning_blocks";
+pub(super) const RESPONSES_REASONING_ITEMS_EXTENSION: &str = "responses_reasoning_items";
 pub(super) use tool_output::{
     canonical_content as responses_tool_output_content, image_url as responses_image_url,
 };
@@ -411,7 +412,7 @@ fn project_responses_reasoning_to_chat_fields(
     }
     Ok(())
 }
-fn append_v3_openai_chat_message_preserving_tool_adjacency(
+pub(crate) fn append_v3_openai_chat_message_preserving_tool_adjacency(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_adjacent_deferred_messages: &mut Vec<Value>,
@@ -557,20 +558,42 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
         target.insert("reasoning_content".to_string(), Value::String(merged));
     }
     if let Some(source_extension) = source.get("routecodex_chat_extension") {
-        // Keep the first Responses reasoning signature: a canonical assistant
-        // message carries one reasoning_content, so a later folded item must
-        // not overwrite the association captured for the first one.
+        // Keep every Responses reasoning id/cipher association in source order.
+        // The canonical assistant message may fold several provider-origin
+        // reasoning items, so the ordered list is the complete business
+        // association while the legacy scalar fields remain compatibility
+        // projections of the first item.
+        let existing_items = target
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object)
+            .and_then(|extension| extension.get(RESPONSES_REASONING_ITEMS_EXTENSION))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         let existing_signature = target
             .get("routecodex_chat_extension")
             .and_then(Value::as_object)
             .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
             .cloned();
         chat_extension_merge::merge_chat_extension(target, source_extension)?;
-        if let Some(signature) = existing_signature {
-            if let Some(extension) = target
-                .get_mut("routecodex_chat_extension")
-                .and_then(Value::as_object_mut)
-            {
+        let source_items = source_extension
+            .get(RESPONSES_REASONING_ITEMS_EXTENSION)
+            .and_then(Value::as_array);
+        let mut ordered_items = existing_items;
+        if let Some(source_items) = source_items {
+            ordered_items.extend(source_items.iter().cloned());
+        }
+        if let Some(extension) = target
+            .get_mut("routecodex_chat_extension")
+            .and_then(Value::as_object_mut)
+        {
+            if !ordered_items.is_empty() {
+                extension.insert(
+                    RESPONSES_REASONING_ITEMS_EXTENSION.to_string(),
+                    Value::Array(ordered_items),
+                );
+            }
+            if let Some(signature) = existing_signature {
                 extension.insert(
                     "responses_reasoning_encrypted_content".to_string(),
                     signature,
@@ -685,6 +708,31 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_payload_for_req_inb
     Ok(request)
 }
 
+/// Convert a finalized Responses `message` output item into a canonical Chat
+/// assistant message for a refill continuation history. The Chat Process owns
+/// continuation construction; this codec owns the Responses-to-Chat content
+/// projection, so the continuation reuses the exact same conversion the inbound
+/// canonicalization already applies.
+pub(crate) fn build_v3_chat_assistant_message_from_responses_output_item(
+    item: &Value,
+) -> Result<Value, String> {
+    let item = item.as_object().ok_or_else(|| {
+        "Responses message output item must be an object before Chat assistant encoding".to_string()
+    })?;
+    build_v3_openai_chat_message_from_responses_message(item)
+}
+
+/// Convert a finalized Responses `reasoning` output item into a canonical Chat
+/// assistant message carrying the provider-origin reasoning content and opaque
+/// signature association. RCC-synthesized reasoning has no provider identity
+/// and is omitted by the caller before this helper runs.
+pub(crate) fn build_v3_chat_assistant_reasoning_message_from_responses_output_item(
+    item: &Value,
+) -> Option<Value> {
+    let item = item.as_object()?;
+    build_v3_openai_chat_assistant_reasoning_message(item)
+}
+
 fn build_v3_openai_chat_message_from_responses_message(
     item: &Map<String, Value>,
 ) -> Result<Value, String> {
@@ -773,6 +821,59 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
             message["routecodex_chat_extension"] = json!({
                 "responses_reasoning_encrypted_content": signature
             });
+        }
+    }
+    // Carry the Responses reasoning item identity so an outbound Chat->Responses
+    // projection can restore a reasoning input item even when the plaintext
+    // summary is empty. Every provider-origin reasoning item in the same turn
+    // keeps its complete id/cipher pair in source order so a continuation does
+    // not collapse distinct reasoning items into one.
+    let provider_item_id = item
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty());
+    if let Some(item_id) = provider_item_id {
+        if let Some(extension) = message
+            .get_mut("routecodex_chat_extension")
+            .and_then(Value::as_object_mut)
+        {
+            extension.insert(
+                "responses_reasoning_item_id".to_string(),
+                Value::String(item_id.to_string()),
+            );
+            let mut ordered = extension
+                .get(RESPONSES_REASONING_ITEMS_EXTENSION)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let mut entry = Map::new();
+            entry.insert("id".to_string(), Value::String(item_id.to_string()));
+            if let Some(Value::String(signature)) = item.get("encrypted_content") {
+                entry.insert(
+                    "encrypted_content".to_string(),
+                    Value::String(signature.clone()),
+                );
+            }
+            if let Some(summary) = item
+                .get("summary")
+                .and_then(Value::as_array)
+                .filter(|value| !value.is_empty())
+            {
+                entry.insert("summary".to_string(), Value::Array(summary.clone()));
+            }
+            if let Some(content) = item.get("content").filter(|value| !value.is_null()) {
+                entry.insert("content".to_string(), content.clone());
+            }
+            if let Some(text) = item.get("text").filter(|value| !value.is_null()) {
+                entry.insert("text".to_string(), text.clone());
+            }
+            if !ordered.iter().any(|entry| entry["id"] == item_id) {
+                ordered.push(Value::Object(entry));
+            }
+            extension.insert(
+                RESPONSES_REASONING_ITEMS_EXTENSION.to_string(),
+                Value::Array(ordered),
+            );
         }
     }
     Some(message)
@@ -1324,6 +1425,18 @@ fn build_v3_openai_chat_content_from_responses_content(
             }
             Some("input_image" | "image_url") => {
                 converted_parts.push(convert_v3_responses_image_part_to_openai_chat_part(object));
+            }
+            Some("refusal") => {
+                // A provider refusal is legal business content: preserve it
+                // faithfully in the continuation history rather than treating
+                // the whole assistant message as unsupported.
+                let mut converted = object.clone();
+                if let Some(text) = converted.get_mut("refusal") {
+                    if !text.is_string() {
+                        *text = Value::String(text.to_string());
+                    }
+                }
+                converted_parts.push(Value::Object(converted));
             }
             Some(other) => {
                 return Err(format!(

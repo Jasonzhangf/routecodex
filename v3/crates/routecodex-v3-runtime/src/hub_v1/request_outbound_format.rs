@@ -36,6 +36,7 @@ use super::request_outbound_metadata::{
     project_openai_chat_reasoning_summary_policy, project_openai_client_metadata_to_metadata,
     validate_openai_metadata,
 };
+use super::responses_openai_codec::RESPONSES_REASONING_ITEMS_EXTENSION;
 #[path = "request_outbound_responses_items.rs"]
 mod request_outbound_responses_items;
 #[path = "signature_target_projection.rs"]
@@ -1208,8 +1209,11 @@ pub(crate) fn build_responses_input_from_chat_messages(
             continue;
         }
         if role.eq_ignore_ascii_case("assistant") {
-            if let Some(reasoning) = chat_assistant_reasoning_to_responses_input_item(row) {
-                output.push(reasoning);
+            if let Some(reasoning) = chat_assistant_reasoning_to_responses_input_item(row)? {
+                match reasoning {
+                    Value::Array(reasoning_items) => output.extend(reasoning_items),
+                    reasoning_item => output.push(reasoning_item),
+                }
             }
             if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
                 let items = tool_calls
@@ -1242,16 +1246,96 @@ pub(crate) fn build_responses_input_from_chat_messages(
     Ok(Value::Array(output))
 }
 
-fn chat_assistant_reasoning_to_responses_input_item(row: &Map<String, Value>) -> Option<Value> {
+fn chat_assistant_reasoning_to_responses_input_item(
+    row: &Map<String, Value>,
+) -> Result<Option<Value>, String> {
+    let extension = row.get("routecodex_chat_extension");
     let text = row
         .get("reasoning_content")
         .or_else(|| row.get("reasoning_text"))
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())?;
-    Some(json!({
-        "type": "reasoning",
-        "summary": [{"type": "summary_text", "text": text}]
-    }))
+        .filter(|value| !value.trim().is_empty());
+    let item_id = extension
+        .and_then(|extension| extension.get("responses_reasoning_item_id"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
+    let signature = extension
+        .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
+        .and_then(Value::as_str);
+    let ordered_items = extension
+        .and_then(|extension| extension.get(RESPONSES_REASONING_ITEMS_EXTENSION))
+        .and_then(Value::as_array);
+    let mut items = Vec::new();
+    // Restore every provider-origin reasoning item in the order the Responses
+    // output delivered it. The ordered list is authoritative; the scalar item
+    // id/cipher fields remain legacy compatibility projections and are emitted
+    // only when no ordered list exists.
+    if let Some(ordered_items) = ordered_items {
+        for entry in ordered_items {
+            let Some(entry) = entry.as_object() else {
+                return Err("responses_reasoning_items entry must be an object".to_string());
+            };
+            items.push(build_responses_reasoning_input_from_entry(entry));
+        }
+    } else if text.is_some() || item_id.is_some() || signature.is_some() {
+        let mut entry = Map::new();
+        if let Some(text) = text {
+            // Legacy scalar Chat reasoning_content has no Responses top-level
+            // `text` field. Build its only representable projection, the
+            // summary, directly so the ordered-item `text` carrier below stays
+            // distinct and is never used as a summary fallback.
+            entry.insert(
+                "summary".to_string(),
+                Value::Array(vec![json!({"type":"summary_text","text":text})]),
+            );
+        }
+        if let Some(item_id) = item_id {
+            entry.insert("id".to_string(), Value::String(item_id.to_string()));
+        }
+        if let Some(signature) = signature {
+            entry.insert(
+                "encrypted_content".to_string(),
+                Value::String(signature.to_string()),
+            );
+        }
+        items.push(build_responses_reasoning_input_from_entry(&entry));
+    }
+    if items.is_empty() {
+        return Ok(None);
+    }
+    if items.len() == 1 {
+        return Ok(Some(items.into_iter().next().unwrap()));
+    }
+    Ok(Some(Value::Array(items)))
+}
+
+fn build_responses_reasoning_input_from_entry(entry: &Map<String, Value>) -> Value {
+    let mut item = Map::new();
+    item.insert("type".to_string(), Value::String("reasoning".to_string()));
+    let summary = entry
+        .get("summary")
+        .and_then(Value::as_array)
+        .filter(|value| !value.is_empty())
+        .cloned();
+    if let Some(summary) = summary {
+        item.insert("summary".to_string(), Value::Array(summary));
+    }
+    if let Some(content) = entry.get("content").filter(|value| !value.is_null()) {
+        item.insert("content".to_string(), content.clone());
+    }
+    if let Some(text) = entry.get("text").filter(|value| !value.is_null()) {
+        item.insert("text".to_string(), text.clone());
+    }
+    if let Some(item_id) = entry.get("id").and_then(Value::as_str) {
+        item.insert("id".to_string(), Value::String(item_id.to_string()));
+    }
+    if let Some(signature) = entry.get("encrypted_content").and_then(Value::as_str) {
+        item.insert(
+            "encrypted_content".to_string(),
+            Value::String(signature.to_string()),
+        );
+    }
+    Value::Object(item)
 }
 
 /// 返回 (投影值, 丢弃记录) 的 non-error carrier 版本；丢弃记录同时来自

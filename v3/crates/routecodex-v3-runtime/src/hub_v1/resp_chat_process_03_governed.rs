@@ -1031,6 +1031,83 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
     let Some(payload_object) = payload.as_object_mut() else {
         return Err("refill continuation requires an object request payload".to_string());
     };
+    // A canonical Chat request carries `messages`; a Responses request carries
+    // `input`. Keep exactly the representation the original request used.
+    // Adding the other form makes the refill fail inbound canonicalization as
+    // conflicting `input` and `messages` histories.
+    if payload_object.get("messages").is_some_and(Value::is_array) {
+        payload_object.remove("input");
+        let messages = payload_object
+            .get_mut("messages")
+            .and_then(Value::as_array_mut)
+            .ok_or_else(|| "refill continuation messages must be an array".to_string())?;
+        // Fold same-turn provider reasoning and assistant content exactly like
+        // the inbound Responses->Chat canonicalizer. A standalone reasoning
+        // carrier row would otherwise project an extra empty assistant message
+        // and split one assistant turn into several messages.
+        let mut pending_tool_message_index: Option<usize> = None;
+        let mut pending_tool_adjacent_deferred_messages: Vec<Value> = Vec::new();
+        let mut turn_assistant_tail_index: Option<usize> = None;
+        for item in
+            collect_v3_chat_process_business_output_items(current_execution_finalized_response)
+        {
+            match item.get("type").and_then(Value::as_str) {
+                Some("message") => {
+                    let message = crate::hub_v1::
+                        build_v3_chat_assistant_message_from_responses_output_item(&item)
+                        .map_err(|error| {
+                            format!(
+                                "refill continuation cannot convert a business Responses message to a Chat assistant message: {error}"
+                            )
+                        })?;
+                    crate::hub_v1::responses_openai_codec::
+                        append_v3_openai_chat_message_preserving_tool_adjacency(
+                            messages,
+                            &mut pending_tool_message_index,
+                            &mut pending_tool_adjacent_deferred_messages,
+                            message,
+                            turn_assistant_tail_index,
+                        )?;
+                    turn_assistant_tail_index = Some(messages.len() - 1);
+                }
+                // A provider-origin reasoning item carries the real `id` and
+                // opaque fields such as `encrypted_content`. RCC-synthesized
+                // reasoning (`rcc_reason_*`) has no provider identity and must
+                // not be replayed as if it were source material.
+                Some("reasoning")
+                    if item
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| {
+                            !id.trim().is_empty() && !id.starts_with("rcc_reason_")
+                        }) =>
+                {
+                    if let Some(message) = crate::hub_v1::
+                        build_v3_chat_assistant_reasoning_message_from_responses_output_item(
+                            &item,
+                        )
+                    {
+                        crate::hub_v1::responses_openai_codec::
+                            append_v3_openai_chat_message_preserving_tool_adjacency(
+                                messages,
+                                &mut pending_tool_message_index,
+                                &mut pending_tool_adjacent_deferred_messages,
+                                message,
+                                turn_assistant_tail_index,
+                            )?;
+                        turn_assistant_tail_index = Some(messages.len() - 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        messages.extend(std::mem::take(&mut pending_tool_adjacent_deferred_messages));
+        messages.push(json!({
+            "role": "user",
+            "content": V3_CHAT_PROCESS_REFILL_INSTRUCTION,
+        }));
+        return Ok(payload);
+    }
     let mut input = match payload_object.get("input") {
         Some(Value::Array(_)) => payload_object
             .get("input")
@@ -1137,18 +1214,22 @@ pub(crate) fn merge_v3_chat_process_refill_output_items(
 /// Accumulate one completed refill round's usage into the running summary.
 ///
 /// Missing stays missing: a field absent in any merged round becomes `None`
-/// and is never fabricated as 0. A `None` accumulator means no completed round
-/// has been merged yet, so the first round's summary is adopted as-is.
+/// and is never fabricated as 0.
+///
+/// `None` therefore never means "the chain has no usage": it only means no
+/// completed round has been merged yet. A round that completed with no usage
+/// evidence at all still marks the chain as observed, so a later round's
+/// numbers cannot be read as the whole chain's totals.
 pub(crate) fn accumulate_v3_chat_process_refill_usage(
     accumulated: &mut Option<V3RuntimeUsageSummary>,
     round: Option<V3RuntimeUsageSummary>,
 ) {
     let Some(round) = round else {
-        if let Some(accumulated) = accumulated.as_mut() {
-            // A completed round with no usage evidence at all means no field
-            // was observed for the whole chain; missing must stay missing.
-            *accumulated = V3RuntimeUsageSummary::default();
-        }
+        // One completed round was observed and carried no usage evidence: every
+        // field is unknown for the chain. Keeping `Some(default)` records that
+        // fact instead of leaving the state indistinguishable from "not
+        // started", which would let the next round be adopted as round one.
+        *accumulated = Some(V3RuntimeUsageSummary::default());
         return;
     };
     let Some(accumulated) = accumulated.as_mut() else {

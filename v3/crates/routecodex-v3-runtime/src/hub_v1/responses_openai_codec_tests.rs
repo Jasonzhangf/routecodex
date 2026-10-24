@@ -18,6 +18,48 @@ fn responses_reasoning_effort_normalizes_whitespace_and_case_like_chat_side() {
 }
 
 #[test]
+fn responses_refusal_content_part_projects_into_openai_chat_message() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "refusal", "refusal": "provider declined the request"}]
+        }]
+    }))
+    .expect("provider refusal is legal business content and must project");
+
+    let messages = request["messages"].as_array().expect("messages");
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["role"], json!("assistant"));
+    let content = messages[0]["content"].as_array().expect("content parts");
+    assert_eq!(
+        content[0],
+        json!({"type": "refusal", "refusal": "provider declined the request"}),
+        "{request}"
+    );
+}
+
+#[test]
+fn responses_refusal_content_part_with_non_string_refusal_still_projects() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "refusal", "refusal": {"code": "POLICY"}}]
+        }]
+    }))
+    .expect("representable refusal payload must remain forward-compatible");
+
+    let content = request["messages"][0]["content"]
+        .as_array()
+        .expect("content parts");
+    assert_eq!(content[0]["type"], json!("refusal"));
+    assert_eq!(content[0]["refusal"], json!("{\"code\":\"POLICY\"}"));
+}
+
+#[test]
 fn responses_reasoning_effort_preserves_unknown_non_empty_value_for_forward_compatibility() {
     let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "model": "deepseek-v4-flash",

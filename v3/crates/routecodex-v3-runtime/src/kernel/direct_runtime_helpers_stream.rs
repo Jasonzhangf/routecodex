@@ -879,11 +879,59 @@ fn direct_sse_output_text_key(event: &serde_json::Value) -> (usize, usize) {
     )
 }
 
+/// Split one committed SSE chunk into complete event segments.
+///
+/// SSE accepts LF, CRLF and CR line endings, and an event ends at a blank line.
+/// Keep each segment verbatim so callers can preserve non-JSON frames and the
+/// untouched prefix byte-for-byte. A trailing incomplete segment is returned
+/// unchanged, matching the previous `split_inclusive` behaviour.
+fn split_direct_sse_segments(text: &str) -> Vec<&str> {
+    let bytes = text.as_bytes();
+    let mut segments = Vec::new();
+    let mut start = 0usize;
+    while start < bytes.len() {
+        let Some(end) = direct_sse_segment_end(bytes, start) else {
+            break;
+        };
+        segments.push(&text[start..end]);
+        start = end;
+    }
+    if start < bytes.len() {
+        segments.push(&text[start..]);
+    }
+    segments
+}
+
+/// Return the byte offset just past the blank line that ends a segment.
+fn direct_sse_segment_end(bytes: &[u8], from: usize) -> Option<usize> {
+    let mut index = from;
+    let mut previous_line_end = None;
+    while index < bytes.len() {
+        let terminator_len = match bytes[index] {
+            b'\n' => 1,
+            b'\r' if bytes.get(index + 1) == Some(&b'\n') => 2,
+            b'\r' if bytes.get(index + 1).is_none() => break,
+            b'\r' => 1,
+            _ => {
+                index += 1;
+                continue;
+            }
+        };
+        if previous_line_end == Some(index) {
+            return Some(index + terminator_len);
+        }
+        previous_line_end = Some(index + terminator_len);
+        index += terminator_len;
+    }
+    None
+}
+
 pub(crate) fn parse_direct_sse_json_frames(frame: &[u8]) -> Vec<serde_json::Value> {
     let Ok(text) = std::str::from_utf8(frame) else {
         return Vec::new();
     };
-    text.split_inclusive("\n\n")
+    split_direct_sse_segments(text)
+        .into_iter()
         .filter_map(|segment| parse_direct_sse_json_segment(segment).map(|(value, _)| value))
         .collect()
 }
@@ -896,9 +944,17 @@ fn rewrite_direct_sse_frame(
         return frame.to_vec();
     };
     let mut output = String::with_capacity(text.len());
-    for segment in text.split_inclusive("\n\n") {
+    for segment in split_direct_sse_segments(text) {
         if let Some((value, prefix)) = parse_direct_sse_json_segment(segment) {
-            output.push_str(&format!("{prefix}data: {}\n\n", rewrite(value)));
+            let line_ending = if segment.contains("\r\n") {
+                "\r\n"
+            } else {
+                "\n"
+            };
+            output.push_str(&format!(
+                "{prefix}data: {}{line_ending}{line_ending}",
+                rewrite(value)
+            ));
         } else {
             output.push_str(segment);
         }
@@ -944,7 +1000,7 @@ pub(crate) fn split_direct_sse_committed_chunks(
             });
             continue;
         };
-        for segment in text.split_inclusive("\n\n") {
+        for segment in split_direct_sse_segments(text) {
             if segment.is_empty() {
                 continue;
             }
@@ -1168,7 +1224,7 @@ pub(crate) struct V3DirectSseProviderFacts {
 pub(crate) fn inspect_direct_sse_raw_provider(raw: &str) -> V3DirectSseProviderFacts {
     let mut facts = V3DirectSseProviderFacts::default();
     let mut output_items = Vec::new();
-    for segment in raw.split_inclusive("\n\n") {
+    for segment in split_direct_sse_segments(raw) {
         let Some((value, _)) = parse_direct_sse_json_segment(segment) else {
             continue;
         };
@@ -2993,6 +3049,44 @@ mod refill_tests {
                 .and_then(Value::as_str),
             Some("response.output_item.done")
         );
+    }
+
+    #[test]
+    fn refill_sse_crlf_multi_event_chunk_shifts_every_event() {
+        let item = json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {"id": "msg_crlf_unit", "type": "message"}
+        });
+        let crlf = format!(
+            "{}{}",
+            sse_frame(
+                "response.output_text.delta",
+                &json!({"type": "response.output_text.delta", "output_index": 0, "delta": "CRLF_UNIT"}),
+            ),
+            sse_frame("response.output_item.done", &item),
+        )
+        .replace('\n', "\r\n");
+        let rewritten = shift_direct_sse_output_index(crlf.as_bytes(), 3);
+        let text = String::from_utf8(rewritten).expect("rewritten SSE is UTF-8");
+        let values: Vec<Value> = parse_direct_sse_json_frames(text.as_bytes());
+        let deltas: Vec<&Value> = values
+            .iter()
+            .filter(|value| value["type"] == "response.output_text.delta")
+            .collect();
+        assert_eq!(
+            deltas.len(),
+            1,
+            "the coalesced CRLF chunk must keep its delta: {text}"
+        );
+        assert_eq!(deltas[0]["output_index"], json!(3));
+        assert_eq!(deltas[0]["delta"], json!("CRLF_UNIT"));
+        let done: Vec<&Value> = values
+            .iter()
+            .filter(|value| value["type"] == "response.output_item.done")
+            .collect();
+        assert_eq!(done.len(), 1, "the done event must survive: {text}");
+        assert_eq!(done[0]["output_index"], json!(3));
     }
 
     #[test]

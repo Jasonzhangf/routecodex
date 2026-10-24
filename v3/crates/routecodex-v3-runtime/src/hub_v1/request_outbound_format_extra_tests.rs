@@ -1008,6 +1008,74 @@ fn responses_wire_preserves_compacted_assistant_reasoning_without_tool_calls() {
             }]
         })
     );
+    assert!(
+        request["input"][1].get("text").is_none(),
+        "legacy scalar reasoning_content has no Responses top-level text field: {request}"
+    );
+}
+
+#[test]
+fn responses_wire_keeps_ordered_reasoning_text_without_fabricating_summary() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [
+            {"role": "user", "content": "continue"},
+            {
+                "role": "assistant",
+                "content": "answer",
+                "routecodex_chat_extension": {
+                    "responses_reasoning_items": [
+                        {
+                            "id": "rsn_text_only",
+                            "text": "  ordered plaintext  ",
+                            "encrypted_content": "cipher"
+                        },
+                        {
+                            "id": "rsn_empty_summary",
+                            "text": "second plaintext",
+                            "summary": []
+                        }
+                    ]
+                }
+            }
+        ]
+    });
+
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("ordered Responses reasoning text must project");
+    let input = request["input"]
+        .as_array()
+        .expect("Responses wire input array");
+    assert_eq!(
+        input[1],
+        json!({
+            "type": "reasoning",
+            "text": "  ordered plaintext  ",
+            "id": "rsn_text_only",
+            "encrypted_content": "cipher"
+        })
+    );
+    assert!(
+        input[1].get("summary").is_none(),
+        "absent summary must not be fabricated from ordered top-level text: {request}"
+    );
+    assert_eq!(
+        input[2],
+        json!({
+            "type": "reasoning",
+            "text": "second plaintext",
+            "id": "rsn_empty_summary"
+        })
+    );
+    assert!(
+        input[2].get("summary").is_none(),
+        "empty summary must not be fabricated from ordered top-level text: {request}"
+    );
+    assert_eq!(input[3]["role"], json!("assistant"));
+    assert_eq!(
+        input[3]["content"],
+        json!([{"type": "output_text", "text": "answer"}])
+    );
 }
 
 #[test]

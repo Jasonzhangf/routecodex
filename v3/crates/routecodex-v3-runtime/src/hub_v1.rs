@@ -52,6 +52,8 @@ pub(crate) use relay_runtime_core::{
     V3RelayProtocolCodec,
 };
 mod responses_openai_codec;
+pub(crate) use responses_openai_codec::build_v3_chat_assistant_message_from_responses_output_item;
+pub(crate) use responses_openai_codec::build_v3_chat_assistant_reasoning_message_from_responses_output_item;
 pub(crate) use responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound;
 mod responses_sse_tree;
 pub use responses_sse_tree::*;
