@@ -38,6 +38,8 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "responses_relay_runtime/relay_client_frames.rs"]
+mod relay_client_frames;
 #[path = "responses_openai_chat_conversion.rs"]
 mod responses_openai_chat_conversion;
 #[path = "responses_relay_dry_run.rs"]
@@ -46,8 +48,6 @@ mod responses_relay_dry_run;
 mod responses_relay_failures;
 #[path = "responses_relay_json_hooks.rs"]
 mod responses_relay_json_hooks;
-#[path = "responses_relay_runtime/relay_client_frames.rs"]
-mod relay_client_frames;
 #[path = "responses_relay_runtime_inner.rs"]
 mod responses_relay_runtime_inner;
 #[path = "responses_relay_types.rs"]
@@ -284,8 +284,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
                         // frame sequence. A committed round keeps its state and
                         // appends from the next round.
                         if let Some(handle) = relay_seeds.client_stream_projection.as_ref() {
-                            let mut slot =
-                                handle.lock().unwrap_or_else(|error| error.into_inner());
+                            let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
                             if slot
                                 .as_ref()
                                 .is_some_and(|projection| !projection.is_committed())
@@ -1553,11 +1552,11 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
 }
 
 #[cfg(test)]
-#[path = "responses_relay_runtime_multi_interface_tests.rs"]
-mod responses_relay_runtime_multi_interface_tests;
-#[cfg(test)]
 #[path = "responses_relay_first_frame_commit_tests.rs"]
 mod responses_relay_first_frame_commit_tests;
+#[cfg(test)]
+#[path = "responses_relay_runtime_multi_interface_tests.rs"]
+mod responses_relay_runtime_multi_interface_tests;
 
 #[cfg(test)]
 #[path = "responses_relay_runtime_tests.rs"]

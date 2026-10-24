@@ -1246,32 +1246,30 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     // the whole-attempt buffering. The first business frame
                     // commits; the server channel takes over from there.
                     let projection_handle = initial_relay_seeds.client_stream_projection.clone();
-                    let mut relay_client_projection =
-                        if client_response_transport_intent == V3HubTransportIntent::Sse
-                            && provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat
-                            && !manifest.memory_raw_capture.enabled
-                            && !request_tool_thinking_enabled
-                        {
-                            projection_handle.as_ref().and_then(|handle| {
-                                let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
-                                if slot.is_none() {
-                                    if let Some(sink) =
-                                        initial_relay_seeds.client_frame_sink.clone()
-                                    {
-                                        *slot = Some(
+                    let mut relay_client_projection = if client_response_transport_intent
+                        == V3HubTransportIntent::Sse
+                        && provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat
+                        && !manifest.memory_raw_capture.enabled
+                        && !request_tool_thinking_enabled
+                    {
+                        projection_handle.as_ref().and_then(|handle| {
+                            let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
+                            if slot.is_none() {
+                                if let Some(sink) = initial_relay_seeds.client_frame_sink.clone() {
+                                    *slot = Some(
                                             super::relay_client_frames::
                                                 V3RelayChatClientStreamProjector::new(
                                                     sink,
                                                     attempt_budget.clone(),
                                                 ),
                                         );
-                                    }
                                 }
-                                slot.take()
-                            })
-                        } else {
-                            None
-                        };
+                            }
+                            slot.take()
+                        })
+                    } else {
+                        None
+                    };
                     let provider_value_result =
                     build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context_and_projection(
                         provider_wire_protocol,
@@ -1530,10 +1528,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             attempt_budget.clone(),
                         )?
                     };
-                    if let (Some(handle), Some(projection)) = (
-                        projection_handle.as_ref(),
-                        relay_client_projection.take(),
-                    ) {
+                    if let (Some(handle), Some(projection)) =
+                        (projection_handle.as_ref(), relay_client_projection.take())
+                    {
                         *handle.lock().unwrap_or_else(|error| error.into_inner()) =
                             Some(projection);
                     }

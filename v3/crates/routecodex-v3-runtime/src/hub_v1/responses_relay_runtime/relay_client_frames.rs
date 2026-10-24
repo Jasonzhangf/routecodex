@@ -83,6 +83,10 @@ pub(crate) struct V3RelayChatClientStreamProjector {
     model: String,
     created_at: u64,
     next_output_index: usize,
+    /// The item id this stream handed the client for each output index. The
+    /// terminal payload carries them, so a client that joins by item id sees
+    /// one item and not two.
+    streamed_item_ids: Vec<Option<String>>,
     reasoning: Option<OpenReasoningItem>,
     message: Option<OpenMessageItem>,
     tool_calls: Vec<OpenToolCallItem>,
@@ -101,6 +105,7 @@ impl V3RelayChatClientStreamProjector {
             model: String::new(),
             created_at: 0,
             next_output_index: 0,
+            streamed_item_ids: Vec::new(),
             reasoning: None,
             message: None,
             tool_calls: Vec::new(),
@@ -226,6 +231,7 @@ impl V3RelayChatClientStreamProjector {
             let output_index = self.next_output_index;
             self.next_output_index += 1;
             let item_id = format!("msg_{output_index}");
+            self.streamed_item_ids.push(Some(item_id.clone()));
             self.push(super::build_v3_runtime_sse_json_frame(
                 "response.output_item.added",
                 &json!({
@@ -283,6 +289,7 @@ impl V3RelayChatClientStreamProjector {
             let output_index = self.next_output_index;
             self.next_output_index += 1;
             let item_id = format!("rs_{output_index}");
+            self.streamed_item_ids.push(Some(item_id.clone()));
             self.push(super::build_v3_runtime_sse_json_frame(
                 "response.output_item.added",
                 &json!({
@@ -342,6 +349,7 @@ impl V3RelayChatClientStreamProjector {
             None => {
                 let output_index = self.next_output_index;
                 self.next_output_index += 1;
+                self.streamed_item_ids.push(None);
                 self.tool_calls.push(OpenToolCallItem {
                     wire_index,
                     output_index,
@@ -384,6 +392,9 @@ impl V3RelayChatClientStreamProjector {
         } else {
             call_entry.call_id.clone()
         };
+        if let Some(slot) = self.streamed_item_ids.get_mut(call_entry.output_index) {
+            *slot = Some(call_entry.item_id.clone());
+        }
         let frame = super::build_v3_runtime_sse_json_frame(
             "response.output_item.added",
             &json!({
@@ -530,7 +541,10 @@ impl V3RelayChatClientStreamProjector {
 
     /// Close every open item and seal the attempt. The terminal frame is held
     /// past the acceptance boundary, so a failed seal cannot deliver it first.
-    pub(crate) fn finish(&mut self, terminal: &Value) -> Result<V3CommittedClientSseStream, String> {
+    pub(crate) fn finish(
+        &mut self,
+        terminal: &Value,
+    ) -> Result<V3CommittedClientSseStream, String> {
         self.close_reasoning()?;
         self.close_message()?;
         self.close_tool_calls()?;
@@ -545,11 +559,28 @@ impl V3RelayChatClientStreamProjector {
             Some("in_progress") => "response.in_progress",
             _ => "response.completed",
         };
+        let mut terminal_response = super::project_v3_responses_client_completed_response(terminal);
+        // The streamed item ids are the ones the client already holds. Without
+        // them the terminal payload would describe the same business items a
+        // second time under synthesized ids.
+        if let Some(output) = terminal_response
+            .get_mut("output")
+            .and_then(Value::as_array_mut)
+        {
+            for (index, item) in output.iter_mut().enumerate() {
+                let Some(Some(streamed_id)) = self.streamed_item_ids.get(index) else {
+                    continue;
+                };
+                if let Some(object) = item.as_object_mut() {
+                    object.insert("id".to_string(), Value::String(streamed_id.clone()));
+                }
+            }
+        }
         let frame = super::build_v3_runtime_sse_json_frame(
             event,
             &json!({
                 "type": event,
-                "response": super::project_v3_responses_client_completed_response(terminal),
+                "response": terminal_response,
             }),
         );
         builder.push(frame).map_err(|error| error.to_string())?;

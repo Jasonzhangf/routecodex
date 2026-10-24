@@ -103,8 +103,7 @@ pub struct V3ResponsesRelayRuntimeSeeds {
     /// time instead of the provider terminal.
     pub client_frame_sink: Option<crate::nodes::V3CommittedClientFrameSink>,
     /// Request-scoped projection state that survives Relay refill rounds.
-    pub client_stream_projection:
-        Option<super::relay_client_frames::V3RelayClientProjectionHandle>,
+    pub client_stream_projection: Option<super::relay_client_frames::V3RelayClientProjectionHandle>,
 }
 
 pub enum V3ResponsesRelayDryRunOutcome {

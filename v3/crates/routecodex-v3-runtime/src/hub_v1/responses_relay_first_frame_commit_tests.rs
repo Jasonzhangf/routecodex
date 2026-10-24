@@ -16,9 +16,7 @@ fn relay_test_budget() -> crate::nodes::V3AttemptBudget {
         .attempt_budget()
 }
 
-fn drain_frames(
-    receiver: &mut tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
-) -> Vec<String> {
+fn drain_frames(receiver: &mut tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) -> Vec<String> {
     let mut frames = Vec::new();
     while let Ok(frame) = receiver.try_recv() {
         frames.push(String::from_utf8_lossy(&frame).to_string());
@@ -58,7 +56,9 @@ fn relay_first_frame_commit_projects_text_before_provider_terminal() {
         "the committed channel must already carry the first text delta, got {frames:?}"
     );
     assert!(
-        !frames.iter().any(|frame| frame.contains("response.completed")),
+        !frames
+            .iter()
+            .any(|frame| frame.contains("response.completed")),
         "the terminal frame must stay held until the attempt seals, got {frames:?}"
     );
 }
@@ -91,7 +91,9 @@ async fn relay_first_frame_commit_holds_tool_arguments_until_the_item_completes(
     );
     let frames = drain_frames(&mut receiver);
     assert!(
-        frames.iter().any(|frame| frame.contains("response.output_item.added")),
+        frames
+            .iter()
+            .any(|frame| frame.contains("response.output_item.added")),
         "the tool-call start frame must reach the client, got {frames:?}"
     );
     assert!(
@@ -124,7 +126,9 @@ async fn relay_first_frame_commit_holds_tool_arguments_until_the_item_completes(
             "arguments": "{\"path\":1}"
         }],
     });
-    let mut sealed = projector.finish(&terminal).expect("seal the committed stream");
+    let mut sealed = projector
+        .finish(&terminal)
+        .expect("seal the committed stream");
     let mut tail = String::new();
     use futures_util::StreamExt;
     while let Some(frame) = sealed.next().await {

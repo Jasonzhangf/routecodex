@@ -114,7 +114,9 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
     mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: &V3RuntimeStreamObservation,
     anthropic_context: &V3AnthropicResponsesProjectionContext,
-    mut relay_client_projection: Option<&mut super::relay_client_frames::V3RelayChatClientStreamProjector>,
+    mut relay_client_projection: Option<
+        &mut super::relay_client_frames::V3RelayChatClientStreamProjector,
+    >,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     // upstream 200 + body 0 字节（如 glmrelay_anthropic / glmrelay_openai 在
     // /v1/responses 上声明 text/event-stream 但不发帧）：先把 stream 的第一个
@@ -498,7 +500,9 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
     mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: &V3RuntimeStreamObservation,
     hook: &mut impl V3OpenAiChatSseSemanticHook,
-    mut relay_client_projection: Option<&mut super::relay_client_frames::V3RelayChatClientStreamProjector>,
+    mut relay_client_projection: Option<
+        &mut super::relay_client_frames::V3RelayChatClientStreamProjector,
+    >,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     use futures_util::StreamExt;
 
