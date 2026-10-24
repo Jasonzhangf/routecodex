@@ -1280,7 +1280,14 @@ fn chat_assistant_reasoning_to_responses_input_item(
     } else if text.is_some() || item_id.is_some() || signature.is_some() {
         let mut entry = Map::new();
         if let Some(text) = text {
-            entry.insert("text".to_string(), Value::String(text.to_string()));
+            // Legacy scalar Chat reasoning_content has no Responses top-level
+            // `text` field. Build its only representable projection, the
+            // summary, directly so the ordered-item `text` carrier below stays
+            // distinct and is never used as a summary fallback.
+            entry.insert(
+                "summary".to_string(),
+                Value::Array(vec![json!({"type":"summary_text","text":text})]),
+            );
         }
         if let Some(item_id) = item_id {
             entry.insert("id".to_string(), Value::String(item_id.to_string()));
@@ -1309,14 +1316,7 @@ fn build_responses_reasoning_input_from_entry(entry: &Map<String, Value>) -> Val
         .get("summary")
         .and_then(Value::as_array)
         .filter(|value| !value.is_empty())
-        .cloned()
-        .or_else(|| {
-            let text = entry.get("text").and_then(Value::as_str);
-            match text.filter(|value| !value.trim().is_empty()) {
-                Some(value) => Some(vec![json!({"type":"summary_text","text":value})]),
-                None => None,
-            }
-        });
+        .cloned();
     if let Some(summary) = summary {
         item.insert("summary".to_string(), Value::Array(summary));
     }

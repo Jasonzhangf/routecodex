@@ -412,7 +412,7 @@ fn project_responses_reasoning_to_chat_fields(
     }
     Ok(())
 }
-fn append_v3_openai_chat_message_preserving_tool_adjacency(
+pub(crate) fn append_v3_openai_chat_message_preserving_tool_adjacency(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_adjacent_deferred_messages: &mut Vec<Value>,

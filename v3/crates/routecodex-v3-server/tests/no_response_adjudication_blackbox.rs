@@ -510,7 +510,7 @@ async fn refill_limit_three_public() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     let (consumed, attempts) = refill_public_chain(
-        "chat",
+        "direct",
         false,
         refill_round_wire(false, "R4_FALLBACK"),
         vec![
@@ -1064,6 +1064,128 @@ async fn refill_continuation_captures_provider_reasoning_public() {
         );
         assert_no_error_payload(&consumed.body);
     }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: a messages-shaped refill continuation must keep same-turn
+/// provider reasoning and assistant content associated, and its Responses
+/// projection must not fabricate an empty assistant message.
+///
+/// The messages branch of the refill continuation is owned by the Responses
+/// relay runtime. `/v1/chat/completions` in this build enters the Chat runtime,
+/// which has no bounded-refill loop, so the reachable public entry that carries
+/// a `messages` payload through bounded refill is `/v1/responses`.
+#[tokio::test]
+async fn refill_continuation_messages_shape_keeps_reasoning_association_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "MESSAGES_ROUND_TWO"),
+        EntryOptions {
+            attempt_bodies: vec![refill_reasoning_round_wire()],
+            refill_max: None,
+            model_key: Some("gpt-5.6-sol".to_string()),
+            wire_model: Some("gpt-5.6-sol".to_string()),
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model": "test.gpt-5.6-sol",
+                "messages": [
+                    {"role": "user", "content": "continue the chat-shaped refill"}
+                ],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(value) = captures.try_recv() {
+        captured.push(value);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "one refill execution must reach the provider: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "refill chain must deliver: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("REASONING_ROUND_ONE")
+            && consumed.body.contains("MESSAGES_ROUND_TWO"),
+        "both rounds must reach the client: {consumed:?}"
+    );
+    let input = captured[1]["input"].as_array().unwrap_or_else(|| {
+        panic!(
+            "second provider request must carry Responses input: {}",
+            captured[1]
+        )
+    });
+    let reasoning: Vec<(usize, &Value)> = input
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item["type"] == "reasoning")
+        .collect();
+    assert_eq!(
+        reasoning.len(),
+        3,
+        "every provider-origin reasoning item must replay: {input:?}"
+    );
+    assert_eq!(reasoning[0].1["id"], json!("rsn_provider_capture"));
+    assert_eq!(
+        reasoning[0].1["encrypted_content"],
+        json!("opaque-refill-cipher")
+    );
+    assert_eq!(reasoning[1].1["id"], json!("rsn_provider_capture_second"));
+    assert_eq!(
+        reasoning[1].1["encrypted_content"],
+        json!("opaque-refill-cipher-second")
+    );
+    assert_eq!(
+        reasoning[2].1["id"],
+        json!("rsn_provider_capture_plaintext")
+    );
+    assert_eq!(
+        reasoning[2].1["content"],
+        json!([{"type": "reasoning_text", "text": "keep this reasoning"}])
+    );
+    let assistant_messages: Vec<(usize, &Value)> = input
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item["type"] == "message" && item["role"] == "assistant")
+        .collect();
+    assert_eq!(
+        assistant_messages.len(),
+        1,
+        "same-turn reasoning must not fabricate a second assistant message: {input:?}"
+    );
+    let (assistant_index, assistant_message) = assistant_messages[0];
+    assert!(
+        assistant_message["content"]
+            .as_array()
+            .is_some_and(|parts| parts.iter().any(|part| {
+                part["type"] == "output_text" && part["text"] == json!("REASONING_ROUND_ONE")
+            })),
+        "assistant content must stay complete: {input:?}"
+    );
+    assert_eq!(
+        assistant_index,
+        reasoning[2].0 + 1,
+        "reasoning items must stay adjacent to their assistant content: {input:?}"
+    );
+    assert_no_error_payload(&consumed.body);
     std::env::remove_var(KEY_ENV);
 }
 

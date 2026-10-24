@@ -1041,6 +1041,13 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
             .get_mut("messages")
             .and_then(Value::as_array_mut)
             .ok_or_else(|| "refill continuation messages must be an array".to_string())?;
+        // Fold same-turn provider reasoning and assistant content exactly like
+        // the inbound Responses->Chat canonicalizer. A standalone reasoning
+        // carrier row would otherwise project an extra empty assistant message
+        // and split one assistant turn into several messages.
+        let mut pending_tool_message_index: Option<usize> = None;
+        let mut pending_tool_adjacent_deferred_messages: Vec<Value> = Vec::new();
+        let mut turn_assistant_tail_index: Option<usize> = None;
         for item in
             collect_v3_chat_process_business_output_items(current_execution_finalized_response)
         {
@@ -1053,7 +1060,15 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
                                 "refill continuation cannot convert a business Responses message to a Chat assistant message: {error}"
                             )
                         })?;
-                    messages.push(message);
+                    crate::hub_v1::responses_openai_codec::
+                        append_v3_openai_chat_message_preserving_tool_adjacency(
+                            messages,
+                            &mut pending_tool_message_index,
+                            &mut pending_tool_adjacent_deferred_messages,
+                            message,
+                            turn_assistant_tail_index,
+                        )?;
+                    turn_assistant_tail_index = Some(messages.len() - 1);
                 }
                 // A provider-origin reasoning item carries the real `id` and
                 // opaque fields such as `encrypted_content`. RCC-synthesized
@@ -1072,12 +1087,21 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
                             &item,
                         )
                     {
-                        messages.push(message);
+                        crate::hub_v1::responses_openai_codec::
+                            append_v3_openai_chat_message_preserving_tool_adjacency(
+                                messages,
+                                &mut pending_tool_message_index,
+                                &mut pending_tool_adjacent_deferred_messages,
+                                message,
+                                turn_assistant_tail_index,
+                            )?;
+                        turn_assistant_tail_index = Some(messages.len() - 1);
                     }
                 }
                 _ => {}
             }
         }
+        messages.extend(std::mem::take(&mut pending_tool_adjacent_deferred_messages));
         messages.push(json!({
             "role": "user",
             "content": V3_CHAT_PROCESS_REFILL_INSTRUCTION,
