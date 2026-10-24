@@ -336,6 +336,12 @@ fn refill_reasoning_round_wire() -> String {
                 "encrypted_content": "opaque-refill-cipher-second"
             },
             {
+                "id": "rsn_provider_capture_plaintext",
+                "type": "reasoning",
+                "summary": [],
+                "content": [{"type": "reasoning_text", "text": "keep this reasoning"}]
+            },
+            {
                 "id": "msg_reasoning_round",
                 "type": "message",
                 "role": "assistant",
@@ -1023,8 +1029,8 @@ async fn refill_continuation_captures_provider_reasoning_public() {
             .collect();
         assert_eq!(
             reasoning.len(),
-            2,
-            "{process}: both provider-origin reasoning items must replay: {input:?}"
+            3,
+            "{process}: every provider-origin reasoning item must replay: {input:?}"
         );
         assert_eq!(
             reasoning[0]["id"],
@@ -1045,6 +1051,16 @@ async fn refill_continuation_captures_provider_reasoning_public() {
             reasoning[1]["encrypted_content"],
             json!("opaque-refill-cipher-second"),
             "{process}"
+        );
+        assert_eq!(
+            reasoning[2]["id"],
+            json!("rsn_provider_capture_plaintext"),
+            "{process}"
+        );
+        assert_eq!(
+            reasoning[2]["content"],
+            json!([{"type":"reasoning_text","text":"keep this reasoning"}]),
+            "{process}: per-item reasoning plaintext must keep its item association"
         );
         assert_no_error_payload(&consumed.body);
     }

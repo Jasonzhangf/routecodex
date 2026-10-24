@@ -1320,6 +1320,12 @@ fn build_responses_reasoning_input_from_entry(entry: &Map<String, Value>) -> Val
     if let Some(summary) = summary {
         item.insert("summary".to_string(), Value::Array(summary));
     }
+    if let Some(content) = entry.get("content").filter(|value| !value.is_null()) {
+        item.insert("content".to_string(), content.clone());
+    }
+    if let Some(text) = entry.get("text").filter(|value| !value.is_null()) {
+        item.insert("text".to_string(), text.clone());
+    }
     if let Some(item_id) = entry.get("id").and_then(Value::as_str) {
         item.insert("id".to_string(), Value::String(item_id.to_string()));
     }
