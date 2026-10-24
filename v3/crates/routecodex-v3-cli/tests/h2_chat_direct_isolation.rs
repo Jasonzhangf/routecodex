@@ -347,11 +347,15 @@ async fn controlled_responses_upstream(
         })
         .unwrap();
     match &state.mode {
+        // The healthy provider reports its own explicit reasoning summary, so a
+        // cross-protocol Relay request is a completed task and the bounded Chat
+        // Process continuation delivers after this single round. Without the
+        // summary the same fixed body would be replayed into a second round.
         ProviderMode::Success => Response::builder()
             .status(StatusCode::OK)
             .header("content-type", "application/json")
             .body(Body::from(
-                r#"{"id":"resp_json","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#,
+                r#"{"id":"resp_json","object":"response","status":"completed","output":[{"id":"rs_ok","type":"reasoning","summary":[{"type":"summary_text","text":"task complete"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#,
             ))
             .unwrap(),
         ProviderMode::NonTerminalAttempt

@@ -1014,16 +1014,21 @@ pub(crate) struct V3ChatProcessGovernedFacts {
 
 /// Build the standard continuation request for one refill execution.
 ///
-/// The original payload is cloned and every field other than `input` is kept
-/// verbatim (model, instructions, tools, tool_choice, reasoning, parallel
-/// tool calls and unknown business extensions). Each collected business item of
-/// the just-finished execution is appended as an assistant message. A
-/// provider-origin reasoning item with real identity and opaque continuation
-/// material is appended verbatim because the target protocol can express it;
-/// RCC-synthesized reasoning is not replayable source material and is omitted.
-/// The refill instruction is appended as a new user turn. No counter, state or
-/// control field ever enters the payload.
+/// The original payload is cloned and every unrelated field is kept verbatim
+/// (model, instructions, tools, tool_choice, reasoning, parallel tool calls and
+/// unknown business extensions). The entry protocol decides which field carries
+/// the conversation history: `messages` for Chat and Anthropic, `input` for
+/// Responses, `contents` for Gemini. That is the same field the next execution's
+/// inbound canonicalization reads, so the appended history actually becomes the
+/// next provider request. Each collected business item of the just-finished
+/// execution is appended as an assistant turn; a provider-origin reasoning item
+/// with real identity and opaque continuation material is appended verbatim
+/// because the target protocol can express it, while RCC-synthesized reasoning
+/// is not replayable source material and is omitted. The refill instruction is
+/// appended as a new user turn. No counter, state or control field ever enters
+/// the payload.
 pub(crate) fn build_v3_chat_process_refill_continuation_request(
+    entry_protocol: V3HubEntryProtocol,
     original_request_payload: &Value,
     current_execution_finalized_response: &Value,
 ) -> Result<Value, String> {
@@ -1031,12 +1036,51 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
     let Some(payload_object) = payload.as_object_mut() else {
         return Err("refill continuation requires an object request payload".to_string());
     };
-    // A canonical Chat request carries `messages`; a Responses request carries
-    // `input`. Keep exactly the representation the original request used.
-    // Adding the other form makes the refill fail inbound canonicalization as
-    // conflicting `input` and `messages` histories.
-    if payload_object.get("messages").is_some_and(Value::is_array) {
-        payload_object.remove("input");
+    // Inbound canonicalization owns the representation decision, including the
+    // Responses entry that carries the Chat shape. Ask it instead of sniffing
+    // field names: extending a field the next execution will not read leaves
+    // the provider request unchanged, and writing a second history form makes
+    // canonicalization fail on conflicting histories.
+    let history_field = super::req_inbound_02_normalized::v3_hub_inbound_history_field(
+        entry_protocol,
+        original_request_payload,
+    );
+    // `ResponsesDual` means the request carried both `input` and a `messages`
+    // twin. Which side owns the history is not decidable from field presence:
+    // inbound merges the decoded `input` with the twin, and the merge is a
+    // single complete history that carries business extensions contributed by
+    // either side (for example a provider-origin reasoning id and encrypted
+    // content on the input side, or a `routecodex_chat_extension` carried only
+    // by the messages twin). Use that accepted merged history when inbound
+    // accepts it. When the twins are not equivalent (the Responses Direct
+    // entry decodes `input` only and never merges), keep `input` as the single
+    // owner and drop the derived twin; extending one raw field while the
+    // other still exists would make the next inbound reject the request.
+    let mut use_messages_history =
+        history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::Messages;
+    if history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::ResponsesDual {
+        match super::req_inbound_02_normalized::v3_hub_responses_accepted_chat_contribution(
+            original_request_payload,
+        ) {
+            Ok(contribution) => {
+                payload_object.remove("input");
+                payload_object.insert("messages".to_string(), Value::Array(contribution.messages));
+                // The decoded `input` can lift tool declarations that only its
+                // items carry (for example `additional_tools`) into the
+                // canonical tool set, with the same refresh priority a root
+                // declaration has for the next execution. Dropping `input`
+                // must not drop that contribution.
+                if let Some(tools) = contribution.tools {
+                    payload_object.insert("tools".to_string(), tools);
+                }
+                use_messages_history = true;
+            }
+            Err(_) => {
+                payload_object.remove("messages");
+            }
+        }
+    }
+    if use_messages_history {
         let messages = payload_object
             .get_mut("messages")
             .and_then(Value::as_array_mut)
@@ -1108,6 +1152,36 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
         }));
         return Ok(payload);
     }
+    // A Gemini client request carries its history under `contents`, and the
+    // Gemini inbound canonicalization rebuilds `messages` from `contents`
+    // only. The continuation must therefore extend that same representation;
+    // writing `input` here would leave the next provider request identical to
+    // the first one, without the answer and without the instruction.
+    if history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::Contents {
+        let contents = payload_object
+            .get_mut("contents")
+            .and_then(Value::as_array_mut)
+            .ok_or_else(|| "refill continuation contents must be an array".to_string())?;
+        let mut model_parts: Vec<Value> = Vec::new();
+        for item in
+            collect_v3_chat_process_business_output_items(current_execution_finalized_response)
+        {
+            // Refill only runs when the round produced no real tool call, so
+            // the replayable business content is the assistant message parts.
+            if item.get("type").and_then(Value::as_str) != Some("message") {
+                continue;
+            }
+            model_parts.extend(v3_chat_process_refill_gemini_parts(&item));
+        }
+        if !model_parts.is_empty() {
+            contents.push(json!({"role": "model", "parts": model_parts}));
+        }
+        contents.push(json!({
+            "role": "user",
+            "parts": [{"text": V3_CHAT_PROCESS_REFILL_INSTRUCTION}],
+        }));
+        return Ok(payload);
+    }
     let mut input = match payload_object.get("input") {
         Some(Value::Array(_)) => payload_object
             .get("input")
@@ -1170,6 +1244,59 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
     Ok(payload)
 }
 
+/// Native Gemini business parts the governed projection keeps verbatim.
+const V3_GEMINI_NATIVE_PART_KEYS: [&str; 4] = [
+    "inlineData",
+    "fileData",
+    "executableCode",
+    "codeExecutionResult",
+];
+
+/// Project one governed business message into representable Gemini `Parts`.
+///
+/// Governance keeps the provider's parts and only adds canonical framing: a
+/// text part arrives as `output_text` while still carrying its native siblings
+/// (for example `thoughtSignature`), and a native part such as `inlineData`
+/// arrives verbatim. Only the canonical framing field is removed. Dropping the
+/// native parts would silently shrink the continuation history of a round that
+/// delivered multimodal business content, and an empty text part is not a valid
+/// Gemini Part.
+fn v3_chat_process_refill_gemini_parts(business_message: &Value) -> Vec<Value> {
+    let mut parts = Vec::new();
+    for part in business_message
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(row) = part.as_object() else {
+            continue;
+        };
+        if matches!(
+            row.get("type").and_then(Value::as_str),
+            Some("output_text" | "text")
+        ) {
+            let text = row.get("text").and_then(Value::as_str).unwrap_or("");
+            if text.is_empty() {
+                // A sibling native part in the same message still carries the
+                // real business content, so skip only this empty Part.
+                continue;
+            }
+            let mut part = row.clone();
+            part.remove("type");
+            parts.push(Value::Object(part));
+            continue;
+        }
+        if V3_GEMINI_NATIVE_PART_KEYS
+            .iter()
+            .any(|key| row.contains_key(*key))
+        {
+            parts.push(part.clone());
+        }
+    }
+    parts
+}
+
 /// Collect the business output items of one execution response, in order.
 ///
 /// Every item shape is kept verbatim, including reasoning items: an earlier
@@ -1186,6 +1313,35 @@ pub(crate) fn collect_v3_chat_process_business_output_items(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+/// Fold prior-round business items and the summed usage into this execution's
+/// governed payload, before it is projected to the client protocol.
+///
+/// Only a refill round calls this: the continuation decision already proved
+/// this execution produced no real tool call, so prior rounds carry message
+/// business content only. The last execution stays authoritative for its own
+/// item order, status and terminal fields; prior items only extend the front of
+/// `output`.
+pub(crate) fn apply_v3_chat_process_refill_accumulation(
+    finalized_response: &mut Value,
+    accumulated_items: &[Value],
+    accumulated_usage: Option<&V3RuntimeUsageSummary>,
+) {
+    if accumulated_items.is_empty() {
+        return;
+    }
+    // The delivered total must cover every round, so the final execution's own
+    // usage is folded in here before write-back.
+    let mut total = accumulated_usage.cloned();
+    accumulate_v3_chat_process_refill_usage(
+        &mut total,
+        super::responses_relay_runtime::extract_v3_runtime_usage_summary(finalized_response),
+    );
+    merge_v3_chat_process_refill_output_items(finalized_response, accumulated_items);
+    if let Some(total) = total.as_ref() {
+        write_v3_chat_process_refill_usage(finalized_response, total);
+    }
 }
 
 /// Merge prior-round business items in front of the last execution's output.
@@ -1209,6 +1365,51 @@ pub(crate) fn merge_v3_chat_process_refill_output_items(
     let existing = std::mem::take(output);
     output.extend(accumulated.iter().cloned());
     output.extend(existing);
+    rebase_v3_chat_process_refill_candidate_output_indices(finalized_response, accumulated.len());
+}
+
+/// Keep the native Gemini candidate association valid after the merge.
+///
+/// A Gemini provider response records which `output` positions each candidate
+/// produced (`gemini_candidate_outcomes[].output_indices`), and the native
+/// Gemini client projection emits business content by following those
+/// positions. Prepending prior rounds therefore has two consequences: every
+/// index of this round moves past the prepended prefix, and the prefix itself
+/// must stay reachable or the earlier rounds would never reach the client.
+/// The prefix joins the first candidate, which is the candidate a Gemini
+/// client reads as the answer.
+fn rebase_v3_chat_process_refill_candidate_output_indices(
+    finalized_response: &mut Value,
+    prepended: usize,
+) {
+    if prepended == 0 {
+        return;
+    }
+    let Some(outcomes) = finalized_response
+        .get_mut("gemini_candidate_outcomes")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for (position, outcome) in outcomes.iter_mut().enumerate() {
+        let Some(indices) = outcome
+            .get_mut("output_indices")
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        let mut rebased: Vec<Value> = if position == 0 {
+            (0..prepended).map(|index| json!(index)).collect()
+        } else {
+            Vec::new()
+        };
+        rebased.extend(indices.iter().filter_map(|index| {
+            index
+                .as_u64()
+                .map(|value| json!(value as usize + prepended))
+        }));
+        *indices = rebased;
+    }
 }
 
 /// Accumulate one completed refill round's usage into the running summary.

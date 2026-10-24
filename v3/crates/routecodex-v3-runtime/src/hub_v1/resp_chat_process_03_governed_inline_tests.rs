@@ -688,8 +688,12 @@ fn refill_continuation_keeps_original_fields_and_appends_history_once() {
             {"type": "reasoning", "summary": [{"type": "summary_text", "text": "thinking"}]}
         ]
     });
-    let continuation = build_v3_chat_process_refill_continuation_request(&original, &finalized)
-        .expect("continuation must build");
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("continuation must build");
     assert_eq!(continuation["model"], json!("gpt-test"));
     assert_eq!(continuation["instructions"], json!("help the user"));
     assert_eq!(
@@ -755,8 +759,12 @@ fn refill_continuation_preserves_provider_reasoning_and_skips_synthesized() {
             }
         ]
     });
-    let continuation = build_v3_chat_process_refill_continuation_request(&original, &finalized)
-        .expect("continuation must build");
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("continuation must build");
     let input = continuation["input"].as_array().expect("input array");
     assert_eq!(
         input.len(),
@@ -809,8 +817,12 @@ fn refill_continuation_messages_merges_same_turn_reasoning_and_assistant_message
         ]
     });
 
-    let continuation = build_v3_chat_process_refill_continuation_request(&original, &finalized)
-        .expect("messages-shaped refill continuation must build");
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::OpenAiChat,
+        &original,
+        &finalized,
+    )
+    .expect("messages-shaped refill continuation must build");
     let messages = continuation["messages"].as_array().expect("messages array");
     assert_eq!(
         messages.len(),
@@ -895,8 +907,12 @@ fn refill_continuation_normalizes_string_input_and_keeps_image_parts() {
             }
         ]
     });
-    let continuation = build_v3_chat_process_refill_continuation_request(&original, &finalized)
-        .expect("continuation must build");
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("continuation must build");
     let input = continuation["input"].as_array().expect("input array");
     assert_eq!(input.len(), 3, "{input:?}");
     assert_eq!(input[0]["role"], json!("user"));
@@ -905,6 +921,669 @@ fn refill_continuation_normalizes_string_input_and_keeps_image_parts() {
     assert_eq!(
         input[1]["content"][1],
         json!({"type": "input_image", "image_url": "data:image/png;base64,AAAA"})
+    );
+}
+
+#[test]
+fn refill_continuation_gemini_keeps_native_parts_and_skips_empty_text() {
+    let original = json!({
+        "contents": [{"role": "user", "parts": [{"text": "describe"}]}],
+        "generationConfig": {"maxOutputTokens": 64}
+    });
+    let finalized = json!({
+        "id": "resp_gemini",
+        "status": "completed",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {"type": "output_text", "text": "caption", "thoughtSignature": "sig-1"},
+                {"type": "output_text", "text": ""},
+                {"inlineData": {"mimeType": "image/png", "data": "QUJD"}}
+            ]
+        }]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Gemini,
+        &original,
+        &finalized,
+    )
+    .expect("gemini-shaped refill continuation must build");
+    assert_eq!(
+        continuation["generationConfig"],
+        json!({"maxOutputTokens": 64}),
+        "the continuation must keep the rest of the client request"
+    );
+    assert!(
+        continuation.get("input").is_none() && continuation.get("messages").is_none(),
+        "a gemini request must keep its own history representation: {continuation}"
+    );
+    let contents = continuation["contents"].as_array().expect("contents array");
+    assert_eq!(
+        contents.len(),
+        3,
+        "original + model + instruction: {contents:?}"
+    );
+    assert_eq!(contents[0]["role"], json!("user"));
+    assert_eq!(contents[1]["role"], json!("model"));
+    let parts = contents[1]["parts"].as_array().expect("model parts");
+    assert_eq!(
+        parts,
+        &vec![
+            json!({"text": "caption", "thoughtSignature": "sig-1"}),
+            json!({"inlineData": {"mimeType": "image/png", "data": "QUJD"}}),
+        ],
+        "native parts and text siblings must survive, an empty text part must not: {parts:?}"
+    );
+    assert_eq!(contents[2]["role"], json!("user"));
+    assert_eq!(
+        contents[2]["parts"][0]["text"],
+        json!(V3_CHAT_PROCESS_REFILL_INSTRUCTION)
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_one_history_owner() {
+    // Equivalent twins merge, so the continuation carries the accepted merged
+    // history in one representation and drops the redundant `input`.
+    let original = json!({
+        "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]}],
+        "messages": [{"role": "user", "content": "go"}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("dual-history continuation must build");
+    let messages = continuation["messages"].as_array().expect("messages array");
+    assert_eq!(
+        messages.len(),
+        3,
+        "original + answer + instruction must extend one history: {messages:?}"
+    );
+    assert!(
+        continuation.get("input").is_none(),
+        "the redundant input must not compete with the merged history: {continuation}"
+    );
+    assert_eq!(messages[0]["role"], json!("user"));
+    assert_eq!(messages[1]["role"], json!("assistant"));
+    assert_eq!(
+        messages[2]["content"],
+        json!(V3_CHAT_PROCESS_REFILL_INSTRUCTION)
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_input_side_extension() {
+    // The provider-origin reasoning item exists only on the input side and is
+    // folded into the assistant turn by the merge. The continuation must carry
+    // that merged turn, not one raw twin.
+    let original = json!({
+        "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]},
+            {"type": "reasoning", "id": "rsn_opaque", "encrypted_content": "cipher-1"},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "prior answer"}]}
+        ],
+        "messages": [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "prior answer", "reasoning_content": ""}
+        ]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "final answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("dual-history continuation with extension must build");
+    let messages = continuation["messages"].as_array().expect("messages array");
+    assert!(
+        continuation.get("input").is_none(),
+        "the redundant input must not compete with the merged history: {continuation}"
+    );
+    let assistant = messages
+        .iter()
+        .find(|message| message["role"] == "assistant")
+        .expect("prior assistant turn");
+    assert_eq!(
+        assistant["content"],
+        json!("prior answer"),
+        "the merged turn must keep the business answer: {assistant}"
+    );
+    assert_eq!(
+        assistant["routecodex_chat_extension"]["responses_reasoning_item_id"],
+        json!("rsn_opaque"),
+        "the merged turn must keep the provider reasoning identity: {assistant}"
+    );
+    assert_eq!(
+        assistant["routecodex_chat_extension"]["responses_reasoning_encrypted_content"],
+        json!("cipher-1"),
+        "the merged turn must keep the opaque reasoning cipher: {assistant}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.to_string().contains("final answer")),
+        "the refill round must join the accepted history: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| message
+            .to_string()
+            .contains(V3_CHAT_PROCESS_REFILL_INSTRUCTION)),
+        "the continuation must carry the instruction: {messages:?}"
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_messages_side_extension() {
+    // The messages twin can carry a business extension that `input` does not.
+    // Dropping the twin would lose it, so the continuation must use the merge.
+    let original = json!({
+        "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "prior answer"}]}
+        ],
+        "messages": [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": "prior answer",
+                "routecodex_chat_extension": {
+                    "responses_reasoning_item_id": "rsn_twin_only",
+                    "responses_reasoning_encrypted_content": "cipher-twin"
+                }
+            }
+        ]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "final answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("twin-extension continuation must build");
+    let messages = continuation["messages"].as_array().expect("messages array");
+    let assistant = messages
+        .iter()
+        .find(|message| message["role"] == "assistant")
+        .expect("prior assistant turn");
+    assert_eq!(
+        assistant["routecodex_chat_extension"]["responses_reasoning_item_id"],
+        json!("rsn_twin_only"),
+        "a messages-side extension must survive: {assistant}"
+    );
+    assert_eq!(
+        assistant["routecodex_chat_extension"]["responses_reasoning_encrypted_content"],
+        json!("cipher-twin"),
+        "a messages-side opaque cipher must survive: {assistant}"
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_tool_result_shape() {
+    // Inbound also accepts a Chat history plus decoded tool results. The
+    // continuation must keep the paired calls together with the results.
+    let original = json!({
+        "input": [
+            {"type": "function_call_output", "call_id": "call_1", "output": "42"}
+        ],
+        "messages": [
+            {"role": "user", "content": "read the value"},
+            {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read_value", "arguments": "{}"}
+                }]
+            }
+        ]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "the value is 42"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("tool-result continuation must build");
+    let messages = continuation["messages"].as_array().expect("messages array");
+    assert!(
+        continuation.get("input").is_none(),
+        "the redundant input must not compete with the merged history: {continuation}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message["role"] == "user"
+                && message.to_string().contains("read the value")),
+        "the original task must survive: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message["tool_calls"][0]["id"] == json!("call_1")),
+        "the paired tool call must survive: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| message["role"] == "tool"
+            && message["tool_call_id"] == json!("call_1")
+            && message["content"] == json!("42")),
+        "the matched tool result must survive: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| message
+            .to_string()
+            .contains(V3_CHAT_PROCESS_REFILL_INSTRUCTION)),
+        "the continuation must carry the instruction: {messages:?}"
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_additional_tools_declaration() {
+    // The decoded `input` can lift tool declarations that only its items carry
+    // into the canonical tool set. Dropping `input` must not drop that
+    // contribution, so the continuation carries the effective canonical tools.
+    let original = json!({
+        "input": [
+            {"type": "additional_tools", "tools": [
+                {"type": "function", "name": "read_value", "parameters": {"type": "object"}}
+            ]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "read it"}]}
+        ],
+        "messages": [
+            {"role": "user", "content": "read it"}
+        ]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("additional-tools continuation must build");
+    assert!(
+        continuation.get("input").is_none(),
+        "the redundant input must not compete with the merged history: {continuation}"
+    );
+    let tools = continuation["tools"].as_array().expect("tools array");
+    assert!(
+        tools.iter().any(|tool| tool["name"] == json!("read_value")),
+        "the lifted tool declaration must survive: {tools:?}"
+    );
+    let messages = continuation["messages"].as_array().expect("messages array");
+    assert!(
+        messages.iter().any(|message| message
+            .to_string()
+            .contains(V3_CHAT_PROCESS_REFILL_INSTRUCTION)),
+        "the continuation must carry the instruction: {messages:?}"
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_additional_tools_refresh_order() {
+    // `additional_tools` may refresh a declaration that the root `tools` array
+    // already carries. The canonical tool set keeps the root declaration first
+    // and the refreshing one last, so the continuation must preserve that order
+    // instead of letting the stale root schema win again.
+    let original = json!({
+        "tools": [{
+            "type": "function",
+            "name": "read_value",
+            "parameters": {"type": "object", "properties": {"stale": {"type": "string"}}}
+        }],
+        "input": [
+            {"type": "additional_tools", "tools": [{
+                "type": "function",
+                "name": "read_value",
+                "parameters": {"type": "object", "properties": {"fresh": {"type": "string"}}}
+            }]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "refresh"}]}
+        ],
+        "messages": [{"role": "user", "content": "refresh"}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("additional-tools refresh continuation must build");
+    let tools = continuation["tools"].as_array().expect("tools array");
+    let read_value: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["name"] == json!("read_value"))
+        .collect();
+    assert_eq!(
+        read_value.len(),
+        1,
+        "the superseded declaration must be removed, not left under the same identity: {tools:?}"
+    );
+    assert!(
+        read_value[0]["parameters"]["properties"]["fresh"].is_object(),
+        "the refreshing declaration must be the surviving one: {tools:?}"
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_collapses_consecutive_refreshes() {
+    // Two `additional_tools` items refresh the same identity in sequence. The
+    // accepted contribution must collapse them to the final effective schema,
+    // not keep superseded declarations that the next round would reject as a
+    // same-source conflict.
+    let original = json!({
+        "input": [
+            {"type": "additional_tools", "tools": [
+                {"type": "function", "name": "read_value", "parameters": {"type": "object", "properties": {"old": {"type": "string"}}}}
+            ]},
+            {"type": "additional_tools", "tools": [
+                {"type": "function", "name": "read_value", "parameters": {"type": "object", "properties": {"fresh": {"type": "string"}}}}
+            ]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "refresh twice"}]}
+        ],
+        "messages": [{"role": "user", "content": "refresh twice"}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("consecutive-refresh continuation must build");
+    let tools = continuation["tools"].as_array().expect("tools array");
+    let read_value: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["name"] == json!("read_value"))
+        .collect();
+    assert_eq!(
+        read_value.len(),
+        1,
+        "consecutive refreshes must collapse to one effective declaration: {tools:?}"
+    );
+    assert!(
+        read_value[0]["parameters"]["properties"]["fresh"].is_object(),
+        "the final declaration must survive: {tools:?}"
+    );
+    assert!(
+        read_value[0]["parameters"]["properties"]["old"].is_null(),
+        "the superseded schema must be gone: {tools:?}"
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_hosted_declarations() {
+    // Hosted declarations carry no tool identity, so the identity registry
+    // never sees them. They must still reach the continuation, including when
+    // they are declared next to an identity-bearing declaration.
+    let original = json!({
+        "input": [
+            {"type": "additional_tools", "tools": [
+                {"type": "function", "name": "read_value", "parameters": {"type": "object"}},
+                {"type": "web_search", "search_context_size": "low"}
+            ]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "search it"}]}
+        ],
+        "messages": [{"role": "user", "content": "search it"}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("hosted-declaration continuation must build");
+    let tools = continuation["tools"].as_array().expect("tools array");
+    assert!(
+        tools.iter().any(|tool| tool["name"] == json!("read_value")),
+        "the function declaration must survive: {tools:?}"
+    );
+    let hosted: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["type"] == json!("web_search"))
+        .collect();
+    assert_eq!(
+        hosted.len(),
+        1,
+        "the hosted declaration must survive exactly once: {tools:?}"
+    );
+    assert_eq!(hosted[0]["search_context_size"], json!("low"));
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_hosted_only_declarations() {
+    // Only a hosted declaration is declared. The contribution must still be
+    // written; treating "no identity" as "no declarations" would drop it.
+    let original = json!({
+        "input": [
+            {"type": "additional_tools", "tools": [
+                {"type": "web_search", "search_context_size": "medium"}
+            ]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "search only"}]}
+        ],
+        "messages": [{"role": "user", "content": "search only"}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("hosted-only continuation must build");
+    let tools = continuation["tools"].as_array().expect("tools array");
+    assert_eq!(
+        tools.len(),
+        1,
+        "the hosted declaration must survive: {tools:?}"
+    );
+    assert_eq!(tools[0]["type"], json!("web_search"));
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_input_web_search_declaration() {
+    // A standalone `input` web_search item is lifted into the declarations by
+    // inbound. Removing `input` must not drop the lifted declaration.
+    let original = json!({
+        "input": [
+            {"type": "web_search", "search_context_size": "high"},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "lifted search"}]}
+        ],
+        "messages": [{"role": "user", "content": "lifted search"}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("lifted web_search continuation must build");
+    let tools = continuation["tools"].as_array().expect("tools array");
+    assert_eq!(
+        tools.len(),
+        1,
+        "the lifted web_search declaration must survive: {tools:?}"
+    );
+    assert_eq!(tools[0]["search_context_size"], json!("high"));
+}
+
+#[test]
+fn refill_continuation_responses_history_record_does_not_revert_refresh() {
+    // A `tool_search_output` history record declares the tools a past search
+    // discovered; a later `additional_tools` item refreshes the same identity.
+    // The continuation drops `input` and keeps the merged messages, so the
+    // record survives as a Chat tool message. Resolving the continuation must
+    // still yield the refreshed schema, never the stale record.
+    let stale = json!([{
+        "type": "function",
+        "name": "read_value",
+        "description": "stale discovery",
+        "parameters": {"type": "object", "properties": {"old": {"type": "string"}}}
+    }]);
+    let original = json!({
+        "input": [
+            {"type": "tool_search_call", "call_id": "call_search", "arguments": {"query": "values"}},
+            {"type": "tool_search_output", "call_id": "call_search", "tools": stale},
+            {"type": "additional_tools", "tools": [{
+                "type": "function",
+                "name": "read_value",
+                "description": "refreshed declaration",
+                "parameters": {"type": "object", "properties": {"fresh": {"type": "string"}}}
+            }]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "search task"}]}
+        ],
+        "messages": [
+            {"role": "assistant", "content": null, "tool_calls": [{
+                "id": "call_search",
+                "type": "function",
+                "function": {"name": "tool_search", "arguments": "{\"query\":\"values\"}"}
+            }]},
+            {"role": "tool", "tool_call_id": "call_search", "content": stale.to_string()},
+            {"role": "user", "content": "search task"}
+        ]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("history-record continuation must build");
+    assert!(
+        continuation.get("input").is_none(),
+        "the merged history must own the continuation: {continuation}"
+    );
+    let tools = continuation["tools"].as_array().expect("tools array");
+    let declared: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["name"] == json!("read_value"))
+        .collect();
+    assert_eq!(
+        declared.len(),
+        1,
+        "the refreshed identity must stay single: {tools:?}"
+    );
+    assert_eq!(
+        declared[0]["parameters"]["properties"]["fresh"].is_object(),
+        true,
+        "the continuation must carry the refreshed schema: {tools:?}"
+    );
+    assert!(
+        declared[0]["parameters"]["properties"]["old"].is_null(),
+        "the stale record must not survive as the declaration: {tools:?}"
+    );
+    // Re-resolving the continuation is what the next round does; the history
+    // record must not revert the refresh there either.
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            &continuation,
+            "openai-responses",
+        )
+        .expect("continuation must resolve");
+    let identity = registry
+        .identity_for_client_path("read_value")
+        .expect("the declared identity must be present");
+    assert_eq!(
+        identity.source["description"], "refreshed declaration",
+        "re-resolution must keep the refreshed source: {continuation}"
+    );
+}
+
+#[test]
+fn refill_continuation_responses_ignores_foreign_contents_extension() {
+    let original = json!({
+        "input": "original task",
+        "contents": [{"role": "user", "parts": [{"text": "extension data"}]}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("responses continuation must build");
+    let input = continuation["input"].as_array().expect("input array");
+    assert_eq!(input.len(), 3, "original + answer + instruction: {input:?}");
+    assert_eq!(input[1]["role"], json!("assistant"));
+    assert_eq!(
+        input[2]["content"][0]["text"],
+        json!(V3_CHAT_PROCESS_REFILL_INSTRUCTION)
+    );
+    assert_eq!(
+        continuation["contents"], original["contents"],
+        "an unrelated preserved extension must not become the history owner"
     );
 }
 
