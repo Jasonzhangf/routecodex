@@ -65,13 +65,6 @@ pub(crate) fn v3_hub_inbound_history_field(
     }
 }
 
-impl V3HubInboundHistoryField {
-    /// Whether inbound reads the Chat `messages` field as the history owner.
-    pub(crate) fn owns_messages(self) -> bool {
-        matches!(self, V3HubInboundHistoryField::Messages)
-    }
-}
-
 pub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(
     input: V3HubReqInbound01ClientRaw,
 ) -> V3HubReqInbound02Normalized {
@@ -433,6 +426,26 @@ fn responses_merged_chat_canonical(raw: &Value) -> Result<Value, String> {
         canonical["messages"] = Value::Array(merge_responses_chat_histories(source, decoded)?);
     }
     Ok(canonical)
+}
+
+/// The Chat history inbound actually accepts for a Responses payload.
+///
+/// A Responses request may carry both `input` and a `messages` twin. Which
+/// side owns the history is not decidable from field presence: the merge in
+/// [`merge_responses_chat_histories`] contributes business extensions from
+/// either side, accepts a Chat history plus decoded tool results, and rejects
+/// twins that are not equivalent. The refill continuation must therefore use
+/// the merged result instead of either raw field, or the next provider request
+/// silently loses a contribution that only one side carried.
+pub(crate) fn v3_hub_responses_accepted_chat_history(
+    payload: &Value,
+) -> Result<Vec<Value>, String> {
+    let canonical = responses_merged_chat_canonical(payload)?;
+    canonical
+        .get("messages")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| "Responses accepted history must be an array".to_string())
 }
 
 pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01(

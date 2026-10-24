@@ -1045,18 +1045,34 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
         entry_protocol,
         original_request_payload,
     );
-    // `ResponsesDual` means the request carried a derived `messages` twin next
-    // to `input`. `input` is the full Responses history: provider-origin
-    // reasoning items keep their `id` and opaque `encrypted_content` there and
-    // decode into business extensions, while the twin is a Chat projection of
-    // the same turns. The continuation therefore keeps `input` as the single
-    // history owner and drops the derived twin; extending `messages` instead
-    // would leave a stale competing history and lose the input-side
-    // associations, and keeping both makes the next inbound reject the request.
+    // `ResponsesDual` means the request carried both `input` and a `messages`
+    // twin. Which side owns the history is not decidable from field presence:
+    // inbound merges the decoded `input` with the twin, and the merge is a
+    // single complete history that carries business extensions contributed by
+    // either side (for example a provider-origin reasoning id and encrypted
+    // content on the input side, or a `routecodex_chat_extension` carried only
+    // by the messages twin). Use that accepted merged history when inbound
+    // accepts it. When the twins are not equivalent (the Responses Direct
+    // entry decodes `input` only and never merges), keep `input` as the single
+    // owner and drop the derived twin; extending one raw field while the
+    // other still exists would make the next inbound reject the request.
+    let mut use_messages_history =
+        history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::Messages;
     if history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::ResponsesDual {
-        payload_object.remove("messages");
+        match super::req_inbound_02_normalized::v3_hub_responses_accepted_chat_history(
+            original_request_payload,
+        ) {
+            Ok(accepted) => {
+                payload_object.remove("input");
+                payload_object.insert("messages".to_string(), Value::Array(accepted));
+                use_messages_history = true;
+            }
+            Err(_) => {
+                payload_object.remove("messages");
+            }
+        }
     }
-    if history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::Messages {
+    if use_messages_history {
         let messages = payload_object
             .get_mut("messages")
             .and_then(Value::as_array_mut)

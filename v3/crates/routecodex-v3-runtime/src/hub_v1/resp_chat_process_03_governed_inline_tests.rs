@@ -984,6 +984,8 @@ fn refill_continuation_gemini_keeps_native_parts_and_skips_empty_text() {
 
 #[test]
 fn refill_continuation_responses_dual_history_keeps_one_history_owner() {
+    // Equivalent twins merge, so the continuation carries the accepted merged
+    // history in one representation and drops the redundant `input`.
     let original = json!({
         "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]}],
         "messages": [{"role": "user", "content": "go"}]
@@ -1001,29 +1003,29 @@ fn refill_continuation_responses_dual_history_keeps_one_history_owner() {
         &finalized,
     )
     .expect("dual-history continuation must build");
-    let input = continuation["input"].as_array().expect("input array");
+    let messages = continuation["messages"].as_array().expect("messages array");
     assert_eq!(
-        input.len(),
+        messages.len(),
         3,
-        "original + answer + instruction must extend the Responses history: {input:?}"
+        "original + answer + instruction must extend one history: {messages:?}"
     );
     assert!(
-        continuation.get("messages").is_none(),
-        "the derived twin must not compete with input: {continuation}"
+        continuation.get("input").is_none(),
+        "the redundant input must not compete with the merged history: {continuation}"
     );
-    assert_eq!(input[1]["type"], json!("message"));
-    assert_eq!(input[1]["role"], json!("assistant"));
+    assert_eq!(messages[0]["role"], json!("user"));
+    assert_eq!(messages[1]["role"], json!("assistant"));
     assert_eq!(
-        input[2]["content"][0]["text"],
+        messages[2]["content"],
         json!(V3_CHAT_PROCESS_REFILL_INSTRUCTION)
     );
 }
 
 #[test]
 fn refill_continuation_responses_dual_history_keeps_input_side_extension() {
-    // The `messages` twin is a Chat projection that cannot carry a
-    // provider-origin reasoning item. Keeping `input` as the history owner is
-    // what preserves the id/cipher association across the refill.
+    // The provider-origin reasoning item exists only on the input side and is
+    // folded into the assistant turn by the merge. The continuation must carry
+    // that merged turn, not one raw twin.
     let original = json!({
         "input": [
             {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]},
@@ -1048,33 +1050,158 @@ fn refill_continuation_responses_dual_history_keeps_input_side_extension() {
         &finalized,
     )
     .expect("dual-history continuation with extension must build");
-    let input = continuation["input"].as_array().expect("input array");
+    let messages = continuation["messages"].as_array().expect("messages array");
     assert!(
-        continuation.get("messages").is_none(),
-        "the derived twin must not compete with input: {continuation}"
+        continuation.get("input").is_none(),
+        "the redundant input must not compete with the merged history: {continuation}"
     );
-    let reasoning: Vec<&Value> = input
+    let assistant = messages
         .iter()
-        .filter(|item| item["type"] == "reasoning")
-        .collect();
+        .find(|message| message["role"] == "assistant")
+        .expect("prior assistant turn");
     assert_eq!(
-        reasoning.len(),
-        1,
-        "the input-side reasoning item must be replayed verbatim: {input:?}"
+        assistant["content"],
+        json!("prior answer"),
+        "the merged turn must keep the business answer: {assistant}"
     );
-    assert_eq!(reasoning[0]["id"], json!("rsn_opaque"));
-    assert_eq!(reasoning[0]["encrypted_content"], json!("cipher-1"));
+    assert_eq!(
+        assistant["routecodex_chat_extension"]["responses_reasoning_item_id"],
+        json!("rsn_opaque"),
+        "the merged turn must keep the provider reasoning identity: {assistant}"
+    );
+    assert_eq!(
+        assistant["routecodex_chat_extension"]["responses_reasoning_encrypted_content"],
+        json!("cipher-1"),
+        "the merged turn must keep the opaque reasoning cipher: {assistant}"
+    );
     assert!(
-        input
+        messages
             .iter()
-            .any(|item| item.to_string().contains("final answer")),
-        "the refill round must join the Responses history: {input:?}"
+            .any(|message| message.to_string().contains("final answer")),
+        "the refill round must join the accepted history: {messages:?}"
     );
     assert!(
-        input.iter().any(|item| item
+        messages.iter().any(|message| message
             .to_string()
             .contains(V3_CHAT_PROCESS_REFILL_INSTRUCTION)),
-        "the continuation must carry the instruction: {input:?}"
+        "the continuation must carry the instruction: {messages:?}"
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_messages_side_extension() {
+    // The messages twin can carry a business extension that `input` does not.
+    // Dropping the twin would lose it, so the continuation must use the merge.
+    let original = json!({
+        "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "prior answer"}]}
+        ],
+        "messages": [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": "prior answer",
+                "routecodex_chat_extension": {
+                    "responses_reasoning_item_id": "rsn_twin_only",
+                    "responses_reasoning_encrypted_content": "cipher-twin"
+                }
+            }
+        ]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "final answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("twin-extension continuation must build");
+    let messages = continuation["messages"].as_array().expect("messages array");
+    let assistant = messages
+        .iter()
+        .find(|message| message["role"] == "assistant")
+        .expect("prior assistant turn");
+    assert_eq!(
+        assistant["routecodex_chat_extension"]["responses_reasoning_item_id"],
+        json!("rsn_twin_only"),
+        "a messages-side extension must survive: {assistant}"
+    );
+    assert_eq!(
+        assistant["routecodex_chat_extension"]["responses_reasoning_encrypted_content"],
+        json!("cipher-twin"),
+        "a messages-side opaque cipher must survive: {assistant}"
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_tool_result_shape() {
+    // Inbound also accepts a Chat history plus decoded tool results. The
+    // continuation must keep the paired calls together with the results.
+    let original = json!({
+        "input": [
+            {"type": "function_call_output", "call_id": "call_1", "output": "42"}
+        ],
+        "messages": [
+            {"role": "user", "content": "read the value"},
+            {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read_value", "arguments": "{}"}
+                }]
+            }
+        ]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "the value is 42"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("tool-result continuation must build");
+    let messages = continuation["messages"].as_array().expect("messages array");
+    assert!(
+        continuation.get("input").is_none(),
+        "the redundant input must not compete with the merged history: {continuation}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message["role"] == "user"
+                && message.to_string().contains("read the value")),
+        "the original task must survive: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message["tool_calls"][0]["id"] == json!("call_1")),
+        "the paired tool call must survive: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| message["role"] == "tool"
+            && message["tool_call_id"] == json!("call_1")
+            && message["content"] == json!("42")),
+        "the matched tool result must survive: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| message
+            .to_string()
+            .contains(V3_CHAT_PROCESS_REFILL_INSTRUCTION)),
+        "the continuation must carry the instruction: {messages:?}"
     );
 }
 

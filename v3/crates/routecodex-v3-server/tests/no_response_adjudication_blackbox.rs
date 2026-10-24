@@ -1698,6 +1698,169 @@ async fn refill_responses_dual_history_continuation_stays_acceptable_public() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// Stable public ID: the `messages` twin of a dual Responses history can carry
+/// a business extension that `input` does not. The refill continuation must
+/// extend the merged history inbound accepted, so the association survives the
+/// second provider request.
+#[tokio::test]
+async fn refill_responses_dual_twin_extension_survives_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "TWIN_EXTENSION_ROUND_TWO"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "TWIN_EXTENSION_ROUND_ONE")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model": "test.test",
+                // Equivalent turns, but only the `messages` twin carries the
+                // provider-origin reasoning association.
+                "input": [
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "twin extension task"}]},
+                    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "twin prior answer"}]}
+                ],
+                "messages": [
+                    {"role": "user", "content": "twin extension task"},
+                    {
+                        "role": "assistant",
+                        "content": "twin prior answer",
+                        "routecodex_chat_extension": {
+                            "responses_reasoning_item_id": "rsn_twin",
+                            "responses_reasoning_encrypted_content": "cipher-twin"
+                        }
+                    }
+                ],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "twin-extension entry must run exactly one refill: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("TWIN_EXTENSION_ROUND_ONE")
+            && consumed.body.contains("TWIN_EXTENSION_ROUND_TWO"),
+        "both rounds must reach the client: {consumed:?}"
+    );
+    let second = &captured[1];
+    let merged = second
+        .get("messages")
+        .or_else(|| second.get("input"))
+        .unwrap_or_else(|| panic!("second provider request must carry a history: {second}"));
+    assert!(
+        merged.to_string().contains("rsn_twin"),
+        "the messages-side reasoning association must survive: {second}"
+    );
+    assert!(
+        merged.to_string().contains("twin extension task"),
+        "the original task must survive: {second}"
+    );
+    assert!(
+        merged.to_string().contains(REFILL_INSTRUCTION),
+        "the continuation must carry the instruction: {second}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: inbound also accepts a Chat history plus decoded tool
+/// results. The refill continuation must keep the paired call and its matched
+/// result together with the original task.
+#[tokio::test]
+async fn refill_responses_dual_tool_result_history_survives_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "TOOL_RESULT_ROUND_TWO"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "TOOL_RESULT_ROUND_ONE")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model": "test.test",
+                "input": [
+                    {"type": "function_call_output", "call_id": "call_dual", "output": "value-42"}
+                ],
+                "messages": [
+                    {"role": "user", "content": "read the dual value"},
+                    {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_dual",
+                            "type": "function",
+                            "function": {"name": "read_value", "arguments": "{}"}
+                        }]
+                    }
+                ],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "tool-result history entry must run exactly one refill: {consumed:?}"
+    );
+    let second = &captured[1];
+    let rendered = second.to_string();
+    assert!(
+        rendered.contains("read the dual value"),
+        "the original task must survive: {second}"
+    );
+    assert!(
+        rendered.contains("call_dual"),
+        "the paired tool call and result must survive: {second}"
+    );
+    assert!(
+        rendered.contains("value-42"),
+        "the matched tool result must survive: {second}"
+    );
+    assert!(
+        rendered.contains(REFILL_INSTRUCTION),
+        "the continuation must carry the instruction: {second}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
 /// Stable public ID: a provider refusal is legal business content, so a refill
 /// continuation must replay the complete assistant message into the next
 /// provider request instead of dropping it.
