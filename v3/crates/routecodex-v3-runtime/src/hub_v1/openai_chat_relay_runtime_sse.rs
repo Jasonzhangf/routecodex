@@ -225,8 +225,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                     done_seen,
                                     finished,
                                     compatibility_profile,
-                                    web_search_execution_mode,
-                                    web_search_center_state,
                                     retain_response_cipher,
                                     provider_outcome,
                                 ),
