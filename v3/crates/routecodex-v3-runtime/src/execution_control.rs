@@ -882,14 +882,14 @@ impl V3CommittedClientSseBuilder {
     /// new frames.
     pub(crate) fn rewrite_complete_attempt_preserving_client_prefix<E>(
         &mut self,
-        rewrite: impl FnOnce(&[Vec<u8>]) -> Result<Option<(Vec<Vec<u8>>, usize)>, E>,
+        rewrite: impl FnOnce(&[Vec<u8>], usize) -> Result<Option<(Vec<Vec<u8>>, usize)>, E>,
     ) -> Result<(), E>
     where
         E: From<V3AttemptStoreError>,
     {
         let flushed = self.flushed_frames;
         let flushed_frames = self.frames[..flushed].to_vec();
-        let Some((frames, terminal)) = rewrite(&self.frames)? else {
+        let Some((frames, terminal)) = rewrite(&self.frames, flushed)? else {
             return Ok(());
         };
         if frames.len() < flushed || frames[..flushed] != flushed_frames[..] {

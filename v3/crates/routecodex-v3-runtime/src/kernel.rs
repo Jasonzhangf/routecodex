@@ -1494,9 +1494,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 // The complete-attempt Direct response hook stays content
                 // driven, so the collector's frame-level commit probe decides
                 // the actual commit and the hook still runs after the terminal.
+                // Tool declarations do not gate early commit: the probe already
+                // holds any governed text (DSML labels and thinking markers)
+                // before the terminal, and the complete-attempt owners only
+                // rewrite content that carries those exact markers. The DSH
+                // harness injects tools into every request and omits
+                // `tool_choice`, so a declaration-based gate here would block
+                // first-frame commit for all live traffic.
                 let attempt_client_frame_sink = client_frame_sink.clone().filter(|_| {
                     !manifest.memory_raw_capture.enabled
-                        && direct_dsml_context.has_no_declared_tools()
                         && !response_projection.compat_plan.has_block(
                             crate::direct_response_hooks::V3DirectResponseCompatBlock::ThinkingTags,
                         )

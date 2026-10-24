@@ -342,8 +342,18 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
     let mut business_decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut has_business_content = false;
     let mut client_committed = false;
+    // A declared tool lets the complete-attempt DSML owner harvest tool markup
+    // out of the output text, so the probe must treat that opener as governed
+    // for this attempt. Tool-less requests keep the base marker set, because
+    // their owner only removes standalone protocol labels.
+    let declared_tools = response_hook
+        .as_ref()
+        .is_some_and(|(_, context)| !context.has_no_declared_tools());
     let mut commit_probe =
-        crate::direct_response_hooks::V3DirectPrefixCommitProbe::new(provider_protocol);
+        crate::direct_response_hooks::V3DirectPrefixCommitProbe::new_with_declared_tools(
+            provider_protocol,
+            declared_tools,
+        );
     loop {
         let next = match tokio::time::timeout_at(deadline, stream.next()).await {
             Ok(next) => next,

@@ -158,18 +158,24 @@ servertool 与 web_search 的内部尝试在请求级已可判定，保持全缓
 请求级谓词（`kernel.rs`）只负责排除已知会整段改写的请求，满足全部条件才把 sink 交给 collector：
 
 1. `!manifest.memory_raw_capture.enabled`（无 memory envelope 整段回写）；
-2. `direct_dsml_context.has_no_declared_tools()`（DSML 声明为空）；
-3. `!compat_plan.has_block(ThinkingTags)`（thinking-tags 流式改写与末帧合成已由该 profile 承担）。
+2. `!compat_plan.has_block(ThinkingTags)`（thinking-tags 流式改写与末帧合成已由该 profile 承担）。
+
+已声明工具的请求不在此排除。真实 harness 请求总会注入工具声明并省略 `tool_choice`，若把它排除，
+首帧提交在真实流量中永远不生效；DSML 声明只让 complete-attempt owner 在终端收割文本里的工具标记，
+这不构成整段改写，由帧级内容证明覆盖：声明工具时探针额外把收割入口（`<tool_call>`）视为治理标记，
+未声明时保持基础标记集合，因此被 flush 的前缀永不含 owner 之后要改成 function_call 的文本。
 
 该谓词不能证明 complete-attempt hook 是恒等：thinking 改写按内容无条件运行，DSML 也会在无声明时删除
-analysis/label 行。因此真实提交点由帧级内容证明（`V3DirectPrefixCommitProbe`）决定，谓词只保证被排除的
-请求不会进入该路径。
+analysis/label 行，声明工具时还会收割工具标记。因此真实提交点由帧级内容证明（`V3DirectPrefixCommitProbe`）决定，
+谓词只保证被排除的请求不会进入该路径。
 
 ### 13.2 提交与续发
 
 - 内容证明：缓冲前缀必须同时满足「已出现可见业务文本」且「没有任何 Direct 文本治理 owner 会改写的标记」
   且「最新文本不以标记前缀结尾」。标记集合由 owner 自己给出（thinking `<thinking>`/`</thinking>`，
   DSML 无声明即可删除的 standalone label），不在探针里重复硬编码。
+- 声明工具时探针的标记集合再追加 owner 的收割入口 `<tool_call>`：只有存在匹配的 Function 声明才会收割，
+  但收割一旦发生，源文本段就被替换成 function_call 项，因此探针必须把它与上述 label 同等看待。
 - 标记集合带匹配范围，与 owner 的匹配方式一致：thinking 标记按整段文本内联匹配，DSML label 只按整行匹配，
   因此普通行内 ` calls>` 不会误判，而末行等于某个标记的真前缀（短于标记本身的任何前缀）时仍然挂起。
 - 独占一行的 `>` 残渣无论其换行是否已经到达都算未决：owner 按整行扫描，`>\n<close>` 与 `><close>` 是同一种残渣，
@@ -206,6 +212,9 @@ analysis/label 行。因此真实提交点由帧级内容证明（`V3DirectPrefi
   provider stream failure 并冷却该身份（与 Relay 提交后路径一致），该记录不改变本请求的候选顺序。
 - 提交后治理标记导致的 `direct_sse_post_commit_governance_break` 只在一种情况下出现：owner 无法在不改写
   已发帧的前提下投影尾部。它走同一条提交后失败语义。
+- 声明工具的请求同样可能提交可见前缀后被 owner 整体拒绝（例如截断的 executable envelope 不可收割）：
+  已 flush 的可见前缀留在通道上，被挂起的标记文本、合成工具项、terminal 与错误载荷都不投影，通道按同一
+  提交后失败语义中断；客户端据缺失 terminal 自行重试。
 - 服务端把该 terminal 投影成 200 SSE 传输中断：通道层因已有已发帧而不发错误帧、不发 keepalive，也不写正常
   分块结束符（`0\r\n\r\n`）；客户端因缺少 terminal 检测到截断并自行重试，看不到 provider 状态、错误码或
   错误载荷。

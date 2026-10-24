@@ -578,6 +578,7 @@ fn rewrite_snapshot(
 
 pub(crate) fn rewrite_v3_direct_dsml_attempt(
     frames: &[Vec<u8>],
+    flushed: usize,
     context: &V3DirectDsmlContext,
 ) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure> {
     use routecodex_v3_sse::{
@@ -700,11 +701,28 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
             return Ok(None);
         }
     }
+    // A committed client channel is append-only, so every frame that already
+    // crossed it must leave this rewrite byte-identical. The commit probe holds
+    // the tail from the first governed marker on, which means a flushed prefix
+    // can only carry the leading carrier frames of the item this rewrite
+    // harvests. Emit the rest of that item from the delivered carrier state and
+    // append the synthesized items after it, keeping the client's frame
+    // coordinates and text intact.
+    if flushed > 0 && events.len() != frames.len() {
+        return Err(V3DirectResponseHookFailure::UnharvestableToolMarkup);
+    }
+    let flushed = flushed.min(events.len());
+    let delivered = delivered_carrier_state(&events, flushed, &association, &plans);
+    let kinds = original_carrier_kinds(&events, &association, &plans);
     let mut output = Vec::new();
     let mut emitted = vec![false; plans.len()];
-    let mut sequence = 0u64;
+    let mut sequence = flushed as u64;
     let mut terminal_index = 0;
     for (position, (frame, value)) in events.into_iter().enumerate() {
+        if position < flushed {
+            output.push(frames[position].clone());
+            continue;
+        }
         let Some(mut event) = value.filter(|v| {
             v.get("type")
                 .and_then(Value::as_str)
@@ -744,7 +762,15 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
                     output.push(encoded);
                 }
                 if !emitted[pi] {
-                    emit_items(&mut output, &mut sequence, plan);
+                    if !resume_emitted_items(
+                        &mut output,
+                        &mut sequence,
+                        plan,
+                        delivered.get(&plan.old),
+                        kinds.get(&plan.old),
+                    ) {
+                        return Err(V3DirectResponseHookFailure::UnharvestableToolMarkup);
+                    }
                     emitted[pi] = true;
                 }
                 continue;
@@ -758,7 +784,15 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
         if position == terminal {
             for (pi, plan) in plans.iter().enumerate() {
                 if !emitted[pi] {
-                    emit_items(&mut output, &mut sequence, plan);
+                    if !resume_emitted_items(
+                        &mut output,
+                        &mut sequence,
+                        plan,
+                        delivered.get(&plan.old),
+                        kinds.get(&plan.old),
+                    ) {
+                        return Err(V3DirectResponseHookFailure::UnharvestableToolMarkup);
+                    }
                 }
             }
             event["response"] = response.clone();
@@ -1029,70 +1063,329 @@ fn push_event(output: &mut Vec<Vec<u8>>, sequence: &mut u64, mut event: Value) -
     true
 }
 
+fn emit_item(output: &mut Vec<Vec<u8>>, sequence: &mut u64, index: usize, item: &Value) -> bool {
+    let mut added = item.clone();
+    added["status"] = "in_progress".into();
+    if item["type"] == "function_call" {
+        added["arguments"] = "".into();
+    } else {
+        added["content"] = json!([]);
+    }
+    if !push_event(
+        output,
+        sequence,
+        json!({"type":"response.output_item.added","output_index":index,"item":added}),
+    ) {
+        return false;
+    }
+    if item["type"] == "function_call" {
+        for kind in [
+            "response.function_call_arguments.delta",
+            "response.function_call_arguments.done",
+        ] {
+            let mut event = json!({"type":kind,"output_index":index,"item_id":item["id"],"call_id":item["call_id"]});
+            event[if kind.ends_with("delta") {
+                "delta"
+            } else {
+                "arguments"
+            }] = item["arguments"].clone();
+            if !push_event(output, sequence, event) {
+                return false;
+            }
+        }
+    } else if let Some(parts) = item["content"].as_array() {
+        for (ci, part) in parts.iter().enumerate() {
+            let mut added_part = part.clone();
+            if part["type"] == "output_text" {
+                added_part["text"] = "".into();
+            }
+            if !push_event(
+                output,
+                sequence,
+                json!({"type":"response.content_part.added","output_index":index,"item_id":item["id"],"content_index":ci,"part":added_part}),
+            ) {
+                return false;
+            }
+            if part["type"] == "output_text" {
+                if !push_event(
+                    output,
+                    sequence,
+                    json!({"type":"response.output_text.delta","output_index":index,"item_id":item["id"],"content_index":ci,"delta":part["text"]}),
+                ) {
+                    return false;
+                }
+                if !push_event(
+                    output,
+                    sequence,
+                    json!({"type":"response.output_text.done","output_index":index,"item_id":item["id"],"content_index":ci,"text":part["text"]}),
+                ) {
+                    return false;
+                }
+            }
+            if !push_event(
+                output,
+                sequence,
+                json!({"type":"response.content_part.done","output_index":index,"item_id":item["id"],"content_index":ci,"part":part}),
+            ) {
+                return false;
+            }
+        }
+    }
+    push_event(
+        output,
+        sequence,
+        json!({"type":"response.output_item.done","output_index":index,"item":item}),
+    )
+}
+
 fn emit_items(output: &mut Vec<Vec<u8>>, sequence: &mut u64, plan: &Replacement) {
     for (offset, item) in plan.items.iter().enumerate() {
-        let index = plan.start + offset;
-        let mut added = item.clone();
-        added["status"] = "in_progress".into();
-        if item["type"] == "function_call" {
-            added["arguments"] = "".into();
-        } else {
-            added["content"] = json!([]);
-        }
-        push_event(
-            output,
-            sequence,
-            json!({"type":"response.output_item.added","output_index":index,"item":added}),
-        );
-        if item["type"] == "function_call" {
-            for kind in [
-                "response.function_call_arguments.delta",
-                "response.function_call_arguments.done",
-            ] {
-                let mut event = json!({"type":kind,"output_index":index,"item_id":item["id"],"call_id":item["call_id"]});
-                event[if kind.ends_with("delta") {
-                    "delta"
-                } else {
-                    "arguments"
-                }] = item["arguments"].clone();
-                push_event(output, sequence, event);
-            }
-        } else if let Some(parts) = item["content"].as_array() {
-            for (ci, part) in parts.iter().enumerate() {
-                let mut added_part = part.clone();
-                if part["type"] == "output_text" {
-                    added_part["text"] = "".into();
-                }
-                push_event(
-                    output,
-                    sequence,
-                    json!({"type":"response.content_part.added","output_index":index,"item_id":item["id"],"content_index":ci,"part":added_part}),
-                );
-                if part["type"] == "output_text" {
-                    push_event(
-                        output,
-                        sequence,
-                        json!({"type":"response.output_text.delta","output_index":index,"item_id":item["id"],"content_index":ci,"delta":part["text"]}),
-                    );
-                    push_event(
-                        output,
-                        sequence,
-                        json!({"type":"response.output_text.done","output_index":index,"item_id":item["id"],"content_index":ci,"text":part["text"]}),
-                    );
-                }
-                push_event(
-                    output,
-                    sequence,
-                    json!({"type":"response.content_part.done","output_index":index,"item_id":item["id"],"content_index":ci,"part":part}),
-                );
-            }
-        }
-        push_event(
-            output,
-            sequence,
-            json!({"type":"response.output_item.done","output_index":index,"item":item}),
-        );
+        let _ = emit_item(output, sequence, plan.start + offset, item);
     }
+}
+
+/// Carrier state that already crossed the committed client channel for the
+/// items this rewrite harvests. The commit probe holds the tail from the first
+/// governed marker on, so only the leading carrier frames of the harvested item
+/// can be flushed; everything after them is rewritten here.
+#[derive(Default)]
+struct DeliveredItem {
+    added: bool,
+    id: Option<String>,
+    parts: HashMap<usize, DeliveredPart>,
+    done: bool,
+}
+
+#[derive(Default)]
+struct DeliveredPart {
+    added: bool,
+    text: String,
+    text_done: bool,
+    part_done: bool,
+}
+
+/// Carrier event kinds the provider itself used for a harvested item. A
+/// provider may stream text as bare deltas without `output_item.added` or
+/// `content_part.added`; the continuation must then close that item with the
+/// same shapes, or the client would receive an `added` event after text it
+/// already aggregated.
+#[derive(Default, Clone, Copy)]
+struct CarrierKinds {
+    part_added: bool,
+    delta: bool,
+    text_done: bool,
+    part_done: bool,
+    item_done: bool,
+}
+
+fn original_carrier_kinds(
+    events: &[(
+        routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
+        Option<Value>,
+    )],
+    association: &TerminalAssociation,
+    plans: &[Replacement],
+) -> HashMap<usize, CarrierKinds> {
+    let mut kinds: HashMap<usize, CarrierKinds> = HashMap::new();
+    for (_, value) in events.iter() {
+        let Some(event) = value.as_ref() else {
+            continue;
+        };
+        let Some(index) = association.event_index(event) else {
+            continue;
+        };
+        if !plans.iter().any(|plan| plan.old == index) {
+            continue;
+        }
+        let slot = kinds.entry(index).or_default();
+        match event["type"].as_str() {
+            Some("response.content_part.added") => slot.part_added = true,
+            Some("response.output_text.delta") => slot.delta = true,
+            Some("response.output_text.done") => slot.text_done = true,
+            Some("response.content_part.done") => slot.part_done = true,
+            Some("response.output_item.done") => slot.item_done = true,
+            _ => {}
+        }
+    }
+    kinds
+}
+
+fn delivered_carrier_state(
+    events: &[(
+        routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
+        Option<Value>,
+    )],
+    flushed: usize,
+    association: &TerminalAssociation,
+    plans: &[Replacement],
+) -> HashMap<usize, DeliveredItem> {
+    let mut delivered: HashMap<usize, DeliveredItem> = HashMap::new();
+    for (_, value) in events.iter().take(flushed) {
+        let Some(event) = value.as_ref() else {
+            continue;
+        };
+        let Some(index) = association.event_index(event) else {
+            continue;
+        };
+        if !plans.iter().any(|plan| plan.old == index) {
+            continue;
+        }
+        let slot = delivered.entry(index).or_default();
+        if slot.id.is_none() {
+            slot.id = event
+                .pointer("/item/id")
+                .and_then(Value::as_str)
+                .or_else(|| event["item_id"].as_str())
+                .map(str::to_owned);
+        }
+        let content_index = event["content_index"]
+            .as_u64()
+            .and_then(|index| usize::try_from(index).ok())
+            .unwrap_or(0);
+        match event["type"].as_str() {
+            Some("response.output_item.added") => {
+                slot.added = true;
+            }
+            Some("response.output_item.done") => slot.done = true,
+            Some("response.content_part.added") => {
+                slot.parts.entry(content_index).or_default().added = true;
+            }
+            Some("response.output_text.delta") => {
+                if let Some(delta) = event["delta"].as_str() {
+                    slot.parts
+                        .entry(content_index)
+                        .or_default()
+                        .text
+                        .push_str(delta);
+                }
+            }
+            Some("response.output_text.done") => {
+                let part = slot.parts.entry(content_index).or_default();
+                if let Some(text) = event["text"].as_str() {
+                    part.text = text.to_owned();
+                }
+                part.text_done = true;
+            }
+            Some("response.content_part.done") => {
+                slot.parts.entry(content_index).or_default().part_done = true;
+            }
+            _ => {}
+        }
+    }
+    delivered
+}
+
+/// Emit one plan where the provider stream left it. A plan whose leading
+/// carrier frames were already flushed continues from the delivered text and
+/// part state instead of repeating it, so every frame the client saw stays
+/// byte-identical while the terminal snapshot keeps the full planned output.
+/// The continuation repeats only the carrier kinds the provider itself used for
+/// that item: a provider that streams bare deltas without `output_item.added`
+/// or `content_part.added` gets the same bare shape back, never an `added`
+/// event after text the client already aggregated.
+fn resume_emitted_items(
+    output: &mut Vec<Vec<u8>>,
+    sequence: &mut u64,
+    plan: &Replacement,
+    delivered: Option<&DeliveredItem>,
+    kinds: Option<&CarrierKinds>,
+) -> bool {
+    let Some(delivered) =
+        delivered.filter(|delivered| delivered.added || !delivered.parts.is_empty())
+    else {
+        emit_items(output, sequence, plan);
+        return true;
+    };
+    let kinds = kinds.copied().unwrap_or_default();
+    let Some(first) = plan.items.first() else {
+        return true;
+    };
+    if first["type"] != "message"
+        || delivered
+            .id
+            .as_deref()
+            .is_some_and(|id| first["id"].as_str() != Some(id))
+    {
+        return false;
+    }
+    let index = plan.start;
+    for (content_index, part) in first["content"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+    {
+        let part_state = delivered.parts.get(&content_index);
+        if kinds.part_added && !part_state.is_some_and(|part_state| part_state.added) {
+            let mut added_part = part.clone();
+            if part["type"] == "output_text" {
+                added_part["text"] = "".into();
+            }
+            if !push_event(
+                output,
+                sequence,
+                json!({"type":"response.content_part.added","output_index":index,"item_id":first["id"],"content_index":content_index,"part":added_part}),
+            ) {
+                return false;
+            }
+        }
+        if part["type"] == "output_text" {
+            let text = part["text"].as_str().unwrap_or_default();
+            let Some(remaining) =
+                text.strip_prefix(part_state.map_or("", |part_state| part_state.text.as_str()))
+            else {
+                return false;
+            };
+            if !remaining.is_empty() {
+                if !kinds.delta
+                    || !push_event(
+                        output,
+                        sequence,
+                        json!({"type":"response.output_text.delta","output_index":index,"item_id":first["id"],"content_index":content_index,"delta":remaining}),
+                    )
+                {
+                    return false;
+                }
+            }
+            if kinds.text_done
+                && !part_state.is_some_and(|part_state| part_state.text_done)
+                && !push_event(
+                    output,
+                    sequence,
+                    json!({"type":"response.output_text.done","output_index":index,"item_id":first["id"],"content_index":content_index,"text":text}),
+                )
+            {
+                return false;
+            }
+        }
+        if kinds.part_done
+            && !part_state.is_some_and(|part_state| part_state.part_done)
+            && !push_event(
+                output,
+                sequence,
+                json!({"type":"response.content_part.done","output_index":index,"item_id":first["id"],"content_index":content_index,"part":part}),
+            )
+        {
+            return false;
+        }
+    }
+    if kinds.item_done
+        && !delivered.done
+        && !push_event(
+            output,
+            sequence,
+            json!({"type":"response.output_item.done","output_index":index,"item":first}),
+        )
+    {
+        return false;
+    }
+    for (offset, item) in plan.items.iter().enumerate().skip(1) {
+        if !emit_item(output, sequence, plan.start + offset, item) {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -1405,7 +1698,7 @@ mod tests {
             "]}}\n\n"
         );
         assert!(
-            rewrite_v3_direct_dsml_attempt(&[wire.as_bytes().to_vec()], &context())
+            rewrite_v3_direct_dsml_attempt(&[wire.as_bytes().to_vec()], 0, &context())
                 .unwrap()
                 .is_none(),
             "ambiguous original items must keep their raw values and duplicate fields"
@@ -1431,7 +1724,7 @@ mod tests {
             ),
         ];
         assert!(
-            rewrite_v3_direct_dsml_attempt(&frames, &context())
+            rewrite_v3_direct_dsml_attempt(&frames, 0, &context())
                 .unwrap()
                 .is_none(),
             "index-only opaque event lost its associated original message"
@@ -1712,7 +2005,7 @@ mod tests {
             })),
             sse_frame(json!({"type":"response.completed","response":response})),
         ];
-        let (rewritten, _) = rewrite_v3_direct_dsml_attempt(&frames, &context())
+        let (rewritten, _) = rewrite_v3_direct_dsml_attempt(&frames, 0, &context())
             .unwrap()
             .expect("reordered native and message identities must be rewritten");
         let wire = String::from_utf8(rewritten.concat()).unwrap();
@@ -1829,7 +2122,7 @@ mod tests {
             })),
             sse_frame(json!({"type":"response.completed","response":response})),
         ];
-        let (rewritten, _) = rewrite_v3_direct_dsml_attempt(&frames, &context())
+        let (rewritten, _) = rewrite_v3_direct_dsml_attempt(&frames, 0, &context())
             .unwrap()
             .expect("reordered expansion must rewrite every associated carrier");
         let events = sse_events(&rewritten);
@@ -2115,7 +2408,7 @@ mod tests {
             })),
             sse_frame(json!({"type":"response.completed","response":response})),
         ];
-        let (rewritten, _) = rewrite_v3_direct_dsml_attempt(&frames, &context)
+        let (rewritten, _) = rewrite_v3_direct_dsml_attempt(&frames, 0, &context)
             .unwrap()
             .expect("complete alternate harvest must rewrite the SSE terminal");
         let terminal = sse_events(&rewritten)
@@ -2226,7 +2519,7 @@ mod tests {
             sse_frame(json!({"type":"response.completed","response":response})),
         ];
 
-        let (rewritten, _) = rewrite_v3_direct_dsml_attempt(&frames, &context())
+        let (rewritten, _) = rewrite_v3_direct_dsml_attempt(&frames, 0, &context())
             .unwrap()
             .expect("deletion-only SSE normalization must preserve the surviving native item");
         let wire = String::from_utf8(rewritten.concat()).unwrap();
@@ -2368,6 +2661,7 @@ mod tests {
         let added = "event: response.output_item.added\nid: original-added\n: original added comment\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n";
         let (frames, _) = rewrite_v3_direct_dsml_attempt(
             &[added.as_bytes().to_vec(), wire.into_bytes()],
+            0,
             &context(),
         )
         .unwrap()
@@ -2401,6 +2695,7 @@ mod tests {
             let terminal = format!("event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{}}}\n\n", sample(&call("x")));
             let (frames, _) = rewrite_v3_direct_dsml_attempt(
                 &[opaque.as_bytes().to_vec(), terminal.into_bytes()],
+                0,
                 &context(),
             )
             .unwrap()
@@ -2465,7 +2760,7 @@ mod tests {
         ];
         // An event-level extension has no defined association with the
         // synthesized tool events, so the complete attempt keeps provider text.
-        let output = rewrite_v3_direct_dsml_attempt(&frames, &context())
+        let output = rewrite_v3_direct_dsml_attempt(&frames, 0, &context())
             .unwrap()
             .map(|(frames, _)| frames)
             .unwrap_or_else(|| frames.clone());
@@ -2486,6 +2781,84 @@ mod tests {
             .as_str()
             .unwrap()
             .contains(OPEN));
+    }
+
+    #[test]
+    fn direct_dsml_flushed_prefix_is_preserved_and_harvest_continues() {
+        // A provider that streams bare text deltas (no item/part added frames)
+        // and commits before the markup arrives. The flushed delta must stay
+        // byte-identical, the harvested item must not repeat it, and the
+        // terminal must keep the full planned output.
+        let full = format!("Before\n{}\nAfter", call("x"));
+        let rest = full.strip_prefix("Before\n").unwrap().to_owned();
+        let frames = vec![
+            format!(
+                "data: {}\n\n",
+                json!({"type":"response.output_text.delta","output_index":0,"item_id":"m","content_index":0,"delta":"Before\n"})
+            )
+            .into_bytes(),
+            format!(
+                "data: {}\n\n",
+                json!({"type":"response.output_text.delta","output_index":0,"item_id":"m","content_index":0,"delta":rest})
+            )
+            .into_bytes(),
+            format!(
+                "data: {}\n\n",
+                json!({"type":"response.output_text.done","output_index":0,"item_id":"m","content_index":0,"text":full})
+            )
+            .into_bytes(),
+            format!(
+                "data: {}\n\n",
+                json!({"type":"response.completed","response":sample(&full)})
+            )
+            .into_bytes(),
+        ];
+        let (output, _) = rewrite_v3_direct_dsml_attempt(&frames, 1, &context())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            output[0], frames[0],
+            "the already-flushed frame was rewritten"
+        );
+        let events: Vec<Value> = output
+            .iter()
+            .skip(1)
+            .filter_map(|frame| {
+                String::from_utf8_lossy(frame)
+                    .lines()
+                    .find_map(|line| line.strip_prefix("data: "))
+                    .and_then(|data| serde_json::from_str(data).ok())
+            })
+            .collect();
+        assert!(
+            !events
+                .iter()
+                .any(|event| event["type"] == "response.output_text.delta"
+                    && event["item_id"] == "m"),
+            "the flushed text was re-emitted: {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| event["type"] == "response.output_item.added"
+                    && event["item"]["id"] == "m"),
+            "the continuation re-added the delivered item: {events:?}"
+        );
+        let terminal = events
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .expect("terminal event");
+        let terminal_output = terminal["response"]["output"].as_array().unwrap();
+        assert_eq!(terminal_output.len(), 3, "{terminal}");
+        assert_eq!(terminal_output[0]["type"], "message");
+        assert_eq!(terminal_output[0]["content"][0]["text"], "Before\n");
+        assert_eq!(terminal_output[1]["type"], "function_call");
+        assert_eq!(terminal_output[1]["name"], "read_image");
+        assert_eq!(terminal_output[2]["type"], "message");
+        assert_eq!(terminal_output[2]["content"][0]["text"], "\nAfter");
+        let wire = String::from_utf8(output.concat()).unwrap();
+        assert!(!wire.contains(OPEN), "harvest markup leaked: {wire}");
+        assert!(!wire.contains(END_INVOKE), "harvest markup leaked: {wire}");
     }
 
     #[test]
@@ -2512,7 +2885,7 @@ mod tests {
                 )
                 .into_bytes(),
             ];
-            let output = rewrite_v3_direct_dsml_attempt(&frames, &context())
+            let output = rewrite_v3_direct_dsml_attempt(&frames, 0, &context())
                 .unwrap()
                 .map(|(frames, _)| frames)
                 .unwrap_or_else(|| frames.clone());
