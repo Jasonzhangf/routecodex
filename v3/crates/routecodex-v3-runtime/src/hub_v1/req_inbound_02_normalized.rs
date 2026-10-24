@@ -30,8 +30,9 @@ pub struct V3HubReqInbound02Normalized {
 /// execution will actually read instead of guessing from field names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum V3HubInboundHistoryField {
-    /// The request also carries an equivalent Chat `messages` history that is
-    /// merged with the decoded `input` and canonicalized into `messages`.
+    /// The request carries both `input` and a derived Chat `messages` twin.
+    /// `input` is the complete history, so the refill continuation keeps it and
+    /// drops the twin instead of maintaining two competing representations.
     ResponsesDual,
     Messages,
     Input,
@@ -65,12 +66,9 @@ pub(crate) fn v3_hub_inbound_history_field(
 }
 
 impl V3HubInboundHistoryField {
-    /// Whether inbound canonicalizes this request into the Chat shape.
-    pub(crate) fn writes_messages(self) -> bool {
-        matches!(
-            self,
-            V3HubInboundHistoryField::ResponsesDual | V3HubInboundHistoryField::Messages
-        )
+    /// Whether inbound reads the Chat `messages` field as the history owner.
+    pub(crate) fn owns_messages(self) -> bool {
+        matches!(self, V3HubInboundHistoryField::Messages)
     }
 }
 
@@ -199,18 +197,7 @@ fn normalize_v3_hub_req_inbound_02_payload(
                 .is_none())
     {
         let raw = Arc::make_mut(&mut input.payload.0);
-        let mut canonical =
-            super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(raw)
-                .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
-        if let Some(source) = raw.get("messages").filter(|value| !value.is_null()) {
-            let source = source.as_array().ok_or_else(|| {
-                "Responses inbound canonicalization failed: messages must be an array".to_string()
-            })?;
-            let decoded = canonical["messages"]
-                .as_array()
-                .expect("codec Chat messages");
-            canonical["messages"] = Value::Array(merge_responses_chat_histories(source, decoded)?);
-        }
+        let canonical = responses_merged_chat_canonical(raw)?;
         input.payload.0 = Arc::new(canonical);
         return Ok(V3HubReqInbound02Normalized {
             previous: input,
@@ -430,6 +417,22 @@ fn comparable_chat_content(content: &Value) -> &Value {
         }
     }
     content
+}
+
+fn responses_merged_chat_canonical(raw: &Value) -> Result<Value, String> {
+    let mut canonical =
+        super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(raw)
+            .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
+    if let Some(source) = raw.get("messages").filter(|value| !value.is_null()) {
+        let source = source.as_array().ok_or_else(|| {
+            "Responses inbound canonicalization failed: messages must be an array".to_string()
+        })?;
+        let decoded = canonical["messages"]
+            .as_array()
+            .expect("codec Chat messages");
+        canonical["messages"] = Value::Array(merge_responses_chat_histories(source, decoded)?);
+    }
+    Ok(canonical)
 }
 
 pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01(

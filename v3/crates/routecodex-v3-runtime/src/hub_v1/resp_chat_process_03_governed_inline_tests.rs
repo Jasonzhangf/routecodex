@@ -1001,20 +1001,80 @@ fn refill_continuation_responses_dual_history_keeps_one_history_owner() {
         &finalized,
     )
     .expect("dual-history continuation must build");
-    let messages = continuation["messages"].as_array().expect("messages array");
+    let input = continuation["input"].as_array().expect("input array");
     assert_eq!(
-        messages.len(),
+        input.len(),
         3,
-        "original + answer + instruction must extend the Chat history: {messages:?}"
+        "original + answer + instruction must extend the Responses history: {input:?}"
     );
     assert!(
-        continuation.get("input").is_none(),
-        "the stale input twin must not compete with messages: {continuation}"
+        continuation.get("messages").is_none(),
+        "the derived twin must not compete with input: {continuation}"
     );
-    assert_eq!(messages[1]["role"], json!("assistant"));
+    assert_eq!(input[1]["type"], json!("message"));
+    assert_eq!(input[1]["role"], json!("assistant"));
     assert_eq!(
-        messages[2]["content"],
+        input[2]["content"][0]["text"],
         json!(V3_CHAT_PROCESS_REFILL_INSTRUCTION)
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_input_side_extension() {
+    // The `messages` twin is a Chat projection that cannot carry a
+    // provider-origin reasoning item. Keeping `input` as the history owner is
+    // what preserves the id/cipher association across the refill.
+    let original = json!({
+        "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]},
+            {"type": "reasoning", "id": "rsn_opaque", "encrypted_content": "cipher-1"},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "prior answer"}]}
+        ],
+        "messages": [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "prior answer", "reasoning_content": ""}
+        ]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "final answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("dual-history continuation with extension must build");
+    let input = continuation["input"].as_array().expect("input array");
+    assert!(
+        continuation.get("messages").is_none(),
+        "the derived twin must not compete with input: {continuation}"
+    );
+    let reasoning: Vec<&Value> = input
+        .iter()
+        .filter(|item| item["type"] == "reasoning")
+        .collect();
+    assert_eq!(
+        reasoning.len(),
+        1,
+        "the input-side reasoning item must be replayed verbatim: {input:?}"
+    );
+    assert_eq!(reasoning[0]["id"], json!("rsn_opaque"));
+    assert_eq!(reasoning[0]["encrypted_content"], json!("cipher-1"));
+    assert!(
+        input
+            .iter()
+            .any(|item| item.to_string().contains("final answer")),
+        "the refill round must join the Responses history: {input:?}"
+    );
+    assert!(
+        input.iter().any(|item| item
+            .to_string()
+            .contains(V3_CHAT_PROCESS_REFILL_INSTRUCTION)),
+        "the continuation must carry the instruction: {input:?}"
     );
 }
 

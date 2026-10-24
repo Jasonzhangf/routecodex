@@ -1616,8 +1616,18 @@ async fn refill_responses_dual_history_continuation_stays_acceptable_public() {
             .json(&json!({
                 "model": "test.test",
                 "instructions": "answer exactly once",
-                "input": "original dual history task",
-                "messages": [{"role": "user", "content": "original dual history task"}],
+                // Dual equivalent history: `input` additionally carries a
+                // provider-origin reasoning item whose id and opaque cipher are
+                // only preserved by the inbound merge, not by the raw twin.
+                "input": [
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "original dual history task"}]},
+                    {"type": "reasoning", "id": "rsn_dual", "encrypted_content": "cipher-dual"},
+                    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "prior dual answer"}]}
+                ],
+                "messages": [
+                    {"role": "user", "content": "original dual history task"},
+                    {"role": "assistant", "content": "prior dual answer", "reasoning_content": ""}
+                ],
                 "stream": false
             }))
             .send()
@@ -1671,6 +1681,18 @@ async fn refill_responses_dual_history_continuation_stays_acceptable_public() {
             .iter()
             .any(|item| item.to_string().contains(REFILL_INSTRUCTION)),
         "continuation must carry the bounded refill instruction: {input:?}"
+    );
+    // The input-side reasoning item must survive as the same reasoning turn.
+    // The outbound projection replaces the opaque cipher with its declared
+    // placeholder, but the item id stays and proves the association survived.
+    let reasoning: Vec<&Value> = input
+        .iter()
+        .filter(|item| item["type"] == "reasoning" && item["id"] == "rsn_dual")
+        .collect();
+    assert_eq!(
+        reasoning.len(),
+        1,
+        "the input-side reasoning item must survive the refill: {input:?}"
     );
     assert_no_error_payload(&consumed.body);
     std::env::remove_var(KEY_ENV);
