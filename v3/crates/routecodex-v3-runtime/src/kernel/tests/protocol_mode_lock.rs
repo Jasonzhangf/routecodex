@@ -14,6 +14,10 @@ struct DirectProviderCompatTerminalTransport {
     sends: AtomicUsize,
 }
 
+struct DirectTransportFailureWithoutResponse {
+    sends: AtomicUsize,
+}
+
 const HANDOFF_DIRECT_PROVIDER: &str = "first_handoff_busy_r5";
 const HANDOFF_RELAY_PROVIDER: &str = "chat_handoff_busy_r5";
 
@@ -121,6 +125,21 @@ impl ResponsesTransport for DirectProviderCompatTerminalTransport {
                         .to_vec(),
                 body_read_failure: None,
             }),
+        })
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for DirectTransportFailureWithoutResponse {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.sends.fetch_add(1, Ordering::SeqCst);
+        Err(V3ProviderError::Transport {
+            request_id: request.request_id().to_string(),
+            provider_id: request.provider_id().to_string(),
+            reason: "connection closed before response headers".to_string(),
         })
     }
 }
@@ -436,6 +455,66 @@ async fn direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_w
             .contains(&"first:default:key:test".to_string()),
         "last candidate HTTP 400 must not exclude the candidate"
     );
+}
+
+#[tokio::test]
+async fn direct_transport_failure_without_response_keeps_last_candidate_health_neutral() {
+    let routing_group = "direct_transport_last_candidate";
+    let manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
+    let raw = V3Server03HttpRequestRaw {
+        request_purpose: V3RequestPurpose::Conversation,
+        port: Some(7777),
+        pipeline_id: Some("test-pipeline:test-session:direct-transport-last-candidate".to_string()),
+        server_id: "test".to_string(),
+        failure_session_scope: test_failure_session_scope(routing_group),
+        request_id: "req-direct-transport-last-candidate".to_string(),
+        execution_id: "exec-direct-transport-last-candidate".to_string(),
+        method: "POST".to_string(),
+        path: "/v1/responses".to_string(),
+        body: json!({"model":"client-model","input":"hello"}),
+    };
+    let transport = DirectTransportFailureWithoutResponse {
+        sends: AtomicUsize::new(0),
+    };
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        raw.clone(),
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        0,
+    )
+    .expect("protocol plan");
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new().with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(
+        transport.sends.load(Ordering::SeqCst),
+        1,
+        "a response-less transport failure must not retry the last candidate: {output:?}"
+    );
+    let observation = output
+        .observability
+        .expect("transport failure must publish observability");
+    let failure = observation
+        .provider_failure_events
+        .first()
+        .expect("transport failure event");
+    assert_eq!(
+        failure.error_type.as_deref(),
+        Some("provider_transport_error"),
+        "{failure:?}"
+    );
+    assert_eq!(
+        failure.health_state, "last_candidate_terminal",
+        "the response-less transport failure must use the terminal health-neutral boundary: {failure:?}"
+    );
+    assert_eq!(failure.failure_count, 0);
+    assert_eq!(failure.cooldown_until_ms, None);
 }
 
 #[tokio::test]

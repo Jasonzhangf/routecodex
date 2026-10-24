@@ -333,6 +333,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         attempt_source: None,
                         status: 502,
                         provider_status: None,
+                        provider_body_read_failure: None,
                         policy_error_type: "selected_target_exhausted".to_string(),
                         policy_error_message: format!(
                             "selected target exhausted after {:?}",
@@ -504,6 +505,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             attempt_source: None,
                             status: 502,
                             provider_status: None,
+                            provider_body_read_failure: None,
                             policy_error_type: "selected_target_exhausted".to_string(),
                             policy_error_message: format!(
                                 "selected target exhausted after {:?}",
