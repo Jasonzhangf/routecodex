@@ -1355,6 +1355,119 @@ fn refill_continuation_responses_dual_history_collapses_consecutive_refreshes() 
 }
 
 #[test]
+fn refill_continuation_responses_dual_history_keeps_hosted_declarations() {
+    // Hosted declarations carry no tool identity, so the identity registry
+    // never sees them. They must still reach the continuation, including when
+    // they are declared next to an identity-bearing declaration.
+    let original = json!({
+        "input": [
+            {"type": "additional_tools", "tools": [
+                {"type": "function", "name": "read_value", "parameters": {"type": "object"}},
+                {"type": "web_search", "search_context_size": "low"}
+            ]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "search it"}]}
+        ],
+        "messages": [{"role": "user", "content": "search it"}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("hosted-declaration continuation must build");
+    let tools = continuation["tools"].as_array().expect("tools array");
+    assert!(
+        tools.iter().any(|tool| tool["name"] == json!("read_value")),
+        "the function declaration must survive: {tools:?}"
+    );
+    let hosted: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["type"] == json!("web_search"))
+        .collect();
+    assert_eq!(
+        hosted.len(),
+        1,
+        "the hosted declaration must survive exactly once: {tools:?}"
+    );
+    assert_eq!(hosted[0]["search_context_size"], json!("low"));
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_hosted_only_declarations() {
+    // Only a hosted declaration is declared. The contribution must still be
+    // written; treating "no identity" as "no declarations" would drop it.
+    let original = json!({
+        "input": [
+            {"type": "additional_tools", "tools": [
+                {"type": "web_search", "search_context_size": "medium"}
+            ]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "search only"}]}
+        ],
+        "messages": [{"role": "user", "content": "search only"}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("hosted-only continuation must build");
+    let tools = continuation["tools"].as_array().expect("tools array");
+    assert_eq!(
+        tools.len(),
+        1,
+        "the hosted declaration must survive: {tools:?}"
+    );
+    assert_eq!(tools[0]["type"], json!("web_search"));
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_input_web_search_declaration() {
+    // A standalone `input` web_search item is lifted into the declarations by
+    // inbound. Removing `input` must not drop the lifted declaration.
+    let original = json!({
+        "input": [
+            {"type": "web_search", "search_context_size": "high"},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "lifted search"}]}
+        ],
+        "messages": [{"role": "user", "content": "lifted search"}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("lifted web_search continuation must build");
+    let tools = continuation["tools"].as_array().expect("tools array");
+    assert_eq!(
+        tools.len(),
+        1,
+        "the lifted web_search declaration must survive: {tools:?}"
+    );
+    assert_eq!(tools[0]["search_context_size"], json!("high"));
+}
+
+#[test]
 fn refill_continuation_responses_ignores_foreign_contents_extension() {
     let original = json!({
         "input": "original task",

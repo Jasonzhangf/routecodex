@@ -455,19 +455,49 @@ pub(crate) fn v3_hub_responses_accepted_chat_contribution(
         .and_then(Value::as_array)
         .cloned()
         .ok_or_else(|| "Responses accepted history must be an array".to_string())?;
-    // Resolve the declarations through the declaration owner's own identity
-    // registry instead of copying `canonical.tools`. The canonical Chat shape
-    // still lists the raw `additional_tools` items next to their resolved
-    // forms, so copying it would hand the next execution a stale schema under
-    // the same tool identity and turn a later refresh into a source conflict.
-    // This resolution keeps hosted, MCP, and namespace declarations and emits
-    // one declaration per identity, so it is re-entrant for the next round.
-    let tools =
-        provider_compat_core::namespace_tools::resolve_responses_tool_declarations(payload)?;
-    Ok(V3HubResponsesAcceptedChatContribution {
-        messages,
-        tools: (!tools.is_empty()).then(|| Value::Array(tools)),
-    })
+    let tools = v3_hub_responses_effective_tool_declarations(payload, &canonical)?;
+    Ok(V3HubResponsesAcceptedChatContribution { messages, tools })
+}
+
+/// The effective tool declarations a collapsed dual Responses request must keep.
+///
+/// Two things have to hold at once. Hosted and MCP declarations carry no tool
+/// identity, so they must be copied from every accepted declaration source;
+/// the canonical Chat request already lifts them out of `additional_tools`
+/// items and standalone `web_search` items, which is why they are read from
+/// there. Declarations that do carry an identity must be emitted once with the
+/// final refresh winning, because the next execution feeds the whole root
+/// `tools` array in as a single source and rejects two schemas for one
+/// identity. Resolving through the identity registry satisfies both, and the
+/// result is re-entrant for the next round.
+fn v3_hub_responses_effective_tool_declarations(
+    payload: &Value,
+    canonical: &Value,
+) -> Result<Option<Value>, String> {
+    let mut hosted: Vec<Value> = Vec::new();
+    for tool in canonical
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if matches!(
+            tool.get("type").and_then(Value::as_str),
+            Some("namespace" | "function" | "custom")
+        ) {
+            continue;
+        }
+        if !hosted.iter().any(|seen| seen == tool) {
+            hosted.push(tool.clone());
+        }
+    }
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            payload,
+            "openai-responses",
+        )?;
+    let declarations = registry.source_tools(&hosted);
+    Ok((!declarations.is_empty()).then(|| Value::Array(declarations)))
 }
 
 pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01(

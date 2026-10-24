@@ -1898,12 +1898,15 @@ async fn refill_responses_dual_additional_tools_survive_public() {
                         "description": "stale declaration",
                         "parameters": {"type": "object", "properties": {"stale": {"type": "string"}}}
                     }]},
-                    {"type": "additional_tools", "tools": [{
-                        "type": "function",
-                        "name": "read_declared_value",
-                        "description": "refreshed declaration",
-                        "parameters": {"type": "object", "properties": {"key": {"type": "string"}}}
-                    }]},
+                    {"type": "additional_tools", "tools": [
+                        {
+                            "type": "function",
+                            "name": "read_declared_value",
+                            "description": "refreshed declaration",
+                            "parameters": {"type": "object", "properties": {"key": {"type": "string"}}}
+                        },
+                        {"type": "code_interpreter", "container": {"type": "auto"}}
+                    ]},
                     {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "declared tools task"}]}
                 ],
                 "messages": [
@@ -1953,6 +1956,15 @@ async fn refill_responses_dual_additional_tools_survive_public() {
     assert!(
         second.to_string().contains("declared tools task"),
         "the original task must survive: {second}"
+    );
+    let hosted: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["type"] == json!("code_interpreter"))
+        .collect();
+    assert_eq!(
+        hosted.len(),
+        1,
+        "the hosted declaration must survive the collapse: {tools:?}"
     );
     assert!(
         second.to_string().contains(REFILL_INSTRUCTION),
