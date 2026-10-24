@@ -166,6 +166,10 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             v3_responses_relay_transport_intent_from_stream_field(&input.payload);
         let provider_request_transport_intent = client_response_transport_intent;
         let local_tool_output_ids = find_responses_tool_output_ids(&input.payload)?;
+        // A request that declares tools enters Relay Chat Process tool
+        // governance, which may rewrite tool markup in the complete response.
+        // Such a request keeps the whole-attempt client projection.
+        let relay_request_declares_tools = relay_request_declares_tools(&input.payload);
         if input
             .payload
             .get("previous_response_id")
@@ -1251,6 +1255,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         && provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat
                         && !manifest.memory_raw_capture.enabled
                         && !request_tool_thinking_enabled
+                        && !relay_request_declares_tools
                     {
                         projection_handle.as_ref().and_then(|handle| {
                             let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
@@ -1605,4 +1610,17 @@ pub(crate) fn find_responses_tool_output_ids(
         }
     }
     Ok(ids)
+}
+
+/// A request that declares tools enters Relay Chat Process tool governance,
+/// which may rewrite tool markup in the complete response. Such a request keeps
+/// the whole-attempt client projection; only a tool-free request may commit its
+/// first business frame at provider arrival time.
+fn relay_request_declares_tools(payload: &Value) -> bool {
+    ["tools", "additional_tools"].iter().any(|field| {
+        payload
+            .get(*field)
+            .and_then(Value::as_array)
+            .is_some_and(|tools| !tools.is_empty())
+    })
 }

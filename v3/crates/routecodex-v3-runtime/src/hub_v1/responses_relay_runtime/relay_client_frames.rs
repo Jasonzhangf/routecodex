@@ -296,7 +296,12 @@ impl V3RelayChatClientStreamProjector {
                     "type": "response.output_item.added",
                     "response_id": self.response_id,
                     "output_index": output_index,
-                    "item": {"id": item_id, "type": "reasoning", "summary": []},
+                    "item": {
+                        "id": item_id,
+                        "type": "reasoning",
+                        "summary": [],
+                        "content": [],
+                    },
                 }),
             ))?;
             self.push(super::build_v3_runtime_sse_json_frame(
@@ -453,6 +458,7 @@ impl V3RelayChatClientStreamProjector {
                     "id": item_id,
                     "type": "reasoning",
                     "summary": [{"type": "summary_text", "text": text}],
+                    "content": [{"type": "reasoning_text", "text": text}],
                 },
             }),
         ))
