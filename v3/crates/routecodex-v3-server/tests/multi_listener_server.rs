@@ -5628,6 +5628,10 @@ async fn responses_client_anthropic_malformed_reasoning_breaks_transport_without
 #[tokio::test]
 async fn anthropic_client_anthropic_cache_usage_keeps_native_wire_shape() {
     let _test_guard = TEST_LOCK.lock().await;
+    // This case asserts the exact single-round cache usage on the native wire,
+    // so the Chat Process continuation is pinned off; a real refill sums every
+    // round's usage into the delivered response.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     std::env::set_var("V3_P6_TEST_KEY", "usage-controlled-key");
     let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
         StatusCode::OK,
