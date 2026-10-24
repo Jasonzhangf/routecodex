@@ -57,6 +57,15 @@ struct OpenToolCallItem {
     added_emitted: bool,
 }
 
+/// One announced business item, recorded so the terminal payload can repeat it
+/// exactly as the client already received it.
+#[derive(Debug, Clone)]
+struct StreamedItem {
+    output_index: usize,
+    item_id: String,
+    item: Value,
+}
+
 /// Shared handle for the request-scoped client stream projection.
 ///
 /// The Relay refill loop runs one provider execution per round and replaces the
@@ -87,6 +96,11 @@ pub(crate) struct V3RelayChatClientStreamProjector {
     /// terminal payload carries them, so a client that joins by item id sees
     /// one item and not two.
     streamed_item_ids: Vec<Option<String>>,
+    /// Every item this stream already announced, in output order. Once the
+    /// client holds a business frame the delivered bytes cannot be rewritten,
+    /// so the terminal response is rebuilt from these items instead of from the
+    /// provider payload.
+    streamed_items: Vec<StreamedItem>,
     reasoning: Option<OpenReasoningItem>,
     message: Option<OpenMessageItem>,
     tool_calls: Vec<OpenToolCallItem>,
@@ -106,6 +120,7 @@ impl V3RelayChatClientStreamProjector {
             created_at: 0,
             next_output_index: 0,
             streamed_item_ids: Vec::new(),
+            streamed_items: Vec::new(),
             reasoning: None,
             message: None,
             tool_calls: Vec::new(),
@@ -419,6 +434,17 @@ impl V3RelayChatClientStreamProjector {
         self.push(frame)
     }
 
+    /// Record one announced item at its output index. The terminal frame
+    /// rebuilds its `output` array from this record, so a late governance rewrite
+    /// can never contradict bytes the client already holds.
+    fn record_streamed_item(&mut self, output_index: usize, item_id: &str, item: Value) {
+        self.streamed_items.push(StreamedItem {
+            output_index,
+            item_id: item_id.to_string(),
+            item,
+        });
+    }
+
     fn close_reasoning(&mut self) -> Result<(), String> {
         let Some(reasoning) = self.reasoning.take() else {
             return Ok(());
@@ -426,6 +452,16 @@ impl V3RelayChatClientStreamProjector {
         let output_index = reasoning.output_index;
         let item_id = reasoning.item_id;
         let text = reasoning.text;
+        self.record_streamed_item(
+            output_index,
+            &item_id,
+            json!({
+                "id": item_id,
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": text}],
+                "content": [{"type": "reasoning_text", "text": text}],
+            }),
+        );
         self.push(super::build_v3_runtime_sse_json_frame(
             "response.reasoning_summary_text.done",
             &json!({
@@ -471,6 +507,17 @@ impl V3RelayChatClientStreamProjector {
         let output_index = message.output_index;
         let item_id = message.item_id;
         let text = message.text;
+        self.record_streamed_item(
+            output_index,
+            &item_id,
+            json!({
+                "id": item_id,
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": text}],
+            }),
+        );
         self.push(super::build_v3_runtime_sse_json_frame(
             "response.output_text.done",
             &json!({
@@ -515,6 +562,18 @@ impl V3RelayChatClientStreamProjector {
             if !call.added_emitted {
                 continue;
             }
+            self.record_streamed_item(
+                call.output_index,
+                &call.item_id,
+                json!({
+                    "id": call.item_id,
+                    "type": "function_call",
+                    "status": "completed",
+                    "call_id": call.call_id,
+                    "name": call.name,
+                    "arguments": call.arguments,
+                }),
+            );
             self.push(super::build_v3_runtime_sse_json_frame(
                 "response.function_call_arguments.done",
                 &json!({
@@ -584,21 +643,23 @@ impl V3RelayChatClientStreamProjector {
                 object.insert("id".to_string(), Value::String(self.response_id.clone()));
             }
         }
-        // The streamed item ids are the ones the client already holds. Without
-        // them the terminal payload would describe the same business items a
-        // second time under synthesized ids.
-        if let Some(output) = terminal_response
-            .get_mut("output")
-            .and_then(Value::as_array_mut)
-        {
-            for (index, item) in output.iter_mut().enumerate() {
-                let Some(Some(streamed_id)) = self.streamed_item_ids.get(index) else {
-                    continue;
-                };
-                if let Some(object) = item.as_object_mut() {
-                    object.insert("id".to_string(), Value::String(streamed_id.clone()));
-                }
-            }
+        if let Some(object) = terminal_response.as_object_mut() {
+            object.insert(
+                "output".to_string(),
+                Value::Array(
+                    self.streamed_items
+                        .iter()
+                        .map(|entry| {
+                            let mut item = entry.item.clone();
+                            if let Some(item_object) = item.as_object_mut() {
+                                item_object
+                                    .insert("id".to_string(), Value::String(entry.item_id.clone()));
+                            }
+                            item
+                        })
+                        .collect(),
+                ),
+            );
         }
         let frame = super::build_v3_runtime_sse_json_frame(
             event,

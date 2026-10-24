@@ -226,3 +226,66 @@ async fn relay_refill_round_boundary_opens_a_new_business_item() {
         "terminal keeps the response id the client already received: {terminal_frame}"
     );
 }
+
+/// A committed stream keeps the bytes it already sent. Chat Process rewrites the
+/// provider payload after this projection, so the terminal must repeat the
+/// announced items rather than re-describe the provider payload.
+#[tokio::test]
+async fn relay_committed_terminal_repeats_announced_items_after_governance() {
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let mut projector = super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+        sink,
+        relay_test_budget(),
+    );
+
+    // The provider streams visible text while its stream is still open.
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_governed",
+            "model": "wire-test",
+            "created": 7,
+            "choices": [{"index": 0, "delta": {"content": "plain answer"}, "finish_reason": null}],
+        }))
+        .expect("chunk");
+
+    // The terminal payload is the post-governance shape: the think block was
+    // harvested into a leading reasoning item and the visible text was rewritten.
+    let terminal = json!({
+        "id": "chatcmpl_governed",
+        "object": "response",
+        "status": "completed",
+        "output": [
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "hidden plan"}],
+             "content": [{"type": "reasoning_text", "text": "hidden plan"}]},
+            {"type": "message", "role": "assistant",
+             "content": [{"type": "output_text", "text": "plain answer"}]}
+        ],
+    });
+    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut frames = drain_frames(&mut receiver);
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+
+    // The client never saw the leading reasoning item, so the terminal must not
+    // introduce one: it would be a second, unreconciled description of the same
+    // answer.
+    let terminal_frame = frames
+        .iter()
+        .find(|frame| frame.contains("response.completed"))
+        .expect("terminal frame");
+    assert!(
+        !terminal_frame.contains("reasoning"),
+        "terminal introduces an item the client never received: {terminal_frame}"
+    );
+    assert!(
+        terminal_frame.contains("\"text\":\"plain answer\"") && terminal_frame.contains("msg_0"),
+        "terminal repeats the announced item exactly: {terminal_frame}"
+    );
+    // The announced item stays one business item in the terminal output array.
+    assert_eq!(
+        terminal_frame.matches("\"type\":\"message\"").count(),
+        1,
+        "terminal output carries exactly the announced item: {terminal_frame}"
+    );
+}
