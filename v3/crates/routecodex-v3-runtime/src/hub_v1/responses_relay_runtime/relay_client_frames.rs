@@ -22,19 +22,6 @@ use crate::nodes::{
 /// Request-level decision for early Relay projection.
 ///
 /// Relay runs its response governance (Resp01/02/03 and Chat Process) on the
-/// complete canonical response. A request whose governance may still rewrite
-/// text or tool shape keeps today's whole-attempt buffering, so its client bytes
-/// stay identical. Only a request that provably has no such rewrite may commit
-/// on the first business frame.
-pub(crate) fn relay_client_stream_commit_eligible(
-    client_wants_sse: bool,
-    sink_present: bool,
-    memory_raw_capture: bool,
-    tool_thinking_enabled: bool,
-) -> bool {
-    client_wants_sse && sink_present && !memory_raw_capture && !tool_thinking_enabled
-}
-
 struct OpenReasoningItem {
     output_index: usize,
     item_id: String,
@@ -53,7 +40,7 @@ struct OpenToolCallItem {
     item_id: String,
     call_id: String,
     name: String,
-    arguments: String,
+    arguments: Option<String>,
     added_emitted: bool,
 }
 
@@ -64,6 +51,22 @@ struct StreamedItem {
     output_index: usize,
     item_id: String,
     item: Value,
+}
+
+fn relay_function_call_item(call: &OpenToolCallItem, status: &str) -> Value {
+    let mut item = json!({
+        "id": call.item_id,
+        "type": "function_call",
+        "status": status,
+        "call_id": call.call_id,
+        "name": call.name,
+    });
+    if let Some(arguments) = &call.arguments {
+        item.as_object_mut()
+            .expect("relay function call item is an object")
+            .insert("arguments".to_string(), Value::String(arguments.clone()));
+    }
+    item
 }
 
 /// Shared handle for the request-scoped client stream projection.
@@ -92,10 +95,6 @@ pub(crate) struct V3RelayChatClientStreamProjector {
     model: String,
     created_at: u64,
     next_output_index: usize,
-    /// The item id this stream handed the client for each output index. The
-    /// terminal payload carries them, so a client that joins by item id sees
-    /// one item and not two.
-    streamed_item_ids: Vec<Option<String>>,
     /// Every item this stream already announced, in output order. Once the
     /// client holds a business frame the delivered bytes cannot be rewritten,
     /// so the terminal response is rebuilt from these items instead of from the
@@ -104,10 +103,6 @@ pub(crate) struct V3RelayChatClientStreamProjector {
     reasoning: Option<OpenReasoningItem>,
     message: Option<OpenMessageItem>,
     tool_calls: Vec<OpenToolCallItem>,
-    /// Request-local resolver applied to each provider tool call so the
-    /// streamed and terminal items keep the client tool kind, namespace and
-    /// custom input. Absent means the plain `function_call` fallback.
-    tool_call_projection: Option<V3OpenAiChatToolCallProjection>,
 }
 
 impl V3RelayChatClientStreamProjector {
@@ -123,24 +118,11 @@ impl V3RelayChatClientStreamProjector {
             model: String::new(),
             created_at: 0,
             next_output_index: 0,
-            streamed_item_ids: Vec::new(),
             streamed_items: Vec::new(),
             reasoning: None,
             message: None,
             tool_calls: Vec::new(),
-            tool_call_projection: None,
         }
-    }
-
-    /// Attach the request-local tool-call resolver built from the request's
-    /// namespace/custom declarations. Without it the projector keeps the plain
-    /// `function_call` shape it has always used for undeclared tool names.
-    pub(crate) fn with_tool_call_projection(
-        mut self,
-        projection: V3OpenAiChatToolCallProjection,
-    ) -> Self {
-        self.tool_call_projection = Some(projection);
-        self
     }
 
     pub(crate) fn is_committed(&self) -> bool {
@@ -262,7 +244,6 @@ impl V3RelayChatClientStreamProjector {
             let output_index = self.next_output_index;
             self.next_output_index += 1;
             let item_id = format!("msg_{output_index}");
-            self.streamed_item_ids.push(Some(item_id.clone()));
             self.push(super::build_v3_runtime_sse_json_frame(
                 "response.output_item.added",
                 &json!({
@@ -320,7 +301,6 @@ impl V3RelayChatClientStreamProjector {
             let output_index = self.next_output_index;
             self.next_output_index += 1;
             let item_id = format!("rs_{output_index}");
-            self.streamed_item_ids.push(Some(item_id.clone()));
             self.push(super::build_v3_runtime_sse_json_frame(
                 "response.output_item.added",
                 &json!({
@@ -385,14 +365,13 @@ impl V3RelayChatClientStreamProjector {
             None => {
                 let output_index = self.next_output_index;
                 self.next_output_index += 1;
-                self.streamed_item_ids.push(None);
                 self.tool_calls.push(OpenToolCallItem {
                     wire_index,
                     output_index,
                     item_id: String::new(),
                     call_id: String::new(),
                     name: String::new(),
-                    arguments: String::new(),
+                    arguments: None,
                     added_emitted: false,
                 });
                 self.tool_calls.len() - 1
@@ -414,7 +393,10 @@ impl V3RelayChatClientStreamProjector {
                 call_entry.name = name.to_string();
             }
             if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
-                call_entry.arguments.push_str(arguments);
+                call_entry
+                    .arguments
+                    .get_or_insert_with(String::new)
+                    .push_str(arguments);
             }
         }
         if call_entry.added_emitted || call_entry.name.is_empty() {
@@ -428,23 +410,13 @@ impl V3RelayChatClientStreamProjector {
         } else {
             call_entry.call_id.clone()
         };
-        if let Some(slot) = self.streamed_item_ids.get_mut(call_entry.output_index) {
-            *slot = Some(call_entry.item_id.clone());
-        }
         let frame = super::build_v3_runtime_sse_json_frame(
             "response.output_item.added",
             &json!({
                 "type": "response.output_item.added",
                 "response_id": self.response_id,
                 "output_index": call_entry.output_index,
-                "item": {
-                    "id": call_entry.item_id,
-                    "type": "function_call",
-                    "status": "in_progress",
-                    "call_id": call_entry.call_id,
-                    "name": call_entry.name,
-                    "arguments": "",
-                },
+                "item": relay_function_call_item(call_entry, "in_progress"),
             }),
         );
         self.push(frame)
@@ -581,24 +553,23 @@ impl V3RelayChatClientStreamProjector {
             self.record_streamed_item(
                 call.output_index,
                 &call.item_id,
-                json!({
-                    "id": call.item_id,
-                    "type": "function_call",
-                    "status": "completed",
-                    "call_id": call.call_id,
-                    "name": call.name,
-                    "arguments": call.arguments,
-                }),
+                relay_function_call_item(&call, "completed"),
             );
+            let mut arguments_done = json!({
+                "type": "response.function_call_arguments.done",
+                "response_id": self.response_id,
+                "output_index": call.output_index,
+                "call_id": call.call_id,
+            });
+            if let Some(arguments) = &call.arguments {
+                arguments_done
+                    .as_object_mut()
+                    .expect("relay function arguments event is an object")
+                    .insert("arguments".to_string(), Value::String(arguments.clone()));
+            }
             self.push(super::build_v3_runtime_sse_json_frame(
                 "response.function_call_arguments.done",
-                &json!({
-                    "type": "response.function_call_arguments.done",
-                    "response_id": self.response_id,
-                    "output_index": call.output_index,
-                    "call_id": call.call_id,
-                    "arguments": call.arguments,
-                }),
+                &arguments_done,
             ))?;
             self.push(super::build_v3_runtime_sse_json_frame(
                 "response.output_item.done",
@@ -606,14 +577,7 @@ impl V3RelayChatClientStreamProjector {
                     "type": "response.output_item.done",
                     "response_id": self.response_id,
                     "output_index": call.output_index,
-                    "item": {
-                        "id": call.item_id,
-                        "type": "function_call",
-                        "status": "completed",
-                        "call_id": call.call_id,
-                        "name": call.name,
-                        "arguments": call.arguments,
-                    },
+                    "item": relay_function_call_item(&call, "completed"),
                 }),
             ))?;
         }
@@ -629,6 +593,25 @@ impl V3RelayChatClientStreamProjector {
         self.close_reasoning()?;
         self.close_message()?;
         self.close_tool_calls()
+    }
+
+    /// The aggregate text the client can reconstruct from the announced items.
+    fn terminal_output_text(&self) -> String {
+        let mut ordered: Vec<&StreamedItem> = self.streamed_items.iter().collect();
+        ordered.sort_by_key(|entry| entry.output_index);
+        let mut text = String::new();
+        for entry in ordered {
+            if let Some(content) = entry.item.get("content").and_then(Value::as_array) {
+                for part in content {
+                    if part.get("type").and_then(Value::as_str) == Some("output_text") {
+                        if let Some(part) = part.get("text").and_then(Value::as_str) {
+                            text.push_str(part);
+                        }
+                    }
+                }
+            }
+        }
+        text
     }
 
     /// Rebuild the terminal `output` from the announced items, ordered by output
@@ -682,6 +665,15 @@ impl V3RelayChatClientStreamProjector {
                 "output".to_string(),
                 Value::Array(self.terminal_output_items()),
             );
+            // The aggregate text is a second view of the same business content.
+            // Chat Process recomputes it after governance, so leaving the
+            // governed value here would contradict the announced items.
+            if object.contains_key("output_text") {
+                object.insert(
+                    "output_text".to_string(),
+                    Value::String(self.terminal_output_text()),
+                );
+            }
         }
         let frame = super::build_v3_runtime_sse_json_frame(
             event,

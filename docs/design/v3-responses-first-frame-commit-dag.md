@@ -149,9 +149,8 @@ flowchart TD
 2. 提交边界与 Direct 同构:首个业务帧(可见输出文本增量或带名字的 tool-call 起始帧)提交,
    提交前仍是整段缓冲,可整体丢弃;提交后续发 append-only,提交后失败静默断流,不换候选。
 3. 治理闸:Relay 的 Resp01/02/03 与 Chat Process 在整段上运行。凡请求级证明会改写文本或工具形状的
-   (tool thinking、DSML、memory raw capture、声明了响应侧改写的 provider compat 档),不提交并保持
-   今天的整段缓冲,逐字节不变;只有证明不改写的请求才渐进投影。终态帧仍由整段 builder 产出
-   (usage/status 只发一次)。
+   (tool thinking、memory raw capture、声明了工具),不提交并保持今天的整段缓冲,逐字节不变;
+   只有证明不改写的请求才渐进投影。终态帧仍由整段 builder 产出(usage/status 只发一次)。
 4. 服务端复用 `V3CommittedClientFrameSink` 与 `accept_v3_client_sse_transport`:首帧提交后通道接管,
    outcome 只补 `flushed_frames` 之后的剩余帧。
 5. 红测:同一 chat SSE 事件流在 relay 路径必须于 provider 终态前把首个 `output_text.delta`
@@ -163,26 +162,33 @@ openai_chat 线协议按上述映射逐帧出帧;提交谓词与 Direct 同构;�
 终态帧在 seal 边界内。Relay refill 循环按请求持有同一投影状态,只在最终轮按合并后的响应
 seal 一次,避免提交后被下一轮重投影覆盖。
 
-请求级不提交条件有四个:客户端未要 SSE、无客户端帧通道、memory raw capture、tool thinking,
-以及声明了工具(`tools` / `additional_tools` 非空)。工具声明属于第 3 项的改写风险:Resp03
-的工具治理会把序列化调用从正文搬进 tool_calls 条目,属于结构改写,已提交的正文无法撤回。
+请求级不提交条件有五个:客户端未要 SSE、无客户端帧通道、memory raw capture、tool thinking、
+声明了工具。工具声明算三种来源:顶层 `tools`、顶层 `additional_tools`、以及 input 条目里的
+`additional_tools` / `tool_search_output`。工具声明属于第 3 项的改写风险:Resp03 的工具治理
+会把序列化调用从正文搬进 tool_calls 条目,属于结构改写,已提交的正文无法撤回。
 
 三条已修的自洽性问题:
-1. 提交后失败不得换候选。两条 provider 失败分支在重试前检查已提交 sink,命中即按终态处置结束
-   该传输,不再进入下一候选重建响应头。
+1. 提交后失败不得换候选。两条 provider 失败分支(provider 流失败、响应 hook 失败)在重试后、
+   进入下一候选前检查已提交 sink,命中即按终态处置结束该传输,不再重建响应头。红测
+   `committed_relay_stream_ends_after_a_response_hook_failure_without_a_second_candidate`:
+   去掉该守卫后同一请求会选第二个候选。
 2. refill 轮次各自成条目。投影器新增 `close_round`,外层 refill 在已提交轮次结束时关闭当前
    message / reasoning / tool 条目,下一轮在新 output_index 开新条目。
 3. 终态与已流出字节收敛。Chat Process 在 Resp03 会摘取 think 块并删独立控制标记,发生在投影
    之后。已提交时投影器记录每个已 announce 的条目,`finish` 用它们重建终态 `output`(同 id、
-   同顺序、同内容),并按 output_index 排序;改写只影响内部与 refill 决策,不再回头改写已交付帧。
+   同顺序、同内容)与顶层 `output_text`,并按 output_index 排序;改写只影响内部与 refill 决策,
+   不再回头改写已交付帧。残留:模型把 think 块内联在正文时,已提交路径按原样交付,缓冲路径仍会
+   摘取,两种传输的可见正文因此可能不同。
 
 真实入口回放(0.90.4935,`rccv3 restart` 后):7777 首帧 20.94s、终态 48.17s,89 个
 `response.output_text.delta` 分散在 27.19 秒、86 个不同到达时刻;终态 output 带 usage。
 4444 首帧 4.08s、终态 8.76s,80 个正文增量分散在 4.55 秒。
 
-gate:`relay_first_frame_commit` 5 条绿(含轮次边界、终态重建、output 排序三条红测:去掉对应
-修复后各自转红);`responses_relay` 200/200、`client_sse` 17/17、`multi_listener_server`
-192/192。尚未做:独立 review、合入与远端回执、合并后复验。
+gate:`relay_first_frame_commit` 6 条绿(轮次边界、终态重建、output 排序、工具声明闸四条红测:
+去掉对应修复后各自转红),加提交后 hook 失败守卫红测 1 条;`responses_relay` 202/202、
+`client_sse` 17/17、`multi_listener_server` 203/203、`openai_chat_namespace_names` 6/6。
+独立 review 已进行两轮,第一轮四项阻断、第二轮两项阻断均已修。尚未做:复评、合入与远端回执、
+合并后复验。
 
 ### P3 完整性闸(工具参数与整段改写)
 
