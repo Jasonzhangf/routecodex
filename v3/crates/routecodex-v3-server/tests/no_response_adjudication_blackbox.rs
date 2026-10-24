@@ -510,7 +510,7 @@ async fn refill_limit_three_public() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     let (consumed, attempts) = refill_public_chain(
-        "direct",
+        "chat",
         false,
         refill_round_wire(false, "R4_FALLBACK"),
         vec![
