@@ -424,8 +424,13 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
             // A semantic terminal or legal closeout is always held past this
             // point too: acceptance, business-content checks and sealing have
             // not run yet, and a later failure cannot retract a completion
-            // event already delivered to the client.
-            if commit_probe.governed_text_pending() || terminal_frame {
+            // event already delivered to the client. A tool-call argument
+            // payload is held until its item completes, because a partial
+            // payload is not yet the payload the client must receive.
+            if commit_probe.governed_text_pending()
+                || commit_probe.tool_arguments_pending()
+                || terminal_frame
+            {
                 committed.hold_client_flush();
             } else {
                 committed.release_client_flush();

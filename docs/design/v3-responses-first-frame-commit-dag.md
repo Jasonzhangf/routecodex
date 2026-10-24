@@ -149,6 +149,11 @@ flowchart TD
    保持前缀安全;需要完整 JSON 的只在 block 完整点发。
 2. DSML/thinking 与 memory 保持整段模式,并由请求级判定切到不提交;补红测证明这些请求仍与今天逐字节一致。
 
+状态(0.90.4935):第 1 项的提交面与完整性闸已实现。提交谓词扩展为「可见 output_text 或带名字的
+tool-call 起始帧」;工具参数帧在 item 完成前保持挂起,完成后一次按序发出。逐帧改写应用
+(`strip_client_response_id`、provider model identity 擦除)仍未实现,提交后这些帧按 provider 原字节下发。
+第 2 项已由 P1 的请求级判定覆盖。证据:`--lib commit_probe`、`--lib first_frame_commit_`。
+
 ### P4 收口
 
 1. 重新生成 `v3-mainline-caller-flow.md`(不手改)。

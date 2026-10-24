@@ -1139,6 +1139,149 @@ async fn first_frame_commit_delivers_business_frame_before_provider_terminal() {
     );
 }
 
+/// A real harness round can end in a tool call with no visible text at all. The
+/// named tool-call start must commit the attempt before the provider terminal,
+/// while the argument payload stays held until its item completes, so the
+/// streamed bytes still equal the fully buffered attempt byte for byte.
+#[tokio::test]
+async fn first_frame_commit_delivers_tool_call_start_before_provider_terminal() {
+    let chunks = responses_tool_call_chunks();
+    let lead = chunks[0].clone();
+    let partial_arguments = chunks[1].clone();
+    let completion = chunks[2].clone();
+    let lead_for_stream = lead.clone();
+    let partial_arguments_for_stream = partial_arguments.clone();
+    let completion_for_stream = completion.clone();
+    let paced = stream::iter([Ok(lead_for_stream)])
+        .chain(stream::once(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            Ok(partial_arguments_for_stream)
+        }))
+        .chain(stream::once(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+            Ok(completion_for_stream)
+        }));
+    let source: crate::nodes::V3ProviderAttemptSseInnerStream = Box::pin(paced);
+    let projected = wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(source),
+        V3RuntimeStreamObservation::default(),
+        V3RuntimeTimingState::start(),
+        false,
+        false,
+        V3HubProviderWireProtocol::Responses,
+    );
+    let (sink, mut rx) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let collector = tokio::spawn(
+        collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
+            projected,
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+            None,
+            None,
+            None,
+            Some(sink),
+        ),
+    );
+    let first = tokio::time::timeout(std::time::Duration::from_millis(900), rx.recv())
+        .await
+        .expect(
+            "the named tool-call start must reach the client channel before the provider terminal",
+        )
+        .expect("client channel frame");
+    let mut streamed = vec![first];
+    while let Ok(frame) = rx.try_recv() {
+        streamed.push(frame);
+    }
+    let early = String::from_utf8_lossy(&streamed.concat()).to_string();
+    assert!(
+        early.contains("response.output_item.added"),
+        "the tool-call start must be delivered before the provider terminal: {early}"
+    );
+    assert!(
+        !early.contains("response.function_call_arguments.delta"),
+        "a partial argument payload must stay held until its item completes: {early}"
+    );
+    let sealed = collector
+        .await
+        .expect("collector task")
+        .expect("sealed attempt");
+    streamed.extend(sealed.collect::<Vec<_>>().await);
+    let buffered = buffered_with_hooks(chunks).await;
+    assert_eq!(
+        String::from_utf8_lossy(&streamed.concat()),
+        String::from_utf8_lossy(&buffered.concat()),
+        "streamed client bytes must equal the buffered attempt"
+    );
+}
+
+/// A realistic tool-call round: the named function item starts, its arguments
+/// arrive as partial deltas, and the item completes before the terminal. The
+/// chunks are [lead, partial arguments, completion].
+fn responses_tool_call_chunks() -> Vec<Vec<u8>> {
+    let function_call = serde_json::json!({
+        "id": "fc_1",
+        "type": "function_call",
+        "call_id": "call_1",
+        "name": "exec_command",
+        "arguments": "{\"command\":\"echo hi\"}"
+    });
+    let lead = [
+        serde_json::json!({"type":"response.created","response":{"id":"r1","status":"in_progress","output":[]}}),
+        serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"exec_command","arguments":""}}),
+    ]
+    .into_iter()
+    .map(responses_sse_frame)
+    .collect::<Vec<_>>()
+    .concat();
+    let partial_arguments = [
+        serde_json::json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_1","delta":"{\"command\":"}),
+        serde_json::json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_1","delta":"\"echo hi\"}"}),
+    ]
+    .into_iter()
+    .map(responses_sse_frame)
+    .collect::<Vec<_>>()
+    .concat();
+    let completion = [
+        serde_json::json!({"type":"response.function_call_arguments.done","output_index":0,"item_id":"fc_1","arguments":"{\"command\":\"echo hi\"}"}),
+        serde_json::json!({"type":"response.output_item.done","output_index":0,"item":function_call}),
+        serde_json::json!({"type":"response.completed","response":{"id":"r1","status":"completed","output":[function_call]}}),
+    ]
+    .into_iter()
+    .map(responses_sse_frame)
+    .collect::<Vec<_>>()
+    .concat();
+    vec![lead, partial_arguments, completion]
+}
+
+/// The same tool-call round through the production Direct response hooks: the
+/// early-commit path must emit exactly the buffered attempt bytes and must still
+/// seal the attempt.
+#[tokio::test]
+async fn first_frame_commit_tool_call_matches_buffered_hooks() {
+    let chunks = responses_tool_call_chunks();
+    let early = run_early_commit_attempt(chunks.clone()).await;
+    assert!(
+        early.committed,
+        "a named tool-call start must commit the attempt early"
+    );
+    assert!(!early.failed, "the committed tool-call attempt must seal");
+    let buffered = buffered_with_hooks(chunks).await;
+    assert_eq!(
+        String::from_utf8_lossy(&early.frames.concat()),
+        String::from_utf8_lossy(&buffered.concat()),
+        "the early-committed tool-call bytes must equal the buffered attempt"
+    );
+}
+
+fn responses_sse_frame(value: serde_json::Value) -> Vec<u8> {
+    format!(
+        "event: {}\ndata: {}\n\n",
+        value["type"].as_str().unwrap_or("message"),
+        value
+    )
+    .into_bytes()
+}
+
 /// A realistic Responses business-item sequence: the item identity is bound
 /// before its text carriers, which is what the whole-attempt text owners use to
 /// associate wire events with the terminal output.
