@@ -336,6 +336,12 @@ fn refill_reasoning_round_wire() -> String {
                 "encrypted_content": "opaque-refill-cipher-second"
             },
             {
+                "id": "rsn_provider_capture_plaintext",
+                "type": "reasoning",
+                "summary": [],
+                "content": [{"type": "reasoning_text", "text": "keep this reasoning"}]
+            },
+            {
                 "id": "msg_reasoning_round",
                 "type": "message",
                 "role": "assistant",
@@ -1023,8 +1029,8 @@ async fn refill_continuation_captures_provider_reasoning_public() {
             .collect();
         assert_eq!(
             reasoning.len(),
-            2,
-            "{process}: both provider-origin reasoning items must replay: {input:?}"
+            3,
+            "{process}: every provider-origin reasoning item must replay: {input:?}"
         );
         assert_eq!(
             reasoning[0]["id"],
@@ -1046,7 +1052,373 @@ async fn refill_continuation_captures_provider_reasoning_public() {
             json!("opaque-refill-cipher-second"),
             "{process}"
         );
+        assert_eq!(
+            reasoning[2]["id"],
+            json!("rsn_provider_capture_plaintext"),
+            "{process}"
+        );
+        assert_eq!(
+            reasoning[2]["content"],
+            json!([{"type":"reasoning_text","text":"keep this reasoning"}]),
+            "{process}: per-item reasoning plaintext must keep its item association"
+        );
         assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: a messages-shaped refill continuation must keep same-turn
+/// provider reasoning and assistant content associated, and its Responses
+/// projection must not fabricate an empty assistant message.
+///
+/// The messages branch of the refill continuation is owned by the Responses
+/// relay runtime. `/v1/chat/completions` in this build enters the Chat runtime,
+/// which has no bounded-refill loop, so the reachable public entry that carries
+/// a `messages` payload through bounded refill is `/v1/responses`.
+#[tokio::test]
+async fn refill_continuation_messages_shape_keeps_reasoning_association_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "MESSAGES_ROUND_TWO"),
+        EntryOptions {
+            attempt_bodies: vec![refill_reasoning_round_wire()],
+            refill_max: None,
+            model_key: Some("gpt-5.6-sol".to_string()),
+            wire_model: Some("gpt-5.6-sol".to_string()),
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model": "test.gpt-5.6-sol",
+                "messages": [
+                    {"role": "user", "content": "continue the chat-shaped refill"}
+                ],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(value) = captures.try_recv() {
+        captured.push(value);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "one refill execution must reach the provider: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "refill chain must deliver: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("REASONING_ROUND_ONE")
+            && consumed.body.contains("MESSAGES_ROUND_TWO"),
+        "both rounds must reach the client: {consumed:?}"
+    );
+    let input = captured[1]["input"].as_array().unwrap_or_else(|| {
+        panic!(
+            "second provider request must carry Responses input: {}",
+            captured[1]
+        )
+    });
+    let reasoning: Vec<(usize, &Value)> = input
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item["type"] == "reasoning")
+        .collect();
+    assert_eq!(
+        reasoning.len(),
+        3,
+        "every provider-origin reasoning item must replay: {input:?}"
+    );
+    assert_eq!(reasoning[0].1["id"], json!("rsn_provider_capture"));
+    assert_eq!(
+        reasoning[0].1["encrypted_content"],
+        json!("opaque-refill-cipher")
+    );
+    assert_eq!(reasoning[1].1["id"], json!("rsn_provider_capture_second"));
+    assert_eq!(
+        reasoning[1].1["encrypted_content"],
+        json!("opaque-refill-cipher-second")
+    );
+    assert_eq!(
+        reasoning[2].1["id"],
+        json!("rsn_provider_capture_plaintext")
+    );
+    assert_eq!(
+        reasoning[2].1["content"],
+        json!([{"type": "reasoning_text", "text": "keep this reasoning"}])
+    );
+    let assistant_messages: Vec<(usize, &Value)> = input
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item["type"] == "message" && item["role"] == "assistant")
+        .collect();
+    assert_eq!(
+        assistant_messages.len(),
+        1,
+        "same-turn reasoning must not fabricate a second assistant message: {input:?}"
+    );
+    let (assistant_index, assistant_message) = assistant_messages[0];
+    assert!(
+        assistant_message["content"]
+            .as_array()
+            .is_some_and(|parts| parts.iter().any(|part| {
+                part["type"] == "output_text" && part["text"] == json!("REASONING_ROUND_ONE")
+            })),
+        "assistant content must stay complete: {input:?}"
+    );
+    assert_eq!(
+        assistant_index,
+        reasoning[2].0 + 1,
+        "reasoning items must stay adjacent to their assistant content: {input:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: a provider refusal is legal business content, so a refill
+/// continuation must replay the complete assistant message into the next
+/// provider request instead of dropping it.
+#[tokio::test]
+async fn refill_continuation_preserves_provider_refusal_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    const REFUSAL: &str = "provider declined the controlled refill request";
+    for process in ["direct", "chat"] {
+        let refusal_round = json!({
+            "id": "resp_refusal_round_one",
+            "object": "response",
+            "status": "completed",
+            "model": "wire-test",
+            "output": [{
+                "id": "msg_refusal_round_one",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "refusal", "refusal": REFUSAL}]
+            }]
+        })
+        .to_string();
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "application/json",
+            text_response("REFUSAL_ROUND_TWO").to_string(),
+            EntryOptions {
+                attempt_bodies: vec![refusal_round],
+                refill_max: None,
+                model_key: Some("gpt-5.6-sol".to_string()),
+                wire_model: Some("gpt-5.6-sol".to_string()),
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let consumed = consume_response(
+            client()
+                .post(&endpoint)
+                .json(&json!({
+                    "model": "test.gpt-5.6-sol",
+                    "input": "controlled refill refusal preservation",
+                    "stream": false
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let mut captured = Vec::new();
+        while let Ok(value) = captures.try_recv() {
+            captured.push(value);
+        }
+        stop_entry(handle, shutdown).await;
+        assert_eq!(
+            captured.len(),
+            2,
+            "{process}: refusal must not stop the bounded refill execution: {consumed:?}"
+        );
+        assert!(
+            consumed.transport_error.is_none(),
+            "{process}: refusal refill chain must deliver: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains(REFUSAL) && consumed.body.contains("REFUSAL_ROUND_TWO"),
+            "{process}: both rounds must reach the client: {consumed:?}"
+        );
+        let input = captured[1]["input"].as_array().unwrap_or_else(|| {
+            panic!(
+                "{process}: second provider request must carry input: {}",
+                captured[1]
+            )
+        });
+        let replayed_refusal = input.iter().find_map(|item| {
+            (item["role"] == "assistant")
+                .then(|| {
+                    item["content"].as_array().and_then(|parts| {
+                        parts
+                            .iter()
+                            .find(|part| part["type"] == "refusal" && part["refusal"] == REFUSAL)
+                    })
+                })
+                .flatten()
+        });
+        assert!(
+            replayed_refusal.is_some(),
+            "{process}: refusal content must be replayed in the second provider request: {input:?}"
+        );
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn responses_relay_history_preserves_per_item_reasoning_summary_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["chat"] {
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "application/json",
+            text_response("HISTORY_ROUND_TWO").to_string(),
+            EntryOptions {
+                model_key: Some("gpt-5.6-sol".to_string()),
+                wire_model: Some("gpt-5.6-sol".to_string()),
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let consumed = consume_response(
+            client()
+                .post(&endpoint)
+                .json(&json!({
+                    "model": "test.gpt-5.6-sol",
+                    "input": [
+                        {"type":"message","role":"user","content":[{"type":"input_text","text":"continue the paired reasoning history"}]},
+                        {"type":"reasoning","id":"rsn_history_first","summary":[{"type":"summary_text","text":"first plaintext"}],"encrypted_content":"cipher-first"},
+                        {"type":"reasoning","id":"rsn_history_second","summary":[{"type":"summary_text","text":"second plaintext"}],"encrypted_content":"cipher-second"},
+                        {"type":"function_call","id":"fc_history","call_id":"call_history","name":"lookup","arguments":"{\"q\":\"history\"}"},
+                        {"type":"function_call_output","call_id":"call_history","output":"history result"}
+                    ],
+                    "stream": false
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let captured = tokio::time::timeout(Duration::from_secs(2), captures.recv())
+            .await
+            .expect("real provider attempt")
+            .unwrap();
+        stop_entry(handle, shutdown).await;
+        assert!(
+            consumed.transport_error.is_none(),
+            "{process}: relay history must deliver: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains("mixed roundtrip complete"),
+            "{process}: provider business text must reach client: {consumed:?}"
+        );
+        let reasoning: Vec<&Value> = captured["input"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{process}: provider request must carry input: {captured}"))
+            .iter()
+            .filter(|item| item["type"] == "reasoning")
+            .collect();
+        assert_eq!(reasoning.len(), 2, "{process}: {captured}");
+        assert_eq!(reasoning[0]["id"], json!("rsn_history_first"), "{process}");
+        assert_eq!(
+            reasoning[0]["summary"],
+            json!([{"type":"summary_text","text":"first plaintext"}]),
+            "{process}"
+        );
+        assert_eq!(
+            reasoning[0]["encrypted_content"],
+            json!("cipher-first"),
+            "{process}"
+        );
+        assert_eq!(reasoning[1]["id"], json!("rsn_history_second"), "{process}");
+        assert_eq!(
+            reasoning[1]["summary"],
+            json!([{"type":"summary_text","text":"second plaintext"}]),
+            "{process}"
+        );
+        assert_eq!(
+            reasoning[1]["encrypted_content"],
+            json!("cipher-second"),
+            "{process}"
+        );
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+#[tokio::test]
+async fn responses_relay_legacy_reasoning_keeps_original_summary_whitespace_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    for process in ["chat"] {
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "application/json",
+            text_response("LEGACY_WHITESPACE_ROUND").to_string(),
+            EntryOptions {
+                model_key: Some("gpt-5.6-sol".to_string()),
+                wire_model: Some("gpt-5.6-sol".to_string()),
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let consumed = consume_response(
+            client()
+                .post(endpoint.replace("/v1/responses", "/v1/chat/completions"))
+                .json(&json!({
+                    "model": "test.gpt-5.6-sol",
+                    "messages": [
+                        {"role":"user","content":"continue legacy reasoning"},
+                        {"role":"assistant","content":"prior answer","reasoning_content":"\n    return value\n"}
+                    ],
+                    "stream": false
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let captured = tokio::time::timeout(Duration::from_secs(2), captures.recv())
+            .await
+            .expect("real provider attempt")
+            .unwrap();
+        stop_entry(handle, shutdown).await;
+        assert!(
+            consumed.transport_error.is_none(),
+            "{process}: legacy reasoning history must deliver: {consumed:?}"
+        );
+        let reasoning: Vec<&Value> = captured["input"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{process}: provider request must carry input: {captured}"))
+            .iter()
+            .filter(|item| item["type"] == "reasoning")
+            .collect();
+        assert_eq!(reasoning.len(), 1, "{process}: {captured}");
+        assert_eq!(
+            reasoning[0]["summary"],
+            json!([{"type":"summary_text","text":"\n    return value\n"}]),
+            "{process}: legacy fallback must keep original text with whitespace"
+        );
     }
     std::env::remove_var(KEY_ENV);
 }

@@ -2734,6 +2734,7 @@ features:
   - v3-protocol-field-parity-gemini-response-01
   - v3-protocol-field-parity-attempt-inverse-01
   - v3-protocol-field-parity-responses-chat-req-01
+  - v3-protocol-field-parity-responses-history-association-01
   - v3-protocol-field-parity-responses-chat-malformed-arguments-project-01
   - v3-protocol-field-parity-responses-chat-resp-01
   - v3-protocol-field-parity-responses-anthropic-req-01
@@ -2758,7 +2759,11 @@ features:
   - NamespaceToolIdentityRegistry::project_tools
   - NamespaceToolIdentityRegistry::project_references
   - NamespaceToolIdentityRegistry::project_request
+  - NamespaceToolIdentityRegistry::project_responses_history_references
+  - NamespaceToolIdentityRegistry::wire_name_for_responses_history
   - NamespaceToolIdentityRegistry::declares_native_tool_search
+  - responses_history_unique_leaf_association_respects_plain_kind_and_ambiguity
+  - responses_standard_projection_qualifies_leaf_only_history
   - native_tool_search_first_discovery_round_trip_through_anthropic
   - non_client_tool_search_controls_preserve_function_call_json_and_sse
   - ordinary_tool_search_function_is_not_promoted_to_native_kind

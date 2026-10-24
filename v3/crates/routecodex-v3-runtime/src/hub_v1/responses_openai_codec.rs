@@ -412,7 +412,7 @@ fn project_responses_reasoning_to_chat_fields(
     }
     Ok(())
 }
-fn append_v3_openai_chat_message_preserving_tool_adjacency(
+pub(crate) fn append_v3_openai_chat_message_preserving_tool_adjacency(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_adjacent_deferred_messages: &mut Vec<Value>,
@@ -715,9 +715,11 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_payload_for_req_inb
 /// canonicalization already applies.
 pub(crate) fn build_v3_chat_assistant_message_from_responses_output_item(
     item: &Value,
-) -> Option<Value> {
-    let item = item.as_object()?;
-    build_v3_openai_chat_message_from_responses_message(item).ok()
+) -> Result<Value, String> {
+    let item = item.as_object().ok_or_else(|| {
+        "Responses message output item must be an object before Chat assistant encoding".to_string()
+    })?;
+    build_v3_openai_chat_message_from_responses_message(item)
 }
 
 /// Convert a finalized Responses `reasoning` output item into a canonical Chat
@@ -851,6 +853,19 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
                     "encrypted_content".to_string(),
                     Value::String(signature.clone()),
                 );
+            }
+            if let Some(summary) = item
+                .get("summary")
+                .and_then(Value::as_array)
+                .filter(|value| !value.is_empty())
+            {
+                entry.insert("summary".to_string(), Value::Array(summary.clone()));
+            }
+            if let Some(content) = item.get("content").filter(|value| !value.is_null()) {
+                entry.insert("content".to_string(), content.clone());
+            }
+            if let Some(text) = item.get("text").filter(|value| !value.is_null()) {
+                entry.insert("text".to_string(), text.clone());
             }
             if !ordered.iter().any(|entry| entry["id"] == item_id) {
                 ordered.push(Value::Object(entry));
@@ -1410,6 +1425,18 @@ fn build_v3_openai_chat_content_from_responses_content(
             }
             Some("input_image" | "image_url") => {
                 converted_parts.push(convert_v3_responses_image_part_to_openai_chat_part(object));
+            }
+            Some("refusal") => {
+                // A provider refusal is legal business content: preserve it
+                // faithfully in the continuation history rather than treating
+                // the whole assistant message as unsupported.
+                let mut converted = object.clone();
+                if let Some(text) = converted.get_mut("refusal") {
+                    if !text.is_string() {
+                        *text = Value::String(text.to_string());
+                    }
+                }
+                converted_parts.push(Value::Object(converted));
             }
             Some(other) => {
                 return Err(format!(

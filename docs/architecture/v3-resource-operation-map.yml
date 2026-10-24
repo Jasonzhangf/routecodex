@@ -551,12 +551,13 @@ resources:
     identity: [requestId, providerId, modelId, attempt]
     semantic_contract:
       standard: NamespaceToolIdentityRegistry binds original components, leaf, kind and actual standard names before provider-private compat; declarations, choice and paired history share that binding
+      responses_history: Only for a typed Responses entry, a namespace-less history call may consume the current unique same-kind declaration with the exact full leaf name. A same-kind plain declaration wins; multiple namespaced candidates remain unbound. Explicit namespaces, forced choice and native Chat history stay exact-only. No call ID, source item ID, arguments, prefix, separator or flattened wire spelling grants identity.
       native_discovery: The same request-local registry owns native tool_search client eligibility from explicit execution=client; Chat and Anthropic inverse consume it, retain ordinary/custom wire-name precedence, preserve complete arguments and call IDs, and never promote server, omitted-execution or undeclared calls to client execution
       private: CustomToolFunctionBinding remains a separate typed resource; its inverse restores standard name and custom kind before the shared namespace inverse
       lifetime: attempt-local stack holder is cloned before wire consumption; retries rebuild from current declarations; completion, cancellation and exhaustion drop the holder
       response: Gemini provider SSE fully buffers into native business content; Resp02 atomically normalizes payload and semantic protocol; Resp03 consumes the standard holder; Resp05 uses existing Responses JSON and SSE projection
     allowed_writers: [NamespaceToolIdentityRegistry::from_request, build_provider_req_compat_06_from_v3_hub_req_outbound_07]
-    allowed_readers: [build_v3_provider_12_responses_wire_payload_with_registry, run_json_response_hooks, restore_gemini_tool_kinds, build_v3_responses_provider_response_from_openai_chat_payload, V3AnthropicResponsesProjectionContext::from_chat_canonical_request, anthropic_tool_use_as_responses_call]
+    allowed_readers: [NamespaceToolIdentityRegistry::project_responses_history_references, project_v3_operation_runner_standard_provider_request, build_v3_provider_12_responses_wire_payload_with_registry, run_json_response_hooks, restore_gemini_tool_kinds, build_v3_responses_provider_response_from_openai_chat_payload, V3AnthropicResponsesProjectionContext::from_chat_canonical_request, anthropic_tool_use_as_responses_call]
     forbidden_writers: [routecodex-v3-server, provider transport, MetadataCenter, debug snapshot]
     may_enter_provider_body: false
     may_enter_client_body: false

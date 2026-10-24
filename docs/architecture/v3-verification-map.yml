@@ -2076,7 +2076,7 @@ features:
   - Legacy OpenAI Chat outbound currently maps exact client_metadata.user_id to public metadata.user_id and consumes registered Codex client-local keys before provider send; unknown client_metadata and reasoning-summary rejection are known transparency defects, not acceptance requirements. Their owner cutover must prove opaque preservation, provider attempt forwarding, and paired client inverse projection.
   - Responses Direct kernel preserves same-protocol Responses input/include/tool history through production Direct provider wire while applying selected provider model binding and never synthesizing Chat
     messages.
-  - Responses function/custom history and forced choice project only through exact declared identities; namespace-less leaf names do not borrow namespace authority from prefixes, separators or source item IDs. Undeclared and ambiguous references remain unchanged.
+  - Forced choice, native Chat history and explicit namespace references project only through exact declared identities. Responses history may associate a namespace-less call only when the current declarations contain one unique same-kind identity with the exact full leaf and no same-kind plain declaration owns that name. Function and custom never cross-bind; prefixes, separators, call IDs, source item IDs and arguments grant no authority; undeclared or ambiguous references remain unchanged.
   - Direct parity test is a verification binding over existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity owner edge for those production
     nodes.
   required_blackbox:
@@ -2158,10 +2158,13 @@ features:
   - fe1ec4b-chat-wire-reasoning-cipher-relay-json
   - fe1ec4b-responses-source-cipher-relay-json
   - responses_function_call_history_keeps_mcp_namespace_on_openai_chat_provider_wire
+  - responses_standard_projection_qualifies_leaf_only_history
+  - responses_history_unique_leaf_association_respects_plain_kind_and_ambiguity
   - native_tool_search_first_discovery_round_trip_through_anthropic
   - non_client_tool_search_controls_preserve_function_call_json_and_sse
   - ordinary_tool_search_function_is_not_promoted_to_native_kind
   - responses_function_call_history_without_namespace_is_qualified_from_provider_tools
+  - responses_namespace_shell_dispatch_roundtrip_json_sse
   - openai_chat_history_does_not_qualify_same_leaf_name_without_responses_origin
   - responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name
   - responses_native_function_does_not_borrow_colliding_mcp_leaf_name
@@ -2189,6 +2192,10 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:function-map-compile-gate
   - npm run verify:v3-cargo-fmt
+  - cargo test --manifest-path v3/Cargo.toml -p provider-compat-core --test namespace_identity_consumer
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib request_outbound_format_extra_tests -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test openai_chat_namespace_names responses_namespace_shell_dispatch_roundtrip_json_sse -- --exact --nocapture --test-threads=1
+  - npm run verify:v3-dagpipe-governance
   - git diff --check
   completion_rule:
     source: Complete when focused parity tests, verifier, red fixtures, architecture/resource/module/Rust-only/function-map gates, fmt, and diff checks pass.
@@ -4210,9 +4217,13 @@ features:
   - docs/architecture/wiki/v3-direct-sse-accept-skeleton.md
   - docs/architecture/wiki/v3-client-sse-head-commit.md
   required_positive:
-  - The first committable business frame (visible output_text that the Direct content probe certifies) crosses the client SSE channel at its provider arrival time, before the provider terminal. Reasoning-only and whitespace-only prefixes never commit, so an empty attempt still recovers through the typed Error chain.
+  - The first committable business frame (visible output_text or a named tool-call start that the Direct content probe certifies) crosses the client SSE channel at its provider arrival time, before the provider terminal. Reasoning-only and whitespace-only prefixes never commit, so an empty attempt still recovers through the typed Error chain. A nameless output item proves nothing and never commits.
+  - A tool-call argument payload is held behind the completeness gate: the client never receives a partial `function_call_arguments` frame; the complete payload is projected once, in order, after the item completes and any argument rewrite ran, so the streamed bytes still equal the fully buffered attempt byte for byte.
+  - The completeness gate and the tool-call certification are decided only by the incremental item carriers (`output_item.added` / `output_item.done`) and the terminal snapshot. A non-terminal `created` / `in_progress` / `queued` state mirror that lists a still-streaming item with a partial payload neither releases the gate nor certifies a start, and parallel items are gated per item identity so one item's completion never releases another item's payload.
+  - A tool item that never receives `output_item.done` stays gated until the terminal seal, which still projects its complete payload exactly once instead of truncating the committed attempt.
   - The client stream carries exactly the fully buffered bytes whenever the registered complete-attempt owner preserves the committed prefix; otherwise the transport breaks before any further byte is projected.
   - The request-level predicate only filters which attempts carry the content probe; the DSML and thinking whole-attempt rewrites run for the whole attempt. A governed marker observed before the commit prevents it. After the commit the probe only suspends projection and the owner decides the whole attempt at the terminal, so protected business text (fenced or inline code, quoted text) is delivered unchanged and governed text never reaches the client.
+  - A request that declares tools carries the same content probe and commits its first visible business delta before the provider terminal. Its probe extends the governed-marker set with the declared-tool harvest opener, so serialized markup on the output text stays buffered until the complete-attempt DSML owner harvests it into the client function_call item, instead of flushing text that the owner would then have to rewrite.
   - After delivery, provider failure records provider health for the attempted identity, switches no candidate, re-issues no attempt, and ends the committed transport as a 200 SSE body break without an error frame, keepalive, or normal chunked terminator.
   - A failed pre-commit attempt is still discarded before any replacement attempt is exposed; residence expiry still terminates through the typed Error chain.
   required_negative:

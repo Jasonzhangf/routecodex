@@ -1139,6 +1139,357 @@ async fn first_frame_commit_delivers_business_frame_before_provider_terminal() {
     );
 }
 
+/// A real harness round can end in a tool call with no visible text at all. The
+/// named tool-call start must commit the attempt before the provider terminal,
+/// while the argument payload stays held until its item completes, so the
+/// streamed bytes still equal the fully buffered attempt byte for byte.
+#[tokio::test]
+async fn first_frame_commit_delivers_tool_call_start_before_provider_terminal() {
+    let chunks = responses_tool_call_chunks();
+    let lead = chunks[0].clone();
+    let partial_arguments = chunks[1].clone();
+    let completion = chunks[2].clone();
+    let lead_for_stream = lead.clone();
+    let partial_arguments_for_stream = partial_arguments.clone();
+    let completion_for_stream = completion.clone();
+    let paced = stream::iter([Ok(lead_for_stream)])
+        .chain(stream::once(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            Ok(partial_arguments_for_stream)
+        }))
+        .chain(stream::once(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+            Ok(completion_for_stream)
+        }));
+    let source: crate::nodes::V3ProviderAttemptSseInnerStream = Box::pin(paced);
+    let projected = wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(source),
+        V3RuntimeStreamObservation::default(),
+        V3RuntimeTimingState::start(),
+        false,
+        false,
+        V3HubProviderWireProtocol::Responses,
+    );
+    let (sink, mut rx) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let collector = tokio::spawn(
+        collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
+            projected,
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+            None,
+            None,
+            None,
+            Some(sink),
+        ),
+    );
+    let first = tokio::time::timeout(std::time::Duration::from_millis(900), rx.recv())
+        .await
+        .expect(
+            "the named tool-call start must reach the client channel before the provider terminal",
+        )
+        .expect("client channel frame");
+    let mut streamed = vec![first];
+    while let Ok(frame) = rx.try_recv() {
+        streamed.push(frame);
+    }
+    let early = String::from_utf8_lossy(&streamed.concat()).to_string();
+    assert!(
+        early.contains("response.output_item.added"),
+        "the tool-call start must be delivered before the provider terminal: {early}"
+    );
+    assert!(
+        !early.contains("response.function_call_arguments.delta"),
+        "a partial argument payload must stay held until its item completes: {early}"
+    );
+    let sealed = collector
+        .await
+        .expect("collector task")
+        .expect("sealed attempt");
+    streamed.extend(sealed.collect::<Vec<_>>().await);
+    let buffered = buffered_with_hooks(chunks).await;
+    assert_eq!(
+        String::from_utf8_lossy(&streamed.concat()),
+        String::from_utf8_lossy(&buffered.concat()),
+        "streamed client bytes must equal the buffered attempt"
+    );
+}
+
+/// A realistic tool-call round: the named function item starts, its arguments
+/// arrive as partial deltas, and the item completes before the terminal. The
+/// chunks are [lead, partial arguments, completion].
+fn responses_tool_call_chunks() -> Vec<Vec<u8>> {
+    let function_call = serde_json::json!({
+        "id": "fc_1",
+        "type": "function_call",
+        "call_id": "call_1",
+        "name": "exec_command",
+        "arguments": "{\"command\":\"echo hi\"}"
+    });
+    let lead = [
+        serde_json::json!({"type":"response.created","response":{"id":"r1","status":"in_progress","output":[]}}),
+        serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"exec_command","arguments":""}}),
+    ]
+    .into_iter()
+    .map(responses_sse_frame)
+    .collect::<Vec<_>>()
+    .concat();
+    let partial_arguments = [
+        serde_json::json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_1","delta":"{\"command\":"}),
+        serde_json::json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_1","delta":"\"echo hi\"}"}),
+    ]
+    .into_iter()
+    .map(responses_sse_frame)
+    .collect::<Vec<_>>()
+    .concat();
+    let completion = [
+        serde_json::json!({"type":"response.function_call_arguments.done","output_index":0,"item_id":"fc_1","arguments":"{\"command\":\"echo hi\"}"}),
+        serde_json::json!({"type":"response.output_item.done","output_index":0,"item":function_call}),
+        serde_json::json!({"type":"response.completed","response":{"id":"r1","status":"completed","output":[function_call]}}),
+    ]
+    .into_iter()
+    .map(responses_sse_frame)
+    .collect::<Vec<_>>()
+    .concat();
+    vec![lead, partial_arguments, completion]
+}
+
+/// The same tool-call round through the production Direct response hooks: the
+/// early-commit path must emit exactly the buffered attempt bytes and must still
+/// seal the attempt.
+#[tokio::test]
+async fn first_frame_commit_tool_call_matches_buffered_hooks() {
+    let chunks = responses_tool_call_chunks();
+    let early = run_early_commit_attempt(chunks.clone()).await;
+    assert!(
+        early.committed,
+        "a named tool-call start must commit the attempt early"
+    );
+    assert!(!early.failed, "the committed tool-call attempt must seal");
+    let buffered = buffered_with_hooks(chunks).await;
+    assert_eq!(
+        String::from_utf8_lossy(&early.frames.concat()),
+        String::from_utf8_lossy(&buffered.concat()),
+        "the early-committed tool-call bytes must equal the buffered attempt"
+    );
+}
+
+/// A provider may mirror the still-streaming item in a live state event. That
+/// mirror is not a completion carrier: the argument payload must stay held
+/// until `output_item.done` even when an `in_progress` snapshot lists the item
+/// with a partial payload.
+#[tokio::test]
+async fn first_frame_commit_holds_tool_arguments_across_nonterminal_snapshot() {
+    let chunks = responses_tool_call_chunks_with_snapshot();
+    let lead = chunks[0].clone();
+    let partial_arguments = chunks[1].clone();
+    let completion = chunks[2].clone();
+    let lead_for_stream = lead.clone();
+    let partial_arguments_for_stream = partial_arguments.clone();
+    let completion_for_stream = completion.clone();
+    let paced = stream::iter([Ok(lead_for_stream)])
+        .chain(stream::once(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            Ok(partial_arguments_for_stream)
+        }))
+        .chain(stream::once(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+            Ok(completion_for_stream)
+        }));
+    let source: crate::nodes::V3ProviderAttemptSseInnerStream = Box::pin(paced);
+    let projected = wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(source),
+        V3RuntimeStreamObservation::default(),
+        V3RuntimeTimingState::start(),
+        false,
+        false,
+        V3HubProviderWireProtocol::Responses,
+    );
+    let (sink, mut rx) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let collector = tokio::spawn(
+        collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
+            projected,
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+            None,
+            None,
+            None,
+            Some(sink),
+        ),
+    );
+    let first = tokio::time::timeout(std::time::Duration::from_millis(900), rx.recv())
+        .await
+        .expect("the named tool-call start must reach the client channel before the terminal")
+        .expect("client channel frame");
+    let mut streamed = vec![first];
+    let held = tokio::time::timeout(std::time::Duration::from_millis(600), rx.recv()).await;
+    let leaked = match &held {
+        Ok(Some(frame)) => String::from_utf8_lossy(frame).to_string(),
+        Ok(None) => String::new(),
+        Err(_) => String::new(),
+    };
+    assert!(
+        held.is_err(),
+        "nothing may reach the client while the tool arguments are incomplete, leaked: {leaked}"
+    );
+    while let Ok(frame) = rx.try_recv() {
+        streamed.push(frame);
+    }
+    let sealed = collector
+        .await
+        .expect("collector task")
+        .expect("sealed attempt");
+    streamed.extend(sealed.collect::<Vec<_>>().await);
+    let buffered = buffered_with_hooks(chunks).await;
+    assert_eq!(
+        String::from_utf8_lossy(&streamed.concat()),
+        String::from_utf8_lossy(&buffered.concat()),
+        "streamed client bytes must equal the buffered attempt"
+    );
+}
+
+/// The same tool-call round with a live `in_progress` state mirror that lists
+/// the streaming item with a partial payload. Chunks are [lead, partial
+/// arguments plus the mirror, completion].
+fn responses_tool_call_chunks_with_snapshot() -> Vec<Vec<u8>> {
+    let mut chunks = responses_tool_call_chunks();
+    let mirror = serde_json::json!({
+        "type": "response.in_progress",
+        "response": {
+            "id": "r1",
+            "status": "in_progress",
+            "output": [{
+                "id": "fc_1",
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"command\":"
+            }]
+        }
+    });
+    let mut partial_arguments = chunks[1].clone();
+    partial_arguments.extend(responses_sse_frame(mirror));
+    chunks[1] = partial_arguments;
+    chunks
+}
+
+/// A provider may never emit `output_item.done` for an item that the terminal
+/// snapshot already completed. The gate then stays closed until the seal, which
+/// must still deliver the complete payload exactly once instead of truncating
+/// the committed attempt.
+#[tokio::test]
+async fn first_frame_commit_tool_arguments_release_on_terminal_seal() {
+    let chunks = responses_tool_call_chunks_without_item_done();
+    let lead = chunks[0].clone();
+    let partial_arguments = chunks[1].clone();
+    let terminal = chunks[2].clone();
+    let lead_for_stream = lead.clone();
+    let partial_arguments_for_stream = partial_arguments.clone();
+    let terminal_for_stream = terminal.clone();
+    let paced = stream::iter([Ok(lead_for_stream)])
+        .chain(stream::once(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            Ok(partial_arguments_for_stream)
+        }))
+        .chain(stream::once(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+            Ok(terminal_for_stream)
+        }));
+    let source: crate::nodes::V3ProviderAttemptSseInnerStream = Box::pin(paced);
+    let projected = wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(source),
+        V3RuntimeStreamObservation::default(),
+        V3RuntimeTimingState::start(),
+        false,
+        false,
+        V3HubProviderWireProtocol::Responses,
+    );
+    let (sink, mut rx) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let collector = tokio::spawn(
+        collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
+            projected,
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+            None,
+            None,
+            None,
+            Some(sink),
+        ),
+    );
+    let first = tokio::time::timeout(std::time::Duration::from_millis(900), rx.recv())
+        .await
+        .expect("the named tool-call start must reach the client channel before the terminal")
+        .expect("client channel frame");
+    let mut streamed = vec![first];
+    let held = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
+    let leaked = match &held {
+        Ok(Some(frame)) => String::from_utf8_lossy(frame).to_string(),
+        Ok(None) | Err(_) => String::new(),
+    };
+    assert!(
+        held.is_err(),
+        "the gate stays closed without output_item.done, leaked: {leaked}"
+    );
+    while let Ok(frame) = rx.try_recv() {
+        streamed.push(frame);
+    }
+    let sealed = collector
+        .await
+        .expect("collector task")
+        .expect("sealed attempt");
+    streamed.extend(sealed.collect::<Vec<_>>().await);
+    let delivered = String::from_utf8_lossy(&streamed.concat()).to_string();
+    assert_eq!(
+        delivered
+            .matches("event: response.function_call_arguments.delta")
+            .count(),
+        2,
+        "each held argument delta is delivered exactly once: {delivered}"
+    );
+    let buffered = buffered_with_hooks(chunks).await;
+    assert_eq!(
+        delivered,
+        String::from_utf8_lossy(&buffered.concat()),
+        "streamed client bytes must equal the buffered attempt"
+    );
+}
+
+/// The tool-call round whose provider never emits `output_item.done`.
+fn responses_tool_call_chunks_without_item_done() -> Vec<Vec<u8>> {
+    let mut chunks = responses_tool_call_chunks();
+    let completion = [
+        serde_json::json!({"type":"response.function_call_arguments.done","output_index":0,"item_id":"fc_1","arguments":"{\"command\":\"echo hi\"}"}),
+        serde_json::json!({
+            "type": "response.completed",
+            "response": {
+                "id": "r1",
+                "status": "completed",
+                "output": [{
+                    "id": "fc_1",
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "exec_command",
+                    "arguments": "{\"command\":\"echo hi\"}"
+                }]
+            }
+        }),
+    ]
+    .into_iter()
+    .map(responses_sse_frame)
+    .collect::<Vec<_>>()
+    .concat();
+    chunks[2] = completion;
+    chunks
+}
+
+fn responses_sse_frame(value: serde_json::Value) -> Vec<u8> {
+    format!(
+        "event: {}\ndata: {}\n\n",
+        value["type"].as_str().unwrap_or("message"),
+        value
+    )
+    .into_bytes()
+}
+
 /// A realistic Responses business-item sequence: the item identity is bound
 /// before its text carriers, which is what the whole-attempt text owners use to
 /// associate wire events with the terminal output.
@@ -1805,9 +2156,12 @@ async fn first_frame_commit_snapshot_carrier_collision_holds_residue() {
         run_early_commit_attempt_with_hooks(chunks.clone(), Some((&registry, &context))).await;
     let projected = projected_delta_text(&run.frames);
     assert!(run.committed, "the clean visible prefix must commit");
+    // The DSML owner preserves the flushed prefix and continues the item from
+    // the delivered text, so this attempt now seals instead of breaking the
+    // transport; only the residue and label stay out of the client stream.
     assert!(
-        run.failed,
-        "the post-commit owner rewrite must end the attempt detectably"
+        !run.failed,
+        "the preserved-prefix owner rewrite must seal the attempt"
     );
     assert!(
         !projected.contains("DSML"),
@@ -1817,4 +2171,25 @@ async fn first_frame_commit_snapshot_carrier_collision_holds_residue() {
         !projected.contains('>'),
         "the bare close residue must not reach the client: {projected:?}"
     );
+    let events: Vec<_> = run
+        .frames
+        .iter()
+        .flat_map(|frame| parse_direct_sse_json_frames(frame))
+        .collect();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["type"] == "response.output_text.delta"
+                && event["item_id"] == "msg_0")
+            .count(),
+        1,
+        "the delivered prefix must not be re-emitted: {events:?}"
+    );
+    let terminal = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .expect("terminal event");
+    let output = terminal["response"]["output"].as_array().unwrap();
+    assert_eq!(output[0]["content"][0]["text"], "hello\n", "{terminal}");
+    assert_eq!(output[1]["content"][0]["text"], "ordinary", "{terminal}");
 }

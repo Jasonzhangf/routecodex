@@ -88,6 +88,7 @@ type ContextualResponseProjectionHook =
 type CompleteResponseSseHook =
     fn(
         &[Vec<u8>],
+        usize,
         &crate::direct_response_hooks::V3DirectDsmlContext,
     ) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure>;
 type CompleteResponseJsonHook = fn(
@@ -189,7 +190,7 @@ impl V3HookRegistry {
         context: &crate::direct_response_hooks::V3DirectDsmlContext,
     ) -> Result<(), V3DirectCompleteResponseError> {
         builder.rewrite_complete_attempt(|frames| {
-            (self.complete_response_sse)(frames, context)
+            (self.complete_response_sse)(frames, 0, context)
                 .map_err(V3DirectCompleteResponseError::Normalization)
         })
     }
@@ -202,8 +203,8 @@ impl V3HookRegistry {
         builder: &mut crate::execution_control::V3CommittedClientSseBuilder,
         context: &crate::direct_response_hooks::V3DirectDsmlContext,
     ) -> Result<(), V3DirectCompleteResponseError> {
-        builder.rewrite_complete_attempt_preserving_client_prefix(|frames| {
-            (self.complete_response_sse)(frames, context)
+        builder.rewrite_complete_attempt_preserving_client_prefix(|frames, flushed| {
+            (self.complete_response_sse)(frames, flushed, context)
                 .map_err(V3DirectCompleteResponseError::Normalization)
         })
     }

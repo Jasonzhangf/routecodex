@@ -777,6 +777,107 @@ fn refill_continuation_preserves_provider_reasoning_and_skips_synthesized() {
 }
 
 #[test]
+fn refill_continuation_messages_merges_same_turn_reasoning_and_assistant_message() {
+    let original = json!({
+        "model": "gpt-test",
+        "messages": [
+            {"role": "user", "content": "go"}
+        ]
+    });
+    let finalized = json!({
+        "id": "resp_messages_shape",
+        "status": "completed",
+        "output": [
+            {
+                "id": "rsn_provider_first",
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "first summary"}],
+                "encrypted_content": "cipher-first"
+            },
+            {
+                "id": "rsn_provider_second",
+                "type": "reasoning",
+                "content": [{"type": "reasoning_text", "text": "second plaintext"}],
+                "encrypted_content": "cipher-second"
+            },
+            {
+                "id": "msg_answer",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "answer"}]
+            }
+        ]
+    });
+
+    let continuation = build_v3_chat_process_refill_continuation_request(&original, &finalized)
+        .expect("messages-shaped refill continuation must build");
+    let messages = continuation["messages"].as_array().expect("messages array");
+    assert_eq!(
+        messages.len(),
+        3,
+        "same-turn reasoning and assistant content must form one assistant row: {messages:?}"
+    );
+    assert_eq!(messages[0]["role"], json!("user"));
+    let assistant = &messages[1];
+    assert_eq!(assistant["role"], json!("assistant"));
+    assert_eq!(
+        assistant["content"],
+        json!([{"type": "text", "text": "answer"}])
+    );
+    assert_eq!(
+        assistant["reasoning_content"],
+        json!("first summary\nsecond plaintext")
+    );
+    let ordered = assistant["routecodex_chat_extension"]["responses_reasoning_items"]
+        .as_array()
+        .expect("ordered reasoning items");
+    assert_eq!(ordered.len(), 2, "{assistant}");
+    assert_eq!(ordered[0]["id"], json!("rsn_provider_first"));
+    assert_eq!(ordered[0]["encrypted_content"], json!("cipher-first"));
+    assert_eq!(
+        ordered[0]["summary"],
+        json!([{"type": "summary_text", "text": "first summary"}])
+    );
+    assert_eq!(ordered[1]["id"], json!("rsn_provider_second"));
+    assert_eq!(ordered[1]["encrypted_content"], json!("cipher-second"));
+    assert_eq!(
+        ordered[1]["content"],
+        json!([{"type": "reasoning_text", "text": "second plaintext"}])
+    );
+    assert_eq!(messages[2]["role"], json!("user"));
+    assert_eq!(
+        messages[2]["content"],
+        json!(V3_CHAT_PROCESS_REFILL_INSTRUCTION)
+    );
+
+    let projected =
+        crate::hub_v1::request_outbound_format::build_responses_input_from_chat_messages(messages)
+            .expect("merged assistant row must project to Responses input");
+    let input = projected.as_array().expect("input array");
+    let assistant_messages: Vec<&Value> = input
+        .iter()
+        .filter(|item| item["type"] == "message" && item["role"] == "assistant")
+        .collect();
+    assert_eq!(
+        assistant_messages.len(),
+        1,
+        "reasoning association must not fabricate an empty assistant message: {input:?}"
+    );
+    assert!(
+        assistant_messages[0]["content"]
+            .as_array()
+            .is_some_and(|parts| parts
+                .iter()
+                .any(|part| part["type"] == "output_text" && part["text"] == json!("answer"))),
+        "{input:?}"
+    );
+    assert_eq!(
+        assistant_messages[0]["content"],
+        json!([{"type": "output_text", "text": "answer"}])
+    );
+}
+
+#[test]
 fn refill_continuation_normalizes_string_input_and_keeps_image_parts() {
     let original = json!({
         "model": "gpt-test",
