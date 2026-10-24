@@ -32,7 +32,40 @@ use tokio_tungstenite::{
     },
 };
 
-static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+/// Serialized public-entry tests share process-global test hooks.
+///
+/// Some tests pin the refill limit to zero to count upstream attempts. The
+/// guard establishes that fixture baseline on acquire and release. Tests
+/// exercising the compiled refill policy explicitly clear the override.
+struct TestLock {
+    inner: Mutex<()>,
+}
+
+impl TestLock {
+    const fn new() -> Self {
+        Self {
+            inner: Mutex::const_new(()),
+        }
+    }
+
+    async fn lock(&self) -> TestLockGuard<'_> {
+        let inner = self.inner.lock().await;
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+        TestLockGuard { _inner: inner }
+    }
+}
+
+struct TestLockGuard<'lock> {
+    _inner: tokio::sync::MutexGuard<'lock, ()>,
+}
+
+impl Drop for TestLockGuard<'_> {
+    fn drop(&mut self) {
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    }
+}
+
+static TEST_LOCK: TestLock = TestLock::new();
 
 #[path = "support/image_input_blackbox.rs"]
 mod image_input_blackbox;
@@ -9361,6 +9394,7 @@ async fn issue4aeb668_refill_exhaustion_keeps_prior_observations() {
 
 async fn assert_refill_round_observations(exhausted: bool) {
     let _guard = TEST_LOCK.lock().await;
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(None);
     let home = TestHomeGuard::new("issue4aeb668-refill-observations");
     let calls = Arc::new(Mutex::new(Vec::<Value>::new()));
     let state = Arc::new((calls.clone(), exhausted));
@@ -9584,6 +9618,7 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
         committed_failure,
     } = case;
     let _test_guard = TEST_LOCK.lock().await;
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(None);
     let home_guard = TestHomeGuard::new("issue4aeb668-nested-observations");
     let (failed_base_url, failed_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;

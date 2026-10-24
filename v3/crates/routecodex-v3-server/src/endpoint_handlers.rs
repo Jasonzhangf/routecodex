@@ -562,6 +562,20 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             );
             match outcome {
                 V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) => {
+                    if record_v3_live_snapshot_projection(
+                        &state,
+                        &trace_scope,
+                        snapshot_session_id.as_deref(),
+                        terminal.status,
+                        &terminal.node_trace,
+                        "live_response",
+                    )
+                    .is_some()
+                    {
+                        eprintln!(
+                            "V3 terminal snapshot capture failed; retaining the runtime outcome"
+                        );
+                    }
                     return provider_terminal_response(
                         &state,
                         front_connection_identity,
@@ -732,6 +746,18 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         );
         match outcome {
             V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) => {
+                if record_v3_live_snapshot_projection(
+                    &state,
+                    &trace_scope,
+                    snapshot_session_id.as_deref(),
+                    terminal.status,
+                    &terminal.node_trace,
+                    "live_response",
+                )
+                .is_some()
+                {
+                    eprintln!("V3 terminal snapshot capture failed; retaining the runtime outcome");
+                }
                 provider_terminal_response(
                     &state,
                     front_connection_identity,
