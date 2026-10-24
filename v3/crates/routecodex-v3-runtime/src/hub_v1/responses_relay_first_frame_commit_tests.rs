@@ -959,8 +959,7 @@ async fn relay_reasoning_delta_preserves_encrypted_content_in_terminal() {
         "output": [
             {"type": "reasoning", "summary": [{"type": "summary_text", "text": "private plan"}],
              "content": [{"type": "reasoning_text", "text": "private plan"}],
-             "encrypted_content": "enc-opaque",
-             "provider_extension": {"opaque": "keep"}},
+             "encrypted_content": "enc-opaque"},
             {"type": "message", "role": "assistant",
              "content": [{"type": "output_text", "text": "answer"}]}
         ],
@@ -971,6 +970,17 @@ async fn relay_reasoning_delta_preserves_encrypted_content_in_terminal() {
     while let Some(frame) = sealed.next().await {
         frames.push(String::from_utf8_lossy(&frame).to_string());
     }
+    let reasoning_done = frames
+        .iter()
+        .find(|frame| {
+            frame.contains("\"type\":\"response.output_item.done\"")
+                && frame.contains("\"encrypted_content\":\"enc-opaque\"")
+        })
+        .expect("reasoning item done frame");
+    assert!(
+        reasoning_done.contains("\"provider_extension\":{\"opaque\":\"keep\"}"),
+        "the streamed reasoning item must keep the complete business payload: {reasoning_done}"
+    );
     let terminal_frame = frames
         .iter()
         .find(|frame| frame.contains("response.completed"))

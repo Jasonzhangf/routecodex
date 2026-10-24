@@ -445,6 +445,17 @@ async fn relay_public_reasoning_cipher_survives_first_frame_and_echoes_next_turn
     .await;
 
     let events = response_sse_events(&body);
+    let reasoning_done = events
+        .iter()
+        .find(|event| {
+            event["type"] == "response.output_item.done" && event["item"]["type"] == "reasoning"
+        })
+        .expect("reasoning item done event");
+    assert_eq!(
+        reasoning_done["item"]["provider_extension"],
+        json!({"opaque": "keep"}),
+        "the first-frame SSE item must keep the complete reasoning payload: {reasoning_done}"
+    );
     let completed = events
         .iter()
         .rev()
