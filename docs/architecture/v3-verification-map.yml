@@ -3978,7 +3978,7 @@ features:
   - Direct/Relay, ToolThinking, inverse context, attempt projection, and response binding have one writer and declared readers
   - a refill is a new execution that re-enters the same request mainline before client commit; the static DAG has no back-edge
   - refill_continuation_signal is produced only by Resp03 when execution_disposition=refill_requested, read only by the Relay and Direct Runtime refill executors, and released after typed attempt cleanup before the new request execution
-  - the Responses entry (direct and Relay), the openai_chat Relay entry and the gemini Relay entry reuse one bounded-refill executor and the single decide_v3_chat_process_refill policy; the anthropic Relay runtime still runs its own request loop and has no bounded-refill executor, so an anthropic client entry never extends its own execution
+  - the Responses entry (direct and Relay), the openai_chat Relay entry, the gemini Relay entry and the anthropic Relay entry reuse the single decide_v3_chat_process_refill policy with one continuation/accumulation primitive set; the anthropic runtime keeps its own buffered request loop because it has no shared relay codec skeleton, and both its JSON and SSE client transports publish the same round facts
   - SSE is the only client projection/communication exit
   - the first node has two real Server callers: the four-protocol HTTP dispatcher and the Responses WebSocket message handler; both call the same Runtime capture operation before their mode dispatch
   - capture_client_json output is the same serde_json::Value and is adapted without payload changes into current Direct and protocol-specific Relay owners
@@ -4113,6 +4113,7 @@ features:
     - refill_concurrent_cancel_public
     - refill_chat_relay_entry_bounded_refill_public
     - refill_gemini_relay_entry_bounded_refill_public
+    - refill_anthropic_relay_entry_bounded_refill_public
     command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox refill_ -- --test-threads=1 --nocapture
   required_gates:
   - npm run verify:v3-operation-runner-dagpipe

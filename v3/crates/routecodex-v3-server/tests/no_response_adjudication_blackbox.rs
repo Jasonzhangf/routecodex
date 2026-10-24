@@ -800,6 +800,58 @@ async fn refill_gemini_relay_entry_bounded_refill_public() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// Stable public ID: the `/v1/messages` entry runs its Relay path through the
+/// same bounded-refill policy. A premature finish triggers exactly one refill
+/// and both rounds reach the Anthropic client in one buffered response.
+#[tokio::test]
+async fn refill_anthropic_relay_entry_bounded_refill_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "ANTHROPIC_RELAY_SECOND"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "ANTHROPIC_RELAY_FIRST")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(endpoint.replace("/v1/responses", "/v1/messages"))
+            .json(&json!({
+                "model": "test.test",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "unfinished anthropic task"}],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    stop_entry(handle, shutdown).await;
+    assert!(
+        consumed.transport_error.is_none(),
+        "anthropic relay entry must deliver normally: {consumed:?}"
+    );
+    assert_eq!(
+        attempts, 2,
+        "anthropic relay entry must run exactly one refill: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("ANTHROPIC_RELAY_FIRST")
+            && consumed.body.contains("ANTHROPIC_RELAY_SECOND"),
+        "both rounds must reach the anthropic client: {consumed:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
 #[tokio::test]
 async fn refill_direct_sse_summary_after_diagnostic_cap_public() {
     let _guard = TEST_LOCK.lock().await;

@@ -25,6 +25,7 @@ async fn execute_v3_anthropic_relay_runtime<T: ResponsesTransport>(
     routecodex_v3_runtime::V3AnthropicRelayRuntimeOutput,
     routecodex_v3_runtime::V3AnthropicRelayRuntimeError,
 > {
+    pin_anthropic_relay_refill_off();
     execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
         manifest,
         input,
@@ -33,6 +34,17 @@ async fn execute_v3_anthropic_relay_runtime<T: ResponsesTransport>(
         V3ProviderFailureRuntimeHealth::from_manifest_for_tests(manifest),
     )
     .await
+}
+
+/// This binary owns projection, routing and lifecycle parity cases. Their
+/// fixtures replay one completed provider response, so the bounded Chat Process
+/// continuation is pinned off; refill coverage lives in the public server entry
+/// tests.
+fn pin_anthropic_relay_refill_off() {
+    static PIN: std::sync::Once = std::sync::Once::new();
+    PIN.call_once(|| {
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    });
 }
 
 struct JsonTransport {

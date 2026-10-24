@@ -5,6 +5,7 @@ pub(super) async fn closeout_anthropic_relay_sse_response<F>(
     request_id: &str,
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
+    refill: Option<&mut crate::hub_v1::relay_runtime_core::V3RelayRefillCarrier>,
     project_client_response: F,
 ) -> Result<(Value, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
@@ -26,6 +27,7 @@ where
         request_id,
         response_hook_profile,
         trace,
+        refill,
         project_client_response,
     )
 }
@@ -35,6 +37,7 @@ pub(super) fn closeout_anthropic_relay_response<F>(
     request_id: &str,
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
+    refill: Option<&mut crate::hub_v1::relay_runtime_core::V3RelayRefillCarrier>,
     project_client_response: F,
 ) -> Result<(Value, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
@@ -50,6 +53,7 @@ where
         request_id,
         response_hook_profile,
         trace,
+        refill,
         project_client_response,
     )
 }
@@ -59,6 +63,7 @@ fn closeout_anthropic_relay_normalized_response<F>(
     request_id: &str,
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
+    refill: Option<&mut crate::hub_v1::relay_runtime_core::V3RelayRefillCarrier>,
     project_client_response: F,
 ) -> Result<(Value, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
@@ -82,24 +87,55 @@ where
         response_hook_profile.toolreason_expected_model_id(),
     )
     .map_err(V3AnthropicRelayRuntimeError::Target)?;
+    // 续杯只看源显式 summary：必须在 govern 可能合成 summary 之前取自归一化后的
+    // 原生 payload，否则合成 summary 会被误判成源显式。
+    let has_source_summary = refill.is_some()
+        && super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
+            &resp02_payload,
+        );
     let complete_profile = response_hook_profile
         .clone()
         .with_complete_provider_attempt(true);
     let resp03 = hooks.govern(resp02, &complete_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp03 = resp03.into_governed();
+    let source_terminal_completed = resp03.previous.source_terminal_completed;
+    let (accumulated_items, accumulated_usage) = match refill {
+        Some(refill) => {
+            super::relay_runtime_core::publish_v3_relay_chat_process_round(
+                &resp03,
+                has_source_summary,
+                source_terminal_completed,
+                refill,
+            );
+            (
+                Some(refill.accumulated_items.clone()),
+                refill.accumulated_usage.clone(),
+            )
+        }
+        None => (None, None),
+    };
     let projection_error = Arc::new(Mutex::new(None));
     let projection_error_for_operator = Arc::clone(&projection_error);
     let resp05 = try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
         resp03,
-        move |payload| match project_client_response(&payload) {
-            Ok(output) => Ok(output),
-            Err(error) => {
-                let message = error.to_string();
-                *projection_error_for_operator.lock().map_err(|_| {
-                    format!("inverse projection typed error holder is poisoned: {message}")
-                })? = Some(error);
-                Err(message)
+        move |mut payload| {
+            if let Some(accumulated_items) = accumulated_items.as_deref() {
+                super::resp_chat_process_03_governed::apply_v3_chat_process_refill_accumulation(
+                    &mut payload,
+                    accumulated_items,
+                    accumulated_usage.as_ref(),
+                );
+            }
+            match project_client_response(&payload) {
+                Ok(output) => Ok(output),
+                Err(error) => {
+                    let message = error.to_string();
+                    *projection_error_for_operator.lock().map_err(|_| {
+                        format!("inverse projection typed error holder is poisoned: {message}")
+                    })? = Some(error);
+                    Err(message)
+                }
             }
         },
     )
@@ -151,6 +187,7 @@ mod tests {
             "req-closeout-typed-error",
             &profile,
             &mut trace,
+            None,
             |payload| {
                 assert_eq!(payload["id"], "resp_closeout_typed_error");
                 Err(V3AnthropicRelayRuntimeError::Target(marker.to_string()))
