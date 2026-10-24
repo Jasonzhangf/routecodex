@@ -37,6 +37,11 @@
       "id": "responses-sse-client-frame-commit",
       "status": "graph",
       "graph": "docs/architecture/dagpipe/graphs/responses-sse-client-frame-commit.graph.json"
+    },
+    {
+      "id": "responses-namespace-shell-roundtrip",
+      "status": "graph",
+      "graph": "docs/architecture/dagpipe/graphs/responses-namespace-shell-roundtrip.graph.json"
     }
   ]
 }

@@ -275,7 +275,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>93 functional paths</span>
-        <span>574 caller edges</span>
+        <span>575 caller edges</span>
       </div>
     </header>
 
@@ -468,7 +468,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>15</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>471</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>472</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -1094,7 +1094,7 @@ flowchart TD
             <span class="chain-id">v 3.protocol_conversion_field_parity</span>
             <span>V3HubReqInbound01ClientRaw → V3ServerRespOutbound06ClientFrame</span>
             <span><code>v3.protocol_conversion_field_parity</code></span>
-            <span>9 edges · 9 resources · v3-runtime, v3-runtime::hub_v1</span>
+            <span>10 edges · 10 resources · provider-compat-core, v3-runtime, v3-runtime::hub_v1</span>
           </a>
 <a class="branch-card" href="#chain-v3_responses_relay_source_server_entry">
             <span class="chain-id">v 3.responses_relay.source_server_entry</span>
@@ -3632,14 +3632,14 @@ flowchart TD
       <summary>
         <span class="summary-main">v 3.protocol_conversion_field_parity</span>
         <span class="summary-sub">V3HubReqInbound01ClientRaw → V3ServerRespOutbound06ClientFrame</span>
-        <span class="summary-sub">9 edges · <code>v3.protocol_conversion_field_parity</code> · V3HubReqInbound01ClientRaw → V3ServerRespOutbound06ClientFrame</span>
+        <span class="summary-sub">10 edges · <code>v3.protocol_conversion_field_parity</code> · V3HubReqInbound01ClientRaw → V3ServerRespOutbound06ClientFrame</span>
       </summary>
       <div class="branch-body">
         <p class="chain-summary">Field-parity contract overlay over existing V3 Relay chains. Source wire is decoded to Chat canonical plus registered payload extensions before Chat Process; outbound projection consumes only governed Chat semantics. Arguments, client metadata, reasoning effort/budget/summary/context/mode/include/display, and other payload fields stay in the data plane. Routing/switch/retry control stays in typed control resources/MetadataCenter, and neither side reconstructs the other. It does not introduce a separate runtime lifecycle or any server/SSE/provider-transport owner.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.protocol_conversion_field_parity</code></span>
-          <span>modules: <code>v3-runtime · v3-runtime::hub_v1</code></span>
-          <span>resources: <code>9</code></span>
+          <span>modules: <code>provider-compat-core · v3-runtime · v3-runtime::hub_v1</code></span>
+          <span>resources: <code>10</code></span>
 
 
         </div>
@@ -3659,6 +3659,7 @@ flowchart TD
   n_v3_protocol_conversion_field_parity_10[&quot;&lt;b&gt;Open Ai Chat Relay Runtime Input&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OpenAiChatRelayRuntimeInput&lt;/small&gt;&quot;]
   n_v3_protocol_conversion_field_parity_0 --&gt;|v3-protocol-field-parity-responses-chat-inbound-order-01&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_protocol_conversion_field_parity_1
   n_v3_protocol_conversion_field_parity_2 --&gt;|v3-protocol-field-parity-responses-chat-req-01&lt;br/&gt;v3-runtime → v3-runtime::hub_v1| n_v3_protocol_conversion_field_parity_3
+  n_v3_protocol_conversion_field_parity_2 --&gt;|v3-protocol-field-parity-responses-history-association-01&lt;br/&gt;v3-runtime::hub_v1 → provider-compat-core| n_v3_protocol_conversion_field_parity_4
   n_v3_protocol_conversion_field_parity_4 --&gt;|v3-protocol-field-parity-responses-chat-malformed-arguments-project-01&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_protocol_conversion_field_parity_3
   n_v3_protocol_conversion_field_parity_5 --&gt;|v3-protocol-field-parity-responses-client-project-01&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_protocol_conversion_field_parity_6
   n_v3_protocol_conversion_field_parity_7 --&gt;|v3-protocol-field-parity-responses-chat-resp-01&lt;br/&gt;v3-runtime → v3-runtime::hub_v1| n_v3_protocol_conversion_field_parity_8
@@ -3675,6 +3676,7 @@ flowchart TD
 <tbody>
 <tr><td><code>v3-protocol-field-parity-responses-chat-inbound-order-01</code></td><td><code>V3HubReqInbound01ClientRaw</code><br/>→ <code>V3HubReqInbound02Normalized</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code> <code>v3.hub.entry_protocol</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.protocol_conversion.field_parity_contract</code></div></td><td><code>build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01</code><br/><small>routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs</small></td><td><code>build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs</small></td></tr>
 <tr><td><code>v3-protocol-field-parity-responses-chat-req-01</code></td><td><code>V3HubReqOutbound07ProviderSemantic</code><br/>→ <code>V3ProviderReqOutbound08WirePayload</code></td><td><span class="status anchored">anchored</span></td><td><span class="status test-bound" title="test/characterization evidence over declared owner path">test-bound</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code> <code>v3.hub.entry_protocol</code> <code>v3.hub.provider_protocol</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.provider_wire_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.protocol_conversion.field_parity_contract</code></div></td><td><code>responses_openai_chat_field_parity_request_matrix</code><br/><small>routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs</small></td><td><code>build_v3_openai_chat_standard_request_from_chat_canonical</code><br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small></td></tr>
+<tr><td><code>v3-protocol-field-parity-responses-history-association-01</code></td><td><code>V3HubReqOutbound07ProviderSemantic</code><br/>→ <code>ProviderReqCompat06ProviderCompat</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.provider_semantic</code> <code>v3.hub.entry_protocol</code> <code>v3.protocol_conversion.attempt_tool_binding</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.provider_wire_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.protocol_conversion.field_parity_contract</code></div></td><td><code>project_v3_operation_runner_standard_provider_request</code><br/><small>routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs</small></td><td><code>NamespaceToolIdentityRegistry::project_responses_history_references</code><br/><small>provider-compat-core/src/namespace_identity.rs</small></td></tr>
 <tr><td><code>v3-protocol-field-parity-responses-chat-malformed-arguments-project-01</code></td><td><code>ProviderReqCompat06ProviderCompat</code><br/>→ <code>V3ProviderReqOutbound08WirePayload</code></td><td><span class="status anchored">anchored</span></td><td><span class="status test-bound" title="test/characterization evidence over declared owner path">test-bound</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code> <code>v3.hub.provider_protocol</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.provider_wire_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.protocol_conversion.field_parity_contract</code></div></td><td><code>build_v3_openai_chat_assistant_tool_call_message</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs</small></td><td><code>project_v3_responses_tool_call_to_openai_chat</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs</small></td></tr>
 <tr><td><code>v3-protocol-field-parity-responses-client-project-01</code></td><td><code>V3HubRespChatProcess03Governed</code><br/>→ <code>V3HubRespOutbound05ClientSemantic</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.protocol_conversion.field_parity_contract</code></div></td><td><code>run_json_response_hooks</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs</small></td><td><code>project_v3_responses_client_completed_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small></td></tr>
 <tr><td><code>v3-protocol-field-parity-responses-chat-resp-01</code></td><td><code>V3ProviderRespInbound01Raw</code><br/>→ <code>V3HubRespInbound02Normalized</code></td><td><span class="status anchored">anchored</span></td><td><span class="status test-bound" title="test/characterization evidence over declared owner path">test-bound</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.provider_raw</code> <code>v3.hub.provider_wire_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.protocol_conversion.field_parity_contract</code></div></td><td><code>responses_openai_chat_field_parity_response_matrix</code><br/><small>routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs</small></td><td><code>build_v3_responses_provider_response_from_openai_chat_payload</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs</small></td></tr>

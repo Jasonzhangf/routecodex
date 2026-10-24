@@ -277,6 +277,23 @@ OpenAI metadata projection requires at most 16 string pairs, keys no longer than
 | request top-level model/messages/tools/tool_choice/parallel_tool_calls/stop/penalties/logit_bias/seed/response_format/metadata | same-protocol runtime matrix preserves provider request |
 | response choices/message/tool_calls/usage/logprobs/refusal/model/created | same-protocol runtime matrix preserves client response |
 
+### Responses namespace history association
+
+This slice covers a Responses history call whose `name` is the exact full leaf
+but whose `namespace` is absent. It applies only to a typed Responses entry and
+does not change forced choice, native Chat history, or an explicit namespace.
+A same-kind plain declaration wins. Multiple same-kind namespaced declarations
+with the same leaf remain unchanged. Function and custom never cross-bind.
+Call IDs, source item IDs, arguments, prefixes, separators and flattened wire
+names grant no identity.
+
+| Test | Failure mode and required assertion | Probability basis | Impact | Cost |
+| --- | --- | --- | --- | --- |
+| `responses_namespace_shell_dispatch_roundtrip_json_sse` | Provider receives plain `exec_command` instead of the one declared `functions__exec_command`, or changes call ID/raw arguments/output order; JSON and SSE must each fail unless one declared provider call, one real client shell execution, exact marker readback, one paired provider follow-up, and final `SHELL_DISPATCH_DONE` pass with exactly two attempts. | Unknown; the historical sample is absent, while current source inspection predicts this exact miss. | P0: Codex cannot continue a namespaced shell call. | Medium: four business requests and two isolated local shell executions. |
+| `responses_standard_projection_qualifies_leaf_only_history` | Standard Responses projection leaves a unique declared leaf unqualified, borrows a plain name, cross-binds kind, or guesses under ambiguity. Each assertion must fail independently. | Unknown; protects the integration boundary not covered by the public fixture alone. | High: wrong tool executor or missing namespace on the next turn. | Low: in-process projection. |
+| `responses_history_unique_leaf_association_respects_plain_kind_and_ambiguity` | Registry lookup selects a namespace despite a plain declaration, cross-binds function/custom, or chooses one of multiple namespaced candidates. | Unknown; broad leaf matching is the obvious unsafe implementation. | High: silently dispatches the wrong tool identity. | Low: no network or shell. |
+| Existing native Chat and explicit-namespace tests | The Responses-only policy leaks into native Chat or bypasses exact lookup for an explicit namespace. | Unknown; shared registry changes can affect every caller. | High: regress unrelated Chat and Responses calls. | Low: existing tests reused. |
+
 ## Verification stack
 
 Focused source gates:

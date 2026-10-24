@@ -286,3 +286,187 @@ fn does_not_infer_undeclared_or_flat_names_and_merges_request_discovery() {
         .restore_identities()
         .contains_key("discovered__unknown"));
 }
+
+#[test]
+fn responses_history_associates_only_unique_same_kind_leaf() {
+    let registry = NamespaceToolIdentityRegistry::from_tools(&[
+        json!({
+            "type": "namespace",
+            "name": "functions",
+            "tools": [{
+                "type": "function",
+                "name": "exec_command",
+                "parameters": {"type": "object"}
+            }]
+        }),
+        json!({
+            "type": "namespace",
+            "name": "customs",
+            "tools": [{
+                "type": "custom",
+                "name": "exec_command",
+                "format": {"type": "text"}
+            }]
+        }),
+    ])
+    .unwrap();
+    let mut body = json!({
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_function",
+                "name": "exec_command",
+                "arguments": "{ \"cmd\" : \"pwd\" }"
+            },
+            {
+                "type": "custom_tool_call",
+                "call_id": "call_custom",
+                "name": "exec_command",
+                "input": "pwd"
+            }
+        ],
+        "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_message",
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "arguments": "{ \"cmd\" : \"pwd\" }"
+                }
+            }]
+        }],
+        "tool_choice": {
+            "type": "function",
+            "name": "exec_command"
+        }
+    });
+
+    registry.project_responses_history_references(&mut body);
+
+    assert_eq!(body["input"][0]["name"], "functions__exec_command");
+    assert_eq!(body["input"][0]["call_id"], "call_function");
+    assert_eq!(body["input"][0]["arguments"], "{ \"cmd\" : \"pwd\" }");
+    assert_eq!(body["input"][1]["name"], "customs__exec_command");
+    assert_eq!(body["input"][1]["call_id"], "call_custom");
+    assert_eq!(body["input"][1]["input"], "pwd");
+    assert_eq!(
+        body["messages"][0]["tool_calls"][0]["function"]["name"],
+        "functions__exec_command"
+    );
+    assert_eq!(
+        body["messages"][0]["tool_calls"][0]["function"]["arguments"],
+        "{ \"cmd\" : \"pwd\" }"
+    );
+    assert_eq!(
+        body["tool_choice"]["name"], "exec_command",
+        "forced choice must remain exact-only"
+    );
+}
+
+#[test]
+fn responses_history_unique_leaf_association_respects_plain_kind_and_ambiguity() {
+    let plain = NamespaceToolIdentityRegistry::from_tools(&[
+        json!({
+            "type": "function",
+            "name": "exec_command",
+            "parameters": {"type": "object"}
+        }),
+        json!({
+            "type": "namespace",
+            "name": "functions",
+            "tools": [{
+                "type": "function",
+                "name": "exec_command",
+                "parameters": {"type": "object"}
+            }]
+        }),
+    ])
+    .unwrap();
+    let mut prefixless = json!({
+        "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_plain",
+                "type": "function",
+                "function": {"name": "exec_command", "arguments": "{}"}
+            }]
+        }]
+    });
+    plain.project_responses_history_references(&mut prefixless);
+    assert_eq!(
+        prefixless["messages"][0]["tool_calls"][0]["function"]["name"], "exec_command",
+        "a same-kind plain declaration owns its bare name"
+    );
+
+    let ambiguous = NamespaceToolIdentityRegistry::from_tools(&[
+        json!({
+            "type": "namespace",
+            "name": "alpha",
+            "tools": [{
+                "type": "function",
+                "name": "exec_command",
+                "parameters": {"type": "object"}
+            }]
+        }),
+        json!({
+            "type": "namespace",
+            "name": "beta",
+            "tools": [{
+                "type": "function",
+                "name": "exec_command",
+                "parameters": {"type": "object"}
+            }]
+        }),
+    ])
+    .unwrap();
+    let mut ambiguous_body = json!({
+        "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_ambiguous",
+                "type": "function",
+                "function": {"name": "exec_command", "arguments": "{}"}
+            }]
+        }]
+    });
+    ambiguous.project_responses_history_references(&mut ambiguous_body);
+    assert_eq!(
+        ambiguous_body["messages"][0]["tool_calls"][0]["function"]["name"], "exec_command",
+        "multiple namespace leaves must remain unbound"
+    );
+
+    let custom = NamespaceToolIdentityRegistry::from_tools(&[json!({
+        "type": "namespace",
+        "name": "customs",
+        "tools": [{
+            "type": "custom",
+            "name": "exec_command",
+            "format": {"type": "text"}
+        }]
+    })])
+    .unwrap();
+    let mut wrong_kind = json!({
+        "input": [{
+            "type": "function_call",
+            "call_id": "call_function",
+            "name": "exec_command",
+            "arguments": "{}"
+        }]
+    });
+    custom.project_responses_history_references(&mut wrong_kind);
+    assert_eq!(wrong_kind["input"][0]["name"], "exec_command");
+
+    let mut wrong_namespace = json!({
+        "input": [{
+            "type": "function_call",
+            "namespace": "unrelated",
+            "call_id": "call_exact",
+            "name": "exec_command",
+            "arguments": "{}"
+        }]
+    });
+    custom.project_responses_history_references(&mut wrong_namespace);
+    assert_eq!(wrong_namespace["input"][0]["name"], "exec_command");
+    assert_eq!(wrong_namespace["input"][0]["namespace"], "unrelated");
+}
