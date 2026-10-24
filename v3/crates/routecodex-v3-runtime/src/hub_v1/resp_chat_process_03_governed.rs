@@ -1045,7 +1045,12 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
         entry_protocol,
         original_request_payload,
     );
-    if history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::Messages {
+    if history_field.writes_messages() {
+        // `ResponsesDual` means the request carried an equivalent `messages`
+        // history next to `input`. Inbound merges them, and it accepts that
+        // merged request only while both representations stay equivalent. The
+        // continuation therefore keeps one owner: it extends `messages` and
+        // drops the now-stale `input`, exactly like a Chat-shaped request.
         payload_object.remove("input");
         let messages = payload_object
             .get_mut("messages")

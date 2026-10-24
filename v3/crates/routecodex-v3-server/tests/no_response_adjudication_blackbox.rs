@@ -1588,6 +1588,94 @@ async fn refill_continuation_messages_shape_keeps_reasoning_association_public()
     std::env::remove_var(KEY_ENV);
 }
 
+/// Stable public ID: a Responses request may carry the Chat history next to
+/// `input` (equivalent representations that inbound merges). The refill
+/// continuation must keep that request acceptable to the next execution:
+/// extending only `input` while the old `messages` stays behind makes inbound
+/// fail on conflicting input and messages representations.
+#[tokio::test]
+async fn refill_responses_dual_history_continuation_stays_acceptable_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "DUAL_HISTORY_ROUND_TWO"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "DUAL_HISTORY_ROUND_ONE")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model": "test.test",
+                "instructions": "answer exactly once",
+                "input": "original dual history task",
+                "messages": [{"role": "user", "content": "original dual history task"}],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "dual-history entry must run exactly one refill: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "dual-history entry must deliver normally: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("DUAL_HISTORY_ROUND_ONE")
+            && consumed.body.contains("DUAL_HISTORY_ROUND_TWO"),
+        "both rounds must reach the responses client: {consumed:?}"
+    );
+    // The second provider request must keep the merged history in one
+    // representation; the stale `messages` twin must not compete with `input`.
+    let second = &captured[1];
+    assert!(
+        second.get("messages").is_none(),
+        "continuation must drop the stale messages twin: {}",
+        second
+    );
+    let input = second["input"]
+        .as_array()
+        .unwrap_or_else(|| panic!("second provider request must carry Responses input: {second}"));
+    assert!(
+        input
+            .iter()
+            .any(|item| item.to_string().contains("original dual history task")),
+        "continuation must replay the original task: {input:?}"
+    );
+    assert!(
+        input
+            .iter()
+            .any(|item| item.to_string().contains("DUAL_HISTORY_ROUND_ONE")),
+        "continuation must replay the first round answer: {input:?}"
+    );
+    assert!(
+        input
+            .iter()
+            .any(|item| item.to_string().contains(REFILL_INSTRUCTION)),
+        "continuation must carry the bounded refill instruction: {input:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
 /// Stable public ID: a provider refusal is legal business content, so a refill
 /// continuation must replay the complete assistant message into the next
 /// provider request instead of dropping it.

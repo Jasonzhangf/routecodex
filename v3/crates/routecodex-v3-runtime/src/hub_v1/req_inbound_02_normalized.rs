@@ -30,11 +30,17 @@ pub struct V3HubReqInbound02Normalized {
 /// execution will actually read instead of guessing from field names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum V3HubInboundHistoryField {
+    /// The request also carries an equivalent Chat `messages` history that is
+    /// merged with the decoded `input` and canonicalized into `messages`.
+    ResponsesDual,
     Messages,
     Input,
     Contents,
 }
 
+/// The single decision that maps a request to the field inbound will read as
+/// the conversation history. Owned here so the canonicalizer and the refill
+/// continuation construction cannot diverge.
 pub(crate) fn v3_hub_inbound_history_field(
     entry_protocol: V3HubEntryProtocol,
     payload: &Value,
@@ -47,12 +53,24 @@ pub(crate) fn v3_hub_inbound_history_field(
         V3HubEntryProtocol::Responses => {
             let has_input = payload.get("input").is_some();
             let has_messages = payload.get("messages").and_then(Value::as_array).is_some();
-            if has_input || !has_messages {
+            if has_input && has_messages {
+                V3HubInboundHistoryField::ResponsesDual
+            } else if has_input || !has_messages {
                 V3HubInboundHistoryField::Input
             } else {
                 V3HubInboundHistoryField::Messages
             }
         }
+    }
+}
+
+impl V3HubInboundHistoryField {
+    /// Whether inbound canonicalizes this request into the Chat shape.
+    pub(crate) fn writes_messages(self) -> bool {
+        matches!(
+            self,
+            V3HubInboundHistoryField::ResponsesDual | V3HubInboundHistoryField::Messages
+        )
     }
 }
 

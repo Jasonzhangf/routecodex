@@ -983,6 +983,42 @@ fn refill_continuation_gemini_keeps_native_parts_and_skips_empty_text() {
 }
 
 #[test]
+fn refill_continuation_responses_dual_history_keeps_one_history_owner() {
+    let original = json!({
+        "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]}],
+        "messages": [{"role": "user", "content": "go"}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("dual-history continuation must build");
+    let messages = continuation["messages"].as_array().expect("messages array");
+    assert_eq!(
+        messages.len(),
+        3,
+        "original + answer + instruction must extend the Chat history: {messages:?}"
+    );
+    assert!(
+        continuation.get("input").is_none(),
+        "the stale input twin must not compete with messages: {continuation}"
+    );
+    assert_eq!(messages[1]["role"], json!("assistant"));
+    assert_eq!(
+        messages[2]["content"],
+        json!(V3_CHAT_PROCESS_REFILL_INSTRUCTION)
+    );
+}
+
+#[test]
 fn refill_continuation_responses_ignores_foreign_contents_extension() {
     let original = json!({
         "input": "original task",
