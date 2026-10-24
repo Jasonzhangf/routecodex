@@ -382,16 +382,23 @@ async fn relay_committed_terminal_repeats_announced_items_after_governance() {
         frames.push(String::from_utf8_lossy(&frame).to_string());
     }
 
-    // The client never saw the leading reasoning item, so the terminal must not
-    // introduce one: it would be a second, unreconciled description of the same
-    // answer.
+    // The provider never delivered that reasoning item incrementally, but the
+    // complete-attempt owner returned a representable reasoning item. The
+    // terminal must keep it so the client can echo the reasoning next turn,
+    // while the announced message still appears exactly once.
     let terminal_frame = frames
         .iter()
         .find(|frame| frame.contains("response.completed"))
         .expect("terminal frame");
     assert!(
-        !terminal_frame.contains("reasoning"),
-        "terminal introduces an item the client never received: {terminal_frame}"
+        terminal_frame.contains("\"type\":\"reasoning\"")
+            && terminal_frame.contains("\"text\":\"hidden plan\""),
+        "terminal must keep the finalized reasoning item: {terminal_frame}"
+    );
+    assert_eq!(
+        terminal_frame.matches("\"type\":\"reasoning\"").count(),
+        1,
+        "terminal carries the terminal-only reasoning item exactly once: {terminal_frame}"
     );
     assert!(
         terminal_frame.contains("\"text\":\"plain answer\"") && terminal_frame.contains("msg_0"),
@@ -845,6 +852,276 @@ async fn relay_first_frame_commit_preserves_streamed_refusal_in_terminal() {
     assert!(
         terminal_frame.contains("\"type\":\"refusal\"") && terminal_frame.contains("cannot comply"),
         "terminal must keep the streamed refusal item: {terminal_frame}"
+    );
+}
+
+/// A governed marker inside a protected range is business text for the
+/// whole-attempt owner. Once the owner returns it unchanged, the held tail must
+/// be released and the attempt must seal normally; the probe alone is only a
+/// hold signal.
+#[tokio::test]
+async fn relay_committed_fenced_governed_marker_seals_when_owner_preserves_it() {
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let mut projector = super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+        sink,
+        relay_test_budget(),
+    );
+
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_fenced_marker",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"content": "Example:\n"}, "finish_reason": null}],
+        }))
+        .expect("committed text chunk");
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_fenced_marker",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"content": "```\n</｜DSML｜tool_calls>\n```"}, "finish_reason": null}],
+        }))
+        .expect("fenced marker chunk");
+
+    let terminal = json!({
+        "id": "chatcmpl_fenced_marker",
+        "object": "response",
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Example:\n```\n</｜DSML｜tool_calls>\n```"}]}],
+    });
+    let mut sealed = projector
+        .finish(&terminal)
+        .expect("fenced marker must seal normally");
+    let mut frames = drain_frames(&mut receiver);
+    use futures_util::StreamExt;
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let all = frames.join("");
+    assert!(
+        all.contains("</｜DSML｜tool_calls>") && all.contains("response.completed"),
+        "the complete-attempt owner preserved the fenced marker, so the tail must be released: {all}"
+    );
+}
+
+/// The committed reasoning carrier must keep opaque business fields such as
+/// `encrypted_content`; the terminal reconciliation must not discard them just
+/// because they were not separately announced as a summary text delta.
+#[tokio::test]
+async fn relay_reasoning_delta_preserves_encrypted_content_in_terminal() {
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let mut projector = super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+        sink,
+        relay_test_budget(),
+    );
+
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_reasoning_cipher",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"content": "answer"}, "finish_reason": null}],
+        }))
+        .expect("text chunk");
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_reasoning_cipher",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"reasoning": {
+                "summary": [{"type": "summary_text", "text": "private plan"}],
+                "encrypted_content": "enc-opaque"
+            }}, "finish_reason": null}],
+        }))
+        .expect("reasoning cipher chunk");
+
+    let terminal = json!({
+        "id": "chatcmpl_reasoning_cipher",
+        "object": "response",
+        "status": "completed",
+        "output": [
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "private plan"}],
+             "content": [{"type": "reasoning_text", "text": "private plan"}],
+             "encrypted_content": "enc-opaque"},
+            {"type": "message", "role": "assistant",
+             "content": [{"type": "output_text", "text": "answer"}]}
+        ],
+    });
+    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut frames = drain_frames(&mut receiver);
+    use futures_util::StreamExt;
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let terminal_frame = frames
+        .iter()
+        .find(|frame| frame.contains("response.completed"))
+        .expect("terminal frame");
+    assert!(
+        terminal_frame.contains("\"encrypted_content\":\"enc-opaque\""),
+        "terminal reasoning must keep encrypted_content: {terminal_frame}"
+    );
+}
+
+/// `close_round` is a complete governance boundary. It must release an
+/// unclosed think block and a partial marker according to this round's owner,
+/// then reset the scanner so the next round cannot close the previous round's
+/// block as reasoning.
+#[tokio::test]
+async fn relay_refill_round_resets_think_scan_at_close_round() {
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let mut projector = super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+        sink,
+        relay_test_budget(),
+    );
+
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_round_one",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"content": "before<think>x"}, "finish_reason": null}],
+        }))
+        .expect("round one chunk");
+    projector.close_round().expect("close round one");
+
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_round_two",
+            "object": "chat.completion.chunk",
+            "created": 2,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"content": "</think>after"}, "finish_reason": null}],
+        }))
+        .expect("round two chunk");
+
+    let terminal = json!({
+        "id": "chatcmpl_round_two",
+        "object": "response",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "beforex"}]},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "after"}]}
+        ],
+    });
+    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut frames = drain_frames(&mut receiver);
+    use futures_util::StreamExt;
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let terminal_frame = frames
+        .iter()
+        .find(|frame| frame.contains("response.completed"))
+        .expect("terminal frame");
+    let payload: serde_json::Value = relay_frame_payload(terminal_frame).expect("terminal payload");
+    let mut texts = Vec::new();
+    for item in payload["response"]["output"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        if item["type"] == "message" {
+            for part in item["content"].as_array().into_iter().flatten() {
+                if part["type"] == "output_text" {
+                    texts.push(part["text"].as_str().unwrap_or_default().to_string());
+                }
+            }
+        }
+    }
+    assert_eq!(
+        texts,
+        vec!["beforex".to_string(), "after".to_string()],
+        "each round must keep its own governed text without cross-round harvesting: {terminal_frame}"
+    );
+    assert!(
+        !terminal_frame.contains("\"type\":\"reasoning\""),
+        "the next round must not turn the previous round's unclosed block into reasoning: {terminal_frame}"
+    );
+}
+
+/// A marker split across a refill boundary must be judged by each round's own
+/// complete governance. The first round ends on ordinary text, so the half
+/// marker is released there; the next round's orphan close tag is removed
+/// without reopening or reassigning the previous round's bytes.
+#[tokio::test]
+async fn relay_refill_round_releases_partial_marker_without_cross_round_reassembly() {
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let mut projector = super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+        sink,
+        relay_test_budget(),
+    );
+
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_partial_round_one",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"content": "before<thin"}, "finish_reason": null}],
+        }))
+        .expect("round one chunk");
+    projector.close_round().expect("close round one");
+
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_partial_round_two",
+            "object": "chat.completion.chunk",
+            "created": 2,
+            "model": "chat-test",
+            "choices": [{"index": 0, "delta": {"content": "king>plan</thinking>after"}, "finish_reason": null}],
+        }))
+        .expect("round two chunk");
+
+    let terminal = json!({
+        "id": "chatcmpl_partial_round_two",
+        "object": "response",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "before<thin"}]},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "king>planafter"}]}
+        ],
+    });
+    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut frames = drain_frames(&mut receiver);
+    use futures_util::StreamExt;
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let terminal_frame = frames
+        .iter()
+        .find(|frame| frame.contains("response.completed"))
+        .expect("terminal frame");
+    let payload: serde_json::Value = relay_frame_payload(terminal_frame).expect("terminal payload");
+    let mut texts = Vec::new();
+    for item in payload["response"]["output"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        if item["type"] == "message" {
+            for part in item["content"].as_array().into_iter().flatten() {
+                if part["type"] == "output_text" {
+                    texts.push(part["text"].as_str().unwrap_or_default().to_string());
+                }
+            }
+        }
+    }
+    assert_eq!(
+        texts,
+        vec!["before<thin".to_string(), "king>planafter".to_string()],
+        "each round keeps its own partial-marker attribution: {terminal_frame}"
+    );
+    assert!(
+        !terminal_frame.contains("\"type\":\"reasoning\""),
+        "the split marker must not become a cross-round reasoning block: {terminal_frame}"
     );
 }
 

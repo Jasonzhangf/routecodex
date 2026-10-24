@@ -16,11 +16,11 @@ use futures_util::stream;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
-use std::{convert::Infallible, time::Duration};
+use std::{collections::VecDeque, convert::Infallible, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Mutex},
     time::timeout,
 };
 
@@ -35,6 +35,10 @@ static TEST_LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
 const PROVIDER_KEY_ENV: &str = "RELAY_FIRST_FRAME_PUBLIC_KEY";
 
 fn chat_delta(text: &str) -> String {
+    chat_delta_value(json!({"role": "assistant", "content": text}))
+}
+
+fn chat_delta_value(delta: Value) -> String {
     format!(
         "data: {}\n\n",
         json!({
@@ -42,7 +46,7 @@ fn chat_delta(text: &str) -> String {
             "object": "chat.completion.chunk",
             "created": 1,
             "model": "wire-relay",
-            "choices": [{"index": 0, "delta": {"role": "assistant", "content": text}}]
+            "choices": [{"index": 0, "delta": delta}]
         })
     )
 }
@@ -60,16 +64,28 @@ fn chat_stop() -> String {
     )
 }
 
-async fn upstream(
-    State(captures): State<mpsc::UnboundedSender<Value>>,
-    Json(body): Json<Value>,
-) -> Response<Body> {
-    let _ = captures.send(body);
-    let frames = vec![
+#[derive(Clone)]
+struct UpstreamState {
+    captures: mpsc::UnboundedSender<Value>,
+    plans: Arc<Mutex<VecDeque<Vec<String>>>>,
+}
+
+fn default_plan() -> Vec<String> {
+    vec![
         chat_delta("early-progressive-text"),
         chat_stop(),
         "data: [DONE]\n\n".to_string(),
-    ];
+    ]
+}
+
+async fn upstream(State(state): State<UpstreamState>, Json(body): Json<Value>) -> Response<Body> {
+    let _ = state.captures.send(body);
+    let frames = state
+        .plans
+        .lock()
+        .await
+        .pop_front()
+        .unwrap_or_else(default_plan);
     // Hold every frame after the first 500ms apart, so the first delta can only
     // reach the client before the terminal if the Relay gate projects it during
     // the provider hold.
@@ -111,18 +127,23 @@ impl Entry {
     }
 }
 
-async fn start() -> Entry {
+async fn start_with_plans(plans: Vec<Vec<String>>) -> (Entry, mpsc::UnboundedReceiver<Value>) {
     std::env::set_var(PROVIDER_KEY_ENV, "owned-fixture-key");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_addr = listener.local_addr().unwrap();
     let (shutdown, stop) = oneshot::channel();
     let (captures, _received) = mpsc::unbounded_channel();
+    let captures_sender = captures.clone();
+    let state = UpstreamState {
+        captures: captures_sender,
+        plans: Arc::new(Mutex::new(plans.into_iter().collect())),
+    };
     let peer = tokio::spawn(async move {
         axum::serve(
             listener,
             Router::new()
                 .route("/v1/chat/completions", post(upstream))
-                .with_state(captures),
+                .with_state(state),
         )
         .with_graceful_shutdown(async {
             let _ = stop.await;
@@ -173,11 +194,93 @@ snapshots = true
     );
     let manifest =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
-    Entry {
-        handle: spawn_v3_server_aggregate(manifest).await.unwrap(),
-        shutdown,
-        peer,
+    (
+        Entry {
+            handle: spawn_v3_server_aggregate(manifest).await.unwrap(),
+            shutdown,
+            peer,
+        },
+        _received,
+    )
+}
+
+async fn start() -> Entry {
+    let (entry, _captures) = start_with_plans(vec![default_plan()]).await;
+    entry
+}
+
+/// Issue one chat-protocol provider round and read the full Responses SSE body.
+/// The shared upstream consumes one queued plan per request.
+async fn relay_body(entry: &Entry, body: Value) -> String {
+    let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
+        .await
+        .unwrap();
+    let body = body.to_string();
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: relay-first-frame-public\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let mut wire = Vec::new();
+    loop {
+        let mut chunk = [0u8; 4096];
+        let count = match timeout(Duration::from_secs(8), socket.read(&mut chunk)).await {
+            Ok(Ok(0)) => break,
+            Ok(Ok(count)) => count,
+            Ok(Err(_)) => break,
+            Err(_) => break,
+        };
+        wire.extend_from_slice(&chunk[..count]);
     }
+    decoded_chunked_body(&wire)
+}
+
+fn decoded_chunked_body(wire: &[u8]) -> String {
+    let header_end = wire
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .unwrap_or(0);
+    let body = &wire[header_end + 4..];
+    if body.starts_with(b"data:") {
+        return String::from_utf8_lossy(body).to_string();
+    }
+    let mut cursor = 0;
+    let mut decoded = Vec::new();
+    while cursor < body.len() {
+        let Some(line_end) = body[cursor..].iter().position(|byte| *byte == b'\n') else {
+            break;
+        };
+        let line_end = cursor + line_end;
+        let size_line = std::str::from_utf8(&body[cursor..line_end])
+            .unwrap()
+            .trim_end_matches('\r');
+        let Ok(size) = usize::from_str_radix(size_line.split(';').next().unwrap_or(""), 16) else {
+            break;
+        };
+        cursor = line_end + 1;
+        if size == 0 {
+            break;
+        }
+        let chunk_end = (cursor + size).min(body.len());
+        decoded.extend_from_slice(&body[cursor..chunk_end]);
+        cursor = chunk_end + 2;
+    }
+    String::from_utf8_lossy(&decoded).to_string()
+}
+
+fn response_sse_events(body: &str) -> Vec<Value> {
+    body.split("\n\n")
+        .filter_map(|event| {
+            let payload = event
+                .lines()
+                .filter_map(|line| line.strip_prefix("data:").map(str::trim))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!payload.is_empty())
+                .then(|| serde_json::from_str(&payload).ok())
+                .flatten()
+        })
+        .collect()
 }
 
 struct TimedWire {
@@ -247,6 +350,110 @@ async fn relay_first_business_frame_precedes_provider_terminal_at_public_http_en
     assert!(
         !text.contains("\"error\"") && !text.contains("network_error"),
         "client received a provider/proxy error payload: {text}"
+    );
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn relay_public_fenced_governed_marker_seals_when_owner_preserves_it() {
+    let _guard = TEST_LOCK.lock().await;
+    let plans = vec![vec![
+        chat_delta("Example:\n"),
+        chat_delta("```\n</\u{FF5C}DSML\u{FF5C}tool_calls>\n```"),
+        chat_stop(),
+        "data: [DONE]\n\n".to_string(),
+    ]];
+    let (entry, _captures) = start_with_plans(plans).await;
+    let body = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
+
+    assert!(
+        body.contains("</\u{FF5C}DSML\u{FF5C}tool_calls>"),
+        "the fenced marker is protected business text the owner preserves: {body}"
+    );
+    assert!(
+        body.contains("response.completed"),
+        "the attempt must seal with a completed terminal: {body}"
+    );
+    assert!(
+        !body.contains("\"error\"") && !body.contains("network_error"),
+        "the client must not receive a proxy-generated error: {body}"
+    );
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn relay_public_reasoning_cipher_survives_first_frame_and_echoes_next_turn() {
+    let _guard = TEST_LOCK.lock().await;
+    let cipher = "chat-cipher-opaque";
+    let plans = vec![
+        vec![
+            chat_delta_value(json!({"reasoning": {
+                "summary": [{"type": "summary_text", "text": "private plan"}],
+                "encrypted_content": cipher
+            }})),
+            chat_delta("answer"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+        vec![
+            chat_delta("second"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+    ];
+    let (entry, mut captures) = start_with_plans(plans).await;
+    let body = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
+
+    let events = response_sse_events(&body);
+    let completed = events
+        .iter()
+        .rev()
+        .find(|event| event["type"] == "response.completed")
+        .expect("completed event");
+    let output = completed
+        .pointer("/response/output")
+        .and_then(Value::as_array)
+        .expect("completed output");
+    let reasoning = output
+        .iter()
+        .find(|item| item["type"] == "reasoning")
+        .expect("reasoning item in terminal");
+    assert_eq!(
+        reasoning["encrypted_content"],
+        json!(cipher),
+        "the first-frame SSE terminal must keep the reasoning cipher: {completed}"
+    );
+
+    // The first request was already captured by the upstream; drain it so the
+    // next-turn capture is the second request's provider body.
+    let _first_capture = captures.try_recv().ok();
+
+    // Echo the delivered reasoning item into the next turn. The server-side
+    // Responses->Chat projection must carry the reasoning plaintext so the
+    // provider receives a complete continuation history.
+    let next_body = json!({
+        "model": "test",
+        "stream": true,
+        "input": [
+            reasoning,
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]}
+        ]
+    });
+    let _second = relay_body(&entry, next_body).await;
+    let captured = captures.try_recv().ok();
+    let captured_text = captured.map(|value| value.to_string()).unwrap_or_default();
+    assert!(
+        captured_text.contains("private plan") || captured_text.contains(cipher),
+        "the next-turn provider request must keep the echoed reasoning: {captured_text}"
     );
     entry.stop().await;
 }

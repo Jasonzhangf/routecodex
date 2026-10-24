@@ -30,6 +30,11 @@ struct OpenReasoningItem {
     output_index: usize,
     item_id: String,
     text: String,
+    /// The complete reasoning item fields the provider supplied. `summary` and
+    /// `content` are rebuilt from the streamed plaintext; opaque business
+    /// fields such as `encrypted_content` must be kept for the terminal ledger
+    /// and the client's next-turn echo.
+    payload: serde_json::Map<String, Value>,
 }
 
 struct OpenMessageItem {
@@ -193,13 +198,17 @@ pub(crate) struct V3RelayChatClientStreamProjector {
     tool_calls: Vec<OpenToolCallItem>,
     governance: V3DirectPrefixCommitProbe,
     post_commit_governed: bool,
-    /// Chat Process harvests `<｜begin▁of▁thinking｜>` blocks out of the visible content on the
-    /// whole attempt. A committed stream cannot rewrite bytes it already sent,
-    /// so the projector applies the same rule while the text arrives: the block
-    /// never reaches the client as output text and becomes reasoning instead.
-    /// Text that might be the head of a marker is held until it is decided.
+    /// Chat Process harvests `<think>` and `<thinking>` blocks out of the
+    /// visible content on the whole attempt. A committed stream cannot rewrite
+    /// bytes it already sent, so the projector applies the same rule while the
+    /// text arrives: the block never reaches the client as output text and
+    /// becomes reasoning instead. Text that might be the head of a marker is
+    /// held until it is decided.
     think_pending: String,
     think_open: bool,
+    /// Which opener the open block used, for the unclosed-tail decision the
+    /// `<thinking>` owner makes differently from the `<think>` owner.
+    think_open_is_thinking: bool,
 }
 
 impl V3RelayChatClientStreamProjector {
@@ -227,6 +236,7 @@ impl V3RelayChatClientStreamProjector {
             post_commit_governed: false,
             think_pending: String::new(),
             think_open: false,
+            think_open_is_thinking: false,
         }
     }
 
@@ -308,7 +318,7 @@ impl V3RelayChatClientStreamProjector {
         }));
     }
 
-    fn reasoning_text_from_delta(delta: &Value) -> Option<String> {
+    fn reasoning_payload_from_delta(delta: &Value) -> Option<Value> {
         let delta = delta.as_object()?;
         if !delta.contains_key("reasoning_content")
             && !delta.contains_key("reasoning_text")
@@ -316,15 +326,110 @@ impl V3RelayChatClientStreamProjector {
         {
             return None;
         }
-        let item = super::build_v3_responses_reasoning_item_from_openai_chat_message(delta)?;
-        let summary = item.get("summary").and_then(Value::as_array)?;
-        let text = summary
-            .iter()
+        super::build_v3_responses_reasoning_item_from_openai_chat_message(delta)
+    }
+
+    fn reasoning_summary_text(item: &Value) -> String {
+        item.get("summary")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
             .filter_map(|part| part.get("text").and_then(Value::as_str))
             .filter(|text| !text.is_empty())
             .collect::<Vec<_>>()
-            .join("\n");
-        (!text.is_empty()).then_some(text)
+            .join("\n")
+    }
+
+    fn merge_reasoning_payload(target: &mut serde_json::Map<String, Value>, incoming: &Value) {
+        let Some(incoming) = incoming.as_object() else {
+            return;
+        };
+        for (key, value) in incoming {
+            if matches!(key.as_str(), "id" | "type" | "summary" | "content") {
+                continue;
+            }
+            target.insert(key.clone(), value.clone());
+        }
+    }
+
+    fn finished_reasoning_item(
+        item_id: String,
+        text: String,
+        mut payload: serde_json::Map<String, Value>,
+    ) -> Value {
+        payload.remove("id");
+        payload.insert("type".to_string(), Value::String("reasoning".to_string()));
+        payload.insert("id".to_string(), Value::String(item_id));
+        if !text.is_empty() {
+            payload.insert(
+                "summary".to_string(),
+                Value::Array(vec![json!({"type": "summary_text", "text": text})]),
+            );
+            payload.insert(
+                "content".to_string(),
+                Value::Array(vec![json!({"type": "reasoning_text", "text": text})]),
+            );
+        }
+        Value::Object(payload)
+    }
+
+    fn reasoning_item_has_business_payload(item: &Value) -> bool {
+        let has_parts = |key: &str| {
+            item.get(key)
+                .and_then(Value::as_array)
+                .is_some_and(|parts| !parts.is_empty())
+        };
+        has_parts("summary")
+            || has_parts("content")
+            || item
+                .get("encrypted_content")
+                .and_then(Value::as_str)
+                .is_some_and(|cipher| !cipher.is_empty())
+            || item.as_object().is_some_and(|object| {
+                object.keys().any(|key| {
+                    !matches!(
+                        key.as_str(),
+                        "id" | "type" | "status" | "summary" | "content"
+                    )
+                })
+            })
+    }
+
+    fn merge_terminal_reasoning_fields(streamed: &mut Value, terminal: &Value) {
+        let Some(streamed) = streamed.as_object_mut() else {
+            return;
+        };
+        let Some(terminal) = terminal.as_object() else {
+            return;
+        };
+        for (key, value) in terminal {
+            if matches!(key.as_str(), "id" | "type" | "summary" | "content" | "text") {
+                continue;
+            }
+            streamed.insert(key.clone(), value.clone());
+        }
+    }
+
+    fn post_commit_governed_consistent_with_terminal(&self, terminal_response: &Value) -> bool {
+        if !self.post_commit_governed {
+            return true;
+        }
+        let terminal_items = terminal_response
+            .get("output")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        self.streamed_items.iter().all(|streamed| {
+            let kind = streamed.item.get("type").and_then(Value::as_str);
+            match kind {
+                Some("message" | "function_call" | "custom_tool_call" | "mcp_call") => {
+                    terminal_items.iter().any(|terminal| {
+                        Self::streamed_item_matches_terminal_item(&streamed.item, terminal)
+                    })
+                }
+                _ => true,
+            }
+        })
     }
 
     fn push_response_prefix_frames(&mut self) -> Result<(), String> {
@@ -376,8 +481,8 @@ impl V3RelayChatClientStreamProjector {
             if let Some(text) = delta.get("content").and_then(Value::as_str) {
                 self.append_text(text)?;
             }
-            if let Some(reasoning) = Self::reasoning_text_from_delta(delta) {
-                self.append_reasoning(&reasoning)?;
+            if let Some(reasoning) = Self::reasoning_payload_from_delta(delta) {
+                self.append_reasoning_payload(&reasoning)?;
             }
             if let Some(refusal) = delta.get("refusal").and_then(Value::as_str) {
                 self.append_refusal(refusal)?;
@@ -443,16 +548,36 @@ impl V3RelayChatClientStreamProjector {
             self.append_visible_text(&visible)?;
             if is_think_open_tag(&tag) {
                 self.think_open = true;
+                self.think_open_is_thinking = tag == THINKING_OPEN;
             }
         }
     }
 
     /// Release whatever the think scanner still holds: an unclosed block keeps
     /// its content as raw visible text, exactly like the whole-attempt harvest,
-    /// and a held partial marker is ordinary text once the stream ended.
+    /// and a held partial marker is ordinary text once the stream ended. The
+    /// `<thinking>` owner makes one exception: a bare unclosed block with no
+    /// visible text and no reasoning before it becomes reasoning when the
+    /// attempt has no complete tools. Mirror it here.
     fn flush_think_pending(&mut self) -> Result<(), String> {
         let pending = std::mem::take(&mut self.think_pending);
+        let was_thinking = self.think_open_is_thinking;
         self.think_open = false;
+        self.think_open_is_thinking = false;
+        if was_thinking
+            && self
+                .message
+                .as_ref()
+                .is_none_or(|message| message.text.is_empty())
+            && self.reasoning.is_none()
+            && self.tool_calls.is_empty()
+        {
+            let block = pending.trim();
+            if !block.is_empty() {
+                return self.append_reasoning(block);
+            }
+            return Ok(());
+        }
         self.append_visible_text(&pending)
     }
 
@@ -525,42 +650,48 @@ impl V3RelayChatClientStreamProjector {
         ))
     }
 
-    fn append_reasoning(&mut self, text: &str) -> Result<(), String> {
-        if self.reasoning.is_none() {
-            let output_index = self.next_output_index;
-            self.next_output_index += 1;
-            let item_id = format!("rs_{output_index}");
-            self.push(super::build_v3_runtime_sse_json_frame(
-                "response.output_item.added",
-                &json!({
-                    "type": "response.output_item.added",
-                    "response_id": self.response_id,
-                    "output_index": output_index,
-                    "item": {
-                        "id": item_id,
-                        "type": "reasoning",
-                        "summary": [],
-                        "content": [],
-                    },
-                }),
-            ))?;
-            self.push(super::build_v3_runtime_sse_json_frame(
-                "response.reasoning_summary_part.added",
-                &json!({
-                    "type": "response.reasoning_summary_part.added",
-                    "response_id": self.response_id,
-                    "output_index": output_index,
-                    "item_id": item_id,
-                    "summary_index": 0,
-                    "part": {"type": "summary_text", "text": ""},
-                }),
-            ))?;
-            self.reasoning = Some(OpenReasoningItem {
-                output_index,
-                item_id,
-                text: String::new(),
-            });
+    fn ensure_reasoning_open(&mut self) -> Result<(), String> {
+        if self.reasoning.is_some() {
+            return Ok(());
         }
+        let output_index = self.next_output_index;
+        self.next_output_index += 1;
+        let item_id = format!("rs_{output_index}");
+        self.push(super::build_v3_runtime_sse_json_frame(
+            "response.output_item.added",
+            &json!({
+                "type": "response.output_item.added",
+                "response_id": self.response_id,
+                "output_index": output_index,
+                "item": {
+                    "id": item_id,
+                    "type": "reasoning",
+                    "summary": [],
+                    "content": [],
+                },
+            }),
+        ))?;
+        self.push(super::build_v3_runtime_sse_json_frame(
+            "response.reasoning_summary_part.added",
+            &json!({
+                "type": "response.reasoning_summary_part.added",
+                "response_id": self.response_id,
+                "output_index": output_index,
+                "item_id": item_id,
+                "summary_index": 0,
+                "part": {"type": "summary_text", "text": ""},
+            }),
+        ))?;
+        self.reasoning = Some(OpenReasoningItem {
+            output_index,
+            item_id,
+            text: String::new(),
+            payload: serde_json::Map::new(),
+        });
+        Ok(())
+    }
+
+    fn append_reasoning_text_delta(&mut self, text: &str) -> Result<(), String> {
         let reasoning = self
             .reasoning
             .as_mut()
@@ -579,6 +710,30 @@ impl V3RelayChatClientStreamProjector {
                 "delta": text,
             }),
         ))
+    }
+
+    /// Project one provider reasoning increment. The client carrier is built
+    /// from the streamed plaintext, but any opaque business field the provider
+    /// attached (notably `encrypted_content`) must survive into the item done
+    /// event and the terminal ledger so the client can echo the item next turn.
+    fn append_reasoning_payload(&mut self, item: &Value) -> Result<(), String> {
+        if !Self::reasoning_item_has_business_payload(item) {
+            return Ok(());
+        }
+        self.ensure_reasoning_open()?;
+        if let Some(reasoning) = self.reasoning.as_mut() {
+            Self::merge_reasoning_payload(&mut reasoning.payload, item);
+        }
+        let text = Self::reasoning_summary_text(item);
+        if text.is_empty() {
+            return Ok(());
+        }
+        self.append_reasoning_text_delta(&text)
+    }
+
+    fn append_reasoning(&mut self, text: &str) -> Result<(), String> {
+        self.ensure_reasoning_open()?;
+        self.append_reasoning_text_delta(text)
     }
 
     fn append_refusal(&mut self, text: &str) -> Result<(), String> {
@@ -737,50 +892,39 @@ impl V3RelayChatClientStreamProjector {
         let output_index = reasoning.output_index;
         let item_id = reasoning.item_id;
         let text = reasoning.text;
-        self.record_streamed_item(
-            output_index,
-            &item_id,
-            json!({
-                "id": item_id,
-                "type": "reasoning",
-                "summary": [{"type": "summary_text", "text": text}],
-                "content": [{"type": "reasoning_text", "text": text}],
-            }),
-        );
-        self.push(super::build_v3_runtime_sse_json_frame(
-            "response.reasoning_summary_text.done",
-            &json!({
-                "type": "response.reasoning_summary_text.done",
-                "response_id": self.response_id,
-                "output_index": output_index,
-                "item_id": item_id,
-                "summary_index": 0,
-                "text": text,
-            }),
-        ))?;
-        self.push(super::build_v3_runtime_sse_json_frame(
-            "response.reasoning_summary_part.done",
-            &json!({
-                "type": "response.reasoning_summary_part.done",
-                "response_id": self.response_id,
-                "output_index": output_index,
-                "item_id": item_id,
-                "summary_index": 0,
-                "part": {"type": "summary_text", "text": text},
-            }),
-        ))?;
+        let item = Self::finished_reasoning_item(item_id.clone(), text.clone(), reasoning.payload);
+        self.record_streamed_item(output_index, &item_id, item.clone());
+        if !text.is_empty() {
+            self.push(super::build_v3_runtime_sse_json_frame(
+                "response.reasoning_summary_text.done",
+                &json!({
+                    "type": "response.reasoning_summary_text.done",
+                    "response_id": self.response_id,
+                    "output_index": output_index,
+                    "item_id": item_id,
+                    "summary_index": 0,
+                    "text": text,
+                }),
+            ))?;
+            self.push(super::build_v3_runtime_sse_json_frame(
+                "response.reasoning_summary_part.done",
+                &json!({
+                    "type": "response.reasoning_summary_part.done",
+                    "response_id": self.response_id,
+                    "output_index": output_index,
+                    "item_id": item_id,
+                    "summary_index": 0,
+                    "part": {"type": "summary_text", "text": text},
+                }),
+            ))?;
+        }
         self.push(super::build_v3_runtime_sse_json_frame(
             "response.output_item.done",
             &json!({
                 "type": "response.output_item.done",
                 "response_id": self.response_id,
                 "output_index": output_index,
-                "item": {
-                    "id": item_id,
-                    "type": "reasoning",
-                    "summary": [{"type": "summary_text", "text": text}],
-                    "content": [{"type": "reasoning_text", "text": text}],
-                },
+                "item": item,
             }),
         ))
     }
@@ -933,11 +1077,12 @@ impl V3RelayChatClientStreamProjector {
     ///
     /// A refill is a separate provider response and the delivered payload keeps
     /// its items as separate entries. The client therefore receives one item per
-    /// round; the next round opens new items at the next output indices.
+    /// round; the next round opens new items at the next output indices. Each
+    /// round ran its own complete governance, so the think scanner must release
+    /// this round's unclosed block or partial marker before the boundary instead
+    /// of carrying it into a different provider response.
     pub(crate) fn close_round(&mut self) -> Result<(), String> {
-        // The think scanner keeps its state across refill rounds: a block that
-        // opens in one round and closes in the next is still one block, exactly
-        // as the whole-attempt harvest would see after the merge.
+        self.flush_think_pending()?;
         self.close_reasoning()?;
         self.close_message()?;
         self.close_refusal()?;
@@ -988,8 +1133,9 @@ impl V3RelayChatClientStreamProjector {
     ///
     /// Delivered items keep their exact bytes and ids. A terminal-only legal
     /// item is appended exactly once; a reasoning item the client never saw is
-    /// not introduced, because it cannot be reconciled with a delivered
-    /// carrier. The finalized governed response is the source for that
+    /// kept when the complete-attempt owner returned a representable business
+    /// payload for it, so the terminal never drops reasoning the provider
+    /// delivered. The finalized governed response is the source for that
     /// terminal-only tail.
     fn terminal_output_items_reconciled(&self, terminal_response: &Value) -> Vec<Value> {
         let mut output = self.terminal_output_items();
@@ -999,16 +1145,20 @@ impl V3RelayChatClientStreamProjector {
             .cloned()
             .unwrap_or_default();
         for terminal_item in terminal_items {
-            if output
-                .iter()
-                .any(|streamed| Self::streamed_item_matches_terminal_item(streamed, &terminal_item))
-            {
+            if let Some(streamed) = output.iter_mut().find(|streamed| {
+                Self::streamed_item_matches_terminal_item(streamed, &terminal_item)
+            }) {
+                if streamed.get("type").and_then(Value::as_str) == Some("reasoning") {
+                    Self::merge_terminal_reasoning_fields(streamed, &terminal_item);
+                }
                 continue;
             }
-            if terminal_item.get("type").and_then(Value::as_str) == Some("reasoning") {
-                // A reasoning item not announced to the client cannot be
-                // reconstructed as an incremental carrier. It belongs to the
-                // whole-attempt owner and stays out of the delivered ledger.
+            if terminal_item.get("type").and_then(Value::as_str) == Some("reasoning")
+                && !Self::reasoning_item_has_business_payload(&terminal_item)
+            {
+                // A reasoning item with no business payload has no content the
+                // client could hold or echo, so introducing it would only
+                // describe an empty carrier.
                 continue;
             }
             output.push(terminal_item);
@@ -1045,7 +1195,16 @@ impl V3RelayChatClientStreamProjector {
         self.close_message()?;
         self.close_refusal()?;
         self.close_tool_calls()?;
-        if self.post_commit_governed && self.governance.confirmed_governed_marker() {
+        // The commit probe only knows that some governed marker appeared after
+        // the channel committed; it does not know the complete-attempt owner's
+        // protected ranges. A fenced or quoted marker is legal business text
+        // the owner returns unchanged, so hold is not a failure by itself.
+        // Terminate only when the items already carried by the projector cannot
+        // be reconciled with the finalized governed response.
+        if self.post_commit_governed
+            && self.governance.confirmed_governed_marker()
+            && !self.post_commit_governed_consistent_with_terminal(terminal)
+        {
             return Err(
                 "relay governed text arrived after the client channel was committed".to_string(),
             );
