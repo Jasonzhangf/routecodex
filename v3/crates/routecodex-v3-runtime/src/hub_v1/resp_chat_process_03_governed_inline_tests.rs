@@ -1468,6 +1468,94 @@ fn refill_continuation_responses_dual_history_keeps_input_web_search_declaration
 }
 
 #[test]
+fn refill_continuation_responses_history_record_does_not_revert_refresh() {
+    // A `tool_search_output` history record declares the tools a past search
+    // discovered; a later `additional_tools` item refreshes the same identity.
+    // The continuation drops `input` and keeps the merged messages, so the
+    // record survives as a Chat tool message. Resolving the continuation must
+    // still yield the refreshed schema, never the stale record.
+    let stale = json!([{
+        "type": "function",
+        "name": "read_value",
+        "description": "stale discovery",
+        "parameters": {"type": "object", "properties": {"old": {"type": "string"}}}
+    }]);
+    let original = json!({
+        "input": [
+            {"type": "tool_search_call", "call_id": "call_search", "arguments": {"query": "values"}},
+            {"type": "tool_search_output", "call_id": "call_search", "tools": stale},
+            {"type": "additional_tools", "tools": [{
+                "type": "function",
+                "name": "read_value",
+                "description": "refreshed declaration",
+                "parameters": {"type": "object", "properties": {"fresh": {"type": "string"}}}
+            }]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "search task"}]}
+        ],
+        "messages": [
+            {"role": "assistant", "content": null, "tool_calls": [{
+                "id": "call_search",
+                "type": "function",
+                "function": {"name": "tool_search", "arguments": "{\"query\":\"values\"}"}
+            }]},
+            {"role": "tool", "tool_call_id": "call_search", "content": stale.to_string()},
+            {"role": "user", "content": "search task"}
+        ]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("history-record continuation must build");
+    assert!(
+        continuation.get("input").is_none(),
+        "the merged history must own the continuation: {continuation}"
+    );
+    let tools = continuation["tools"].as_array().expect("tools array");
+    let declared: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["name"] == json!("read_value"))
+        .collect();
+    assert_eq!(
+        declared.len(),
+        1,
+        "the refreshed identity must stay single: {tools:?}"
+    );
+    assert_eq!(
+        declared[0]["parameters"]["properties"]["fresh"].is_object(),
+        true,
+        "the continuation must carry the refreshed schema: {tools:?}"
+    );
+    assert!(
+        declared[0]["parameters"]["properties"]["old"].is_null(),
+        "the stale record must not survive as the declaration: {tools:?}"
+    );
+    // Re-resolving the continuation is what the next round does; the history
+    // record must not revert the refresh there either.
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            &continuation,
+            "openai-responses",
+        )
+        .expect("continuation must resolve");
+    let identity = registry
+        .identity_for_client_path("read_value")
+        .expect("the declared identity must be present");
+    assert_eq!(
+        identity.source["description"], "refreshed declaration",
+        "re-resolution must keep the refreshed source: {continuation}"
+    );
+}
+
+#[test]
 fn refill_continuation_responses_ignores_foreign_contents_extension() {
     let original = json!({
         "input": "original task",

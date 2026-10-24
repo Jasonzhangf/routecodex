@@ -2013,7 +2013,7 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_unit:
-  - Same original namespace components, leaf and tool kind across Responses `tools`, `additional_tools` and discovered tools use the later source schema; distinct identities and kinds receive unique target wire names from one request-local binding and restore without overwrite.
+  - Same original namespace components, leaf and tool kind resolve to one request-local identity whose schema comes from the current declaration surface — `tools` and `additional_tools` state what the request declares now and refresh each other in source order, while a discovered-tool history record (`input` `tool_search_output` or the merged Chat tool message) records a past search and never overrides them, so a collapsed continuation keeps its refreshed schema. Distinct identities and kinds receive unique target wire names from one request-local binding and restore without overwrite.
   - One complete registered custom-wrapper boundary is shared by Anthropic mechanical inverse and Resp03 serialized/provenance restoration. An unrecognized object with valid reason and extra fields remains complete through JSON/SSE and paired consumer-error follow-up; valid wrappers retain exact input and existing reasoning authorization.
   - Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens and preserves OpenAI Chat data-plane metadata/stop, tool schema, tool_choice, user, sampling, response_format,
     token fields, and projects Responses reasoning config to `reasoning_effort` while rejecting non-standard client_metadata and the raw Responses `reasoning` object from provider wire.
@@ -4145,6 +4145,7 @@ features:
     - refill_responses_dual_twin_extension_survives_public
     - refill_responses_dual_tool_result_history_survives_public
     - refill_responses_dual_additional_tools_survive_public
+    - refill_responses_history_record_does_not_revert_refreshed_declaration
     - refill_anthropic_relay_entry_bounded_refill_public
     command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox refill_ -- --test-threads=1 --nocapture
   required_gates:

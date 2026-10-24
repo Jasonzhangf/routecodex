@@ -1974,6 +1974,157 @@ async fn refill_responses_dual_additional_tools_survive_public() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// Public ID: a `tool_search_output` history record declares the tools a past
+/// search discovered. A later `additional_tools` item refreshes the same tool
+/// identity, and the dual-history collapse keeps the record as a Chat tool
+/// message. The refill round must still declare the refreshed schema; letting
+/// the history record win would silently revert the tool the provider sees.
+#[tokio::test]
+async fn refill_responses_history_record_does_not_revert_refreshed_declaration() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "HISTORY_RECORD_ROUND_TWO"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "HISTORY_RECORD_ROUND_ONE")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let stale = json!([
+        {
+            "type": "function",
+            "name": "read_declared_value",
+            "description": "stale discovery",
+            "parameters": {"type": "object", "properties": {"stale": {"type": "string"}}}
+        },
+        {
+            "type": "namespace",
+            "name": "workspace",
+            "tools": [{
+                "type": "function",
+                "name": "read",
+                "description": "stale namespace discovery",
+                "parameters": {"type": "object", "properties": {"stale": {"type": "string"}}}
+            }]
+        },
+        {
+            "type": "custom",
+            "name": "shell_command",
+            "description": "stale custom discovery",
+            "format": {"type": "grammar", "syntax": "lark", "definition": "start: /.+/"}
+        }
+    ]);
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model": "test.test",
+                "input": [
+                    {"type": "tool_search_call", "call_id": "call_search", "arguments": {"query": "values"}},
+                    {"type": "tool_search_output", "call_id": "call_search", "tools": stale},
+                    {"type": "additional_tools", "tools": [
+                        {
+                            "type": "function",
+                            "name": "read_declared_value",
+                            "description": "refreshed declaration",
+                            "parameters": {"type": "object", "properties": {"key": {"type": "string"}}}
+                        },
+                        {
+                            "type": "namespace",
+                            "name": "workspace",
+                            "tools": [{
+                                "type": "function",
+                                "name": "read",
+                                "description": "refreshed namespace declaration",
+                                "parameters": {"type": "object", "properties": {"key": {"type": "string"}}}
+                            }]
+                        },
+                        {
+                            "type": "custom",
+                            "name": "shell_command",
+                            "description": "refreshed custom declaration",
+                            "format": {"type": "grammar", "syntax": "lark", "definition": "start: /key.+/"}
+                        },
+                        {"type": "code_interpreter", "container": {"type": "auto"}}
+                    ]},
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "history record task"}]}
+                ],
+                "messages": [
+                    {"role": "assistant", "content": null, "tool_calls": [{
+                        "id": "call_search",
+                        "type": "function",
+                        "function": {"name": "tool_search", "arguments": "{\"query\":\"values\"}"}
+                    }]},
+                    {"role": "tool", "tool_call_id": "call_search", "content": stale.to_string()},
+                    {"role": "user", "content": "history record task"}
+                ],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "history-record entry must run exactly one refill: {consumed:?}"
+    );
+    let second = &captured[1];
+    let tools = second["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("second provider request must carry tools: {second}"));
+    let declared: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["name"] == json!("read_declared_value"))
+        .collect();
+    assert_eq!(
+        declared.len(),
+        1,
+        "the refreshed identity must stay single: {declared:?}"
+    );
+    assert!(
+        declared[0]["parameters"]["properties"]["key"].is_object(),
+        "the refreshed schema must win over the history record: {declared:?}"
+    );
+    let rendered = second.to_string();
+    assert!(
+        rendered.contains("refreshed namespace declaration")
+            && !rendered.contains("stale namespace discovery"),
+        "the refreshed namespaced declaration must win over the history record: {second}"
+    );
+    assert!(
+        rendered.contains("refreshed custom declaration")
+            && !rendered.contains("stale custom discovery"),
+        "the refreshed custom declaration must win over the history record: {second}"
+    );
+    assert!(
+        rendered.contains("history record task"),
+        "the original task must survive: {second}"
+    );
+    let hosted: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["type"] == json!("code_interpreter"))
+        .collect();
+    assert_eq!(
+        hosted.len(),
+        1,
+        "the hosted declaration must survive: {tools:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
 /// Stable public ID: a provider refusal is legal business content, so a refill
 /// continuation must replay the complete assistant message into the next
 /// provider request instead of dropping it.
