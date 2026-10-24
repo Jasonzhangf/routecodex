@@ -1046,11 +1046,14 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
         {
             match item.get("type").and_then(Value::as_str) {
                 Some("message") => {
-                    if let Some(message) = crate::hub_v1::
+                    let message = crate::hub_v1::
                         build_v3_chat_assistant_message_from_responses_output_item(&item)
-                    {
-                        messages.push(message);
-                    }
+                        .map_err(|error| {
+                            format!(
+                                "refill continuation cannot convert a business Responses message to a Chat assistant message: {error}"
+                            )
+                        })?;
+                    messages.push(message);
                 }
                 // A provider-origin reasoning item carries the real `id` and
                 // opaque fields such as `encrypted_content`. RCC-synthesized

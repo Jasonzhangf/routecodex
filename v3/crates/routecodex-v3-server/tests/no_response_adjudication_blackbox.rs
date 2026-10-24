@@ -1051,6 +1051,100 @@ async fn refill_continuation_captures_provider_reasoning_public() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// Stable public ID: a provider refusal is legal business content, so a refill
+/// continuation must replay the complete assistant message into the next
+/// provider request instead of dropping it.
+#[tokio::test]
+async fn refill_continuation_preserves_provider_refusal_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    const REFUSAL: &str = "provider declined the controlled refill request";
+    for process in ["direct", "chat"] {
+        let refusal_round = json!({
+            "id": "resp_refusal_round_one",
+            "object": "response",
+            "status": "completed",
+            "model": "wire-test",
+            "output": [{
+                "id": "msg_refusal_round_one",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "refusal", "refusal": REFUSAL}]
+            }]
+        })
+        .to_string();
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "responses",
+            process,
+            StatusCode::OK,
+            "application/json",
+            text_response("REFUSAL_ROUND_TWO").to_string(),
+            EntryOptions {
+                attempt_bodies: vec![refusal_round],
+                refill_max: None,
+                model_key: Some("gpt-5.6-sol".to_string()),
+                wire_model: Some("gpt-5.6-sol".to_string()),
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let consumed = consume_response(
+            client()
+                .post(&endpoint)
+                .json(&json!({
+                    "model": "test.gpt-5.6-sol",
+                    "input": "controlled refill refusal preservation",
+                    "stream": false
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let mut captured = Vec::new();
+        while let Ok(value) = captures.try_recv() {
+            captured.push(value);
+        }
+        stop_entry(handle, shutdown).await;
+        assert_eq!(
+            captured.len(),
+            2,
+            "{process}: refusal must not stop the bounded refill execution: {consumed:?}"
+        );
+        assert!(
+            consumed.transport_error.is_none(),
+            "{process}: refusal refill chain must deliver: {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains(REFUSAL) && consumed.body.contains("REFUSAL_ROUND_TWO"),
+            "{process}: both rounds must reach the client: {consumed:?}"
+        );
+        let input = captured[1]["input"].as_array().unwrap_or_else(|| {
+            panic!(
+                "{process}: second provider request must carry input: {}",
+                captured[1]
+            )
+        });
+        let replayed_refusal = input.iter().find_map(|item| {
+            (item["role"] == "assistant")
+                .then(|| {
+                    item["content"].as_array().and_then(|parts| {
+                        parts
+                            .iter()
+                            .find(|part| part["type"] == "refusal" && part["refusal"] == REFUSAL)
+                    })
+                })
+                .flatten()
+        });
+        assert!(
+            replayed_refusal.is_some(),
+            "{process}: refusal content must be replayed in the second provider request: {input:?}"
+        );
+        assert_no_error_payload(&consumed.body);
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 #[tokio::test]
 async fn responses_relay_history_preserves_per_item_reasoning_summary_public() {
     let _guard = TEST_LOCK.lock().await;
