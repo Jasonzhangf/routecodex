@@ -157,7 +157,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_default_transport_client_he
     handoff: crate::V3ResponsesProtocolRelayHandoff,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
     let route_policy_pending = handoff.route_policy_pending.clone();
-    let output = execute_v3_anthropic_relay_runtime_inner(
+    let output = execute_v3_anthropic_relay_runtime_inner_with_refill(
         manifest,
         input,
         crate::default_responses_transport(),
@@ -207,7 +207,7 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
         Arc::clone(&captured_provider_request),
     );
     // dry-run 只做一次主线执行：续杯会再发一次请求，超出该入口的声明范围。
-    let mut output = match execute_v3_anthropic_relay_runtime_once(
+    let mut output = match execute_v3_anthropic_relay_runtime_inner(
         manifest,
         input,
         &transport,
@@ -298,7 +298,7 @@ pub async fn execute_v3_anthropic_relay_response_dry_run_runtime(
         Arc::clone(&captured_provider_request),
     );
     // dry-run 只做一次主线执行：续杯会再发一次请求，超出该入口的声明范围。
-    let mut output = match execute_v3_anthropic_relay_runtime_once(
+    let mut output = match execute_v3_anthropic_relay_runtime_inner(
         manifest,
         input,
         &transport,
@@ -410,7 +410,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_client_headers_provider_hea
     client_headers: Vec<V3AnthropicRelayClientHeader>,
     provider_health: V3ProviderFailureRuntimeHealth,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
-    execute_v3_anthropic_relay_runtime_inner(
+    execute_v3_anthropic_relay_runtime_inner_with_refill(
         manifest,
         input,
         transport,
@@ -432,7 +432,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_client_headers_provider_hea
 /// 续请求构造、内容累积与 usage 合计也复用同一组 Chat Process 原语。
 /// 单次执行的 round 由响应 closeout 在投影前发布，失败与空业务出口不发布。
 #[allow(clippy::too_many_arguments)]
-async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
+async fn execute_v3_anthropic_relay_runtime_inner_with_refill<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3AnthropicRelayRuntimeInput,
     transport: &T,
@@ -464,7 +464,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         carrier.round = None;
         let mut execution_input = input.clone();
         execution_input.payload = payload.clone();
-        let output = execute_v3_anthropic_relay_runtime_once(
+        let output = execute_v3_anthropic_relay_runtime_inner(
             manifest,
             execution_input,
             transport,
@@ -530,8 +530,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     }
 }
 
+/// 单次 anthropic relay 主线执行：完整请求/响应治理、provider action gate 与
+/// 客户端投影都在这里。
+///
+/// `refill` 是续杯载体：有值时复用同一份执行控制，并在响应 closeout 投影前
+/// 发布本轮 round、并入前几轮业务项；dry-run 入口传 `None`，只做一次执行。
 #[allow(clippy::too_many_arguments)]
-async fn execute_v3_anthropic_relay_runtime_once<T: ResponsesTransport>(
+async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3AnthropicRelayRuntimeInput,
     transport: &T,
