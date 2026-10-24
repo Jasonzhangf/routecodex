@@ -104,6 +104,10 @@ pub(crate) struct V3RelayChatClientStreamProjector {
     reasoning: Option<OpenReasoningItem>,
     message: Option<OpenMessageItem>,
     tool_calls: Vec<OpenToolCallItem>,
+    /// Request-local resolver applied to each provider tool call so the
+    /// streamed and terminal items keep the client tool kind, namespace and
+    /// custom input. Absent means the plain `function_call` fallback.
+    tool_call_projection: Option<V3OpenAiChatToolCallProjection>,
 }
 
 impl V3RelayChatClientStreamProjector {
@@ -124,7 +128,19 @@ impl V3RelayChatClientStreamProjector {
             reasoning: None,
             message: None,
             tool_calls: Vec::new(),
+            tool_call_projection: None,
         }
+    }
+
+    /// Attach the request-local tool-call resolver built from the request's
+    /// namespace/custom declarations. Without it the projector keeps the plain
+    /// `function_call` shape it has always used for undeclared tool names.
+    pub(crate) fn with_tool_call_projection(
+        mut self,
+        projection: V3OpenAiChatToolCallProjection,
+    ) -> Self {
+        self.tool_call_projection = Some(projection);
+        self
     }
 
     pub(crate) fn is_committed(&self) -> bool {

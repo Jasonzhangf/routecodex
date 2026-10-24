@@ -1660,11 +1660,32 @@ pub(crate) fn find_responses_tool_output_ids(
 /// which may rewrite tool markup in the complete response. Such a request keeps
 /// the whole-attempt client projection; only a tool-free request may commit its
 /// first business frame at provider arrival time.
-fn relay_request_declares_tools(payload: &Value) -> bool {
-    ["tools", "additional_tools"].iter().any(|field| {
+pub(crate) fn relay_request_declares_tools(payload: &Value) -> bool {
+    fn declares_tools(value: &Value) -> bool {
+        value
+            .get("tools")
+            .and_then(Value::as_array)
+            .is_some_and(|tools| !tools.is_empty())
+    }
+    // Top-level declarations.
+    if ["tools", "additional_tools"].iter().any(|field| {
         payload
             .get(*field)
             .and_then(Value::as_array)
             .is_some_and(|tools| !tools.is_empty())
-    })
+    }) {
+        return true;
+    }
+    // A Responses client can also declare tools as an input item. Chat Process
+    // rewrites the business carriers for every declared tool, so an item that
+    // adds declarations keeps whole-attempt buffering too.
+    payload
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                let kind = item.get("type").and_then(Value::as_str).unwrap_or_default();
+                kind.contains("tool") || declares_tools(item)
+            })
+        })
 }

@@ -352,3 +352,29 @@ async fn relay_terminal_output_follows_output_index_not_close_order() {
         "terminal output follows output index order, got {positions:?}: {terminal_frame}"
     );
 }
+
+/// Chat Process rewrites the business carriers of every request that declares a
+/// tool, so such a request must keep whole-attempt buffering. A Responses client
+/// can declare tools three ways: a top-level field, an `additional_tools` input
+/// item, or a `tool_search_output` input item.
+#[test]
+fn relay_tool_declaration_blocks_first_frame_commit_from_every_source() {
+    let custom = json!({"type": "custom", "name": "exec"});
+    let declares = |payload: Value| {
+        super::responses_relay_runtime_inner::relay_request_declares_tools(&payload)
+    };
+
+    assert!(declares(json!({"tools": [custom]})));
+    assert!(declares(json!({"additional_tools": [custom]})));
+    assert!(declares(json!({
+        "input": [{"type": "additional_tools", "tools": [custom]}]
+    })));
+    assert!(declares(json!({
+        "input": [{"type": "tool_search_output", "tools": [custom]}]
+    })));
+    // A tool-free request still commits, otherwise the feature is dead.
+    assert!(!declares(
+        json!({"input": [{"type": "message", "content": "hi"}]})
+    ));
+    assert!(!declares(json!({"tools": []})));
+}

@@ -108,6 +108,7 @@ impl V3ResponsesRelayProviderHealthHandle {
 }
 pub(super) use responses_openai_chat_conversion::build_v3_responses_provider_response_from_openai_chat_payload;
 pub(crate) use responses_openai_chat_conversion::build_v3_responses_reasoning_item_from_openai_chat_message;
+pub(crate) use responses_openai_chat_conversion::V3OpenAiChatToolCallProjection;
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
 pub use responses_relay_dry_run::{
