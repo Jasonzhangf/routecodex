@@ -36198,3 +36198,22 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - 静态与架构 gate：`verify:v3-architecture-ci` `35/35`；resource-map、module-boundaries、protocol-conversion-field-parity、provider-action-gate（48 edges）、cargo-fmt 与 `git diff --check` 通过。
 - 独立 Review：oauth/gpt-6.1-sol medium 对完整 worktree diff（base `7ad8e0e9a`）PASS，无 blocking findings，随后发现一个 P1：mixed reasoning blocks 中无扩展的块在下一轮 provider 请求被丢弃。当前修复改为保存每个 reasoning 块的有序记录，并保留 native type、明文、encrypted data 与可选扩展；redacted reasoning 不再只有 codec 级往返覆盖。未做 install/restart/live replay。
 - 边界：按 master 分工未 merge、未 push、未安装、未重启、未做 live replay；本 worktree 保留到 candidate commit 和交接完成。
+
+## 2026-10-23 849ed8f P2 relay 首帧提交 — review FAIL 记录
+
+- Worktree `/Volumes/Intel/playground/routecodex/849ed8f-relay-first-frame`，branch `codex/849ed8f-relay-first-frame`，HEAD `23676e502`（3 commits），未合入。base 已推进到 `origin/main 1a8705c09`（落后 13）。
+- 两份独立 review 都 FAIL。核对后确认两条阻断成立：
+  - B2 提交后失败换候选：inner 两条失败分支 `continue` 前未查 committed；投影器被丢弃，下一轮在同一已提交 sink 上重建并重放 response.created/in_progress + 重复 item。
+  - B3 refill 轮次不关闭条目：`append_text` 复用 open message；无工具 completed 文本会 refill 一轮，两轮文本并进同一 msg_0，终态两条目/单 id。
+  - B1（另一份 review 的阻断）Resp03 无条件 think/control 改写发生在投影之后，流出字节与终态不一致；需设计取舍（逐 chunk 改写 vs 让 openai_chat 文本保持整段）。
+- 非阻断：终态缺 usage 零填充；strip_client_response_id 未生效；`relay_client_stream_commit_eligible` 死代码；doc/status 与实现不符；id 按下标对齐有顺序假设；finish 把非 incomplete/in_progress 都投影成 completed；created/in_progress 手搓 8 字段而非复用 progress 投影。
+- 状态：候选已回滚，live 4444/7777 运行主干构建。分支保留，未清理 worktree。
+
+### B1 根因收敛（2026-10-23 续）
+
+- 逐条读实现：`harvest_v3_think_blocks_at_resp03` 无条件；OpenAiChat 走 `harvest_v3_openai_chat_think_blocks` → `harvest_v3_think_text`，只认 `<think>`、`</think>`（未闭合块把正文留在可见文本）。`govern_v3_relay_control_markers_at_resp03` 用 `ToolMarkupDeclarations::default()`，`removed_label` 只删整行等于独立协议标签的行（`removable_label`），是行级删除。`tool_markup::govern_thinking` 与 think 同族，`complete_provider_attempt` 恒真。
+- 结论：改写由模型输出触发，不存在请求级事实能证明正文不被改写，因此 B1 无法用 gate 收口；只有两条路：
+  - (a) 投影器逐 chunk 复刻同一套治理 + hold-back（未闭合 `<think>` 后不得流出、末尾部分标签前缀回退、未结束行回退），并与终态逐字节收敛。正确但要新建流式治理子系统，需专门红测证明多输入下逐字节一致。
+  - (b) 收敛方向反过来：已提交时把终态正文改写为已流出正文（投影器在 finish 覆写条目文本，按 类型+序号 对齐 id），收敛由构造保证，代价是 SSE 模式下 `<think>` 内联块不再被摘入 reasoning，形成模式相关的载荷语义差异。
+- 两项取舍都需要 owner 拍板；(b) 改动较小但留下可见语义差异，(a) 无差异但工作量与风险显著。
+- 已修：B2 提交后失败不换候选、B3 refill 轮次各自成条目（commit `f9ffca51c`）。未修：B1、终态 usage、strip_client_response_id、死代码、DAG 状态段、id 对齐、finish 状态映射。
