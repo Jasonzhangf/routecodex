@@ -65,6 +65,36 @@ struct StreamedItem {
 
 const THINK_OPEN: &str = "<think>";
 const THINK_CLOSE: &str = "</think>";
+/// Resp03 also harvests the `<thinking>` family through
+/// `project_v3_thinking_tag_text_with_tools`. The same hold-and-route rule keeps
+/// a committed prefix from carrying text the whole-attempt owner removes.
+const THINKING_OPEN: &str = "<thinking>";
+const THINKING_CLOSE: &str = "</thinking>";
+
+/// Earliest tag in `text`, preferring the longest tag at the same position so
+/// `<thinking>` is never mistaken for `<think>`.
+fn next_think_tag(text: &str) -> Option<(usize, usize)> {
+    let mut found: Option<(usize, usize)> = None;
+    for tag in [THINK_OPEN, THINK_CLOSE, THINKING_OPEN, THINKING_CLOSE] {
+        let Some(position) = text.find(tag) else {
+            continue;
+        };
+        found = match found {
+            Some((best, best_length))
+                if position < best || (position == best && tag.len() > best_length) =>
+            {
+                Some((position, tag.len()))
+            }
+            Some(current) => Some(current),
+            None => Some((position, tag.len())),
+        };
+    }
+    found
+}
+
+fn is_think_open_tag(tag: &str) -> bool {
+    tag == THINK_OPEN || tag == THINKING_OPEN
+}
 
 /// The whole-attempt Relay governance owner for tool-free Chat text.
 ///
@@ -97,7 +127,7 @@ fn relay_governed_text_markers() -> Vec<V3GovernedTextMarker> {
 fn held_marker_suffix_len(text: &str) -> usize {
     let bytes = text.as_bytes();
     let mut held = 0usize;
-    for marker in [THINK_OPEN, THINK_CLOSE] {
+    for marker in [THINK_OPEN, THINK_CLOSE, THINKING_OPEN, THINKING_CLOSE] {
         let marker = marker.as_bytes();
         for len in 1..marker.len() {
             if bytes.len() >= len && &bytes[bytes.len() - len..] == &marker[..len] {
@@ -368,11 +398,19 @@ impl V3RelayChatClientStreamProjector {
         self.think_pending.push_str(text);
         loop {
             if self.think_open {
-                let Some(position) = self.think_pending.find(THINK_CLOSE) else {
+                let closing = [THINK_CLOSE, THINKING_CLOSE]
+                    .into_iter()
+                    .filter_map(|tag| {
+                        self.think_pending
+                            .find(tag)
+                            .map(|position| (position, tag.len()))
+                    })
+                    .min();
+                let Some((position, length)) = closing else {
                     return Ok(());
                 };
                 let block = self.think_pending[..position].to_string();
-                self.think_pending = self.think_pending[position + THINK_CLOSE.len()..].to_string();
+                self.think_pending = self.think_pending[position + length..].to_string();
                 self.think_open = false;
                 let block = block.trim();
                 if !block.is_empty() {
@@ -391,38 +429,20 @@ impl V3RelayChatClientStreamProjector {
                 }
                 continue;
             }
-            let open = self.think_pending.find(THINK_OPEN);
-            let stray_close = self.think_pending.find(THINK_CLOSE);
-            match (open, stray_close) {
-                (Some(open), Some(close)) if close < open => {
-                    let visible = self.think_pending[..close].to_string();
-                    self.think_pending =
-                        self.think_pending[close + THINK_CLOSE.len()..].to_string();
-                    self.append_visible_text(&visible)?;
-                    continue;
-                }
-                (Some(open), _) => {
-                    let visible = self.think_pending[..open].to_string();
-                    self.think_pending = self.think_pending[open + THINK_OPEN.len()..].to_string();
-                    self.append_visible_text(&visible)?;
-                    self.think_open = true;
-                    continue;
-                }
-                (None, Some(close)) => {
-                    let visible = self.think_pending[..close].to_string();
-                    self.think_pending =
-                        self.think_pending[close + THINK_CLOSE.len()..].to_string();
-                    self.append_visible_text(&visible)?;
-                    continue;
-                }
-                (None, None) => {
-                    let held = held_marker_suffix_len(&self.think_pending);
-                    let release = self.think_pending.len() - held;
-                    let visible = self.think_pending[..release].to_string();
-                    self.think_pending = self.think_pending[release..].to_string();
-                    self.append_visible_text(&visible)?;
-                    return Ok(());
-                }
+            let Some((position, length)) = next_think_tag(&self.think_pending) else {
+                let held = held_marker_suffix_len(&self.think_pending);
+                let release = self.think_pending.len() - held;
+                let visible = self.think_pending[..release].to_string();
+                self.think_pending = self.think_pending[release..].to_string();
+                self.append_visible_text(&visible)?;
+                return Ok(());
+            };
+            let tag = self.think_pending[position..position + length].to_string();
+            let visible = self.think_pending[..position].to_string();
+            self.think_pending = self.think_pending[position + length..].to_string();
+            self.append_visible_text(&visible)?;
+            if is_think_open_tag(&tag) {
+                self.think_open = true;
             }
         }
     }

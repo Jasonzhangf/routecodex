@@ -4256,6 +4256,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_first_frame_commit_
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test e041a3b_response_timeout -- --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test 849ed8f_governed_commit_public -- --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test relay_first_frame_commit_public -- --test-threads=1
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-dagpipe-governance

@@ -179,18 +179,22 @@ seal 一次,避免提交后被下一轮重投影覆盖。
    同顺序、同内容)与顶层 `output_text`,并按 output_index 排序;改写只影响内部与 refill 决策,
    不再回头改写已交付帧。
 4. think 收割前移。既然已交付字节不可改写,投影器就在流式到达时应用 Chat Process 的同一条
-   `<think>` / `</think>` 规则:块内容只进 reasoning,正文只发块外文本;跨 provider 帧拆开的
-   标记先扣住不判定,流结束仍未闭合的块按整段收割语义保留为正文。规则真源仍是
-   `resp_chat_process_03_governed::harvest_v3_think_text`,投影器与它由逐字逐切分 parity 红测
-   绑定,去掉前移逻辑该测转红。
+   规则:块内容只进 reasoning,正文只发块外文本;跨 provider 帧拆开的标记先扣住不判定,流结束
+   仍未闭合的块按整段收割语义保留为正文。两族标记都覆盖:`<think>` / `</think>`
+   (owner `harvest_v3_think_text`,无条件)与 `<thinking>` / `</thinking>`
+   (owner `project_v3_thinking_tag_text_with_tools`,complete attempt)。`<think>` 一族由逐字
+   逐切分 parity 红测与 owner 绑定,去掉前移逻辑该测转红;`<thinking>` 一族另有红测证明标记与
+   块内容不进正文。残留两处,均为边界:`<thinking>` owner 会保护围栏代码块、行内代码与双引号
+   区间,投影器不做这层保护,落在这些区间内的 `<thinking>` 会被当块收割;流结束时仍未闭合且
+   之前没有任何正文的 `<thinking>`,owner 在无工具时把块内容改成 reasoning,投影器按正文保留。
 
 真实入口回放(0.90.4935,`rccv3 restart` 后):7777 首帧 20.94s、终态 48.17s,89 个
 `response.output_text.delta` 分散在 27.19 秒、86 个不同到达时刻;终态 output 带 usage。
 4444 首帧 4.08s、终态 8.76s,80 个正文增量分散在 4.55 秒。
 
-gate:`relay_first_frame_commit` 11 条绿(轮次边界、终态重建、output 排序、工具声明闸、内联
+gate:`relay_first_frame_commit` 13 条绿(轮次边界、终态重建、output 排序、工具声明闸、内联
 think 收割、think parity 六条红测:去掉对应修复后各自转红),加提交后 hook 失败守卫红测 1 条;
-`responses_relay` 207/207、`client_sse` 17/17、`multi_listener_server` 203/203、
+`responses_relay` 211/211、`client_sse` 17/17、`multi_listener_server` 203/203、
 `openai_chat_namespace_names` 6/6。独立 review 已进行两轮,第一轮四项阻断、第二轮两项阻断
 均已修(第二轮 B2 think 残留改为前移收割)。尚未做:复评、合入与远端回执、合并后复验。
 

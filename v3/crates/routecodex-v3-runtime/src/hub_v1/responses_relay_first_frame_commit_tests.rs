@@ -560,6 +560,62 @@ async fn relay_first_frame_commit_projects_reasoning_summary_before_terminal() {
     );
 }
 
+/// Resp03 harvests the `<thinking>` family too, through
+/// `project_v3_thinking_tag_text_with_tools`. A committed stream must route it
+/// the same way instead of leaking the tag as business text.
+#[tokio::test]
+async fn relay_first_frame_commit_harvests_inline_thinking_blocks() {
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let mut projector = super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+        sink,
+        relay_test_budget(),
+    );
+    for content in ["answer<thin", "king>plan</thinking>mo", "re"] {
+        projector
+            .on_chat_chunk(&json!({
+                "id": "chatcmpl_inline_thinking",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "chat-test",
+                "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": null}],
+            }))
+            .expect("content increment");
+    }
+    let terminal = json!({
+        "id": "chatcmpl_inline_thinking",
+        "object": "response",
+        "status": "completed",
+        "output": [],
+    });
+    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut frames = drain_frames(&mut receiver);
+    use futures_util::StreamExt;
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    assert!(
+        !frames
+            .iter()
+            .any(|frame| frame.contains("<thinking>") || frame.contains("</thinking")),
+        "no delivered frame may carry a thinking marker: {frames:?}"
+    );
+    assert!(
+        frames.iter().any(
+            |frame| frame.contains("response.reasoning_summary_text.delta")
+                && frame.contains("plan")
+        ),
+        "the harvested block must be delivered as reasoning: {frames:?}"
+    );
+    let terminal_frame = frames
+        .iter()
+        .find(|frame| frame.contains("response.completed"))
+        .expect("terminal frame");
+    assert!(
+        terminal_frame.contains("answermore"),
+        "visible text on both sides of the block must join: {terminal_frame}"
+    );
+}
+
 fn relay_frame_payload(frame: &str) -> Option<serde_json::Value> {
     let data = frame.lines().find_map(|line| line.strip_prefix("data: "))?;
     serde_json::from_str(data).ok()
