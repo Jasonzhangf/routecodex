@@ -582,6 +582,576 @@ async fn response_body(response: reqwest::Response, stream: bool) -> Value {
         .clone()
 }
 
+#[derive(Clone)]
+struct ShellDispatchFixture {
+    events: Arc<mpsc::UnboundedSender<Result<(usize, Value), String>>>,
+    arguments: Arc<String>,
+    attempts: Arc<AtomicUsize>,
+}
+
+async fn shell_dispatch_chat(
+    State(fixture): State<ShellDispatchFixture>,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    let attempt = fixture.attempts.fetch_add(1, Ordering::SeqCst) + 1;
+    let validation = validate_shell_provider_attempt(&body, attempt, &fixture.arguments);
+    if let Err(reason) = validation {
+        let _ = fixture.events.send(Err(reason.clone()));
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"error": {"message": reason}}).to_string(),
+            ))
+            .unwrap();
+    }
+    let _ = fixture.events.send(Ok((attempt, body.clone())));
+    let followup = attempt == 2;
+    let message = if followup {
+        json!({"role":"assistant","content":"SHELL_DISPATCH_DONE"})
+    } else {
+        let tool_name = body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["function"]["name"] == "functions__exec_command")
+            .unwrap()["function"]["name"]
+            .as_str()
+            .unwrap();
+        json!({"role":"assistant","content":null,"tool_calls":[{
+            "id":"call_shell_dispatch",
+            "type":"function",
+            "function":{"name":tool_name,"arguments":fixture.arguments.as_str()}
+        }]})
+    };
+    let finish = if followup { "stop" } else { "tool_calls" };
+    let usage = json!({"prompt_tokens":2,"completion_tokens":3,"total_tokens":5});
+    if body["stream"] == true {
+        let chunk = json!({"id":"chatcmpl-shell","object":"chat.completion.chunk","model":"wire-model","choices":[{"index":0,"delta":message,"finish_reason":finish}],"usage":usage});
+        return Response::builder()
+            .header("content-type", "text/event-stream")
+            .body(Body::from(format!("data: {chunk}\n\ndata: [DONE]\n\n")))
+            .unwrap();
+    }
+    Response::builder()
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({"id":"chatcmpl-shell","object":"chat.completion","model":"wire-model","choices":[{"index":0,"message":message,"finish_reason":finish}],"usage":usage})
+                .to_string(),
+        ))
+        .unwrap()
+}
+
+fn validate_shell_provider_attempt(
+    body: &Value,
+    attempt: usize,
+    arguments: &str,
+) -> Result<(), String> {
+    if !matches!(attempt, 1 | 2) {
+        return Err(format!(
+            "provider attempt {attempt} is a retry or switch around the failed roundtrip"
+        ));
+    }
+    let tools = body["tools"]
+        .as_array()
+        .ok_or_else(|| format!("provider tools must be an array: {body}"))?;
+    let declarations = tools
+        .iter()
+        .filter(|tool| tool["function"]["name"] == "functions__exec_command")
+        .collect::<Vec<_>>();
+    if declarations.len() != 1 {
+        return Err(format!(
+            "provider attempt {attempt} lost the declared functions__exec_command tool: {body}"
+        ));
+    }
+    if attempt == 1 {
+        if body.to_string().contains("call_shell_dispatch") {
+            return Err(format!(
+                "first provider attempt unexpectedly contains shell history: {body}"
+            ));
+        }
+        return Ok(());
+    }
+    let messages = body["messages"]
+        .as_array()
+        .ok_or_else(|| format!("follow-up messages must be an array: {body}"))?;
+    let calls = messages
+        .iter()
+        .enumerate()
+        .flat_map(|(message_index, message)| {
+            message["tool_calls"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(move |call| call["id"] == "call_shell_dispatch")
+                .map(move |call| (message_index, call))
+        })
+        .collect::<Vec<_>>();
+    let [(call_index, call)] = calls.as_slice() else {
+        return Err(format!(
+            "provider attempt 2 must contain exactly one shell call, found {}: {body}",
+            calls.len()
+        ));
+    };
+    if call["function"]["name"] != "functions__exec_command" {
+        return Err(format!(
+            "provider attempt 2 changed shell history identity: {call}"
+        ));
+    }
+    if call["function"]["arguments"] != arguments {
+        return Err(format!(
+            "provider attempt 2 changed shell arguments: {call}"
+        ));
+    }
+    let outputs = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| {
+            message["role"] == "tool" && message["tool_call_id"] == "call_shell_dispatch"
+        })
+        .collect::<Vec<_>>();
+    let [(output_index, output)] = outputs.as_slice() else {
+        return Err(format!(
+            "provider attempt 2 must contain exactly one paired shell output: {body}"
+        ));
+    };
+    if *output_index != call_index + 1 {
+        return Err(format!(
+            "provider attempt 2 did not keep the shell output adjacent to its call: {body}"
+        ));
+    }
+    if output["content"] != "SHELL_MARKER_WRITTEN" {
+        return Err(format!(
+            "provider attempt 2 changed the marker readback: {output}"
+        ));
+    }
+    Ok(())
+}
+
+struct ShellMarker {
+    directory: std::path::PathBuf,
+    path: std::path::PathBuf,
+    value: String,
+}
+
+impl ShellMarker {
+    fn new() -> Self {
+        let directory = std::env::temp_dir().join(format!(
+            "rcc-shell-dispatch-{}-{}",
+            std::process::id(),
+            test_ports::free_port()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("marker.txt");
+        let value = "SHELL_MARKER_WRITTEN".to_string();
+        Self {
+            directory,
+            path,
+            value,
+        }
+    }
+
+    fn command(&self) -> String {
+        format!("printf '%s' '{}' > '{}'", self.value, self.path.display())
+    }
+}
+
+impl Drop for ShellMarker {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
+
+async fn receive_shell_provider_attempt(
+    rx: &mut mpsc::UnboundedReceiver<Result<(usize, Value), String>>,
+) -> Result<(usize, Value), String> {
+    tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .map_err(|_| "the controlled upstream did not validate a provider attempt".to_string())?
+        .ok_or_else(|| "the controlled upstream capture closed unexpectedly".to_string())?
+}
+
+async fn run_namespace_shell_dispatch(stream: bool) {
+    let marker = ShellMarker::new();
+    let arguments = format!(
+        r#"{{ "max_output_tokens" : 4096, "cmd" : "{}", "yield_time_ms" : 321 }}"#,
+        marker.command()
+    );
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let fixture = ShellDispatchFixture {
+        events: Arc::new(tx),
+        arguments: Arc::new(arguments.clone()),
+        attempts: attempts.clone(),
+    };
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/chat/completions", post(shell_dispatch_chat))
+        .with_state(fixture);
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(upstream, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    let handle = spawn_v3_server_aggregate(manifest(test_ports::free_port(), upstream_addr.port()))
+        .await
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let tool = json!({
+        "type":"namespace",
+        "name":"functions",
+        "tools":[{
+            "type":"function",
+            "name":"exec_command",
+            "description":"Runs a namespace-declared shell command.",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "cmd":{"type":"string"},
+                    "yield_time_ms":{"type":"integer"},
+                    "max_output_tokens":{"type":"integer"}
+                },
+                "required":["cmd"],
+                "additionalProperties":false
+            },
+            "strict":false
+        }]
+    });
+    let mut request = json!({
+        "model":"name-client",
+        "stream":stream,
+        "input":[{"role":"user","content":"use the declared shell tool"}],
+        "tools":[tool],
+        "tool_choice":{"type":"function","name":"functions.exec_command"}
+    });
+    let first_send = client.post(&endpoint).json(&request).send();
+    let (first_response, first_capture) =
+        tokio::join!(first_send, receive_shell_provider_attempt(&mut rx));
+    let (_, first_wire) =
+        first_capture.expect("the first provider request must pass strict validation");
+    let first = response_body(
+        first_response.expect("the controlled first provider attempt must be accepted"),
+        stream,
+    )
+    .await;
+    let call = first["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["call_id"] == "call_shell_dispatch")
+        .expect("the client must receive the shell call");
+    assert_eq!(call["type"], "function_call");
+    assert_eq!(call["namespace"], "functions");
+    assert_eq!(call["name"], "exec_command");
+    assert_eq!(call["arguments"], arguments);
+
+    assert_eq!(first_wire["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        first_wire["tools"][0]["function"]["name"],
+        "functions__exec_command"
+    );
+    assert_eq!(
+        first_wire["tool_choice"]["function"]["name"],
+        "functions__exec_command"
+    );
+
+    let parsed_arguments: Value =
+        serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+    let executed = std::process::Command::new("/bin/sh")
+        .args(["-c", parsed_arguments["cmd"].as_str().unwrap()])
+        .output()
+        .expect("the client shell consumer must start");
+    assert!(
+        executed.status.success(),
+        "client shell consumer failed: {executed:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&marker.path).unwrap(), marker.value);
+
+    request["input"].as_array_mut().unwrap().push(json!({
+        "type":"function_call",
+        "name":"exec_command",
+        "call_id":"call_shell_dispatch",
+        "arguments": arguments.clone()
+    }));
+    request["input"].as_array_mut().unwrap().push(json!({
+        "type":"function_call_output",
+        "call_id":"call_shell_dispatch",
+        "output":marker.value.clone()
+    }));
+    let followup_send = client.post(&endpoint).json(&request).send();
+    let (followup_response, followup_capture) =
+        tokio::join!(followup_send, receive_shell_provider_attempt(&mut rx));
+    let (attempt, followup_wire) = followup_capture
+        .unwrap_or_else(|reason| panic!("the paired follow-up failed strict validation: {reason}"));
+    assert_eq!(attempt, 2);
+    let followup = response_body(
+        followup_response.expect("the paired follow-up must reach the provider"),
+        stream,
+    )
+    .await;
+    assert_eq!(followup["status"], "completed");
+    assert_eq!(
+        followup["output"][0]["content"][0]["text"],
+        "SHELL_DISPATCH_DONE"
+    );
+
+    assert_eq!(followup_wire["tools"], first_wire["tools"]);
+    let history_call = followup_wire["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|message| message["tool_calls"].as_array().into_iter().flatten())
+        .find(|item| item["id"] == "call_shell_dispatch")
+        .expect("paired history must retain the shell call");
+    assert_eq!(history_call["function"]["name"], "functions__exec_command");
+    assert_eq!(history_call["function"]["arguments"], arguments);
+    assert!(followup_wire["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|message| message["role"] == "tool"
+            && message["tool_call_id"] == "call_shell_dispatch"
+            && message["content"] == "SHELL_MARKER_WRITTEN"));
+    handle.shutdown().await;
+    let _ = shutdown_tx.send(());
+    upstream_task.await.unwrap();
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        2,
+        "the roundtrip must use exactly two provider attempts"
+    );
+}
+
+#[tokio::test]
+async fn responses_namespace_shell_dispatch_roundtrip_json_sse() {
+    let _counter_environment = CounterEnvironment::new();
+    std::env::set_var("V3_CHAT_NAME_TEST_KEY", "fixture-key");
+    for stream in [false, true] {
+        run_namespace_shell_dispatch(stream).await;
+    }
+    std::env::remove_var("V3_CHAT_NAME_TEST_KEY");
+}
+
+struct CustomLeafHistoryFixture {
+    captures: mpsc::UnboundedSender<Result<Value, String>>,
+}
+
+fn validate_custom_leaf_history(body: &Value) -> Result<(), String> {
+    let tools = body["tools"]
+        .as_array()
+        .ok_or_else(|| format!("provider tools must be an array: {body}"))?;
+    let indexed_tools = tools.iter().enumerate().collect::<Vec<_>>();
+    let [(tool_index, tool)] = indexed_tools.as_slice() else {
+        return Err(format!(
+            "custom leaf history must expose exactly one declaration: {body}"
+        ));
+    };
+    let name = tool["function"]["name"]
+        .as_str()
+        .ok_or_else(|| format!("custom leaf declaration must have a name: {tool}"))?;
+    if *tool_index != 0 || name != "functions__apply_patch" {
+        return Err(format!(
+            "custom leaf declaration lost its namespace identity: {tool}"
+        ));
+    }
+    let messages = body["messages"]
+        .as_array()
+        .ok_or_else(|| format!("provider messages must be an array: {body}"))?;
+    let calls = messages
+        .iter()
+        .enumerate()
+        .flat_map(|(index, message)| {
+            message["tool_calls"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(move |call| (index, call))
+        })
+        .filter(|(_, call)| call["id"] == "call_custom_leaf")
+        .collect::<Vec<_>>();
+    let [(call_index, call)] = calls.as_slice() else {
+        return Err(format!(
+            "custom leaf history must contain exactly one call: {body}"
+        ));
+    };
+    if *call_index != 1
+        || call["function"]["name"] != "functions__apply_patch"
+        || call["function"]["arguments"] != r#"{"input":"patch"}"#
+    {
+        return Err(format!(
+            "custom leaf history changed identity or arguments: {call}"
+        ));
+    }
+    let outputs = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| {
+            message["role"] == "tool" && message["tool_call_id"] == "call_custom_leaf"
+        })
+        .collect::<Vec<_>>();
+    let [(output_index, output)] = outputs.as_slice() else {
+        return Err(format!(
+            "custom leaf history must contain exactly one paired output: {body}"
+        ));
+    };
+    if *output_index != call_index + 1 || output["content"] != "patch applied" {
+        return Err(format!(
+            "custom leaf history changed or separated its paired output: {output}"
+        ));
+    }
+    Ok(())
+}
+
+async fn custom_leaf_history_chat(
+    State(fixture): State<Arc<CustomLeafHistoryFixture>>,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    if body
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_none_or(Vec::is_empty)
+    {
+        return Response::builder()
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "id":"chatcmpl-probe",
+                    "object":"chat.completion",
+                    "model":"wire-model",
+                    "choices":[{
+                        "index":0,
+                        "message":{"role":"assistant","content":"probe"},
+                        "finish_reason":"stop"
+                    }]
+                })
+                .to_string(),
+            ))
+            .unwrap();
+    }
+    if let Err(reason) = validate_custom_leaf_history(&body) {
+        let _ = fixture.captures.send(Err(reason.clone()));
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"error":{"message":reason}}).to_string()))
+            .unwrap();
+    }
+    let _ = fixture.captures.send(Ok(body.clone()));
+    let message = json!({"role":"assistant","content":"CUSTOM_LEAF_HISTORY_DONE"});
+    let usage = json!({"prompt_tokens":2,"completion_tokens":3,"total_tokens":5});
+    if body["stream"] == true {
+        let chunk = json!({
+            "id":"chatcmpl-custom-leaf",
+            "object":"chat.completion.chunk",
+            "model":"wire-model",
+            "choices":[{"index":0,"delta":message,"finish_reason":"stop"}],
+            "usage":usage
+        });
+        return Response::builder()
+            .header("content-type", "text/event-stream")
+            .body(Body::from(format!("data: {chunk}\n\ndata: [DONE]\n\n")))
+            .unwrap();
+    }
+    Response::builder()
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({
+                "id":"chatcmpl-custom-leaf",
+                "object":"chat.completion",
+                "model":"wire-model",
+                "choices":[{"index":0,"message":message,"finish_reason":"stop"}],
+                "usage":usage
+            })
+            .to_string(),
+        ))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn responses_custom_leaf_history_keeps_kind_json_sse() {
+    let _counter_environment = CounterEnvironment::new();
+    std::env::set_var("V3_CHAT_NAME_TEST_KEY", "fixture-key");
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let (capture_tx, mut capture_rx) = mpsc::unbounded_channel();
+    let fixture = Arc::new(CustomLeafHistoryFixture {
+        captures: capture_tx,
+    });
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/chat/completions", post(custom_leaf_history_chat))
+        .with_state(fixture);
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(upstream, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    let handle = spawn_v3_server_aggregate(manifest(test_ports::free_port(), upstream_addr.port()))
+        .await
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .unwrap();
+    for stream in [false, true] {
+        let request = json!({
+            "model":"name-client",
+            "stream":stream,
+            "input":[
+                {"role":"user","content":"apply the patch"},
+                {
+                    "type":"custom_tool_call",
+                    "call_id":"call_custom_leaf",
+                    "name":"apply_patch",
+                    "input":"patch"
+                },
+                {
+                    "type":"custom_tool_call_output",
+                    "call_id":"call_custom_leaf",
+                    "output":"patch applied"
+                },
+                {"role":"user","content":"continue"}
+            ],
+            "tools":[{
+                "type":"namespace",
+                "name":"functions",
+                "tools":[{
+                    "type":"custom",
+                    "name":"apply_patch",
+                    "description":"Patches a workspace file.",
+                    "format":{"type":"text"}
+                }]
+            }]
+        });
+        let response = client.post(&endpoint).json(&request).send().await.unwrap();
+        let completed = read_recovery_response(response, stream).await.unwrap();
+        assert_eq!(completed["status"], "completed");
+        assert!(completed.to_string().contains("CUSTOM_LEAF_HISTORY_DONE"));
+        let provider = tokio::time::timeout(Duration::from_secs(2), capture_rx.recv())
+            .await
+            .expect("the provider attempt must complete")
+            .expect("the provider capture must stay open");
+        provider.unwrap_or_else(|reason| panic!("custom leaf history failed: {reason}"));
+    }
+    handle.shutdown().await;
+    let _ = shutdown_tx.send(());
+    upstream_task.await.unwrap();
+    std::env::remove_var("V3_CHAT_NAME_TEST_KEY");
+}
+
 #[tokio::test]
 async fn responses_chat_long_namespace_names_round_trip_on_first_attempt_json_and_sse() {
     let _counter_environment = CounterEnvironment::new();

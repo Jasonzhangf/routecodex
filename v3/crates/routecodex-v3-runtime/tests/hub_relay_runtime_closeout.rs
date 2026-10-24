@@ -2394,7 +2394,8 @@ async fn responses_relay_default_floor_projects_error_without_retry_wait() {
 }
 
 #[tokio::test]
-async fn responses_relay_provider_request_compat_failure_stops_without_send_or_reselect() {
+async fn responses_relay_provider_request_compat_failure_reselects_without_sending_failed_candidate(
+) {
     let transport = ResponsesContextErrorThenSuccessTransport {
         captures: Mutex::new(Vec::new()),
     };
@@ -2425,25 +2426,41 @@ async fn responses_relay_provider_request_compat_failure_stops_without_send_or_r
     .await
     .expect("request projection failure must use the error chain");
 
-    assert_eq!(output.status, 598);
-    assert_eq!(
-        output.error_chain.as_deref(),
-        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
-    );
+    assert_eq!(output.status, 200);
+    assert!(output.error_chain.is_none());
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("recovered attempt evidence");
+    assert_eq!(observability.provider_id.as_deref(), Some("minimax"));
+    assert_eq!(observability.provider_status, Some(200));
+    assert_eq!(observability.provider_failure_events.len(), 1);
+    let failure = &observability.provider_failure_events[0];
+    assert_eq!(failure.provider_key, "limited:default:key1:claude-fable-5");
+    assert_eq!(failure.status, 598);
+    assert_eq!(failure.action, "switch_provider");
+    assert!(failure.diagnostic_source.is_some());
+    assert!(failure.external_error_status.is_none());
+    assert!(failure.cooldown_until_ms.is_none());
+    let V3ResponsesRelayClientBody::Json(body) = &output.client_body else {
+        panic!("expected the backup provider's JSON business response");
+    };
+    assert_eq!(body["id"], "resp_context_retry");
+    assert_eq!(body["status"], "completed");
     assert!(
         started.elapsed() < Duration::from_millis(1_000),
         "request projection failure must not consume provider action gate delay"
     );
-    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
     let captures = transport.captures.lock().unwrap();
     assert!(
-        captures.is_empty(),
-        "request projection cannot send to a backup provider"
+        captures.len() == 1 && captures[0].0 == "minimax",
+        "only the eligible backup may receive a transport attempt: {captures:?}"
     );
 }
 
 #[tokio::test]
-async fn concurrent_provider_request_compat_failures_do_not_send_or_reselect() {
+async fn concurrent_provider_request_compat_failures_reselect_with_private_causes() {
     let manifest = responses_request_compat_storm_manifest();
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
@@ -2482,14 +2499,36 @@ async fn concurrent_provider_request_compat_failures_do_not_send_or_reselect() {
     let first = first.expect("first compat failure must reach the error chain");
     let second = second.expect("second compat failure must reach the error chain");
     for output in [first, second] {
-        assert_eq!(output.status, 598);
+        assert_eq!(output.status, 200);
+        assert!(output.error_chain.is_none());
+        assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+        let observability = output
+            .observability
+            .as_ref()
+            .expect("recovered attempt evidence");
         assert_eq!(
-            output.error_chain.as_deref(),
-            Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+            observability.provider_id.as_deref(),
+            Some("compat_storm_responses")
         );
-        assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+        assert_eq!(observability.provider_status, Some(200));
+        assert_eq!(observability.provider_failure_events.len(), 1);
+        let failure = &observability.provider_failure_events[0];
+        assert_eq!(
+            failure.provider_key,
+            "compat_storm_anthropic:default:key1:claude-fable-5"
+        );
+        assert_eq!(failure.status, 598);
+        assert_eq!(failure.action, "switch_provider");
+        assert!(failure.diagnostic_source.is_some());
+        assert!(failure.external_error_status.is_none());
+        assert!(failure.cooldown_until_ms.is_none());
+        let V3ResponsesRelayClientBody::Json(body) = &output.client_body else {
+            panic!("expected the backup provider's JSON business response");
+        };
+        assert_eq!(body["id"], "resp_compat_storm_retry");
+        assert_eq!(body["status"], "completed");
     }
-    assert!(transport.sends.lock().unwrap().is_empty());
+    assert_eq!(transport.sends.lock().unwrap().len(), 2);
     assert!(
         started.elapsed() < Duration::from_millis(1_000),
         "request-local projection failures must not enter provider action waits"

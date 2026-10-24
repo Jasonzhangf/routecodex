@@ -851,6 +851,14 @@ fn project_sse_stream(
                 };
                 let result = match chunk {
                     Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
+                        if let Err(observation_error) = state
+                            .provider_outcome
+                            .response_control
+                            .record_client_disconnect()
+                        {
+                            state.done = true;
+                            return Some((Err(observation_error), state));
+                        }
                         state.done = true;
                         return Some((Err(error.to_string()), state));
                     }
@@ -1073,6 +1081,7 @@ mod tests {
                 V3RelayProviderFailure {
                     status: 502,
                     provider_status: None,
+                    provider_body_read_failure: None,
                     client_response: Value::Null,
                     source_stage: "V3Error06ClientProjected",
                     terminal_projection: None,

@@ -211,6 +211,26 @@ fn project_anthropic_sse_as_openai_chat_stream(
                         // client disconnect 是健康中性事件（客户端断开导致
                         // provider 流中止）：禁止写 provider 失败/冷却，与
                         // project_sse_stream / gemini / direct 路径一致。
+                        if let Err(observation_error) =
+                            provider_outcome.response_control.record_client_disconnect()
+                        {
+                            finished = true;
+                            return Some((
+                                Err(observation_error),
+                                (
+                                    provider,
+                                    decoder,
+                                    transducer,
+                                    toolreason,
+                                    pending,
+                                    done_seen,
+                                    finished,
+                                    compatibility_profile,
+                                    retain_response_cipher,
+                                    provider_outcome,
+                                ),
+                            ));
+                        }
                         finished = true;
                         return Some((
                             Err(error.to_string()),

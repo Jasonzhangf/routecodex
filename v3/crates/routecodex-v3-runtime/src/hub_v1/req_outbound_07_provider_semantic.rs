@@ -181,6 +181,9 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request(
     if provider_protocol == V3HubProviderWireProtocol::Responses {
         namespace_registry.project_request(&mut provider_protocol_payload, "openai-responses")?;
     }
+    if entry_protocol == V3HubEntryProtocol::Responses {
+        namespace_registry.project_responses_history_references(&mut provider_protocol_payload);
+    }
     let payload = bind_v3_selected_provider_model(provider_protocol_payload, selected)
         .map(V3SelectedProviderModelBinding::into_payload)?;
     Ok(V3HubReqOutbound07StandardProjection {

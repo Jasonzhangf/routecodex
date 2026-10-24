@@ -156,6 +156,7 @@ impl ResponsesTransport for Local599Transport {
         // This public library consumer supplies its own typed runtime scope.
         // The scope never enters the wire request or business payload.
         let request_id = request.request_id().to_string();
+        let fail_this_provider = request.provider_id() == PROVIDER_ID;
         let request = request
             .with_handoff_scope(
                 routecodex_v3_provider_responses::V3ProviderTransportHandoffScope {
@@ -177,6 +178,9 @@ impl ResponsesTransport for Local599Transport {
                 reason,
             })?;
         let raw = self.inner.send(request).await?;
+        if !fail_this_provider {
+            return Ok(raw);
+        }
         let status = raw.status();
         let headers = raw.headers().to_vec();
         let compatibility_profile = raw.compatibility_profile().map(ToOwned::to_owned);
@@ -556,6 +560,53 @@ async fn local599_handoff_positive_control() {
     assert!(receipts[0].error.is_none());
     drop(receipts);
     let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn issue4aeb668_local599_recovers_through_public_runtime_consumer() {
+    std::env::set_var(KEY_ENV, "local599-test-secret");
+    let (base_url, upstream, shutdown) =
+        start_controlled_upstream(responses_text_sse("recovered response")).await;
+    let mut manifest = local599_manifest(&base_url, true);
+    let mut fallback = manifest.providers[PROVIDER_ID].clone();
+    fallback.id = "fallback".into();
+    manifest.providers.insert("fallback".into(), fallback);
+    let pool = manifest
+        .route_groups
+        .get_mut("local599-group")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap();
+    let mut target = pool.targets[0].clone();
+    target.provider = Some("fallback".into());
+    target.priority = Some(0);
+    pool.targets.push(target);
+    let transport = build_local599_transport(AttemptMode::HandoffFailure, upstream.clone());
+    let health = local599_health(&manifest);
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
+        &manifest,
+        local599_input("issue4aeb668-recovery"),
+        &transport,
+        &health,
+    )
+    .await
+    .unwrap();
+    let _ = shutdown.send(());
+    assert_eq!(output.status, 200);
+    assert!(output.error_chain.is_none());
+    assert_eq!(upstream.requests(), 2);
+    assert_eq!(upstream.statuses(), vec![200, 200]);
+    let events = &output
+        .observability
+        .as_ref()
+        .unwrap()
+        .provider_failure_events;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].status, 599);
+    assert_eq!(events[0].external_error_status, Some(200));
+    assert!(health_snapshot(&health).is_empty());
+    assert_eq!(transport.receipts.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

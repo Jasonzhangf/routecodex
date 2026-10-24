@@ -1457,7 +1457,7 @@ async fn transport_provider_failure_publishes_no_upstream_status_to_observabilit
 }
 
 #[tokio::test]
-async fn provider_internal_transport_request_lane_projects_598_without_provider_policy() {
+async fn provider_internal_transport_request_lane_recovers_without_client_error() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct InternalRequestFailureTransport {
@@ -1470,7 +1470,15 @@ async fn provider_internal_transport_request_lane_projects_598_without_provider_
             &self,
             request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            self.sends.fetch_add(1, Ordering::SeqCst);
+            if self.sends.fetch_add(1, Ordering::SeqCst) > 0 {
+                return Ok(V3ProviderResp14Raw::from_json(
+                    request.request_id(), request.provider_id(), 200,
+                    vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
+                        name: "content-type".into(), value: b"application/json".to_vec(),
+                    }],
+                    br#"{"id":"resp_recovered","status":"completed","output_text":"ok","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
+                ));
+            }
             Err(V3ProviderError::InternalTransport {
                 request_id: request.request_id().to_string(),
                 provider_id: request.provider_id().to_string(),
@@ -1504,16 +1512,20 @@ async fn provider_internal_transport_request_lane_projects_598_without_provider_
     )
     .await;
 
-    assert_eq!(output.client_payload.status, 598, "{output:?}");
-    assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
-    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
-    if let Some(observability) = output.observability.as_ref() {
-        assert_eq!(observability.provider_failure_events.len(), 0);
-    }
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let events = &output
+        .observability
+        .as_ref()
+        .unwrap()
+        .provider_failure_events;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].status, 598);
 }
 
 #[tokio::test]
-async fn provider_internal_transport_response_lane_projects_599_without_provider_policy() {
+async fn provider_internal_transport_response_lane_recovers_without_client_error() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct InternalResponseFailureTransport {
@@ -1526,7 +1538,15 @@ async fn provider_internal_transport_response_lane_projects_599_without_provider
             &self,
             request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            self.sends.fetch_add(1, Ordering::SeqCst);
+            if self.sends.fetch_add(1, Ordering::SeqCst) > 0 {
+                return Ok(V3ProviderResp14Raw::from_json(
+                    request.request_id(), request.provider_id(), 200,
+                    vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
+                        name: "content-type".into(), value: b"application/json".to_vec(),
+                    }],
+                    br#"{"id":"resp_recovered","status":"completed","output_text":"ok","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
+                ));
+            }
             Ok(V3ProviderResp14Raw::from_sse(
                 request.request_id().to_string(),
                 request.provider_id().to_string(),
@@ -1574,18 +1594,18 @@ async fn provider_internal_transport_response_lane_projects_599_without_provider
     )
     .await;
 
-    assert_eq!(output.client_payload.status, 599, "{output:?}");
-    assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
-    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
-    if let Some(observability) = output.observability.as_ref() {
-        assert_eq!(observability.provider_failure_events.len(), 0);
-    }
-    match output.client_payload.body {
-        V3ClientBody::Json(_) => {}
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
-            panic!("internal response failure must terminate before client SSE commit")
-        }
-    }
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let events = &output
+        .observability
+        .as_ref()
+        .unwrap()
+        .provider_failure_events;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].status, 599);
+    assert!(output.error_chain.is_none());
+    assert!(output.diagnostic_source.is_none());
 }
 
 #[test]
@@ -2455,6 +2475,7 @@ async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_fro
             calls: calls.clone(),
         },
         &debug,
+        V3DirectDebugNodePublication::Runtime,
     )
     .await;
 

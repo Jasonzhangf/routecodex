@@ -110,6 +110,10 @@ pub struct NamespaceToolIdentityRegistry {
     /// omitted `execution` field follows that same default. Only the explicit
     /// client declaration authorizes client-native restoration.
     client_executed_native_tool_search: bool,
+    /// Typed function/custom kinds captured before a Responses request is
+    /// projected into the target protocol. `None` records a conflicting call
+    /// ID so a later association cannot guess across kinds.
+    responses_history_call_kinds: BTreeMap<String, Option<ToolKind>>,
 }
 
 impl NamespaceToolIdentityRegistry {
@@ -193,8 +197,66 @@ impl NamespaceToolIdentityRegistry {
                 }
             }
         }
+        registry.capture_responses_history_call_kinds(request);
         registry.bind_wire_names(protocol);
         Ok(registry)
+    }
+
+    fn capture_responses_history_call_kinds(&mut self, request: &Value) {
+        for item in request
+            .get("input")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            self.capture_responses_history_call_kind(item);
+        }
+        for call in request
+            .get("messages")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .flat_map(|message| {
+                message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+            })
+        {
+            self.capture_responses_history_call_kind(call);
+        }
+    }
+
+    fn capture_responses_history_call_kind(&mut self, value: &Value) {
+        let Some(call_id) = value
+            .get("call_id")
+            .or_else(|| value.get("id"))
+            .and_then(Value::as_str)
+        else {
+            return;
+        };
+        let kind = if value
+            .pointer("/routecodex_chat_extension/responses_tool_call_type")
+            .and_then(Value::as_str)
+            == Some("custom_tool_call")
+        {
+            ToolKind::Custom
+        } else {
+            match value.get("type").and_then(Value::as_str) {
+                Some("function" | "function_call") => ToolKind::Function,
+                Some("custom" | "custom_tool_call") => ToolKind::Custom,
+                _ => return,
+            }
+        };
+        let previous = self.responses_history_call_kinds.get(call_id).copied();
+        if previous.is_none() {
+            self.responses_history_call_kinds
+                .insert(call_id.to_owned(), Some(kind));
+        } else if previous != Some(Some(kind)) {
+            self.responses_history_call_kinds
+                .insert(call_id.to_owned(), None);
+        }
     }
 
     /// Project declarations using the already assigned names. Namespace
@@ -485,6 +547,96 @@ impl NamespaceToolIdentityRegistry {
             .then_some(first.actual_wire_name.as_str())
     }
 
+    /// Project only Responses-origin history calls whose current request
+    /// declares one unique same-kind namespace leaf. This is deliberately
+    /// separate from exact client-reference projection: forced choice and
+    /// native Chat history keep their exact-only behavior.
+    pub fn project_responses_history_references(&self, body: &mut Value) {
+        for item in body
+            .get_mut("input")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            let kind = match item.get("type").and_then(Value::as_str) {
+                Some("function_call") => ToolKind::Function,
+                Some("custom_tool_call") => ToolKind::Custom,
+                _ => continue,
+            };
+            project_responses_history_reference(self, item, kind);
+        }
+        for message in body
+            .get_mut("messages")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            for call in message
+                .get_mut("tool_calls")
+                .and_then(Value::as_array_mut)
+                .into_iter()
+                .flatten()
+            {
+                let call_kind = call
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|call_id| self.responses_history_call_kinds.get(call_id))
+                    .copied();
+                let kind = match call_kind {
+                    Some(Some(kind)) => kind,
+                    Some(None) => continue,
+                    None => {
+                        if call.get("type").and_then(Value::as_str) == Some("custom")
+                            || call
+                                .pointer("/routecodex_chat_extension/responses_tool_call_type")
+                                .and_then(Value::as_str)
+                                == Some("custom_tool_call")
+                        {
+                            ToolKind::Custom
+                        } else {
+                            ToolKind::Function
+                        }
+                    }
+                };
+                project_responses_history_reference(self, call, kind);
+            }
+        }
+    }
+
+    /// Responses history may use a bare leaf name only when the current
+    /// declarations contain one unique same-kind namespace identity with that
+    /// leaf and no same-kind plain declaration owns the name.
+    pub fn wire_name_for_responses_history(
+        &self,
+        namespace: Option<&str>,
+        name: &str,
+        kind: ToolKind,
+    ) -> Option<&str> {
+        if namespace.is_some() {
+            return self.wire_name_for_client(namespace, name, kind);
+        }
+        // An exact declared wire name is already the final identity. It may
+        // only have reached this pass after an explicit namespace reference
+        // was projected, so it must not be reinterpreted as another
+        // declaration's unique leaf.
+        if self.declared_wire_names.contains(name) {
+            return None;
+        }
+        if self.identities().any(|identity| {
+            identity.kind == kind && !identity.is_namespaced() && identity.leaf_name == name
+        }) {
+            return None;
+        }
+        let mut found = self.identities().filter(|identity| {
+            identity.kind == kind && identity.is_namespaced() && identity.leaf_name == name
+        });
+        let first = found.next()?;
+        found
+            .next()
+            .is_none()
+            .then_some(first.actual_wire_name.as_str())
+    }
+
     /// Resolve the unique namespace identity emitted for a provider wire name.
     /// Returns `None` for a plain flat name, an undeclared name, or a genuine
     /// collision where two distinct namespace identities share one wire name.
@@ -729,6 +881,33 @@ impl NamespaceToolIdentityRegistry {
         self.declaration_order.push(key.clone());
         self.by_identity.insert(key, identity);
         Ok(())
+    }
+}
+
+fn project_responses_history_reference(
+    registry: &NamespaceToolIdentityRegistry,
+    value: &mut Value,
+    kind: ToolKind,
+) {
+    let namespace = value
+        .get("namespace")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let name = value
+        .get("name")
+        .or_else(|| value.pointer("/function/name"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let Some(name) = name else {
+        return;
+    };
+    let Some(wire) = registry.wire_name_for_responses_history(namespace.as_deref(), &name, kind)
+    else {
+        return;
+    };
+    set_wire_name(value, wire);
+    if let Some(object) = value.as_object_mut() {
+        object.remove("namespace");
     }
 }
 

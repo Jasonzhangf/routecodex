@@ -43,6 +43,7 @@ enum V3RelayAttemptCollectFailure {
     ResponseGovernance(V3HubRelayResponseError),
     ProviderResponseBody(String),
     ProviderTransport(String),
+    ClientDisconnect,
     LocalStore(V3AttemptStoreError),
     Observation(String),
 }
@@ -1768,22 +1769,84 @@ where
                             }
                         }
                         Some(Err(reason)) => {
-                            break Some(
-                                match stream_observation
-                                    .take_response_governance_failure()
-                                    .map_err(V3RelayCoreError::Target)?
-                                {
-                                    Some(error) => {
-                                        V3RelayAttemptCollectFailure::ResponseGovernance(error)
-                                    }
-                                    None => {
-                                        V3RelayAttemptCollectFailure::ProviderResponseBody(reason)
-                                    }
-                                },
-                            )
+                            match stream_observation.take_client_disconnect() {
+                                Ok(true) => {
+                                    break Some(V3RelayAttemptCollectFailure::ClientDisconnect)
+                                }
+                                Ok(false) => {}
+                                Err(error) => {
+                                    break Some(V3RelayAttemptCollectFailure::Observation(error))
+                                }
+                            }
+                            if let Some(error) = stream_observation
+                                .take_response_governance_failure()
+                                .map_err(V3RelayCoreError::Target)?
+                            {
+                                break Some(V3RelayAttemptCollectFailure::ResponseGovernance(
+                                    error,
+                                ));
+                            }
+                            // Governance interception is a control-plane decision,
+                            // not a provider body failure; keep it on its own lane.
+                            if reason.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
+                                break Some(V3RelayAttemptCollectFailure::ProviderResponseBody(
+                                    reason,
+                                ));
+                            }
+                            // A projected stream that yielded partial business
+                            // content and then failed before its semantic terminal
+                            // is a truncated provider body, not a local codec
+                            // failure. Keep the provider-transport class so the
+                            // exact identity receives its declared health effect;
+                            // local governance and client-disconnect lanes stay
+                            // on the response-body lane above.
+                            let truncated_body = match (
+                                stream_observation.has_provider_business_content(),
+                                stream_observation.has_semantic_terminal(),
+                            ) {
+                                (Ok(true), Ok(false)) => true,
+                                (Ok(_), Ok(_)) => false,
+                                (Err(error), _) | (_, Err(error)) => {
+                                    break Some(V3RelayAttemptCollectFailure::Observation(error))
+                                }
+                            };
+                            break Some(if truncated_body {
+                                V3RelayAttemptCollectFailure::ProviderTransport(reason)
+                            } else {
+                                V3RelayAttemptCollectFailure::ProviderResponseBody(reason)
+                            });
                         }
                         None => {
-                            break None;
+                            break match stream_observation.has_provider_business_content() {
+                                Ok(true) => {
+                                    match stream_observation.has_semantic_terminal() {
+                                        Ok(true) => None,
+                                        // A truncated HTTP 200 stream that delivered
+                                        // partial content but never reached a semantic
+                                        // terminal is a provider transport failure, not
+                                        // a local payload-store error. It must enter the
+                                        // provider failure policy so the exact identity
+                                        // is cooled and a candidate can be reselected.
+                                        Ok(false) => {
+                                            Some(V3RelayAttemptCollectFailure::ProviderTransport(
+                                                "provider SSE stream ended before a semantic terminal"
+                                                    .to_string(),
+                                            ))
+                                        }
+                                        Err(error) => {
+                                            Some(V3RelayAttemptCollectFailure::Observation(error))
+                                        }
+                                    }
+                                }
+                                Ok(false) => {
+                                    Some(V3RelayAttemptCollectFailure::ResponseGovernance(
+                                        V3HubRelayResponseError::GovernedAttemptEmpty,
+                                    ))
+                                }
+                                Err(error) => {
+                                    Some(V3RelayAttemptCollectFailure::Observation(error))
+                                }
+                            };
                         }
                     }
                 };
@@ -1827,6 +1890,20 @@ where
                     };
                 }
                 if let Some(failure) = stream_failure {
+                    if matches!(&failure, V3RelayAttemptCollectFailure::ClientDisconnect) {
+                        let failure = provider_runtime_failure(
+                            V3ProviderError::ClientDisconnect {
+                                request_id: request_id.to_string(),
+                                provider_id: selected_target_provider_id.clone(),
+                            },
+                            &selected_target_provider_id,
+                        );
+                        return Ok(C::assemble_failure_output(
+                            failure,
+                            trace,
+                            std::mem::take(failure_events),
+                        ));
+                    }
                     let (mut failure, response_processing_code) = match failure {
                         V3RelayAttemptCollectFailure::ResponseGovernance(error) => {
                             provider_response_governance_failure(
@@ -1870,6 +1947,9 @@ where
                                 &selected_target_provider_id,
                             ),
                             None,
+                        ),
+                        V3RelayAttemptCollectFailure::ClientDisconnect => unreachable!(
+                            "client disconnect must be returned before provider failure policy"
                         ),
                     };
                     failure.provider_status = Some(provider_status);

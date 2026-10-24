@@ -826,6 +826,9 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         matched_policy_directive,
         state,
         None,
+        None,
+        None,
+        None,
     )
     .await
 }
@@ -840,6 +843,9 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     matched_policy_directive: Option<&V3ProviderErrorActionPolicyManifest>,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
+    attempt_source: Option<V3Error01SourceRaised>,
+    provider_status: Option<u16>,
+    provider_body_read_failure: Option<&str>,
 ) -> Result<V3RelayProviderFailurePolicyResult, Result<String, V3RelayErrorOperatorFault>> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
     // Request-local provider failure exclusion is monotonic. Record it before
@@ -849,26 +855,35 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     // Preserve the original typed Error01 source of this provider attempt before
     // the Error05 decision consumes it, so a later target-resolution failure
     // cannot erase the provider cause that actually began this attempt.
-    let (attempt_source_projection, attempt_source) =
-        if let Some(code) = response_processing_code {
-            raise_v3_source_via_err01(
-                V3ErrorSourceKind::RuntimeFailure,
-                source_stage,
-                error_type
-                    .as_deref()
-                    .unwrap_or("relay_response_processing_failure"),
-                &message,
-                V3Err01SourceInput::Internal(code),
-            )
-        } else {
-            build_v3_relay_provider_attempt_source(
-                &selected,
-                source_stage,
-                error_type.as_deref(),
-                &message,
-            )
-        }
-        .map_err(Err)?;
+    let (attempt_source_projection, attempt_source) = if let Some(source) = attempt_source {
+        serde_json::to_value(&source)
+            .map(|projection| (projection, source.clone()))
+            .map_err(|error| {
+                relay_error_operator_fault(
+                    "relay_error_operator_sdk_failure",
+                    format!("failed to serialize V3Error01SourceRaised: {error}"),
+                    Some(source),
+                )
+            })
+    } else if let Some(code) = response_processing_code {
+        raise_v3_source_via_err01(
+            V3ErrorSourceKind::RuntimeFailure,
+            source_stage,
+            error_type
+                .as_deref()
+                .unwrap_or("relay_response_processing_failure"),
+            &message,
+            V3Err01SourceInput::Internal(code),
+        )
+    } else {
+        build_v3_relay_provider_attempt_source(
+            &selected,
+            source_stage,
+            error_type.as_deref(),
+            &message,
+        )
+    }
+    .map_err(Err)?;
     let matched_policy = matched_policy_directive.or_else(|| {
         find_matching_provider_error_policy(
             context.manifest,
@@ -897,6 +912,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     let has_alternative = matches!(&resolution, V3RelayProviderTargetResolution::Selected(_));
     // Resolve another eligible identity before any health mutation. A terminal
     // attempt publishes diagnostics only; it does not update health or actions.
+    // The last or only eligible candidate stays health-neutral for every
+    // provider failure class.
     let health_record = if is_request_local_compat_failure || !has_alternative {
         V3ProviderFailureRecord {
             scope_label: candidate_key.clone(),

@@ -628,6 +628,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_request_dry_run.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/provider_error_policy_matching.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -688,9 +690,16 @@ features:
   - v3-de-22
   - v3-de-23
   - v3-de-24
+  - v3-responses-observation-closeout-01
+  - v3-responses-refill-observation-compose-01
   entry_symbols:
   - execute_v3_foundation_pending_runtime
   - is_v3_recoverable_response_processing_source
+  - V3ResponsesDirectRuntimeSharedState::defer_debug_node_publication_to_server
+  - prepend_refill_observations
+  - V3ResponsesDirectServerOutcome::prepend_observations
+  - V3ResponsesDirectServerOutcome::publish_observations
+  - publish_v3_responses_closeout_observations
   - V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup
   - V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup
   - execute_v3_responses_direct_dry_run_runtime
@@ -2725,6 +2734,7 @@ features:
   - v3-protocol-field-parity-gemini-response-01
   - v3-protocol-field-parity-attempt-inverse-01
   - v3-protocol-field-parity-responses-chat-req-01
+  - v3-protocol-field-parity-responses-history-association-01
   - v3-protocol-field-parity-responses-chat-malformed-arguments-project-01
   - v3-protocol-field-parity-responses-chat-resp-01
   - v3-protocol-field-parity-responses-anthropic-req-01
@@ -2749,7 +2759,11 @@ features:
   - NamespaceToolIdentityRegistry::project_tools
   - NamespaceToolIdentityRegistry::project_references
   - NamespaceToolIdentityRegistry::project_request
+  - NamespaceToolIdentityRegistry::project_responses_history_references
+  - NamespaceToolIdentityRegistry::wire_name_for_responses_history
   - NamespaceToolIdentityRegistry::declares_native_tool_search
+  - responses_history_unique_leaf_association_respects_plain_kind_and_ambiguity
+  - responses_standard_projection_qualifies_leaf_only_history
   - native_tool_search_first_discovery_round_trip_through_anthropic
   - non_client_tool_search_controls_preserve_function_call_json_and_sse
   - ordinary_tool_search_function_is_not_promoted_to_native_kind
@@ -4380,7 +4394,8 @@ features:
   - finalize_v3_responses_relay_server_output
   - persist_v3_chat_failure_evidence
   - persist_v3_chat_failure_evidence_sources
-  - take_responses_direct_terminal_outcome
+  - publish_v3_responses_closeout_observations
+  - publish_responses_direct_terminal_outcome
   - issue885bb74_responses_direct_http502_recovers_with_wire_evidence_json_and_sse
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -4388,6 +4403,7 @@ features:
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot_projections.rs
   - v3/crates/routecodex-v3-server/src/executors.rs
+  - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   - v3/crates/routecodex-v3-debug/src/sample_store.rs
   - v3/crates/routecodex-v3-server/tests
   - docs/architecture

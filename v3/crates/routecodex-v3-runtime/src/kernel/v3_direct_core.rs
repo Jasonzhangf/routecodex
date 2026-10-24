@@ -516,10 +516,8 @@ where
                     selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
                         V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
                         V3AdmitAfterRecovery::Busy => {
-                            let busy_key =
-                                v3_relay_provider_candidate_key(&selected.candidate);
-                            failed_candidates
-                                .insert(busy_key.clone());
+                            let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                            failed_candidates.insert(busy_key.clone());
                             request_local_busy_candidates.insert(busy_key);
                             drop(provider_action_permit.take());
                             provider_action_permit_target = None;
@@ -695,7 +693,9 @@ where
                             );
                     }
                 };
-                if source.source_kind != V3ErrorSourceKind::ProviderFailure {
+                if source.source_kind != V3ErrorSourceKind::ProviderFailure
+                    && !routecodex_v3_error::is_v3_recoverable_response_processing_source(&source)
+                {
                     drop(provider_action_permit.take());
                     return error_output(
                         source,
@@ -1070,7 +1070,8 @@ where
                 if !matches!(
                     source.source_kind,
                     routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
-                ) {
+                ) && !routecodex_v3_error::is_v3_recoverable_response_processing_source(&source)
+                {
                     return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(
                         Ok(source),
                         last_external_http.clone(),
@@ -1426,12 +1427,14 @@ where
                     let normalization = crate::hooks::register_responses_direct_hooks()
                         .project_complete_direct_json(&mut body, &direct_dsml_context)
                         .map_err(crate::hooks::direct_complete_response_error_source);
-                    if let Err(source) = normalization.and_then(|()| crate::shared::enforce_v3_provider_json_attempt_admission(
-                        response_projection.compat_plan.provider_protocol,
-                        &body,
-                        &C::policy_target(&policy).candidate.provider_id,
-                        provider_status,
-                    )) {
+                    if let Err(source) = normalization.and_then(|()| {
+                        crate::shared::enforce_v3_provider_json_attempt_admission(
+                            response_projection.compat_plan.provider_protocol,
+                            &body,
+                            &C::policy_target(&policy).candidate.provider_id,
+                            provider_status,
+                        )
+                    }) {
                         let source = match source {
                             Ok(source) => source,
                             Err(fault) => {

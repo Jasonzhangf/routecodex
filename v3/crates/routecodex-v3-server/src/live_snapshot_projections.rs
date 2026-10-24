@@ -191,6 +191,47 @@ pub(crate) fn persist_v3_provider_terminal_evidence(
 ///
 /// Queue failures remain in the existing Debug persistence-failure ledger, so a
 /// diagnostic write can never turn a client response into an error.
+/// The outer Server closeout receives the complete ordered execution result.
+/// Nested protocol executions compose these typed observations without writing
+/// partial histories or replaying execution-node events.
+pub(crate) fn publish_v3_responses_closeout_observations(
+    state: &V3ListenerState,
+    scope: Option<&V3DebugTraceScope>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    node_trace: &[&'static str],
+    error_chain: Option<&[&'static str]>,
+    observability: Option<&V3RuntimeObservability>,
+    source: Option<&routecodex_v3_error::V3Error01SourceRaised>,
+    cause: Option<&routecodex_v3_error::V3Error01SourceRaised>,
+) {
+    if let Some(scope) = scope {
+        for node_id in node_trace {
+            if let Err(error) = state.debug.record_node_event(
+                scope,
+                *node_id,
+                "executed",
+                error_chain.map(|chain| json!({"error_chain": chain})),
+            ) {
+                eprintln!("V3 execution observation publication failed: {error}");
+                break;
+            }
+        }
+    }
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        observability
+            .map(|observation| observation.provider_failure_events.as_slice())
+            .unwrap_or(&[]),
+        source,
+        cause,
+    );
+}
+
 pub(crate) fn persist_v3_chat_failure_evidence_sources(
     state: &V3ListenerState,
     entry_protocol: &str,

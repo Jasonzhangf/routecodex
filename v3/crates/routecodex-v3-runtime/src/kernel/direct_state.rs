@@ -63,11 +63,18 @@ impl V3ResponsesDirectRefillSignal {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum V3DirectDebugNodePublication {
+    Runtime,
+    ServerCloseout,
+}
+
 pub struct V3ResponsesDirectRuntimeSharedState {
     provider_health: V3ProviderFailureRuntimeHealth,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
     client_frame_sink: Option<crate::nodes::V3CommittedClientFrameSink>,
+    debug_node_publication: V3DirectDebugNodePublication,
 }
 
 impl V3ResponsesDirectRuntimeSharedState {
@@ -80,7 +87,15 @@ impl V3ResponsesDirectRuntimeSharedState {
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
             client_frame_sink: None,
+            debug_node_publication: V3DirectDebugNodePublication::Runtime,
         }
+    }
+
+    /// The Server composes nested protocol outcomes before publishing their
+    /// execution nodes. Raw request/response capture remains owned by Debug.
+    pub fn defer_debug_node_publication_to_server(mut self) -> Self {
+        self.debug_node_publication = V3DirectDebugNodePublication::ServerCloseout;
+        self
     }
 
     pub fn with_client_frame_sink(

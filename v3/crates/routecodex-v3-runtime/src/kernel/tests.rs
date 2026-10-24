@@ -70,6 +70,9 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
             last_external_http: &mut last,
         },
         Some(routecodex_v3_error::V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup),
+        None,
+        None,
+        None,
     )
     .await
     .expect("typed Relay recovery");

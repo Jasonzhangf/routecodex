@@ -3,29 +3,123 @@ use super::*;
 pub(super) enum V3ResponsesDirectServerOutcome {
     DirectFrame(V3Server16HttpFrame),
     RelayOutput(V3ResponsesRelayRuntimeOutput),
-    ProviderTerminal(routecodex_v3_error::V3ProviderTerminalDisposition),
+    ProviderTerminal(V3ResponsesDirectTerminalOutcome),
+}
+
+pub(super) struct V3ResponsesDirectTerminalOutcome {
+    pub disposition: routecodex_v3_error::V3ProviderTerminalDisposition,
+    pub node_trace: Vec<&'static str>,
+    pub observability: Option<V3RuntimeObservability>,
+    pub diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub error_chain: Option<Vec<&'static str>>,
+    pub status: u16,
+}
+
+impl V3ResponsesDirectServerOutcome {
+    pub(super) fn prepend_observations(
+        &mut self,
+        trace: &[&'static str],
+        failures: Vec<V3RuntimeProviderFailureObservation>,
+    ) {
+        match self {
+            Self::DirectFrame(frame) => {
+                prepend_v3_relay_handoff_trace_to_direct_frame(frame, trace);
+                merge_v3_relay_handoff_provider_failure_events_into_direct_frame(frame, failures);
+            }
+            Self::RelayOutput(output) => {
+                prepend_v3_protocol_plan_trace_to_responses_relay_output(output, trace);
+                merge_v3_direct_handoff_provider_failure_events(output, failures);
+            }
+            Self::ProviderTerminal(terminal) => {
+                terminal.node_trace = merge_v3_protocol_plan_trace(
+                    trace.to_vec(),
+                    std::mem::take(&mut terminal.node_trace),
+                );
+                let observation = terminal.observability.get_or_insert_with(Default::default);
+                let mut combined = failures;
+                combined.append(&mut observation.provider_failure_events);
+                observation.provider_failure_events = combined;
+            }
+        }
+    }
+
+    pub(super) fn publish_observations(
+        &self,
+        state: &V3ListenerState,
+        scope: Option<&V3DebugTraceScope>,
+        entry_protocol: &str,
+        path: &str,
+        request_id: &str,
+    ) {
+        match self {
+            Self::DirectFrame(frame) => publish_v3_responses_closeout_observations(
+                state,
+                scope,
+                entry_protocol,
+                path,
+                request_id,
+                &frame.node_trace,
+                (!frame.error_chain.is_empty()).then_some(frame.error_chain.as_slice()),
+                frame.observability.as_ref(),
+                frame.diagnostic_source.as_ref(),
+                frame.diagnostic_cause.as_ref(),
+            ),
+            Self::RelayOutput(output) => publish_v3_responses_closeout_observations(
+                state,
+                scope,
+                entry_protocol,
+                path,
+                request_id,
+                &output.node_trace,
+                output.error_chain.as_deref(),
+                output.observability.as_ref(),
+                output.diagnostic_source.as_ref(),
+                output.diagnostic_cause.as_ref(),
+            ),
+            Self::ProviderTerminal(terminal) => {
+                publish_responses_direct_terminal_outcome(state, scope, path, request_id, terminal)
+            }
+        }
+    }
 }
 
 pub(super) fn take_responses_direct_terminal_outcome(
-    state: &V3ListenerState,
-    path: &str,
-    request_id: &str,
     output: &mut routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput,
 ) -> Option<V3ResponsesDirectServerOutcome> {
-    persist_v3_chat_failure_evidence_sources(
+    let disposition = output.terminal_disposition.take()?;
+    Some(V3ResponsesDirectServerOutcome::ProviderTerminal(
+        V3ResponsesDirectTerminalOutcome {
+            disposition,
+            node_trace: output.node_trace.clone(),
+            observability: output.observability.clone(),
+            diagnostic_source: output.diagnostic_source.clone(),
+            diagnostic_cause: output.diagnostic_cause.clone(),
+            error_chain: output.error_chain.clone(),
+            status: output.client_payload.status,
+        },
+    ))
+}
+
+fn publish_responses_direct_terminal_outcome(
+    state: &V3ListenerState,
+    scope: Option<&V3DebugTraceScope>,
+    path: &str,
+    request_id: &str,
+    output: &V3ResponsesDirectTerminalOutcome,
+) {
+    publish_v3_responses_closeout_observations(
         state,
+        scope,
         "responses",
         path,
         request_id,
-        output
-            .observability
-            .as_ref()
-            .map(|observation| observation.provider_failure_events.as_slice())
-            .unwrap_or(&[]),
+        &output.node_trace,
+        output.error_chain.as_deref(),
+        output.observability.as_ref(),
         output.diagnostic_source.as_ref(),
         output.diagnostic_cause.as_ref(),
     );
-    let disposition = output.terminal_disposition.take()?;
     // A Responses Direct provider terminal ends the client transport without a
     // client payload, so the request never reaches the Direct frame closeout
     // that would write its terminal observability row. Record the already-typed
@@ -45,7 +139,7 @@ pub(super) fn take_responses_direct_terminal_outcome(
                 "responses",
                 None,
                 None,
-                output.client_payload.status,
+                output.status,
                 None,
                 webui_observability::V3ObsErrorProjection {
                     exposed: true,
@@ -61,9 +155,6 @@ pub(super) fn take_responses_direct_terminal_outcome(
             }
         }
     }
-    Some(V3ResponsesDirectServerOutcome::ProviderTerminal(
-        disposition,
-    ))
 }
 
 pub(super) fn execute_responses_direct_server_outcome<'a>(
@@ -235,7 +326,8 @@ async fn execute_responses_direct_server_outcome_inner(
                         .as_ref()
                         .map(std::sync::Arc::clone),
                 )
-                .with_client_frame_sink(client_frame_sink.clone()),
+                .with_client_frame_sink(client_frame_sink.clone())
+                .defer_debug_node_publication_to_server(),
                 &state.manifest,
                 raw,
                 register_responses_direct_hooks(),
@@ -260,7 +352,8 @@ async fn execute_responses_direct_server_outcome_inner(
                         .as_ref()
                         .map(std::sync::Arc::clone),
                 )
-                .with_client_frame_sink(client_frame_sink.clone()),
+                .with_client_frame_sink(client_frame_sink.clone())
+                .defer_debug_node_publication_to_server(),
                 &state.manifest,
                 raw,
                 register_responses_direct_hooks(),
@@ -337,10 +430,7 @@ async fn execute_responses_direct_server_outcome_inner(
             handoff.provider_failure_events,
         );
         if let Some(next_handoff) = relay_output.protocol_direct_handoff.take() {
-            let relay_trace = merge_v3_protocol_plan_trace(
-                relay_output.node_trace.clone(),
-                next_handoff.node_trace.clone(),
-            );
+            let relay_trace = relay_output.node_trace.clone();
             let mut relay_events = relay_output
                 .observability
                 .as_ref()
@@ -348,7 +438,7 @@ async fn execute_responses_direct_server_outcome_inner(
                 .unwrap_or_default();
             relay_events.extend(next_handoff.provider_failure_events);
             let request_execution_control = next_handoff.request_execution_control;
-            let nested_outcome = Box::pin(execute_responses_direct_server_outcome(
+            let mut nested_outcome = Box::pin(execute_responses_direct_server_outcome(
                 state,
                 request_headers,
                 method,
@@ -366,81 +456,24 @@ async fn execute_responses_direct_server_outcome_inner(
                 request_purpose,
             ))
             .await;
-            return match nested_outcome {
-                V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
-                    prepend_v3_relay_handoff_trace_to_direct_frame(&mut frame, &relay_trace);
-                    merge_v3_relay_handoff_provider_failure_events_into_direct_frame(
-                        &mut frame,
-                        relay_events,
-                    );
-                    V3ResponsesDirectServerOutcome::DirectFrame(frame)
-                }
-                V3ResponsesDirectServerOutcome::RelayOutput(mut output) => {
-                    prepend_v3_protocol_plan_trace_to_responses_relay_output(
-                        &mut output,
-                        &relay_trace,
-                    );
-                    merge_v3_direct_handoff_provider_failure_events(&mut output, relay_events);
-                    V3ResponsesDirectServerOutcome::RelayOutput(output)
-                }
-                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
-                    V3ResponsesDirectServerOutcome::ProviderTerminal(disposition)
-                }
-            };
+            nested_outcome.prepend_observations(&relay_trace, relay_events);
+            return nested_outcome;
         }
         return V3ResponsesDirectServerOutcome::RelayOutput(relay_output);
     }
-    if let Some(output) = capture_v3_responses_direct_provider_snapshots(
+    if capture_v3_responses_direct_provider_snapshots(
         state,
         "responses",
         &path,
         &request_id,
         &mut output,
-    ) {
-        return V3ResponsesDirectServerOutcome::DirectFrame(
-            project_v3_responses_direct_stream_error_frame_if_requested(
-                build_v3_server_16_http_frame_from_v3_foundation_output(output),
-                requested_stream,
-            ),
-        );
-    }
-    if let Some(terminal) =
-        take_responses_direct_terminal_outcome(state, &path, &request_id, &mut output)
+    )
+    .is_some()
     {
+        eprintln!("V3 Direct provider snapshot capture failed; retaining the runtime outcome");
+    }
+    if let Some(terminal) = take_responses_direct_terminal_outcome(&mut output) {
         return terminal;
-    }
-    let scope = match state
-        .debug
-        .start_trace(&state.server.id, &request_id, &execution_id)
-    {
-        Ok(scope) => scope,
-        Err(error) => {
-            let frame = build_v3_server_16_http_frame_from_v3_foundation_output(
-                project_v3_debug_failure("V3Debug01TraceContextStarted", error),
-            );
-            return V3ResponsesDirectServerOutcome::DirectFrame(
-                project_v3_responses_direct_stream_error_frame_if_requested(
-                    frame,
-                    requested_stream,
-                ),
-            );
-        }
-    };
-    if let Err(error) = state.debug.record_node_event(
-        &scope,
-        "V3Server16HttpFrame",
-        "projected",
-        Some(json!({"status": output.client_payload.status})),
-    ) {
-        return V3ResponsesDirectServerOutcome::DirectFrame(
-            project_v3_responses_direct_stream_error_frame_if_requested(
-                build_v3_server_16_http_frame_from_v3_foundation_output(project_v3_debug_failure(
-                    "V3Server16HttpFrame",
-                    error,
-                )),
-                requested_stream,
-            ),
-        );
     }
     let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(
         output.client_payload,
@@ -449,6 +482,8 @@ async fn execute_responses_direct_server_outcome_inner(
     );
     frame.observability = output.observability;
     frame.stream_observation = output.stream_observation;
+    frame.diagnostic_source = output.diagnostic_source;
+    frame.diagnostic_cause = output.diagnostic_cause;
     V3ResponsesDirectServerOutcome::DirectFrame(
         project_v3_responses_direct_stream_error_frame_if_requested(frame, requested_stream),
     )

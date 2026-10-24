@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn provider_internal_transport_request_lane_projects_598_without_provider_policy() {
+fn provider_internal_transport_request_lane_carries_598_into_provider_policy() {
     let failure = super::responses_relay_failures::provider_runtime_failure(
         V3ProviderError::InternalTransport {
             request_id: "req-internal".to_string(),
@@ -22,16 +22,14 @@ fn provider_internal_transport_request_lane_projects_598_without_provider_policy
         failure.policy_error_type,
         "provider_internal_transport_error"
     );
-    assert!(failure.terminal_projection.is_some());
+    assert!(failure.terminal_projection.is_none());
+    assert!(failure.attempt_source.is_some());
     assert!(failure.matched_policy.is_none());
-    assert_eq!(
-        failure.terminal_disposition,
-        Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
-    );
+    assert!(failure.terminal_disposition.is_none());
 }
 
 #[test]
-fn provider_internal_transport_response_lane_projects_599_without_provider_policy() {
+fn provider_internal_transport_response_lane_carries_599_into_provider_policy() {
     let failure = super::responses_relay_failures::provider_runtime_failure(
         V3ProviderError::InternalTransport {
             request_id: "req-internal".to_string(),
@@ -49,10 +47,8 @@ fn provider_internal_transport_response_lane_projects_599_without_provider_polic
         failure.policy_error_type,
         "provider_internal_transport_error"
     );
-    assert!(failure.terminal_projection.is_some());
+    assert!(failure.terminal_projection.is_none());
+    assert!(failure.attempt_source.is_some());
     assert!(failure.matched_policy.is_none());
-    assert_eq!(
-        failure.terminal_disposition,
-        Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
-    );
+    assert!(failure.terminal_disposition.is_none());
 }

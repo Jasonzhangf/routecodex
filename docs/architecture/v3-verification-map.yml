@@ -1751,6 +1751,8 @@ features:
   - Server does not commit SSE response headers or frames before the controlled provider attempt reaches a valid terminal
   - Server 429 response exposes Error01-06 and does not wrap success
   - OpenAI Chat Relay has no secondary SSE accept worker and never serializes Error06 JSON as a normal Chat completion data frame
+  - the Relay collector handoff after a partial provider frame and typed ClientDisconnect retains its typed Error01 ClientDisconnect source, proves the partial frame was observed, keeps the primary health-neutral, and starts no additional provider attempt while a second eligible candidate exists; the untyped-transport counterexample after the same partial frame cools the primary, reselects the eligible secondary, and delivers the secondary payload
+  - the public Server socket-drop path separately aborts the runtime outcome task, releases the request-local attempt, and starts no additional provider attempt; it does not claim to exercise the typed codec-to-collector handoff
   - rejected metadata_center request produces zero upstream captures
   - chat entry pool exhaustion and provider terminals break the client transport for both the same-protocol Direct lane and the cross-protocol Relay lane instead of projecting an error payload
   - a real external upstream status (429/503) never reaches the client on either lane; the client observes a transport break and a healthy later candidate is reselected to serve the request, while the failed request's provider-terminal evidence keeps the real upstream status, headers, and body
@@ -2076,7 +2078,7 @@ features:
   - Legacy OpenAI Chat outbound currently maps exact client_metadata.user_id to public metadata.user_id and consumes registered Codex client-local keys before provider send; unknown client_metadata and reasoning-summary rejection are known transparency defects, not acceptance requirements. Their owner cutover must prove opaque preservation, provider attempt forwarding, and paired client inverse projection.
   - Responses Direct kernel preserves same-protocol Responses input/include/tool history through production Direct provider wire while applying selected provider model binding and never synthesizing Chat
     messages.
-  - Responses function/custom history and forced choice project only through exact declared identities; namespace-less leaf names do not borrow namespace authority from prefixes, separators or source item IDs. Undeclared and ambiguous references remain unchanged.
+  - Forced choice, native Chat history and explicit namespace references project only through exact declared identities. Responses history may associate a namespace-less call only when the current declarations contain one unique same-kind identity with the exact full leaf and no same-kind plain declaration owns that name. Function and custom never cross-bind; prefixes, separators, call IDs, source item IDs and arguments grant no authority; undeclared or ambiguous references remain unchanged.
   - Direct parity test is a verification binding over existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity owner edge for those production
     nodes.
   required_blackbox:
@@ -2158,10 +2160,13 @@ features:
   - fe1ec4b-chat-wire-reasoning-cipher-relay-json
   - fe1ec4b-responses-source-cipher-relay-json
   - responses_function_call_history_keeps_mcp_namespace_on_openai_chat_provider_wire
+  - responses_standard_projection_qualifies_leaf_only_history
+  - responses_history_unique_leaf_association_respects_plain_kind_and_ambiguity
   - native_tool_search_first_discovery_round_trip_through_anthropic
   - non_client_tool_search_controls_preserve_function_call_json_and_sse
   - ordinary_tool_search_function_is_not_promoted_to_native_kind
   - responses_function_call_history_without_namespace_is_qualified_from_provider_tools
+  - responses_namespace_shell_dispatch_roundtrip_json_sse
   - openai_chat_history_does_not_qualify_same_leaf_name_without_responses_origin
   - responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name
   - responses_native_function_does_not_borrow_colliding_mcp_leaf_name
@@ -2189,6 +2194,10 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:function-map-compile-gate
   - npm run verify:v3-cargo-fmt
+  - cargo test --manifest-path v3/Cargo.toml -p provider-compat-core --test namespace_identity_consumer
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib request_outbound_format_extra_tests -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test openai_chat_namespace_names responses_namespace_shell_dispatch_roundtrip_json_sse -- --exact --nocapture --test-threads=1
+  - npm run verify:v3-dagpipe-governance
   - git diff --check
   completion_rule:
     source: Complete when focused parity tests, verifier, red fixtures, architecture/resource/module/Rust-only/function-map gates, fmt, and diff checks pass.
@@ -3316,6 +3325,8 @@ features:
   - every HTTP 429 requires three consecutive HTTP 429 failures of the exact provider+auth_alias+model identity regardless of body code or fingerprint; success or a non-429 failure resets its streak; success immediately clears its exact 429-owned cooldown; other failures retain typed thresholds
   - private-profile probes preserve provider-specific request compatibility and accept HTTP 2xx before a successful next business request
   - a provider-declared terminal that carries a legal business result is forwarded as-is and never becomes a provider failure even without visible text: Responses incomplete content_filter, Anthropic refusal, and the OpenAI Chat empty-content content_filter finish; a complete attempt with no deliverable business content at all (empty end_turn/stop terminal with no text/tool/refusal/reasoning) is instead classified as an internal typed 502 for the Error chain
+  - a completely received upstream HTTP 502 with an empty or non-JSON body remains last_candidate_terminal and never enters provider cooldown; a truncated 2xx body at the last or only candidate through Direct or Relay likewise terminates detectably without cooldown, retry, fallback, or recovery probe
+  - a Relay client disconnect after a partial provider frame stays health-neutral, releases the request-local attempt, reaches the public Server boundary, and starts no additional provider attempt
   - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
   - Public `/v1/responses` switches to a spare provider while the first provider remains held; all-full pools terminate promptly without an extra upstream request
   - provider_concurrency_saturated_candidates_exhaust_without_send and provider_concurrency_relay_saturated_candidates_exhaust_without_send prove pure all-busy exhaustion retains TargetPoolExhausted/provider_concurrency_busy
@@ -3338,6 +3349,12 @@ features:
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue231_responses_relay_stale_probe_public_blackbox -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue245_permission_11128_search_continuation_public_blackbox -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox db1f482_complete_upstream_http_502_keeps_last_candidate_health_neutral -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox db1f482_truncated_openai_chat_sse_keeps_last_candidate_health_neutral_at_public_entry -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox db1f482_truncated_openai_chat_sse_relay_keeps_last_candidate_health_neutral_at_public_entry -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox db1f482_relay_client_disconnect_keeps_candidate_health_neutral_at_public_entry -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration partial_client_disconnect_is_health_neutral_and_never_reselects -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration partial_content_with_untyped_disconnect_cools_and_reselects_counterexample -- --exact --nocapture --test-threads=1
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test provider_account_pool_blackbox
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_status_contract
@@ -3406,6 +3423,16 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/manifests/v3.provider_action_gate.mainline.yml
   required_positive:
+  - issue4aeb668_compat_failure_reselects_later_tier exercises public HTTP request-side compat failure followed by a healthy later-tier provider; run node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue4aeb668_ -- --nocapture --test-threads=1
+  - issue4aeb668_actual_exhaustion_has_no_client_error_payload verifies JSON and SSE transport exhaustion without client errors or empty completions through the same command
+  - issue4aeb668_local599_recovers_through_public_runtime_consumer preserves actual upstream HTTP 200 and internal 599 while recovering through another provider; run node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test local599_consumer_blackbox -- --nocapture
+  - issue4aeb668_nested_trace_published_once and issue4aeb668_nested_final_relay_trace_published_once publish each real segment once without Router reentry or mirrored handoff duplication; run node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue4aeb668_nested_ -- --nocapture --test-threads=1
+  - issue4aeb668_nested_failure_evidence_keeps_all_attempts, issue4aeb668_nested_exhaustion_keeps_terminal_observations, issue4aeb668_nested_local_compat_keeps_original_source and issue4aeb668_nested_sse_keeps_complete_observations preserve ordered enclosing/nested failed identities and typed source/status on JSON, SSE and transport-only exhaustion without partial artifact overwrite; run node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue4aeb668_nested_ -- --nocapture --test-threads=1
+  - issue4aeb668_nested_committed_sse_keeps_enclosing_evidence preserves the delivered prefix, breaks a governed post-commit stream without replacement or normal terminator, and keeps all enclosing failed-attempt sources; run node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue4aeb668_nested_committed_sse -- --nocapture --test-threads=1
+  - issue4aeb668_refill_recovery_keeps_ordered_observations and issue4aeb668_refill_exhaustion_keeps_prior_observations execute real refill and provider recovery, preserve each round's ordered trace and full typed HTTP/local-cooldown failures, and distinguish four actual wire attempts from the local unavailable observation; run node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue4aeb668_refill_ -- --nocapture --test-threads=1
+  - responses_relay_provider_request_compat_failure_reselects_without_sending_failed_candidate preserves the private typed 598 cause and returns the eligible backup's business response with exactly one transport attempt and none to the failed candidate; run node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test hub_relay_runtime_closeout responses_relay_provider_request_compat_failure_reselects_without_sending_failed_candidate -- --exact
+  - concurrent_provider_request_compat_failures_reselect_with_private_causes preserves each request-local failure and independent backup business response without provider cooldown or sends to failed candidates; run node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test hub_relay_runtime_closeout concurrent_provider_request_compat_failures_reselect_with_private_causes -- --exact
+  - provider_internal_transport_request_lane_recovers_without_client_error and provider_internal_transport_response_lane_recovers_without_client_error verify Direct candidate recovery and internal 598/599 observation; run node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_internal_transport_ -- --nocapture
   - Provider-local full path compiles into the unified provider error action manifest with injected provider scope while legacy action remains compatible.
   - Genuine Chat, Anthropic and Responses errors retain their typed source through recovery and transport termination.
   - issue0ff6700 and issuee63d2f2 public HTTP cases reject post-filter empty or reasoning-only attempts before commit, recover through the next candidate, and preserve reasoning alongside independent business results
@@ -3601,7 +3628,7 @@ features:
   - Relay and Direct requests enter the same Front skeleton; the Front does not choose between them.
   - The accept skeleton does not parse provider business events or own routing, health, or retry.
   - A non-SSE inner response on an accepted SSE channel becomes an internal response-stage Error01-06 failure; it is never reinterpreted from payload bytes.
-  - A post-commit provider failure does not reroute or rebuild the current response; without first-frame commit the lifecycle makes provider failure post-commit unreachable by withholding semantic commit until terminal success, and with first-frame commit the committed channel ends silently without switching candidates or re-issuing the attempt.
+  - A post-commit provider failure does not reroute or rebuild the current response; without first-frame commit the lifecycle makes provider failure post-commit unreachable by withholding semantic commit until terminal success, and with first-frame commit the committed channel ends as a detectable transport break without switching candidates, re-issuing the attempt, or fabricating normal completion.
   - Delivered first-frame-commit frames are never rewritten, replaced, suppressed, or re-emitted; the ledger rejects whole-attempt rewrites after delivery.
   - Failed-attempt frames are discarded and cannot be concatenated with replacement-attempt frames.
   - New features cannot replace the accept channel, runtime worker, or projected-frame edge.

@@ -681,6 +681,12 @@ fn project_sse_stream(
                 };
                 let result = match chunk {
                     Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
+                        if let Err(observation_error) =
+                            state.stream_observation.record_client_disconnect()
+                        {
+                            state.done = true;
+                            return Some((Err(observation_error), state));
+                        }
                         state.done = true;
                         return Some((Err(error.to_string()), state));
                     }
@@ -1091,6 +1097,27 @@ fn project_responses_sse_as_openai_chat_stream(
                                 // client disconnect 是健康中性事件（客户端断开导致
                                 // provider 流中止）：禁止写 provider 失败/冷却，与
                                 // project_sse_stream / gemini / direct 路径一致。
+                                if let Err(observation_error) =
+                                    stream_observation.record_client_disconnect()
+                                {
+                                    return Some((
+                                        Err(observation_error),
+                                        (
+                                            provider,
+                                            decoder,
+                                            transducer,
+                                            toolreason,
+                                            pending,
+                                            done_seen,
+                                            finished,
+                                            stream_observation,
+                                            compatibility_profile,
+                                            retain_response_cipher,
+                                            tool_thinking_enabled,
+                                            provider_outcome,
+                                        ),
+                                    ));
+                                }
                                 return Some((
                                     Err(error),
                                     (
@@ -1178,6 +1205,7 @@ fn openai_chat_provider_http_failure(
     V3RelayProviderFailure {
         status,
         provider_status: Some(status),
+        provider_body_read_failure: None,
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
@@ -1246,6 +1274,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             status: 502,
             // Request-construction failure: no upstream HTTP response exists.
             provider_status: None,
+            provider_body_read_failure: None,
             client_response: json!({"error":{"type":error_type,"message":error.to_string()}}),
             source_stage,
             terminal_projection: None,
