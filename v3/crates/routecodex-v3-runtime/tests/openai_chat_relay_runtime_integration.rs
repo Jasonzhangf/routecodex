@@ -21,6 +21,11 @@ use tokio::net::TcpListener;
 fn ensure_openai_chat_relay_test_state_dir() {
     static INITIALIZE: std::sync::Once = std::sync::Once::new();
     INITIALIZE.call_once(|| {
+        // This binary owns projection, routing and lifecycle parity cases. Their
+        // fixtures replay one completed provider response, so the bounded Chat
+        // Process continuation is pinned off; refill coverage lives in the
+        // public server entry tests.
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock must follow the Unix epoch")
