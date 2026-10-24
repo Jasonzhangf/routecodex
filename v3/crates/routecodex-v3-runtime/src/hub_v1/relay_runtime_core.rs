@@ -2010,7 +2010,13 @@ where
         super::resp_chat_process_03_governed::v3_chat_process_refill_max_consecutive();
     let mut payload = initial_payload;
     let mut initial_handoff = initial_handoff;
-    let mut failure_events: Vec<V3RuntimeProviderFailureObservation> = Vec::new();
+    // Direct 阶段交给 Relay 的 handoff 已经记录了同一次请求的前序失败尝试证据。
+    // 它必须作为 Relay 首次执行的起点，否则客户端失败证据只保留 Relay 阶段，
+    // 丢掉同协议 Direct 的真实失败。
+    let mut failure_events: Vec<V3RuntimeProviderFailureObservation> = initial_handoff
+        .as_mut()
+        .map(|handoff| std::mem::take(&mut handoff.provider_failure_events))
+        .unwrap_or_default();
     let mut carrier = V3RelayRefillCarrier {
         request_execution_control,
         accumulated_items: Vec::new(),
