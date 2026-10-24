@@ -6,13 +6,22 @@
 //!
 //! 1. the complete-attempt text governance of this attempt is the identity on
 //!    everything flushed so far, and
-//! 2. the flushed prefix already carries visible business text.
+//! 2. the flushed prefix already carries client-visible business content.
 //!
 //! (2) makes the complete-attempt empty/blank/invisible-final judgment
-//! irrevocably true: visible text only grows, so no later provider frame can
+//! irrevocably true: both carriers only grow, so no later provider frame can
 //! turn this attempt into a `provider_response_empty` 502 that would need a
-//! retry or a provider switch. Reasoning-only and whitespace-only deltas never
-//! commit.
+//! retry or a provider switch. The two carriers are visible `output_text` and a
+//! named tool-call output item (`function_call`, `custom_tool_call`,
+//! `mcp_call`). The business-content classifier already accepts every typed
+//! output item as deliverable, and no text-governance owner rewrites a tool
+//! name, so a named tool-call start certifies the attempt exactly as visible
+//! text does. Reasoning-only and whitespace-only deltas never commit, and a
+//! nameless item proves nothing.
+//!
+//! The tool-call argument payload is excluded from that certification: the
+//! collector holds its frames until the item completes, so the client receives
+//! the complete payload once, in order, and never a partial one.
 //!
 //! (1) keeps the registered Direct response hook authoritative. Both text
 //! governance owners that can rewrite a plain Responses attempt are content
@@ -123,11 +132,42 @@ fn direct_sse_output_text_key(event: &serde_json::Value) -> (usize, usize) {
     )
 }
 
+/// Gate identity for one tool-call item. The item's own id is the identity
+/// every carrier repeats (`output_item.added`/`done` and the terminal
+/// snapshot), so parallel items stay distinct and array positions cannot shift
+/// it. Events without an item identity fall back to the carrier position.
+fn tool_item_gate_key(item: &serde_json::Value, output_index: usize) -> String {
+    for field in ["id", "call_id"] {
+        if let Some(identity) = item
+            .get(field)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|identity| !identity.is_empty())
+        {
+            return format!("{field}:{identity}");
+        }
+    }
+    format!("output_index:{output_index}")
+}
+
 #[derive(Debug)]
 pub(crate) struct V3DirectPrefixCommitProbe {
     protocol: V3HubProviderWireProtocol,
     markers: Vec<V3GovernedTextMarker>,
     visible_text: bool,
+    /// A named tool-call output item started. Its name is client-visible
+    /// business content that no text-governance owner rewrites, so it certifies
+    /// the complete-attempt business-content judgment the same way visible text
+    /// does.
+    tool_call_started: bool,
+    /// Stable identities of tool-call items whose argument payload is not
+    /// complete yet. The completeness gate keeps those frames buffered until
+    /// the item completes, because a provider-private argument rewrite may
+    /// still change them. The key is the item's own identity, not its array
+    /// position: two concurrent items may omit `output_index`, and a snapshot
+    /// may shift array positions, and either would otherwise release the wrong
+    /// payload.
+    tool_arguments_pending: std::collections::BTreeSet<String>,
     confirmed_marker: bool,
     tails_by_carrier: std::collections::BTreeMap<(usize, usize), String>,
 }
@@ -164,6 +204,8 @@ impl V3DirectPrefixCommitProbe {
             protocol,
             markers,
             visible_text: false,
+            tool_call_started: false,
+            tool_arguments_pending: std::collections::BTreeSet::new(),
             confirmed_marker: false,
             tails_by_carrier: std::collections::BTreeMap::new(),
         }
@@ -194,18 +236,37 @@ impl V3DirectPrefixCommitProbe {
             Some("response.content_part.added" | "response.content_part.done") => {
                 self.observe_part(event.get("part"), direct_sse_output_text_key(event));
             }
-            Some("response.output_item.added" | "response.output_item.done") => {
-                self.observe_item(event.get("item"), direct_sse_output_text_key(event));
+            Some("response.output_item.added") => {
+                let carrier_key = direct_sse_output_text_key(event);
+                self.observe_tool_item(event.get("item"), carrier_key.0, false);
+                self.observe_item(event.get("item"), carrier_key);
+            }
+            Some("response.output_item.done") => {
+                let carrier_key = direct_sse_output_text_key(event);
+                self.observe_tool_item(event.get("item"), carrier_key.0, true);
+                self.observe_item(event.get("item"), carrier_key);
             }
             // The complete-attempt owners read the terminal snapshot output, so
-            // the certification has to read the same text.
-            Some(
-                "response.created"
-                | "response.in_progress"
-                | "response.queued"
-                | "response.completed"
-                | "response.incomplete",
-            ) => {
+            // the certification has to read the same text. A nonterminal
+            // snapshot is a live state mirror, not a delivery carrier: it may
+            // list an item that is still streaming together with a partial
+            // payload, so reading it as a completion would release the argument
+            // gate mid-payload, and reading it as a start would certify content
+            // the client never received and the business-content classifier
+            // never counted. Tool-item carriers are therefore the incremental
+            // item events plus the terminal snapshot.
+            Some("response.created" | "response.in_progress" | "response.queued") => {
+                for (output_index, item) in event
+                    .pointer("/response/output")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .enumerate()
+                {
+                    self.observe_item(Some(item), (output_index, 0));
+                }
+            }
+            Some("response.completed" | "response.incomplete") => {
                 for (output_index, item) in event
                     .pointer("/response/output")
                     .and_then(Value::as_array)
@@ -217,10 +278,46 @@ impl V3DirectPrefixCommitProbe {
                     // the output array is the authoritative carrier identity,
                     // matching how the complete-attempt owners read the
                     // terminal snapshot.
+                    self.observe_tool_item(Some(item), output_index, true);
                     self.observe_item(Some(item), (output_index, 0));
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Observe a tool-call output item.
+    ///
+    /// A named `function_call`, `custom_tool_call` or `mcp_call` item is
+    /// client-visible business content that no text-governance owner rewrites,
+    /// so its start frame certifies the complete-attempt business-content
+    /// judgment the same way visible text does. The argument payload is not
+    /// part of that certification: it stays behind the completeness gate until
+    /// the item completes, because a provider-private rewrite may still change
+    /// it.
+    fn observe_tool_item(&mut self, item: Option<&Value>, output_index: usize, complete: bool) {
+        let Some(item) = item else {
+            return;
+        };
+        if !matches!(
+            item.get("type").and_then(Value::as_str),
+            Some("function_call" | "custom_tool_call" | "mcp_call")
+        ) {
+            return;
+        }
+        let named = item
+            .get("name")
+            .and_then(Value::as_str)
+            .is_some_and(|name| !name.trim().is_empty());
+        if !named {
+            return;
+        }
+        self.tool_call_started = true;
+        let gate_key = tool_item_gate_key(item, output_index);
+        if complete {
+            self.tool_arguments_pending.remove(&gate_key);
+        } else {
+            self.tool_arguments_pending.insert(gate_key);
         }
     }
 
@@ -307,9 +404,20 @@ impl V3DirectPrefixCommitProbe {
 
     /// True only while the whole buffered prefix is governed business content:
     /// no marker any text-governance owner could act on was observed, no carrier
-    /// ends with a marker prefix, and the prefix already carries visible text.
+    /// ends with a marker prefix, and the prefix already carries client-visible
+    /// business content (visible text or a named tool-call start). Reasoning
+    /// deltas and whitespace alone never certify the commit, so an empty
+    /// attempt still recovers through the typed Error chain.
     pub(crate) fn is_committable(&self) -> bool {
-        self.visible_text && !self.governed_text_pending()
+        (self.visible_text || self.tool_call_started) && !self.governed_text_pending()
+    }
+
+    /// A tool-call argument payload is not complete yet. A committed channel
+    /// must not project those frames until the item completes: a
+    /// provider-private argument rewrite may still change them, so the complete
+    /// payload leaves the gate once, in order.
+    pub(crate) fn tool_arguments_pending(&self) -> bool {
+        !self.tool_arguments_pending.is_empty()
     }
 
     /// A complete governed marker was observed. Production code uses
@@ -396,6 +504,274 @@ mod tests {
         assert!(!probe.is_committable());
         probe.observe_event(&json!({"type": "response.output_item.added", "item": {"type": "reasoning", "id": "rs_1"}}));
         assert!(!probe.is_committable());
+    }
+
+    fn tool_item_event(
+        event_type: &str,
+        output_index: usize,
+        item_type: &str,
+        name: &str,
+    ) -> Value {
+        json!({
+            "type": event_type,
+            "output_index": output_index,
+            "item": {
+                "type": item_type,
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": name,
+                "arguments": ""
+            }
+        })
+    }
+
+    #[test]
+    fn named_tool_call_item_start_commits() {
+        let mut probe = probe();
+        probe.observe_event(&json!({"type": "response.created", "response": {"output": []}}));
+        probe.observe_event(
+            &json!({"type": "response.reasoning_summary_text.delta", "delta": "plan the call"}),
+        );
+        assert!(
+            !probe.is_committable(),
+            "reasoning alone never authorizes a commit"
+        );
+        probe.observe_event(&tool_item_event(
+            "response.output_item.added",
+            1,
+            "function_call",
+            "exec_command",
+        ));
+        assert!(
+            probe.is_committable(),
+            "a named tool-call start is client-visible business content"
+        );
+        assert!(
+            probe.tool_arguments_pending(),
+            "the argument payload stays behind the completeness gate"
+        );
+        probe.observe_event(&json!({
+            "type": "response.function_call_arguments.delta",
+            "output_index": 1,
+            "delta": "{\"command\":\"echo h"
+        }));
+        assert!(
+            probe.tool_arguments_pending(),
+            "a partial argument payload must not leave the gate"
+        );
+        probe.observe_event(&json!({
+            "type": "response.output_item.done",
+            "output_index": 1,
+            "item": {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"command\":\"echo hi\"}"
+            }
+        }));
+        assert!(
+            !probe.tool_arguments_pending(),
+            "a completed tool item releases the argument gate"
+        );
+        assert!(probe.is_committable());
+    }
+
+    #[test]
+    fn unnamed_tool_call_item_does_not_commit() {
+        let mut probe = probe();
+        probe.observe_event(&tool_item_event(
+            "response.output_item.added",
+            1,
+            "function_call",
+            "",
+        ));
+        assert!(
+            !probe.is_committable(),
+            "a nameless function item proves no client-visible business content"
+        );
+        assert!(!probe.tool_arguments_pending());
+    }
+
+    #[test]
+    fn custom_tool_call_start_commits_and_is_gated() {
+        let mut probe = probe();
+        probe.observe_event(&json!({
+            "type": "response.output_item.added",
+            "output_index": 2,
+            "item": {
+                "type": "custom_tool_call",
+                "id": "ctc_1",
+                "call_id": "call_2",
+                "name": "apply_patch",
+                "input": ""
+            }
+        }));
+        assert!(probe.is_committable());
+        assert!(probe.tool_arguments_pending());
+        probe.observe_event(&json!({
+            "type": "response.output_item.done",
+            "output_index": 2,
+            "item": {
+                "type": "custom_tool_call",
+                "id": "ctc_1",
+                "call_id": "call_2",
+                "name": "apply_patch",
+                "input": "*** Begin Patch"
+            }
+        }));
+        assert!(!probe.tool_arguments_pending());
+    }
+
+    #[test]
+    fn nonterminal_snapshot_does_not_complete_a_streaming_tool_item() {
+        let mut probe = probe();
+        probe.observe_event(&tool_item_event(
+            "response.output_item.added",
+            1,
+            "function_call",
+            "exec_command",
+        ));
+        assert!(probe.tool_arguments_pending());
+        // A live state mirror is not a delivery carrier. It may list the item
+        // that is still streaming together with a partial payload, and reading
+        // it as a completion would release the argument gate mid-payload.
+        for event_type in [
+            "response.created",
+            "response.in_progress",
+            "response.queued",
+        ] {
+            probe.observe_event(&json!({
+                "type": event_type,
+                "response": {
+                    "id": "r1",
+                    "output": [{
+                        "type": "function_call",
+                        "id": "fc_1",
+                        "call_id": "call_1",
+                        "name": "exec_command",
+                        "arguments": "{\"command\":\"echo h"
+                    }]
+                }
+            }));
+            assert!(
+                probe.tool_arguments_pending(),
+                "{event_type} must not release the streaming argument gate"
+            );
+            assert!(
+                probe.is_committable(),
+                "{event_type} keeps the start frame the item already proved"
+            );
+        }
+        probe.observe_event(&json!({
+            "type": "response.output_item.done",
+            "output_index": 1,
+            "item": {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"command\":\"echo hi\"}"
+            }
+        }));
+        assert!(
+            !probe.tool_arguments_pending(),
+            "the completed item releases the argument gate"
+        );
+    }
+
+    #[test]
+    fn snapshot_only_tool_item_does_not_certify_the_commit() {
+        let mut probe = probe();
+        // A tool item that exists only in a state mirror was never delivered to
+        // the client and is not read by the complete-attempt business-content
+        // classifier, so certifying it would let an empty terminal commit.
+        probe.observe_event(&json!({
+            "type": "response.in_progress",
+            "response": {
+                "id": "r1",
+                "output": [{
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "exec_command",
+                    "arguments": ""
+                }]
+            }
+        }));
+        assert!(
+            !probe.is_committable(),
+            "a snapshot-only tool item proves no delivered business content"
+        );
+        assert!(!probe.tool_arguments_pending());
+    }
+
+    #[test]
+    fn parallel_tool_items_gate_per_item_identity() {
+        let mut probe = probe();
+        // Two concurrent tool items that both omit `output_index` must not
+        // collapse onto one gate key: completing one would otherwise release
+        // the other item's still-streaming payload.
+        for (item_id, name) in [("fc_a", "exec_command"), ("fc_b", "read_file")] {
+            probe.observe_event(&json!({
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "function_call",
+                    "id": item_id,
+                    "call_id": format!("call_{item_id}"),
+                    "name": name,
+                    "arguments": ""
+                }
+            }));
+        }
+        assert!(probe.tool_arguments_pending());
+        probe.observe_event(&json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "id": "fc_a",
+                "call_id": "call_fc_a",
+                "name": "exec_command",
+                "arguments": "{\"command\":\"echo hi\"}"
+            }
+        }));
+        assert!(
+            probe.tool_arguments_pending(),
+            "the second tool item still streams its payload"
+        );
+        probe.observe_event(&json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "id": "fc_b",
+                "call_id": "call_fc_b",
+                "name": "read_file",
+                "arguments": "{\"path\":\"note.md\"}"
+            }
+        }));
+        assert!(
+            !probe.tool_arguments_pending(),
+            "both completed items release the gate"
+        );
+    }
+
+    #[test]
+    fn governed_text_blocks_the_tool_call_commit() {
+        let mut probe = V3DirectPrefixCommitProbe::new_with_declared_tools(
+            V3HubProviderWireProtocol::Responses,
+            true,
+        );
+        probe.observe_event(&delta("visible <tool_call>write_file</tool_call>"));
+        probe.observe_event(&tool_item_event(
+            "response.output_item.added",
+            1,
+            "function_call",
+            "write_file",
+        ));
+        assert!(
+            !probe.is_committable(),
+            "a governed prefix still waits for the complete-attempt owner"
+        );
     }
 
     #[test]

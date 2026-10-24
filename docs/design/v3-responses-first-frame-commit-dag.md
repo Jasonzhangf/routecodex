@@ -145,9 +145,15 @@ flowchart TD
 
 ### P3 完整性闸(工具参数与整段改写)
 
-1. 工具参数改写、custom tool、`strip_client_response_id`、provider model identity 擦除按帧逐个应用,
-   保持前缀安全;需要完整 JSON 的只在 block 完整点发。
+1. 工具参数改写、custom tool 按帧逐个应用,保持前缀安全;需要完整 JSON 的只在 block 完整点发。
+   `strip_client_response_id` 已由 Direct SSE content consumer 在传输层后、客户端投影前逐帧应用,
+   不属本阶段残留;provider model identity 擦除是 Relay 请求侧清理,不是 Direct 响应帧变换。
 2. DSML/thinking 与 memory 保持整段模式,并由请求级判定切到不提交;补红测证明这些请求仍与今天逐字节一致。
+
+状态(0.90.4935):第 1 项的提交面与完整性闸已实现。提交谓词扩展为「可见 output_text 或带名字的
+tool-call 起始帧」;工具参数帧在 item 完成前保持挂起,完成后一次按序发出。完整性只由增量 item 载荷
+(`output_item.added` / `done`)裁决,非终态快照只是状态镜像:它既不能释放参数闸,也不能认证提交。
+第 2 项已由 P1 的请求级判定覆盖。证据:`--lib commit_probe`、`--lib first_frame_commit_`。
 
 ### P4 收口
 

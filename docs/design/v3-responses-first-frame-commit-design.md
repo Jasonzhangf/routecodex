@@ -1,6 +1,8 @@
 # v3 Responses 首帧提交设计（issue 849ed8f）
 
-状态：P1（Responses Direct 首帧提交 + append-only 续发 + 提交后静默断开）已实现，P2/P3 未实现。
+状态：P1（Responses Direct 首帧提交 + append-only 续发 + 提交后静默断开）已实现；
+P3 的「带名字的 tool-call 起始帧提交 + 工具参数完整性闸」已实现（0.90.4935）；
+P2（Relay 逐事件投影）未实现。
 
 ## 1 问题与证据
 
@@ -59,11 +61,18 @@
 
 ## 5 定义
 
-- 可提交业务帧：通过该协议投影与已验证 hook 之后，客户协议上的首个可见 `output_text` 非空增量。
-  DSH 以首 token 度量窗口，状态帧 `response.created` 不算。
+- 可提交业务帧：通过该协议投影与已验证 hook 之后，客户协议上的首个可见 `output_text` 非空增量，
+  或带名字的 tool-call 起始帧（`function_call` / `custom_tool_call` / `mcp_call` 的
+  `output_item.added`）。
+  DSH 以首 token 度量窗口，状态帧 `response.created` 不算；工具名是客户端可见业务内容，
+  且无文本治理 owner 会改写工具名，因此它与可见文本同样认证该尝试的业务内容。
+  认证与参数闸只由增量 item 载荷（`output_item.added` / `output_item.done`）与 terminal 快照裁决：
+  非终态 `created` / `in_progress` / `queued` 快照只是状态镜像，可能带着仍在流式解析的半截参数，
+  因此既不能认证提交，也不能释放参数闸。
 - P1 实际提交条件只有「可见 output_text」。`reasoning` 增量保真但不授权成功，也不设置可见标记，
-  因此 reasoning-only 尝试从不提前提交（见 §13.1）。带名字的 tool-call 起始帧、tool_thinking 与
-  toolreason 投影属于 P2/P3 计划，P1 未实现，实际由逐帧投影承担。
+  因此 reasoning-only 尝试从不提前提交（见 §13.1）。tool_thinking 与 toolreason 投影属于
+  P2/P3 计划，实际由逐帧投影承担；带名字的 tool-call 起始帧属于 P3 计划，已在 0.90.4935 实现
+  （提交谓词含 tool-call 起始帧；工具参数帧按完整性闸延后到参数完整且改写完成后一次发出）。
 - 提交点：首个可提交业务帧写入客户端通道的时刻。此刻起该尝试不可再被替换。
 - 续发账本：记录每个 block 已发出的文本长度、已发出的参数长度、已发出的 item 集合。
   末尾投影只发账本未覆盖的部分。
