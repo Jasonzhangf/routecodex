@@ -97,7 +97,12 @@ payload.
   output_text or a named tool-call item start) and no governed text marker, so a
   reasoning-only, whitespace-only, or nameless-item prefix never commits. A
   tool-call argument payload stays held until its item completes, so the client
-  receives the complete payload once and never a partial one.
+  receives the complete payload once and never a partial one. That gate and the
+  tool-call certification are decided only by the incremental item carriers
+  (`output_item.added`/`output_item.done`) and the terminal snapshot: a
+  non-terminal `created`/`in_progress`/`queued` state mirror may list the item
+  together with a partial payload, so it neither certifies a start nor releases
+  the gate.
 - After the commit the probe is only a hold signal: while the newest text may
   still be governed, the collector suspends projection, keeps those frames in the
   attempt, and the registered complete-attempt owner decides the whole attempt at

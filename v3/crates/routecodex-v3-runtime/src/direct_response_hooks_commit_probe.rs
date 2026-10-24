@@ -132,6 +132,24 @@ fn direct_sse_output_text_key(event: &serde_json::Value) -> (usize, usize) {
     )
 }
 
+/// Gate identity for one tool-call item. The item's own id is the identity
+/// every carrier repeats (`output_item.added`/`done` and the terminal
+/// snapshot), so parallel items stay distinct and array positions cannot shift
+/// it. Events without an item identity fall back to the carrier position.
+fn tool_item_gate_key(item: &serde_json::Value, output_index: usize) -> String {
+    for field in ["id", "call_id"] {
+        if let Some(identity) = item
+            .get(field)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|identity| !identity.is_empty())
+        {
+            return format!("{field}:{identity}");
+        }
+    }
+    format!("output_index:{output_index}")
+}
+
 #[derive(Debug)]
 pub(crate) struct V3DirectPrefixCommitProbe {
     protocol: V3HubProviderWireProtocol,
@@ -142,11 +160,14 @@ pub(crate) struct V3DirectPrefixCommitProbe {
     /// the complete-attempt business-content judgment the same way visible text
     /// does.
     tool_call_started: bool,
-    /// Output indices of tool-call items whose argument payload is not complete
-    /// yet. The completeness gate keeps those frames buffered until the item
-    /// completes, because a provider-private argument rewrite may still change
-    /// them.
-    tool_arguments_pending: std::collections::BTreeSet<usize>,
+    /// Stable identities of tool-call items whose argument payload is not
+    /// complete yet. The completeness gate keeps those frames buffered until
+    /// the item completes, because a provider-private argument rewrite may
+    /// still change them. The key is the item's own identity, not its array
+    /// position: two concurrent items may omit `output_index`, and a snapshot
+    /// may shift array positions, and either would otherwise release the wrong
+    /// payload.
+    tool_arguments_pending: std::collections::BTreeSet<String>,
     confirmed_marker: bool,
     tails_by_carrier: std::collections::BTreeMap<(usize, usize), String>,
 }
@@ -226,14 +247,26 @@ impl V3DirectPrefixCommitProbe {
                 self.observe_item(event.get("item"), carrier_key);
             }
             // The complete-attempt owners read the terminal snapshot output, so
-            // the certification has to read the same text.
-            Some(
-                "response.created"
-                | "response.in_progress"
-                | "response.queued"
-                | "response.completed"
-                | "response.incomplete",
-            ) => {
+            // the certification has to read the same text. A nonterminal
+            // snapshot is a live state mirror, not a delivery carrier: it may
+            // list an item that is still streaming together with a partial
+            // payload, so reading it as a completion would release the argument
+            // gate mid-payload, and reading it as a start would certify content
+            // the client never received and the business-content classifier
+            // never counted. Tool-item carriers are therefore the incremental
+            // item events plus the terminal snapshot.
+            Some("response.created" | "response.in_progress" | "response.queued") => {
+                for (output_index, item) in event
+                    .pointer("/response/output")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .enumerate()
+                {
+                    self.observe_item(Some(item), (output_index, 0));
+                }
+            }
+            Some("response.completed" | "response.incomplete") => {
                 for (output_index, item) in event
                     .pointer("/response/output")
                     .and_then(Value::as_array)
@@ -280,10 +313,11 @@ impl V3DirectPrefixCommitProbe {
             return;
         }
         self.tool_call_started = true;
+        let gate_key = tool_item_gate_key(item, output_index);
         if complete {
-            self.tool_arguments_pending.remove(&output_index);
+            self.tool_arguments_pending.remove(&gate_key);
         } else {
-            self.tool_arguments_pending.insert(output_index);
+            self.tool_arguments_pending.insert(gate_key);
         }
     }
 
@@ -587,6 +621,138 @@ mod tests {
             }
         }));
         assert!(!probe.tool_arguments_pending());
+    }
+
+    #[test]
+    fn nonterminal_snapshot_does_not_complete_a_streaming_tool_item() {
+        let mut probe = probe();
+        probe.observe_event(&tool_item_event(
+            "response.output_item.added",
+            1,
+            "function_call",
+            "exec_command",
+        ));
+        assert!(probe.tool_arguments_pending());
+        // A live state mirror is not a delivery carrier. It may list the item
+        // that is still streaming together with a partial payload, and reading
+        // it as a completion would release the argument gate mid-payload.
+        for event_type in [
+            "response.created",
+            "response.in_progress",
+            "response.queued",
+        ] {
+            probe.observe_event(&json!({
+                "type": event_type,
+                "response": {
+                    "id": "r1",
+                    "output": [{
+                        "type": "function_call",
+                        "id": "fc_1",
+                        "call_id": "call_1",
+                        "name": "exec_command",
+                        "arguments": "{\"command\":\"echo h"
+                    }]
+                }
+            }));
+            assert!(
+                probe.tool_arguments_pending(),
+                "{event_type} must not release the streaming argument gate"
+            );
+            assert!(
+                probe.is_committable(),
+                "{event_type} keeps the start frame the item already proved"
+            );
+        }
+        probe.observe_event(&json!({
+            "type": "response.output_item.done",
+            "output_index": 1,
+            "item": {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"command\":\"echo hi\"}"
+            }
+        }));
+        assert!(
+            !probe.tool_arguments_pending(),
+            "the completed item releases the argument gate"
+        );
+    }
+
+    #[test]
+    fn snapshot_only_tool_item_does_not_certify_the_commit() {
+        let mut probe = probe();
+        // A tool item that exists only in a state mirror was never delivered to
+        // the client and is not read by the complete-attempt business-content
+        // classifier, so certifying it would let an empty terminal commit.
+        probe.observe_event(&json!({
+            "type": "response.in_progress",
+            "response": {
+                "id": "r1",
+                "output": [{
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "exec_command",
+                    "arguments": ""
+                }]
+            }
+        }));
+        assert!(
+            !probe.is_committable(),
+            "a snapshot-only tool item proves no delivered business content"
+        );
+        assert!(!probe.tool_arguments_pending());
+    }
+
+    #[test]
+    fn parallel_tool_items_gate_per_item_identity() {
+        let mut probe = probe();
+        // Two concurrent tool items that both omit `output_index` must not
+        // collapse onto one gate key: completing one would otherwise release
+        // the other item's still-streaming payload.
+        for (item_id, name) in [("fc_a", "exec_command"), ("fc_b", "read_file")] {
+            probe.observe_event(&json!({
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "function_call",
+                    "id": item_id,
+                    "call_id": format!("call_{item_id}"),
+                    "name": name,
+                    "arguments": ""
+                }
+            }));
+        }
+        assert!(probe.tool_arguments_pending());
+        probe.observe_event(&json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "id": "fc_a",
+                "call_id": "call_fc_a",
+                "name": "exec_command",
+                "arguments": "{\"command\":\"echo hi\"}"
+            }
+        }));
+        assert!(
+            probe.tool_arguments_pending(),
+            "the second tool item still streams its payload"
+        );
+        probe.observe_event(&json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "id": "fc_b",
+                "call_id": "call_fc_b",
+                "name": "read_file",
+                "arguments": "{\"path\":\"note.md\"}"
+            }
+        }));
+        assert!(
+            !probe.tool_arguments_pending(),
+            "both completed items release the gate"
+        );
     }
 
     #[test]

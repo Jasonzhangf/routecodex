@@ -66,6 +66,9 @@ P2（Relay 逐事件投影）未实现。
   `output_item.added`）。
   DSH 以首 token 度量窗口，状态帧 `response.created` 不算；工具名是客户端可见业务内容，
   且无文本治理 owner 会改写工具名，因此它与可见文本同样认证该尝试的业务内容。
+  认证与参数闸只由增量 item 载荷（`output_item.added` / `output_item.done`）与 terminal 快照裁决：
+  非终态 `created` / `in_progress` / `queued` 快照只是状态镜像，可能带着仍在流式解析的半截参数，
+  因此既不能认证提交，也不能释放参数闸。
 - P1 实际提交条件只有「可见 output_text」。`reasoning` 增量保真但不授权成功，也不设置可见标记，
   因此 reasoning-only 尝试从不提前提交（见 §13.1）。tool_thinking 与 toolreason 投影属于
   P2/P3 计划，实际由逐帧投影承担；带名字的 tool-call 起始帧属于 P3 计划，已在 0.90.4935 实现
