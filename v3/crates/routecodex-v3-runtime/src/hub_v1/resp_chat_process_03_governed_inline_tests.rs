@@ -1206,6 +1206,104 @@ fn refill_continuation_responses_dual_history_keeps_tool_result_shape() {
 }
 
 #[test]
+fn refill_continuation_responses_dual_history_keeps_additional_tools_declaration() {
+    // The decoded `input` can lift tool declarations that only its items carry
+    // into the canonical tool set. Dropping `input` must not drop that
+    // contribution, so the continuation carries the effective canonical tools.
+    let original = json!({
+        "input": [
+            {"type": "additional_tools", "tools": [
+                {"type": "function", "name": "read_value", "parameters": {"type": "object"}}
+            ]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "read it"}]}
+        ],
+        "messages": [
+            {"role": "user", "content": "read it"}
+        ]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("additional-tools continuation must build");
+    assert!(
+        continuation.get("input").is_none(),
+        "the redundant input must not compete with the merged history: {continuation}"
+    );
+    let tools = continuation["tools"].as_array().expect("tools array");
+    assert!(
+        tools.iter().any(|tool| tool["name"] == json!("read_value")),
+        "the lifted tool declaration must survive: {tools:?}"
+    );
+    let messages = continuation["messages"].as_array().expect("messages array");
+    assert!(
+        messages.iter().any(|message| message
+            .to_string()
+            .contains(V3_CHAT_PROCESS_REFILL_INSTRUCTION)),
+        "the continuation must carry the instruction: {messages:?}"
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_keeps_additional_tools_refresh_order() {
+    // `additional_tools` may refresh a declaration that the root `tools` array
+    // already carries. The canonical tool set keeps the root declaration first
+    // and the refreshing one last, so the continuation must preserve that order
+    // instead of letting the stale root schema win again.
+    let original = json!({
+        "tools": [{
+            "type": "function",
+            "name": "read_value",
+            "parameters": {"type": "object", "properties": {"stale": {"type": "string"}}}
+        }],
+        "input": [
+            {"type": "additional_tools", "tools": [{
+                "type": "function",
+                "name": "read_value",
+                "parameters": {"type": "object", "properties": {"fresh": {"type": "string"}}}
+            }]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "refresh"}]}
+        ],
+        "messages": [{"role": "user", "content": "refresh"}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("additional-tools refresh continuation must build");
+    let tools = continuation["tools"].as_array().expect("tools array");
+    let read_value: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["name"] == json!("read_value"))
+        .collect();
+    assert_eq!(
+        read_value.len(),
+        2,
+        "both the root and the refreshing declaration must survive: {tools:?}"
+    );
+    assert!(
+        read_value[1]["parameters"]["properties"]["fresh"].is_object(),
+        "the refreshing declaration must stay last so it keeps precedence: {tools:?}"
+    );
+}
+
+#[test]
 fn refill_continuation_responses_ignores_foreign_contents_extension() {
     let original = json!({
         "input": "original task",

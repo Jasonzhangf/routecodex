@@ -4144,6 +4144,7 @@ features:
     - refill_responses_dual_history_continuation_stays_acceptable_public
     - refill_responses_dual_twin_extension_survives_public
     - refill_responses_dual_tool_result_history_survives_public
+    - refill_responses_dual_additional_tools_survive_public
     - refill_anthropic_relay_entry_bounded_refill_public
     command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox refill_ -- --test-threads=1 --nocapture
   required_gates:

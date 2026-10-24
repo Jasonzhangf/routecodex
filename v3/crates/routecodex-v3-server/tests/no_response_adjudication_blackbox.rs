@@ -1861,6 +1861,103 @@ async fn refill_responses_dual_tool_result_history_survives_public() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// Stable public ID: a dual Responses request can declare tools that only its
+/// `input` items carry (for example `additional_tools`). Collapsing the dual
+/// representation must keep those declarations reachable on the provider wire
+/// in the refill round.
+#[tokio::test]
+async fn refill_responses_dual_additional_tools_survive_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "ADDITIONAL_TOOLS_ROUND_TWO"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "ADDITIONAL_TOOLS_ROUND_ONE")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model": "test.test",
+                // The root declaration is stale; the input-side declaration
+                // refreshes it and must keep precedence after the collapse.
+                "tools": [{
+                    "type": "function",
+                    "name": "read_declared_value",
+                    "description": "stale declaration",
+                    "parameters": {"type": "object", "properties": {"stale": {"type": "string"}}}
+                }],
+                "input": [
+                    {"type": "additional_tools", "tools": [{
+                        "type": "function",
+                        "name": "read_declared_value",
+                        "description": "refreshed declaration",
+                        "parameters": {"type": "object", "properties": {"key": {"type": "string"}}}
+                    }]},
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "declared tools task"}]}
+                ],
+                "messages": [
+                    {"role": "user", "content": "declared tools task"}
+                ],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "additional-tools entry must run exactly one refill: {consumed:?}"
+    );
+    let second = &captured[1];
+    let tools = second["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("second provider request must carry tools: {second}"));
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool["name"] == json!("read_declared_value")),
+        "the input-declared tool must survive the refill: {tools:?}"
+    );
+    // The refreshing declaration must still win: otherwise the refill round
+    // silently reverts to the stale root schema.
+    let declared: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["name"] == json!("read_declared_value"))
+        .collect();
+    let effective = declared
+        .iter()
+        .find(|tool| tool["parameters"]["properties"]["key"].is_object());
+    assert!(
+        effective.is_some(),
+        "the refreshing declaration must remain effective: {declared:?}"
+    );
+    assert!(
+        second.to_string().contains("declared tools task"),
+        "the original task must survive: {second}"
+    );
+    assert!(
+        second.to_string().contains(REFILL_INSTRUCTION),
+        "the continuation must carry the instruction: {second}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
 /// Stable public ID: a provider refusal is legal business content, so a refill
 /// continuation must replay the complete assistant message into the next
 /// provider request instead of dropping it.

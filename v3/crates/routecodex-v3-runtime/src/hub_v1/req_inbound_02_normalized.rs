@@ -428,24 +428,37 @@ fn responses_merged_chat_canonical(raw: &Value) -> Result<Value, String> {
     Ok(canonical)
 }
 
-/// The Chat history inbound actually accepts for a Responses payload.
+/// The complete business contribution inbound accepts for a Responses payload.
 ///
-/// A Responses request may carry both `input` and a `messages` twin. Which
-/// side owns the history is not decidable from field presence: the merge in
+/// A Responses request may carry both `input` and a `messages` twin. Which side
+/// owns the history is not decidable from field presence: the merge in
 /// [`merge_responses_chat_histories`] contributes business extensions from
 /// either side, accepts a Chat history plus decoded tool results, and rejects
-/// twins that are not equivalent. The refill continuation must therefore use
-/// the merged result instead of either raw field, or the next provider request
-/// silently loses a contribution that only one side carried.
-pub(crate) fn v3_hub_responses_accepted_chat_history(
+/// twins that are not equivalent. The decoded `input` also lifts declarations
+/// that live only in its items, such as `additional_tools`, into the canonical
+/// tool set. Collapsing the dual representation into one must therefore carry
+/// this whole contribution, not a single raw field.
+pub(crate) struct V3HubResponsesAcceptedChatContribution {
+    /// The merged Chat history ReqInbound02 accepts.
+    pub(crate) messages: Vec<Value>,
+    /// The effective tool declarations, including those lifted out of `input`
+    /// items. `None` means the request declares no tools at all.
+    pub(crate) tools: Option<Value>,
+}
+
+pub(crate) fn v3_hub_responses_accepted_chat_contribution(
     payload: &Value,
-) -> Result<Vec<Value>, String> {
+) -> Result<V3HubResponsesAcceptedChatContribution, String> {
     let canonical = responses_merged_chat_canonical(payload)?;
-    canonical
+    let messages = canonical
         .get("messages")
         .and_then(Value::as_array)
         .cloned()
-        .ok_or_else(|| "Responses accepted history must be an array".to_string())
+        .ok_or_else(|| "Responses accepted history must be an array".to_string())?;
+    Ok(V3HubResponsesAcceptedChatContribution {
+        messages,
+        tools: canonical.get("tools").cloned(),
+    })
 }
 
 pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01(

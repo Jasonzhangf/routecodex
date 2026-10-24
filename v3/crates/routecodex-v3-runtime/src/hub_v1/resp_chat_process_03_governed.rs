@@ -1059,12 +1059,20 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
     let mut use_messages_history =
         history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::Messages;
     if history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::ResponsesDual {
-        match super::req_inbound_02_normalized::v3_hub_responses_accepted_chat_history(
+        match super::req_inbound_02_normalized::v3_hub_responses_accepted_chat_contribution(
             original_request_payload,
         ) {
-            Ok(accepted) => {
+            Ok(contribution) => {
                 payload_object.remove("input");
-                payload_object.insert("messages".to_string(), Value::Array(accepted));
+                payload_object.insert("messages".to_string(), Value::Array(contribution.messages));
+                // The decoded `input` can lift tool declarations that only its
+                // items carry (for example `additional_tools`) into the
+                // canonical tool set, with the same refresh priority a root
+                // declaration has for the next execution. Dropping `input`
+                // must not drop that contribution.
+                if let Some(tools) = contribution.tools {
+                    payload_object.insert("tools".to_string(), tools);
+                }
                 use_messages_history = true;
             }
             Err(_) => {
