@@ -1174,9 +1174,11 @@ async fn refill_continuation_captures_provider_reasoning_public() {
 /// projection must not fabricate an empty assistant message.
 ///
 /// The messages branch of the refill continuation is owned by the Responses
-/// relay runtime. `/v1/chat/completions` in this build enters the Chat runtime,
-/// which has no bounded-refill loop, so the reachable public entry that carries
-/// a `messages` payload through bounded refill is `/v1/responses`.
+/// relay runtime. The chat and gemini Relay entries now reuse the same
+/// bounded-refill executor, but their continuation stays chat-native and does
+/// not exercise this Responses `messages` shape, so the reachable public entry
+/// that carries a `messages` payload through bounded refill remains
+/// `/v1/responses`.
 #[tokio::test]
 async fn refill_continuation_messages_shape_keeps_reasoning_association_public() {
     let _guard = TEST_LOCK.lock().await;

@@ -7027,6 +7027,9 @@ fn spawn_concurrency_client(
 #[tokio::test]
 async fn responses_provider_concurrency_full_switches_without_queueing() {
     let _test_guard = TEST_LOCK.lock().await;
+    // This case counts upstream provider attempts, so the Chat Process
+    // continuation must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let (first_url, mut first_captures, first_release, first_shutdown) =
         start_controlled_held_upstream().await;
     let (second_url, mut second_captures, second_release, second_shutdown) =
@@ -7088,6 +7091,9 @@ async fn responses_provider_concurrency_full_switches_without_queueing() {
 #[tokio::test]
 async fn responses_provider_concurrency_all_full_exhausts_without_queueing() {
     let _test_guard = TEST_LOCK.lock().await;
+    // This case counts upstream provider attempts, so the Chat Process
+    // continuation must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let (first_url, mut first_captures, first_release, first_shutdown) =
         start_controlled_held_upstream().await;
     let (second_url, mut second_captures, second_release, second_shutdown) =
