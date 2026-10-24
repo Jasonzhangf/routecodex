@@ -1887,15 +1887,17 @@ async fn refill_responses_dual_additional_tools_survive_public() {
             .post(&endpoint)
             .json(&json!({
                 "model": "test.test",
-                // The root declaration is stale; the input-side declaration
-                // refreshes it and must keep precedence after the collapse.
-                "tools": [{
-                    "type": "function",
-                    "name": "read_declared_value",
-                    "description": "stale declaration",
-                    "parameters": {"type": "object", "properties": {"stale": {"type": "string"}}}
-                }],
+                // Two successive input declarations refresh the same tool
+                // identity. The collapse must keep only the final effective
+                // schema; a superseded copy under the same identity would make
+                // the refill round fail as a same-source declaration conflict.
                 "input": [
+                    {"type": "additional_tools", "tools": [{
+                        "type": "function",
+                        "name": "read_declared_value",
+                        "description": "stale declaration",
+                        "parameters": {"type": "object", "properties": {"stale": {"type": "string"}}}
+                    }]},
                     {"type": "additional_tools", "tools": [{
                         "type": "function",
                         "name": "read_declared_value",
@@ -1939,12 +1941,14 @@ async fn refill_responses_dual_additional_tools_survive_public() {
         .iter()
         .filter(|tool| tool["name"] == json!("read_declared_value"))
         .collect();
-    let effective = declared
-        .iter()
-        .find(|tool| tool["parameters"]["properties"]["key"].is_object());
+    assert_eq!(
+        declared.len(),
+        1,
+        "consecutive refreshes must collapse to one effective declaration: {declared:?}"
+    );
     assert!(
-        effective.is_some(),
-        "the refreshing declaration must remain effective: {declared:?}"
+        declared[0]["parameters"]["properties"]["key"].is_object(),
+        "the final refreshing declaration must remain effective: {declared:?}"
     );
     assert!(
         second.to_string().contains("declared tools task"),

@@ -435,7 +435,7 @@ fn responses_merged_chat_canonical(raw: &Value) -> Result<Value, String> {
 /// [`merge_responses_chat_histories`] contributes business extensions from
 /// either side, accepts a Chat history plus decoded tool results, and rejects
 /// twins that are not equivalent. The decoded `input` also lifts declarations
-/// that live only in its items, such as `additional_tools`, into the canonical
+/// that live only in its items, such as `additional_tools`, into the effective
 /// tool set. Collapsing the dual representation into one must therefore carry
 /// this whole contribution, not a single raw field.
 pub(crate) struct V3HubResponsesAcceptedChatContribution {
@@ -455,9 +455,18 @@ pub(crate) fn v3_hub_responses_accepted_chat_contribution(
         .and_then(Value::as_array)
         .cloned()
         .ok_or_else(|| "Responses accepted history must be an array".to_string())?;
+    // Resolve the declarations through the declaration owner's own identity
+    // registry instead of copying `canonical.tools`. The canonical Chat shape
+    // still lists the raw `additional_tools` items next to their resolved
+    // forms, so copying it would hand the next execution a stale schema under
+    // the same tool identity and turn a later refresh into a source conflict.
+    // This resolution keeps hosted, MCP, and namespace declarations and emits
+    // one declaration per identity, so it is re-entrant for the next round.
+    let tools =
+        provider_compat_core::namespace_tools::resolve_responses_tool_declarations(payload)?;
     Ok(V3HubResponsesAcceptedChatContribution {
         messages,
-        tools: canonical.get("tools").cloned(),
+        tools: (!tools.is_empty()).then(|| Value::Array(tools)),
     })
 }
 

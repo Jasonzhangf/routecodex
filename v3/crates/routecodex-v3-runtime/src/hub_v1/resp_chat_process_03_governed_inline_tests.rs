@@ -1294,12 +1294,63 @@ fn refill_continuation_responses_dual_history_keeps_additional_tools_refresh_ord
         .collect();
     assert_eq!(
         read_value.len(),
-        2,
-        "both the root and the refreshing declaration must survive: {tools:?}"
+        1,
+        "the superseded declaration must be removed, not left under the same identity: {tools:?}"
     );
     assert!(
-        read_value[1]["parameters"]["properties"]["fresh"].is_object(),
-        "the refreshing declaration must stay last so it keeps precedence: {tools:?}"
+        read_value[0]["parameters"]["properties"]["fresh"].is_object(),
+        "the refreshing declaration must be the surviving one: {tools:?}"
+    );
+}
+
+#[test]
+fn refill_continuation_responses_dual_history_collapses_consecutive_refreshes() {
+    // Two `additional_tools` items refresh the same identity in sequence. The
+    // accepted contribution must collapse them to the final effective schema,
+    // not keep superseded declarations that the next round would reject as a
+    // same-source conflict.
+    let original = json!({
+        "input": [
+            {"type": "additional_tools", "tools": [
+                {"type": "function", "name": "read_value", "parameters": {"type": "object", "properties": {"old": {"type": "string"}}}}
+            ]},
+            {"type": "additional_tools", "tools": [
+                {"type": "function", "name": "read_value", "parameters": {"type": "object", "properties": {"fresh": {"type": "string"}}}}
+            ]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "refresh twice"}]}
+        ],
+        "messages": [{"role": "user", "content": "refresh twice"}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("consecutive-refresh continuation must build");
+    let tools = continuation["tools"].as_array().expect("tools array");
+    let read_value: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["name"] == json!("read_value"))
+        .collect();
+    assert_eq!(
+        read_value.len(),
+        1,
+        "consecutive refreshes must collapse to one effective declaration: {tools:?}"
+    );
+    assert!(
+        read_value[0]["parameters"]["properties"]["fresh"].is_object(),
+        "the final declaration must survive: {tools:?}"
+    );
+    assert!(
+        read_value[0]["parameters"]["properties"]["old"].is_null(),
+        "the superseded schema must be gone: {tools:?}"
     );
 }
 
