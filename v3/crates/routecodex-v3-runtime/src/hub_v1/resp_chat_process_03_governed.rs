@@ -1108,6 +1108,54 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
         }));
         return Ok(payload);
     }
+    // A Gemini client request carries its history under `contents`, and the
+    // Gemini inbound canonicalization rebuilds `messages` from `contents`
+    // only. The continuation must therefore extend that same representation;
+    // writing `input` here would leave the next provider request identical to
+    // the first one, without the answer and without the instruction.
+    if payload_object.get("contents").is_some_and(Value::is_array) {
+        let contents = payload_object
+            .get_mut("contents")
+            .and_then(Value::as_array_mut)
+            .ok_or_else(|| "refill continuation contents must be an array".to_string())?;
+        let mut model_parts: Vec<Value> = Vec::new();
+        for item in
+            collect_v3_chat_process_business_output_items(current_execution_finalized_response)
+        {
+            // Refill only runs when the round produced no real tool call, so
+            // the replayable business content is the visible assistant text.
+            if item.get("type").and_then(Value::as_str) != Some("message") {
+                continue;
+            }
+            let Some(content) = item.get("content").and_then(Value::as_array) else {
+                continue;
+            };
+            for part in content {
+                let Some(text) = part
+                    .as_object()
+                    .filter(|row| {
+                        matches!(
+                            row.get("type").and_then(Value::as_str),
+                            Some("output_text" | "text")
+                        )
+                    })
+                    .and_then(|row| row.get("text"))
+                    .and_then(Value::as_str)
+                else {
+                    continue;
+                };
+                model_parts.push(json!({"text": text}));
+            }
+        }
+        if !model_parts.is_empty() {
+            contents.push(json!({"role": "model", "parts": model_parts}));
+        }
+        contents.push(json!({
+            "role": "user",
+            "parts": [{"text": V3_CHAT_PROCESS_REFILL_INSTRUCTION}],
+        }));
+        return Ok(payload);
+    }
     let mut input = match payload_object.get("input") {
         Some(Value::Array(_)) => payload_object
             .get("input")
@@ -1238,6 +1286,51 @@ pub(crate) fn merge_v3_chat_process_refill_output_items(
     let existing = std::mem::take(output);
     output.extend(accumulated.iter().cloned());
     output.extend(existing);
+    rebase_v3_chat_process_refill_candidate_output_indices(finalized_response, accumulated.len());
+}
+
+/// Keep the native Gemini candidate association valid after the merge.
+///
+/// A Gemini provider response records which `output` positions each candidate
+/// produced (`gemini_candidate_outcomes[].output_indices`), and the native
+/// Gemini client projection emits business content by following those
+/// positions. Prepending prior rounds therefore has two consequences: every
+/// index of this round moves past the prepended prefix, and the prefix itself
+/// must stay reachable or the earlier rounds would never reach the client.
+/// The prefix joins the first candidate, which is the candidate a Gemini
+/// client reads as the answer.
+fn rebase_v3_chat_process_refill_candidate_output_indices(
+    finalized_response: &mut Value,
+    prepended: usize,
+) {
+    if prepended == 0 {
+        return;
+    }
+    let Some(outcomes) = finalized_response
+        .get_mut("gemini_candidate_outcomes")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for (position, outcome) in outcomes.iter_mut().enumerate() {
+        let Some(indices) = outcome
+            .get_mut("output_indices")
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        let mut rebased: Vec<Value> = if position == 0 {
+            (0..prepended).map(|index| json!(index)).collect()
+        } else {
+            Vec::new()
+        };
+        rebased.extend(indices.iter().filter_map(|index| {
+            index
+                .as_u64()
+                .map(|value| json!(value as usize + prepended))
+        }));
+        *indices = rebased;
+    }
 }
 
 /// Accumulate one completed refill round's usage into the running summary.

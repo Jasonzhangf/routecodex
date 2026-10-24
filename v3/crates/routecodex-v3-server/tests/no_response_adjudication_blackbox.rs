@@ -198,6 +198,12 @@ async fn issuee63d2f2_review_orphan_without_tools_recovers_or_exhausts() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// The explicit continuation instruction is the user-facing refill contract, so
+/// the public entry tests pin it by value instead of reading the runtime's
+/// internal constant.
+const REFILL_INSTRUCTION: &str =
+    "继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。";
+
 /// One complete governed refill round. SSE ends at the terminal seal.
 fn refill_round_wire(stream: bool, text: &str) -> String {
     let response = text_response(text);
@@ -734,10 +740,14 @@ async fn refill_chat_relay_entry_bounded_refill_public() {
             .await,
     )
     .await;
-    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
     stop_entry(handle, shutdown).await;
     assert_eq!(
-        attempts, 2,
+        captured.len(),
+        2,
         "chat relay entry must run exactly one refill: {consumed:?}"
     );
     assert!(
@@ -747,6 +757,14 @@ async fn refill_chat_relay_entry_bounded_refill_public() {
     assert!(
         consumed.body.contains("CHAT_RELAY_FIRST") && consumed.body.contains("CHAT_RELAY_SECOND"),
         "both rounds must reach the chat client: {consumed:?}"
+    );
+    // The second provider request is the refill continuation, not a replay of
+    // the first one: it must carry the earlier answer and the instruction.
+    assert!(
+        captured[1].to_string().contains("CHAT_RELAY_FIRST")
+            && captured[1].to_string().contains(REFILL_INSTRUCTION),
+        "chat continuation must carry the history and the instruction: {}",
+        captured[1]
     );
     assert_no_error_payload(&consumed.body);
     std::env::remove_var(KEY_ENV);
@@ -801,7 +819,118 @@ async fn refill_gemini_relay_entry_bounded_refill_public() {
     std::env::remove_var(KEY_ENV);
 }
 
-/// Stable public ID: the `/v1/messages` entry runs its Relay path through the
+/// Stable public ID: a native Gemini provider round trips through the same
+/// Gemini Relay entry, so the provider wire is `contents` on both sides.
+///
+/// This locks two facts the Responses-provider case cannot see:
+/// - the continuation must extend the client's `contents` history. Writing a
+///   Responses `input` array would leave the second provider request identical
+///   to the first one, without the earlier answer and without the instruction;
+/// - after earlier rounds join `output`, the candidate association
+///   (`gemini_candidate_outcomes[].output_indices`) must stay valid, or the
+///   native Gemini projection follows a stale index and emits the wrong round.
+#[tokio::test]
+async fn refill_gemini_native_provider_entry_bounded_refill_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let first_round = json!({"candidates":[{
+        "index": 0,
+        "finishReason": "STOP",
+        "content": {"role": "model", "parts": [{"text": "GEMINI_NATIVE_FIRST"}]}
+    }]});
+    // The final round is either a plain answer or a real tool call: the second
+    // shape proves the delivered call stays associated with its candidate.
+    for (final_round, expected_final) in [
+        (
+            json!({"candidates":[{
+                "index": 0,
+                "finishReason": "STOP",
+                "content": {"role": "model", "parts": [{"text": "GEMINI_NATIVE_SECOND"}]}
+            }]}),
+            "GEMINI_NATIVE_SECOND",
+        ),
+        (
+            json!({"candidates":[{
+                "index": 0,
+                "finishReason": "STOP",
+                "content": {"role": "model", "parts": [
+                    {"functionCall": {"name": "lookup", "args": {"city": "Paris"}}}
+                ]}
+            }]}),
+            "lookup",
+        ),
+    ] {
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "gemini",
+            "chat",
+            StatusCode::OK,
+            "application/json",
+            final_round.to_string(),
+            EntryOptions {
+                attempt_bodies: vec![first_round.to_string()],
+                refill_max: None,
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let consumed = consume_response(
+            client()
+                .post(endpoint.replace("/v1/responses", "/v1beta/models/test.test:generateContent"))
+                .json(&json!({
+                    "contents": [{"role": "user", "parts": [{"text": "unfinished gemini native task"}]}],
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let mut captured = Vec::new();
+        while let Ok(body) = captures.try_recv() {
+            captured.push(body);
+        }
+        stop_entry(handle, shutdown).await;
+        assert!(
+            consumed.transport_error.is_none(),
+            "gemini native relay entry must deliver normally: {consumed:?}"
+        );
+        assert_eq!(
+            captured.len(),
+            2,
+            "gemini native relay entry must run exactly one refill (final={expected_final}): {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains("GEMINI_NATIVE_FIRST") && consumed.body.contains(expected_final),
+            "both rounds must reach the gemini native client (final={expected_final}): {consumed:?}"
+        );
+        assert_no_error_payload(&consumed.body);
+        let contents = captured[1]["contents"].as_array().unwrap_or_else(|| {
+            panic!(
+                "second provider request must carry gemini contents: {}",
+                captured[1]
+            )
+        });
+        assert!(
+            captured[1].get("input").is_none() && captured[1].get("messages").is_none(),
+            "continuation must keep the provider's own request representation: {}",
+            captured[1]
+        );
+        assert!(
+            contents
+                .iter()
+                .any(|content| content["parts"].to_string().contains("GEMINI_NATIVE_FIRST")),
+            "continuation must replay the first round answer to the provider: {}",
+            captured[1]
+        );
+        assert!(
+            contents
+                .iter()
+                .any(|content| content["parts"].to_string().contains(REFILL_INSTRUCTION)),
+            "continuation must carry the bounded refill instruction: {}",
+            captured[1]
+        );
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
 /// same bounded-refill policy. A premature finish triggers exactly one refill
 /// and both rounds reach the Anthropic client in one buffered response.
 #[tokio::test]
@@ -834,20 +963,32 @@ async fn refill_anthropic_relay_entry_bounded_refill_public() {
             .await,
     )
     .await;
-    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
     stop_entry(handle, shutdown).await;
     assert!(
         consumed.transport_error.is_none(),
         "anthropic relay entry must deliver normally: {consumed:?}"
     );
     assert_eq!(
-        attempts, 2,
+        captured.len(),
+        2,
         "anthropic relay entry must run exactly one refill: {consumed:?}"
     );
     assert!(
         consumed.body.contains("ANTHROPIC_RELAY_FIRST")
             && consumed.body.contains("ANTHROPIC_RELAY_SECOND"),
         "both rounds must reach the anthropic client: {consumed:?}"
+    );
+    // The second provider request is the refill continuation, not a replay of
+    // the first one: it must carry the earlier answer and the instruction.
+    assert!(
+        captured[1].to_string().contains("ANTHROPIC_RELAY_FIRST")
+            && captured[1].to_string().contains(REFILL_INSTRUCTION),
+        "anthropic continuation must carry the history and the instruction: {}",
+        captured[1]
     );
     assert_no_error_payload(&consumed.body);
     std::env::remove_var(KEY_ENV);
