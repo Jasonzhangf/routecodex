@@ -698,6 +698,107 @@ async fn refill_direct_relay_content_parity_public() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// Stable public ID: the `/v1/chat/completions` entry runs its Relay path
+/// through the same bounded-refill policy as the Responses entry. A chat client
+/// therefore receives both rounds of a prematurely-finished task in one
+/// response, and a source-explicit summary still stops the chain.
+#[tokio::test]
+async fn refill_chat_relay_entry_bounded_refill_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "CHAT_RELAY_SECOND"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "CHAT_RELAY_FIRST")],
+            // `EntryOptions::default()` pins `Some(0)`; this test runs the
+            // compiled policy, which is the real production default.
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(endpoint.replace("/v1/responses", "/v1/chat/completions"))
+            .json(&json!({
+                "model": "test.test",
+                "messages": [{"role": "user", "content": "unfinished chat task"}],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        attempts, 2,
+        "chat relay entry must run exactly one refill: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "chat relay entry must deliver normally: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("CHAT_RELAY_FIRST") && consumed.body.contains("CHAT_RELAY_SECOND"),
+        "both rounds must reach the chat client: {consumed:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: the `/v1beta/models/:model:generateContent` entry runs its
+/// Relay path through the same bounded-refill policy. A source-explicit
+/// summary stops the chain, and premature content triggers exactly one refill.
+#[tokio::test]
+async fn refill_gemini_relay_entry_bounded_refill_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "GEMINI_RELAY_SECOND"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "GEMINI_RELAY_FIRST")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(endpoint.replace("/v1/responses", "/v1beta/models/test.test:generateContent"))
+            .json(&json!({
+                "contents": [{"role": "user", "parts": [{"text": "unfinished gemini task"}]}],
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    stop_entry(handle, shutdown).await;
+    assert!(
+        consumed.transport_error.is_none(),
+        "gemini relay entry must deliver normally: {consumed:?}"
+    );
+    assert_eq!(
+        attempts, 2,
+        "gemini relay entry must run exactly one refill: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("GEMINI_RELAY_FIRST") && consumed.body.contains("GEMINI_RELAY_SECOND"),
+        "both rounds must reach the gemini client: {consumed:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
 #[tokio::test]
 async fn refill_direct_sse_summary_after_diagnostic_cap_public() {
     let _guard = TEST_LOCK.lock().await;

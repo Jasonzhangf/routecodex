@@ -1188,6 +1188,35 @@ pub(crate) fn collect_v3_chat_process_business_output_items(
         .unwrap_or_default()
 }
 
+/// Fold prior-round business items and the summed usage into this execution's
+/// governed payload, before it is projected to the client protocol.
+///
+/// Only a refill round calls this: the continuation decision already proved
+/// this execution produced no real tool call, so prior rounds carry message
+/// business content only. The last execution stays authoritative for its own
+/// item order, status and terminal fields; prior items only extend the front of
+/// `output`.
+pub(crate) fn apply_v3_chat_process_refill_accumulation(
+    finalized_response: &mut Value,
+    accumulated_items: &[Value],
+    accumulated_usage: Option<&V3RuntimeUsageSummary>,
+) {
+    if accumulated_items.is_empty() {
+        return;
+    }
+    // The delivered total must cover every round, so the final execution's own
+    // usage is folded in here before write-back.
+    let mut total = accumulated_usage.cloned();
+    accumulate_v3_chat_process_refill_usage(
+        &mut total,
+        super::responses_relay_runtime::extract_v3_runtime_usage_summary(finalized_response),
+    );
+    merge_v3_chat_process_refill_output_items(finalized_response, accumulated_items);
+    if let Some(total) = total.as_ref() {
+        write_v3_chat_process_refill_usage(finalized_response, total);
+    }
+}
+
 /// Merge prior-round business items in front of the last execution's output.
 ///
 /// The last execution stays authoritative for its own item order, ids, status
@@ -1195,8 +1224,7 @@ pub(crate) fn collect_v3_chat_process_business_output_items(
 /// A missing or non-array `output` is left untouched.
 pub(crate) fn merge_v3_chat_process_refill_output_items(
     finalized_response: &mut Value,
-    accumulated: &[Value],
-) {
+    accumulated: &[Value],) {
     let Some(output) = finalized_response
         .get_mut("output")
         .and_then(Value::as_array_mut)

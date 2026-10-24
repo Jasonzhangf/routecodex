@@ -40,6 +40,7 @@ fn project_sse_event_payload(
         expected_model_id,
         false,
         &super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext::default(),
+        None,
     );
     if let Err(V3OpenAiChatRelayRuntimeError::Response(error)) = &result {
         response_control
@@ -368,6 +369,7 @@ fn project_gemini_sse_as_openai_chat_stream(
                 &provider_outcome.model_id,
                 true,
                 &super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext::default(),
+                None,
             ) {
                 Ok(projected) => projected,
                 Err(error) => {

@@ -12,7 +12,7 @@
 
 use super::relay_runtime_shared::{
     handle_provider_failure_with_response_code, provider_response_governance_failure,
-    relay_handoff_entry_state, relay_request_execution_control,
+    relay_handoff_entry_state,
 };
 use super::*;
 use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder};
@@ -296,6 +296,65 @@ pub(crate) use super::relay_runtime_shared::{
     v3_relay_transport_response_timeout, V3RelayCoreError,
 };
 
+/// 单次执行完成后，codec 从治理后响应里发布的 Chat Process 事实与治理后
+/// canonical payload。它只服务共享续杯策略：`facts` 是策略的四项输入，
+/// `finalized_response` 用于构造续请求历史与合并前几轮业务项。任何字段都不进入
+/// 业务 metadata。
+#[derive(Debug, Clone)]
+pub(crate) struct V3RelayChatProcessRound {
+    pub(crate) facts: super::resp_chat_process_03_governed::V3ChatProcessGovernedFacts,
+    /// 本次执行是否到达 completed 终态。
+    pub(crate) response_completed: bool,
+    /// 本次执行治理后的 canonical payload（仅本次执行，未合并前几轮）。
+    pub(crate) finalized_response: Value,
+}
+
+/// 单个客户端请求的续杯载体，由入口调用方创建一次并在该请求的每次执行间复用，
+/// 因此连续续杯额度不会在轮间被重置。骨架只写 `round`，调用方只读它并决定是否
+/// 发起下一次执行。
+pub(crate) struct V3RelayRefillCarrier {
+    pub(crate) request_execution_control: crate::nodes::V3RequestExecutionControl,
+    /// 前几轮已完成的业务 output 项，按交付顺序存放。
+    pub(crate) accumulated_items: Vec<Value>,
+    /// 前几轮已完成执行的 usage 合计；`None` 表示还没有已合并的轮次。
+    pub(crate) accumulated_usage: Option<V3RuntimeUsageSummary>,
+    /// 骨架在成功的 JSON 出口发布；SSE 出口与失败出口不发布。
+    pub(crate) round: Option<V3RelayChatProcessRound>,
+}
+
+/// 发布本次执行完成后可供共享续杯策略使用的事实与治理后 canonical payload。
+///
+/// codec 在治理完成后、投影到客户端协议之前调用；这是骨架与入口读取 round 的
+/// 唯一来源，失败出口与 SSE 出口不调用它。
+///
+/// `source_terminal_completed`：源终态标记。JSON 出口的源终态只是传输层标记，
+/// 并不等价于业务完成，因此完成判定优先读治理后 canonical 的 `status`；该标记只
+/// 作为补充信号，保证 SSE 物化路径同样能给出 completed 事实。
+pub(crate) fn publish_v3_relay_chat_process_round(
+    governed: &super::resp_chat_process_03_governed::V3HubRespChatProcess03Governed,
+    has_source_summary: bool,
+    source_terminal_completed: bool,
+    refill: &mut V3RelayRefillCarrier,
+) {
+    let finalized_response = governed.finalized_payload().clone();
+    let governed_completed = finalized_response
+        .get("status")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        == Some("completed");
+    refill.round = Some(V3RelayChatProcessRound {
+        facts: super::resp_chat_process_03_governed::V3ChatProcessGovernedFacts {
+            tool_calls:
+                super::resp_chat_process_03_governed::collect_v3_governed_response_tool_calls(
+                    &finalized_response,
+                ),
+            has_source_summary,
+        },
+        response_completed: governed_completed || source_terminal_completed,
+        finalized_response,
+    });
+}
+
 /// relay 协议 codec：协议差异的唯一收敛面。
 ///
 /// 实现方（每个协议一个 codec）只提供协议差异方法；生命周期与编排由骨架持有。
@@ -344,6 +403,10 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
     /// JSON 响应投影（resp01 -> 02 -> 03 -> 04 -> 05 -> 06）。
     /// `retain_response_cipher`：请求侧 VR 路由决策算好的"保留响应密文"标记（仅 gpt
     /// 单 provider 候选时为 true），响应侧 Resp03 只消费该结果。
+    ///
+    /// `refill`：codec 读取其中前几轮业务项与 usage，在治理后、投影前合并进本次
+    /// 响应；并把本次执行的 Chat Process 事实与治理后 canonical payload 写入
+    /// `refill.round`，供共享续杯策略使用。
     fn project_json_response(
         request_id: &str,
         session_id: &str,
@@ -357,6 +420,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         tool_thinking_enabled: bool,
         expected_model_id: &str,
         namespace_registry: &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
+        refill: &mut V3RelayRefillCarrier,
     ) -> Result<Value, V3RelayCoreError>;
     /// 构建 SSE provider outcome。
     fn build_sse_outcome(
@@ -437,6 +501,9 @@ pub async fn execute_v3_relay_runtime_core<C, T>(
     allow_exhaustion_rescue_probe: bool,
     initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
     failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
+    // 请求作用域的续杯载体：控制由入口创建并在本请求的每次执行间复用，骨架只写
+    // `round`。这样连续续杯额度不按执行重置，也不跨请求共享。
+    refill: &mut V3RelayRefillCarrier,
 ) -> Result<C::Output, V3RelayCoreError>
 where
     C: V3RelayProtocolCodec,
@@ -629,8 +696,9 @@ where
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
-    let request_execution_control =
-        relay_request_execution_control(manifest, server_id, initial_handoff.as_ref())?;
+    // 入口已按 handoff 建好请求作用域控制；骨架只消费它，确保同一请求的多次
+    // 执行共享同一份续杯额度与驻留截止时间。
+    let request_execution_control = refill.request_execution_control.clone();
     let attempt_budget = request_execution_control.attempt_budget();
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
@@ -1185,6 +1253,7 @@ where
                         &provider_value,
                     );
                 let projection = if has_business_content {
+                    refill.round = None;
                     C::project_json_response(
                         &request_id,
                         failure_session_scope.session_id(),
@@ -1198,6 +1267,7 @@ where
                         request_tool_thinking_enabled,
                         &selected_target_model_id,
                         &namespace_registry,
+                        refill,
                     )
                 } else {
                     Err(V3RelayCoreError::Target(
@@ -1484,6 +1554,7 @@ where
                     let projection = match provider_value {
                         Ok(value) => {
                             let snapshot = value.clone();
+                            refill.round = None;
                             match C::project_json_response(
                                 request_id,
                                 failure_session_scope.session_id(),
@@ -1497,6 +1568,7 @@ where
                                 request_tool_thinking_enabled,
                                 &selected_target_model_id,
                                 &namespace_registry,
+                                refill,
                             ) {
                                 Ok(client) => Ok((client, snapshot)),
                                 Err(error) => Err(provider_response_governance_failure(
@@ -1895,6 +1967,123 @@ where
                     },
                 ));
             }
+        }
+    }
+}
+
+/// 带 Chat Process 有界续杯的 relay 执行入口（骨架之上的唯一循环）。
+///
+/// 续杯策略仍只有一处实现（`decide_v3_chat_process_refill`）。本函数只负责：
+/// - 为一个客户端请求创建并复用同一份执行控制，连续续杯额度不按执行重置、
+///   也不跨请求共享；
+/// - 每次执行后读取骨架发布的 round，并据共享策略决定是否再执行一次；
+/// - 把前几轮业务项与 usage 累积到载体，供 codec 在投影前合并；
+/// - 失败事件跨轮累积，中间轮不产生任何客户端交付。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_v3_relay_runtime_with_chat_process_refill<C, T>(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+    failure_session_scope: V3ProviderFailureSessionScope,
+    request_id: &str,
+    endpoint_path: &str,
+    execution_mode: V3HubExecutionMode,
+    initial_payload: Value,
+    transport: &T,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    retry_policy: V3RelayProviderFailureRetryPolicy,
+    initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
+) -> Result<(C::Output, Vec<V3RuntimeProviderFailureObservation>), (V3RelayCoreError, Vec<V3RuntimeProviderFailureObservation>)>
+where
+    C: V3RelayProtocolCodec,
+    T: ResponsesTransport,
+{
+    let request_execution_control =
+        super::relay_runtime_shared::relay_request_execution_control(
+            manifest,
+            server_id,
+            initial_handoff.as_ref(),
+        )
+        .map_err(|error| (error, Vec::new()))?;
+    let max_refills =
+        super::resp_chat_process_03_governed::v3_chat_process_refill_max_consecutive();
+    let mut payload = initial_payload;
+    let mut initial_handoff = initial_handoff;
+    let mut failure_events: Vec<V3RuntimeProviderFailureObservation> = Vec::new();
+    let mut carrier = V3RelayRefillCarrier {
+        request_execution_control,
+        accumulated_items: Vec::new(),
+        accumulated_usage: None,
+        round: None,
+    };
+    loop {
+        carrier.round = None;
+        let output = execute_v3_relay_runtime_core::<C, T>(
+            manifest,
+            server_id,
+            failure_session_scope.clone(),
+            request_id,
+            endpoint_path,
+            execution_mode,
+            payload.clone(),
+            transport,
+            provider_health.clone(),
+            retry_policy.clone(),
+            Vec::new(),
+            true,
+            initial_handoff.take(),
+            &mut failure_events,
+            &mut carrier,
+        )
+        .await
+        .map_err(|error| (error, failure_events.clone()))?;
+        let Some(round) = carrier.round.take() else {
+            // 没有发布 round：SSE 交付或失败出口。当前结果就是最终结果。
+            return Ok((output, failure_events));
+        };
+        let disposition =
+            super::resp_chat_process_03_governed::decide_v3_chat_process_refill(
+                &round.facts.tool_calls,
+                round.facts.has_source_summary,
+                round.response_completed,
+                carrier.request_execution_control.refill_used(),
+                max_refills,
+            );
+        let mut continued = false;
+        if disposition == super::common::V3ChatProcessRefillDisposition::RequestRefill {
+            if let Ok(next_payload) =
+                super::resp_chat_process_03_governed::build_v3_chat_process_refill_continuation_request(
+                    &payload,
+                    &round.finalized_response,
+                )
+            {
+                // 请求作用域的取消见证只有驻留截止时间；已过期就交付当前真实结果，
+                // 不再发起新执行。
+                if carrier.request_execution_control.deadline_unix_ms().is_ok()
+                    && carrier
+                        .request_execution_control
+                        .try_admit_refill(max_refills)
+                {
+                    carrier.request_execution_control.begin_refill_execution();
+                    carrier.accumulated_items.extend(
+                        super::resp_chat_process_03_governed::
+                            collect_v3_chat_process_business_output_items(
+                                &round.finalized_response,
+                            ),
+                    );
+                    super::resp_chat_process_03_governed::
+                        accumulate_v3_chat_process_refill_usage(
+                            &mut carrier.accumulated_usage,
+                            super::responses_relay_runtime::extract_v3_runtime_usage_summary(
+                                &round.finalized_response,
+                            ),
+                        );
+                    payload = next_payload;
+                    continued = true;
+                }
+            }
+        }
+        if !continued {
+            return Ok((output, failure_events));
         }
     }
 }
