@@ -454,7 +454,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             plan.map(|plan| plan.expanded.clone()),
             BTreeSet::new(),
             plan.map_or_else(V3ResponsesRelayRuntimeSeeds::default, |plan| {
-                plan.relay_runtime_seeds()
+                let mut seeds = plan.relay_runtime_seeds();
+                seeds.client_frame_sink = client_frame_sink.clone();
+                seeds
             }),
         )
         .await

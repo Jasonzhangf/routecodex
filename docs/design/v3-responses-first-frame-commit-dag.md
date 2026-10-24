@@ -137,11 +137,34 @@ flowchart TD
 
 ### P2 Relay 逐事件出帧
 
-1. 为 anthropic / openai_chat / gemini 各补 reducer 到客户端帧的逐事件映射:
-   `message_start` → `response.created` + item 起始;文本增量 → `output_text.delta`;
-   `content_block_stop` → `content_part.done` / `output_item.done`;工具参数增量攒到 block 完整再发;终态补 usage。
-2. 红测:同一 provider 事件流在 relay 路径与 direct 路径产出等价客户端帧;到达时间分布跟随 provider。
-3. 证据:`cargo test -p routecodex-v3-runtime --lib relay_first_frame_commit`、`npm run test:v3-responses-direct-blackbox`。
+现状(0.90.4935 实测):Relay 的客户端帧只在整段归约后一次性产出。`responses_relay_runtime.rs:805-930`
+对 message item 只发 `output_item.done`,不发任何 `output_text.delta`;因此即使不缓冲也没有渐进显示。
+7777 真实回放(relay,openai_chat 线协议)在 49.89s 一次性收到
+`created / in_progress / output_item.done × 4 / completed`,共 7 帧。
+
+1. 逐事件映射(先 openai_chat,再 anthropic / gemini):
+   `delta.content` → `output_text.delta`(配 `output_item.added` + `content_part.added` 生命周期);
+   `delta.reasoning_content` → 推理摘要增量;工具调用 `function.name` 出现即 `output_item.added`,
+   参数增量挂起到块完整再发;`finish_reason` 关闭 open item;终态补 usage。
+2. 提交边界与 Direct 同构:首个业务帧(可见输出文本增量或带名字的 tool-call 起始帧)提交,
+   提交前仍是整段缓冲,可整体丢弃;提交后续发 append-only,提交后失败静默断流,不换候选。
+3. 治理闸:Relay 的 Resp01/02/03 与 Chat Process 在整段上运行。凡请求级证明会改写文本或工具形状的
+   (tool thinking、DSML、memory raw capture、声明了响应侧改写的 provider compat 档),不提交并保持
+   今天的整段缓冲,逐字节不变;只有证明不改写的请求才渐进投影。终态帧仍由整段 builder 产出
+   (usage/status 只发一次)。
+4. 服务端复用 `V3CommittedClientFrameSink` 与 `accept_v3_client_sse_transport`:首帧提交后通道接管,
+   outcome 只补 `flushed_frames` 之后的剩余帧。
+5. 红测:同一 chat SSE 事件流在 relay 路径必须于 provider 终态前把首个 `output_text.delta`
+   送到客户端通道;并断言工具参数字节挂起到块完整。
+6. 证据:`cargo test -p routecodex-v3-runtime --lib relay_first_frame_commit`、真实入口 7777 到达时间分布。
+
+状态(P2 进行中,未合入):逐事件投影已落在 `responses_relay_runtime/relay_client_frames.rs`。
+openai_chat 线协议按上述映射逐帧出帧;提交谓词与 Direct 同构;工具参数挂起到 item 完成;
+终态帧在 seal 边界内。Relay refill 循环按请求持有同一投影状态,只在最终轮按合并后的响应
+seal 一次,避免提交后被下一轮重投影覆盖。请求级不提交条件为 memory raw capture 或
+tool thinking。gate `cargo test -p routecodex-v3-runtime --lib relay_first_frame_commit` 两条已绿,
+关闭提交谓词时两条同时红。受影响 relay 套件 197/197 绿。尚未做:真实入口 7777 逐帧到达时间
+回放、构建安装重启、独立 review、合入与远端回执。
 
 ### P3 完整性闸(工具参数与整段改写)
 

@@ -1240,8 +1240,40 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             attempt_budget.residence_deadline(),
                         );
                     let stream_observation = V3RuntimeStreamObservation::default();
+                    // Relay projects the client frames at provider arrival time
+                    // for the requests whose response governance cannot rewrite
+                    // already-projected business carriers. Everything else keeps
+                    // the whole-attempt buffering. The first business frame
+                    // commits; the server channel takes over from there.
+                    let projection_handle = initial_relay_seeds.client_stream_projection.clone();
+                    let mut relay_client_projection =
+                        if client_response_transport_intent == V3HubTransportIntent::Sse
+                            && provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat
+                            && !manifest.memory_raw_capture.enabled
+                            && !request_tool_thinking_enabled
+                        {
+                            projection_handle.as_ref().and_then(|handle| {
+                                let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
+                                if slot.is_none() {
+                                    if let Some(sink) =
+                                        initial_relay_seeds.client_frame_sink.clone()
+                                    {
+                                        *slot = Some(
+                                            super::relay_client_frames::
+                                                V3RelayChatClientStreamProjector::new(
+                                                    sink,
+                                                    attempt_budget.clone(),
+                                                ),
+                                        );
+                                    }
+                                }
+                                slot.take()
+                            })
+                        } else {
+                            None
+                        };
                     let provider_value_result =
-                    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+                    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context_and_projection(
                         provider_wire_protocol,
                         crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
                             &input.request_id,
@@ -1251,6 +1283,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         ),
                         &stream_observation,
                         &anthropic_response_projection_context,
+                        relay_client_projection.as_mut(),
                     )
                     .await;
                     handle_error_before_resp03!(runtime_timing
@@ -1473,15 +1506,37 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         );
                     chat_process_refill.set(disposition);
                     let finalized_response = finalized_provider_value.clone();
-                    let client_body = project_v3_responses_relay_client_body(
-                        client_response_transport_intent,
-                        finalized_provider_value,
-                        crate::shared::v3_strip_client_response_id_enabled_for_server(
-                            manifest,
-                            &input.server_id,
-                        ),
-                        attempt_budget.clone(),
-                    )?;
+                    // A committed Relay attempt already handed its first
+                    // business frames to the client channel; the remaining
+                    // frames come from the projector's sealed tail. A failed
+                    // seal ends the committed transport without an error frame.
+                    // A committed projection already handed its first business
+                    // frames to the client channel. Its remaining tail is sealed
+                    // by the refill owner over the merged response, so this
+                    // execution reports no second client body.
+                    let committed_projection = relay_client_projection
+                        .as_ref()
+                        .is_some_and(|projection| projection.is_committed());
+                    let client_body = if committed_projection {
+                        V3ResponsesRelayClientBody::Json(Value::Null)
+                    } else {
+                        project_v3_responses_relay_client_body(
+                            client_response_transport_intent,
+                            finalized_provider_value,
+                            crate::shared::v3_strip_client_response_id_enabled_for_server(
+                                manifest,
+                                &input.server_id,
+                            ),
+                            attempt_budget.clone(),
+                        )?
+                    };
+                    if let (Some(handle), Some(projection)) = (
+                        projection_handle.as_ref(),
+                        relay_client_projection.take(),
+                    ) {
+                        *handle.lock().unwrap_or_else(|error| error.into_inner()) =
+                            Some(projection);
+                    }
                     commit_route_policy_if_present!();
                     return Ok(V3ResponsesRelayRuntimeOutput {
                         status: 200,
