@@ -615,6 +615,24 @@ impl V3RelayChatClientStreamProjector {
         self.close_tool_calls()
     }
 
+    /// Rebuild the terminal `output` from the announced items, ordered by output
+    /// index. Items close in arrival order, which interleaves a long message with
+    /// the reasoning items around it; the protocol orders `output` by index.
+    fn terminal_output_items(&self) -> Vec<Value> {
+        let mut ordered: Vec<&StreamedItem> = self.streamed_items.iter().collect();
+        ordered.sort_by_key(|entry| entry.output_index);
+        ordered
+            .into_iter()
+            .map(|entry| {
+                let mut item = entry.item.clone();
+                if let Some(object) = item.as_object_mut() {
+                    object.insert("id".to_string(), Value::String(entry.item_id.clone()));
+                }
+                item
+            })
+            .collect()
+    }
+
     /// Close every open item and seal the attempt. The terminal frame is held
     /// past the acceptance boundary, so a failed seal cannot deliver it first.
     pub(crate) fn finish(
@@ -646,19 +664,7 @@ impl V3RelayChatClientStreamProjector {
         if let Some(object) = terminal_response.as_object_mut() {
             object.insert(
                 "output".to_string(),
-                Value::Array(
-                    self.streamed_items
-                        .iter()
-                        .map(|entry| {
-                            let mut item = entry.item.clone();
-                            if let Some(item_object) = item.as_object_mut() {
-                                item_object
-                                    .insert("id".to_string(), Value::String(entry.item_id.clone()));
-                            }
-                            item
-                        })
-                        .collect(),
-                ),
+                Value::Array(self.terminal_output_items()),
             );
         }
         let frame = super::build_v3_runtime_sse_json_frame(

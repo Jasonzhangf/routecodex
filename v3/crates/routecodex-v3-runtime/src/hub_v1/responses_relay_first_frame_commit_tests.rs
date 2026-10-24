@@ -289,3 +289,66 @@ async fn relay_committed_terminal_repeats_announced_items_after_governance() {
         "terminal output carries exactly the announced item: {terminal_frame}"
     );
 }
+
+/// Items close in arrival order but the protocol orders `output` by output
+/// index. A long message interleaved with reasoning items must not reorder the
+/// terminal payload.
+#[tokio::test]
+async fn relay_terminal_output_follows_output_index_not_close_order() {
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let mut projector = super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+        sink,
+        relay_test_budget(),
+    );
+
+    // reasoning rs_0 -> message msg_1 (closes rs_0) -> reasoning rs_2
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_order", "model": "wire-test", "created": 1,
+            "choices": [{"index": 0, "delta": {"reasoning_content": "r1"}, "finish_reason": null}],
+        }))
+        .expect("reasoning one");
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_order", "model": "wire-test", "created": 1,
+            "choices": [{"index": 0, "delta": {"content": "answer"}, "finish_reason": null}],
+        }))
+        .expect("message");
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_order", "model": "wire-test", "created": 1,
+            "choices": [{"index": 0, "delta": {"reasoning_content": "r2"}, "finish_reason": null}],
+        }))
+        .expect("reasoning two");
+
+    let terminal = json!({
+        "id": "chatcmpl_order", "object": "response", "status": "completed",
+        "output": [
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "r1"}]},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]},
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "r2"}]}
+        ],
+    });
+    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut frames = drain_frames(&mut receiver);
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let terminal_frame = frames
+        .iter()
+        .find(|frame| frame.contains("response.completed"))
+        .expect("terminal frame");
+    let ids = ["rs_0", "msg_1", "rs_2"];
+    let positions: Vec<usize> = ids
+        .iter()
+        .map(|id| {
+            terminal_frame
+                .find(&format!("\"id\":\"{id}\""))
+                .unwrap_or_else(|| panic!("terminal keeps {id}: {terminal_frame}"))
+        })
+        .collect();
+    assert!(
+        positions[0] < positions[1] && positions[1] < positions[2],
+        "terminal output follows output index order, got {positions:?}: {terminal_frame}"
+    );
+}
