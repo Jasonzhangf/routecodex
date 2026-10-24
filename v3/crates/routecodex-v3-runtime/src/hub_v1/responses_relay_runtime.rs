@@ -285,11 +285,17 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
                         // appends from the next round.
                         if let Some(handle) = relay_seeds.client_stream_projection.as_ref() {
                             let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
-                            if slot
-                                .as_ref()
-                                .is_some_and(|projection| !projection.is_committed())
-                            {
-                                *slot = None;
+                            match slot.as_mut() {
+                                Some(projection) if projection.is_committed() => {
+                                    // The next round is a separate business item
+                                    // in the delivered payload: close the open
+                                    // items so the client sees one item per round.
+                                    projection.close_round().map_err(
+                                        V3ResponsesRelayRuntimeError::ExecutionControlResponse,
+                                    )?;
+                                }
+                                Some(_) => *slot = None,
+                                None => {}
                             }
                         }
                         payload = next_payload;

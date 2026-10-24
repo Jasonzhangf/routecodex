@@ -545,6 +545,17 @@ impl V3RelayChatClientStreamProjector {
         Ok(())
     }
 
+    /// Close the open items at a refill round boundary.
+    ///
+    /// A refill is a separate provider response and the delivered payload keeps
+    /// its items as separate entries. The client therefore receives one item per
+    /// round; the next round opens new items at the next output indices.
+    pub(crate) fn close_round(&mut self) -> Result<(), String> {
+        self.close_reasoning()?;
+        self.close_message()?;
+        self.close_tool_calls()
+    }
+
     /// Close every open item and seal the attempt. The terminal frame is held
     /// past the acceptance boundary, so a failed seal cannot deliver it first.
     pub(crate) fn finish(
@@ -566,6 +577,13 @@ impl V3RelayChatClientStreamProjector {
             _ => "response.completed",
         };
         let mut terminal_response = super::project_v3_responses_client_completed_response(terminal);
+        // The client learned this response id from `response.created`. A refill
+        // round carries a different provider id, so pin the streamed one.
+        if !self.response_id.is_empty() {
+            if let Some(object) = terminal_response.as_object_mut() {
+                object.insert("id".to_string(), Value::String(self.response_id.clone()));
+            }
+        }
         // The streamed item ids are the ones the client already holds. Without
         // them the terminal payload would describe the same business items a
         // second time under synthesized ids.

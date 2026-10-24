@@ -145,3 +145,84 @@ async fn relay_first_frame_commit_holds_tool_arguments_until_the_item_completes(
         "the sealed tail must close the response, got {all}"
     );
 }
+
+/// A refill is a separate provider response. The delivered payload keeps its
+/// items apart, so the client must receive one business item per round instead
+/// of one item that silently merges two rounds.
+#[tokio::test]
+async fn relay_refill_round_boundary_opens_a_new_business_item() {
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let mut projector = super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+        sink,
+        relay_test_budget(),
+    );
+
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_round_one",
+            "model": "wire-test",
+            "created": 1,
+            "choices": [{"index": 0, "delta": {"content": "first"}, "finish_reason": null}],
+        }))
+        .expect("round one chunk");
+    projector.close_round().expect("close round one");
+
+    projector
+        .on_chat_chunk(&json!({
+            "id": "chatcmpl_round_two",
+            "model": "wire-test",
+            "created": 2,
+            "choices": [{"index": 0, "delta": {"content": "second"}, "finish_reason": null}],
+        }))
+        .expect("round two chunk");
+
+    let terminal = json!({
+        "id": "chatcmpl_round_two",
+        "object": "response",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "first"}]},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "second"}]}
+        ],
+    });
+    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut frames = drain_frames(&mut receiver);
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    // Two rounds must produce two announcements and two donations, not one.
+    let added = frames
+        .iter()
+        .filter(|frame| frame.contains("response.output_item.added"))
+        .count();
+    assert_eq!(added, 2, "each round announces its own item: {frames:?}");
+    let done: Vec<&String> = frames
+        .iter()
+        .filter(|frame| frame.contains("response.output_item.done"))
+        .collect();
+    assert_eq!(done.len(), 2, "each round closes its own item: {frames:?}");
+    // The first round's text must not be rewritten by the second round.
+    assert!(
+        done[0].contains("\"text\":\"first\""),
+        "round one keeps its own text: {}",
+        done[0]
+    );
+    assert!(
+        done[1].contains("\"text\":\"second\""),
+        "round two keeps its own text: {}",
+        done[1]
+    );
+    // The terminal names both streamed items and the response the client saw.
+    let terminal_frame = frames
+        .iter()
+        .find(|frame| frame.contains("response.completed"))
+        .expect("terminal frame");
+    assert!(
+        terminal_frame.contains("\"id\":\"msg_0\"") && terminal_frame.contains("\"id\":\"msg_1\""),
+        "terminal reuses both streamed item ids: {terminal_frame}"
+    );
+    assert!(
+        terminal_frame.contains("chatcmpl_round_one"),
+        "terminal keeps the response id the client already received: {terminal_frame}"
+    );
+}
