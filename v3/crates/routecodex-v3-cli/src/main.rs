@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 mod init;
+mod runtime;
 
 #[derive(Parser)]
 #[command(name = "rccv3")]
@@ -156,26 +157,37 @@ enum ServerCommand {
     },
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(error) = run_cli().await {
-        eprintln!("[RouteCodexV3] command failed: {error}");
-        std::process::exit(1);
+fn main() {
+    if should_print_version() {
+        if let Err(error) = print_version() {
+            eprintln!("[RouteCodexV3] command failed: {error}");
+            std::process::exit(1);
+        }
+        return;
     }
+    let args = Args::parse();
+    let runtime = runtime::build(&args).expect("tokio runtime");
+    runtime.block_on(async {
+        if let Err(error) = run_cli(args).await {
+            eprintln!("[RouteCodexV3] command failed: {error}");
+            std::process::exit(1);
+        }
+    });
 }
 
-async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
-    if should_print_version() {
-        let executable = std::env::current_exe()?;
-        println!(
-            "rccv3 {} (crate {})",
-            resolve_routecodex_package_version_from_executable(&executable)
-                .unwrap_or_else(|| "unknown".to_string()),
-            env!("CARGO_PKG_VERSION")
-        );
-        return Ok(());
-    }
-    match Args::parse().command {
+fn print_version() -> Result<(), Box<dyn std::error::Error>> {
+    let executable = std::env::current_exe()?;
+    println!(
+        "rccv3 {} (crate {})",
+        resolve_routecodex_package_version_from_executable(&executable)
+            .unwrap_or_else(|| "unknown".to_string()),
+        env!("CARGO_PKG_VERSION")
+    );
+    Ok(())
+}
+
+async fn run_cli(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    match args.command {
         Command::Config {
             command: ConfigCommand::Check { config },
         } => {
