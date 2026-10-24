@@ -827,6 +827,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         state,
         None,
         None,
+        None,
+        None,
     )
     .await
 }
@@ -842,6 +844,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
     attempt_source: Option<V3Error01SourceRaised>,
+    provider_status: Option<u16>,
+    provider_body_read_failure: Option<&str>,
 ) -> Result<V3RelayProviderFailurePolicyResult, Result<String, V3RelayErrorOperatorFault>> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
     // Request-local provider failure exclusion is monotonic. Record it before
@@ -908,6 +912,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     let has_alternative = matches!(&resolution, V3RelayProviderTargetResolution::Selected(_));
     // Resolve another eligible identity before any health mutation. A terminal
     // attempt publishes diagnostics only; it does not update health or actions.
+    // The last or only eligible candidate stays health-neutral for every
+    // provider failure class.
     let health_record = if is_request_local_compat_failure || !has_alternative {
         V3ProviderFailureRecord {
             scope_label: candidate_key.clone(),

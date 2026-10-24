@@ -59,6 +59,7 @@ pub(crate) fn provider_http_failure(
         status,
         provider_status: Some(status),
         attempt_source: None,
+        provider_body_read_failure: None,
         policy_error_type,
         policy_error_message,
         provider_id: provider_id.to_string(),
@@ -109,6 +110,7 @@ pub(crate) fn provider_runtime_failure(
             status,
             // A response-lane handoff failure may follow a real upstream response.
             provider_status,
+            provider_body_read_failure: None,
             policy_error_type: "provider_internal_transport_error".to_string(),
             policy_error_message,
             provider_id: provider_id.to_string(),
@@ -173,6 +175,10 @@ pub(crate) fn provider_runtime_failure(
         status,
         provider_status,
         attempt_source: None,
+        provider_body_read_failure: match &error {
+            V3ProviderError::ResponseBodyUnreadable { reason, .. } => Some(reason.clone()),
+            _ => None,
+        },
         policy_error_type,
         policy_error_message: policy_error_message.clone(),
         provider_id: provider_id.to_string(),
@@ -203,6 +209,7 @@ pub(crate) fn provider_response_stream_relay_failure(
             // Synthesized stream-semantic status (see `provider_semantic_failure`).
             attempt_source: None,
             provider_status: None,
+            provider_body_read_failure: None,
             policy_error_type: code.clone(),
             policy_error_message: message.clone(),
             provider_id: provider_id.to_string(),
@@ -240,6 +247,7 @@ fn provider_response_codec_relay_failure(
         // Internal response codec failure: the 502 is the client projection, not
         // an upstream HTTP status.
         provider_status: None,
+        provider_body_read_failure: None,
         policy_error_type: "provider_response_event_codec_failure".to_string(),
         policy_error_message: format!("provider response event codec failed: {reason}"),
         provider_id: provider_id.to_string(),
@@ -314,6 +322,7 @@ pub(crate) fn provider_request_relay_failure(
         status: if attempt_source.is_some() { 598 } else { 502 },
         // Request-stage compat/wire failures happen before any upstream response.
         provider_status: None,
+        provider_body_read_failure: None,
         policy_error_type: error_type.to_string(),
         policy_error_message: message.clone(),
         provider_id: provider_id.to_string(),
@@ -509,6 +518,7 @@ pub(crate) fn provider_response_hook_failure(
                 status: 502,
                 provider_status,
                 attempt_source: None,
+                provider_body_read_failure: None,
                 policy_error_type: "relay_unharvestable_tool_markup".into(),
                 policy_error_message: "recognized incomplete tool invocation cannot be delivered".into(),
                 provider_id: provider_id.into(),
@@ -535,6 +545,7 @@ pub(crate) fn provider_response_hook_failure(
             attempt_source: None,
             // upstream HTTP status.
             provider_status: None,
+            provider_body_read_failure: None,
             policy_error_type: code,
             policy_error_message: message,
             provider_id: provider_id.to_string(),
@@ -554,6 +565,7 @@ pub(crate) fn provider_response_hook_failure(
                 // Internal response-hook codec failure: no upstream HTTP status.
                 attempt_source: None,
                 provider_status: None,
+                provider_body_read_failure: None,
                 policy_error_type: "provider_response_event_codec_failure".to_string(),
                 policy_error_message: message,
                 provider_id: provider_id.to_string(),
@@ -854,6 +866,7 @@ mod tests {
             V3ResponsesRelayProviderFailure {
                 status: 502,
                 provider_status: None,
+                provider_body_read_failure: None,
                 policy_error_type: "relay_error_projection_nonterminal".to_string(),
                 attempt_source: None,
                 policy_error_message: "Error06 SDK completed without a terminal client projection"
@@ -933,6 +946,7 @@ mod tests {
             V3ResponsesRelayProviderFailure {
                 status: 502,
                 provider_status: None,
+                provider_body_read_failure: None,
                 policy_error_type: "relay_error_projection_nonterminal".to_string(),
                 attempt_source: None,
                 policy_error_message: "authored disposition".to_string(),
@@ -1260,6 +1274,7 @@ mod tests {
             V3ResponsesRelayProviderFailure {
                 status: 502,
                 provider_status: None,
+                provider_body_read_failure: None,
                 policy_error_type: "provider_request_compat_error".to_string(),
                 attempt_source: None,
                 policy_error_message: "V3 Responses Relay provider compat failed".to_string(),

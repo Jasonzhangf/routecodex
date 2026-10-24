@@ -291,6 +291,7 @@ pub enum V3RuntimeSemanticTerminal {
 struct V3RuntimeStreamControlState {
     semantic_terminal: Option<V3RuntimeSemanticTerminal>,
     provider_business_content: bool,
+    client_disconnect: bool,
     /// Attempt-local typed Error handoff, physically separate from snapshots.
     response_governance_failure: Option<super::V3HubRelayResponseError>,
 }
@@ -329,6 +330,10 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
     /// received (network/transport failure or an internally synthesized failure).
     /// Never the client-facing projection status.
     pub(crate) provider_status: Option<u16>,
+    /// A typed body-read failure for an HTTP response whose status and headers
+    /// really arrived. `None` for a response-less transport failure and for a
+    /// completely received upstream HTTP error.
+    pub(crate) provider_body_read_failure: Option<String>,
     pub(crate) policy_error_type: String,
     pub(crate) policy_error_message: String,
     pub(crate) provider_id: String,
@@ -349,6 +354,7 @@ impl From<V3RelayErrorOperatorFault> for V3ResponsesRelayProviderFailure {
             attempt_source: None,
             status: 599,
             provider_status: None,
+            provider_body_read_failure: None,
             policy_error_type: fault.policy_failure.code.clone(),
             policy_error_message: fault.policy_failure.message.clone(),
             provider_id: "none".to_string(),
@@ -461,6 +467,20 @@ impl V3RuntimeStreamObservation {
         self.control
             .lock()
             .map(|control| control.provider_business_content)
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn record_client_disconnect(&self) -> Result<(), String> {
+        self.control
+            .lock()
+            .map(|mut control| control.client_disconnect = true)
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn take_client_disconnect(&self) -> Result<bool, String> {
+        self.control
+            .lock()
+            .map(|mut control| std::mem::take(&mut control.client_disconnect))
             .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
     }
 
