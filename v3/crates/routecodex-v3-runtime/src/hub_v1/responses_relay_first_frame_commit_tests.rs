@@ -294,8 +294,9 @@ async fn relay_committed_marker_prefix_releases_tail_but_real_marker_breaks() {
     );
 
     // Real governed marker: the same committed prefix followed by a complete
-    // DSML close label on its own line. The attempt owner cannot preserve those
-    // bytes, so the projector must end the transport before any completed frame.
+    // DSML close label on its own line. The whole-attempt owner strips only the
+    // label and preserves the already-delivered "answer " prefix plus the
+    // trailing newline, so the projector releases the held newline and seals.
     let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
     let mut projector = super::relay_client_frames::V3RelayChatClientStreamProjector::new(
         sink,
@@ -325,20 +326,25 @@ async fn relay_committed_marker_prefix_releases_tail_but_real_marker_breaks() {
         "object": "response",
         "status": "completed",
         "output": [{"type": "message", "role": "assistant",
-                    "content": [{"type": "output_text", "text": "answer"}]}],
+                    "content": [{"type": "output_text", "text": "answer \n"}]}],
     });
-    let broken = projector
+    let mut sealed = projector
         .finish(&terminal)
-        .expect_err("a committed real marker must break the transport");
+        .expect("a preserved prefix must release the governed tail and seal");
+    let mut frames = drain_frames(&mut receiver);
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let all = frames.join("");
     assert!(
-        broken.contains("governed"),
-        "the break error must name the governed marker, got {broken}"
+        all.contains("\"delta\":\"answer \"")
+            && all.contains("\"delta\":\"\\n\"")
+            && all.contains("response.completed"),
+        "the held governed tail must be delivered with a completed terminal, got {all}"
     );
     assert!(
-        !drain_frames(&mut receiver)
-            .iter()
-            .any(|frame| frame.contains("response.completed")),
-        "no completed terminal may reach the client after the break"
+        !all.contains("</｜DSML｜tool_calls>"),
+        "the standalone control label must not reach the client: {all}"
     );
 }
 
@@ -697,7 +703,7 @@ async fn relay_first_frame_commit_matches_the_whole_attempt_think_harvest() {
                 frames.push(String::from_utf8_lossy(&frame).to_string());
             }
             let mut visible = String::new();
-            let mut reasoning = String::new();
+            let mut reasoning: Vec<String> = Vec::new();
             for frame in &frames {
                 let Some(payload) = relay_frame_payload(frame) else {
                     continue;
@@ -712,7 +718,14 @@ async fn relay_first_frame_commit_matches_the_whole_attempt_think_harvest() {
                         );
                     }
                     Some("response.reasoning_summary_text.delta") => {
-                        reasoning.push_str(
+                        let summary_index = payload
+                            .get("summary_index")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0) as usize;
+                        if summary_index >= reasoning.len() {
+                            reasoning.resize(summary_index + 1, String::new());
+                        }
+                        reasoning[summary_index].push_str(
                             payload
                                 .get("delta")
                                 .and_then(serde_json::Value::as_str)
@@ -727,9 +740,9 @@ async fn relay_first_frame_commit_matches_the_whole_attempt_think_harvest() {
                 harvest.visible_text(),
                 "visible text must match the whole-attempt harvest for {text:?} split at {split}"
             );
-            let expected_reasoning = harvest.reasoning_segments().join("\n");
             assert_eq!(
-                reasoning, expected_reasoning,
+                reasoning,
+                harvest.reasoning_segments(),
                 "reasoning text must match the whole-attempt harvest for {text:?} split at {split}"
             );
         }

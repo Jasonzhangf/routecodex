@@ -22,6 +22,10 @@ use crate::nodes::{
     V3AttemptBudget, V3CommittedClientFrameSink, V3CommittedClientSseBuilder,
     V3CommittedClientSseStream,
 };
+use crate::shared_direct_thinking_compat::{
+    find_unprotected, incomplete_protected_text_start, protected_text_ranges, THINKING_CLOSE,
+    THINKING_OPEN,
+};
 
 /// Request-level decision for early Relay projection.
 ///
@@ -29,7 +33,12 @@ use crate::nodes::{
 struct OpenReasoningItem {
     output_index: usize,
     item_id: String,
-    text: String,
+    source: ReasoningSource,
+    /// One summary part per harvested block. Provider increments continue the
+    /// last part, mirroring the whole-attempt owner.
+    parts: Vec<String>,
+    /// Number of `reasoning_summary_part.added` frames already emitted.
+    announced: usize,
     /// The complete reasoning item fields the provider supplied. `summary` and
     /// `content` are rebuilt from the streamed plaintext; opaque business
     /// fields such as `encrypted_content` must be kept for the terminal ledger
@@ -37,10 +46,21 @@ struct OpenReasoningItem {
     payload: serde_json::Map<String, Value>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReasoningSource {
+    Think,
+    Thinking,
+    Provider,
+}
+
 struct OpenMessageItem {
     output_index: usize,
     item_id: String,
     text: String,
+    /// Bytes of this item that have already crossed the client channel. A
+    /// governed suffix is buffered until the complete-attempt owner decides it,
+    /// so the terminal reconciliation must compare only this prefix.
+    delivered_text: String,
 }
 
 struct OpenRefusalItem {
@@ -66,39 +86,68 @@ struct StreamedItem {
     output_index: usize,
     item_id: String,
     item: Value,
+    /// Which owner produced this item. Reasoning blocks harvested from
+    /// `<think>`/`<thinking>` must not be confused with provider reasoning that
+    /// happens to carry the same plaintext.
+    source: Option<ReasoningSource>,
 }
 
 const THINK_OPEN: &str = "<think>";
 const THINK_CLOSE: &str = "</think>";
-/// Resp03 also harvests the `<thinking>` family through
-/// `project_v3_thinking_tag_text_with_tools`. The same hold-and-route rule keeps
-/// a committed prefix from carrying text the whole-attempt owner removes.
-const THINKING_OPEN: &str = "<thinking>";
-const THINKING_CLOSE: &str = "</thinking>";
 
-/// Earliest tag in `text`, preferring the longest tag at the same position so
-/// `<thinking>` is never mistaken for `<think>`.
-fn next_think_tag(text: &str) -> Option<(usize, usize)> {
-    let mut found: Option<(usize, usize)> = None;
-    for tag in [THINK_OPEN, THINK_CLOSE, THINKING_OPEN, THINKING_CLOSE] {
-        let Some(position) = text.find(tag) else {
-            continue;
-        };
-        found = match found {
-            Some((best, best_length))
-                if position < best || (position == best && tag.len() > best_length) =>
-            {
-                Some((position, tag.len()))
-            }
-            Some(current) => Some(current),
-            None => Some((position, tag.len())),
-        };
-    }
-    found
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ThinkTagKind {
+    ThinkOpen,
+    ThinkClose,
+    ThinkingOpen,
+    ThinkingClose,
 }
 
-fn is_think_open_tag(tag: &str) -> bool {
-    tag == THINK_OPEN || tag == THINKING_OPEN
+struct ThinkTag {
+    position: usize,
+    length: usize,
+    kind: ThinkTagKind,
+}
+
+fn next_think_tag(text: &str) -> Option<ThinkTag> {
+    let protected = protected_text_ranges(text);
+    // A `<thinking>` marker inside an unclosed protected region cannot be
+    // classified until the region closes; hold from its start instead.
+    let stable_end = incomplete_protected_text_start(text).unwrap_or(text.len());
+    let mut candidates = Vec::new();
+    for (needle, kind) in [
+        (THINK_OPEN, ThinkTagKind::ThinkOpen),
+        (THINK_CLOSE, ThinkTagKind::ThinkClose),
+    ] {
+        if let Some(position) = text.find(needle) {
+            if position < stable_end {
+                candidates.push(ThinkTag {
+                    position,
+                    length: needle.len(),
+                    kind,
+                });
+            }
+        }
+    }
+    for (needle, kind) in [
+        (THINKING_OPEN, ThinkTagKind::ThinkingOpen),
+        (THINKING_CLOSE, ThinkTagKind::ThinkingClose),
+    ] {
+        if let Some(position) = find_unprotected(text, needle, 0, &protected) {
+            if position < stable_end {
+                candidates.push(ThinkTag {
+                    position,
+                    length: needle.len(),
+                    kind,
+                });
+            }
+        }
+    }
+    candidates.into_iter().min_by(|left, right| {
+        left.position
+            .cmp(&right.position)
+            .then_with(|| right.length.cmp(&left.length))
+    })
 }
 
 /// The whole-attempt Relay governance owner for tool-free Chat text.
@@ -205,10 +254,11 @@ pub(crate) struct V3RelayChatClientStreamProjector {
     /// becomes reasoning instead. Text that might be the head of a marker is
     /// held until it is decided.
     think_pending: String,
-    think_open: bool,
-    /// Which opener the open block used, for the unclosed-tail decision the
-    /// `<thinking>` owner makes differently from the `<think>` owner.
-    think_open_is_thinking: bool,
+    think_open: Option<ReasoningSource>,
+    /// Whether a `<thinking>` block was harvested for the current message item.
+    /// The whole-attempt `<thinking>` owner only turns an unclosed tail into
+    /// reasoning when no visible text and no prior `<thinking>` block exists.
+    thinking_reasoning_seen: bool,
 }
 
 impl V3RelayChatClientStreamProjector {
@@ -235,8 +285,8 @@ impl V3RelayChatClientStreamProjector {
             ),
             post_commit_governed: false,
             think_pending: String::new(),
-            think_open: false,
-            think_open_is_thinking: false,
+            think_open: None,
+            thinking_reasoning_seen: false,
         }
     }
 
@@ -338,15 +388,15 @@ impl V3RelayChatClientStreamProjector {
         Some(item)
     }
 
-    fn reasoning_summary_text(item: &Value) -> String {
+    fn reasoning_summary_parts(item: &Value) -> Vec<String> {
         item.get("summary")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
             .filter_map(|part| part.get("text").and_then(Value::as_str))
             .filter(|text| !text.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n")
+            .map(str::to_string)
+            .collect()
     }
 
     fn merge_reasoning_payload(target: &mut serde_json::Map<String, Value>, incoming: &Value) {
@@ -363,21 +413,28 @@ impl V3RelayChatClientStreamProjector {
 
     fn finished_reasoning_item(
         item_id: String,
-        text: String,
+        parts: Vec<String>,
         mut payload: serde_json::Map<String, Value>,
     ) -> Value {
         payload.remove("id");
         payload.insert("type".to_string(), Value::String("reasoning".to_string()));
         payload.insert("id".to_string(), Value::String(item_id));
-        if !text.is_empty() {
-            payload.insert(
-                "summary".to_string(),
-                Value::Array(vec![json!({"type": "summary_text", "text": text})]),
-            );
-            payload.insert(
-                "content".to_string(),
-                Value::Array(vec![json!({"type": "reasoning_text", "text": text})]),
-            );
+        let parts: Vec<&str> = parts
+            .iter()
+            .map(String::as_str)
+            .filter(|text| !text.is_empty())
+            .collect();
+        if !parts.is_empty() {
+            let summary = parts
+                .iter()
+                .map(|text| json!({"type": "summary_text", "text": text}))
+                .collect();
+            let content = parts
+                .iter()
+                .map(|text| json!({"type": "reasoning_text", "text": text}))
+                .collect();
+            payload.insert("summary".to_string(), Value::Array(summary));
+            payload.insert("content".to_string(), Value::Array(content));
         }
         Value::Object(payload)
     }
@@ -428,16 +485,29 @@ impl V3RelayChatClientStreamProjector {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        self.streamed_items.iter().all(|streamed| {
+        let streamed_preserved = self.streamed_items.iter().all(|streamed| {
             let kind = streamed.item.get("type").and_then(Value::as_str);
             match kind {
                 Some("message" | "function_call" | "custom_tool_call" | "mcp_call") => {
                     terminal_items.iter().any(|terminal| {
-                        Self::streamed_item_matches_terminal_item(&streamed.item, terminal)
+                        Self::streamed_item_matches_terminal_item(streamed, terminal)
                     })
                 }
                 _ => true,
             }
+        });
+        if !streamed_preserved {
+            return false;
+        }
+        // The open message may have a held governed suffix that is not in
+        // `streamed_items` yet. It is preservable when some terminal message
+        // starts with the already-delivered prefix.
+        self.message.as_ref().is_none_or(|message| {
+            terminal_items.iter().any(|terminal| {
+                terminal.get("type").and_then(Value::as_str) == Some("message")
+                    && Self::terminal_message_text(terminal)
+                        .is_some_and(|text| text.starts_with(&message.delivered_text))
+            })
         })
     }
 
@@ -511,53 +581,73 @@ impl V3RelayChatClientStreamProjector {
     fn append_text(&mut self, text: &str) -> Result<(), String> {
         self.think_pending.push_str(text);
         loop {
-            if self.think_open {
-                let closing = [THINK_CLOSE, THINKING_CLOSE]
-                    .into_iter()
-                    .filter_map(|tag| {
-                        self.think_pending
-                            .find(tag)
-                            .map(|position| (position, tag.len()))
-                    })
-                    .min();
-                let Some((position, length)) = closing else {
+            // The whole-attempt `<thinking>` owner returns opaque invocation
+            // text unchanged, so no block should be harvested inside one.
+            if self.think_open.is_none()
+                && crate::tool_markup_parser::scan_tool_markup(
+                    &self.think_pending,
+                    &crate::tool_markup_parser::ToolMarkupDeclarations::default(),
+                )
+                .opaque_invocation
+            {
+                let pending = std::mem::take(&mut self.think_pending);
+                self.append_visible_text(&pending)?;
+                return Ok(());
+            }
+            if let Some(source) = self.think_open {
+                let position = match source {
+                    ReasoningSource::Think => self.think_pending.find(THINK_CLOSE),
+                    ReasoningSource::Thinking => {
+                        let protected = protected_text_ranges(&self.think_pending);
+                        find_unprotected(&self.think_pending, THINKING_CLOSE, 0, &protected)
+                    }
+                    ReasoningSource::Provider => {
+                        return Err(
+                            "relay think scanner opened a provider reasoning block".to_string()
+                        )
+                    }
+                };
+                let close_len = if source == ReasoningSource::Thinking {
+                    THINKING_CLOSE.len()
+                } else {
+                    THINK_CLOSE.len()
+                };
+                let Some(position) = position else {
                     return Ok(());
                 };
                 let block = self.think_pending[..position].to_string();
-                self.think_pending = self.think_pending[position + length..].to_string();
-                self.think_open = false;
-                let block = block.trim();
-                if !block.is_empty() {
-                    // The whole-attempt owner joins harvested segments with a
-                    // newline in `reasoning_content`; one open reasoning item
-                    // keeps that shape.
-                    let joined = self
-                        .reasoning
-                        .as_ref()
-                        .map(|reasoning| !reasoning.text.is_empty())
-                        .unwrap_or(false);
-                    if joined {
-                        self.append_reasoning("\n")?;
-                    }
-                    self.append_reasoning(block)?;
-                }
+                self.think_pending = self.think_pending[position + close_len..].to_string();
+                self.think_open = None;
+                self.append_reasoning_block(block.trim(), source)?;
                 continue;
             }
-            let Some((position, length)) = next_think_tag(&self.think_pending) else {
-                let held = held_marker_suffix_len(&self.think_pending);
-                let release = self.think_pending.len() - held;
-                let visible = self.think_pending[..release].to_string();
-                self.think_pending = self.think_pending[release..].to_string();
-                self.append_visible_text(&visible)?;
-                return Ok(());
-            };
-            let tag = self.think_pending[position..position + length].to_string();
-            let visible = self.think_pending[..position].to_string();
-            self.think_pending = self.think_pending[position + length..].to_string();
-            self.append_visible_text(&visible)?;
-            if is_think_open_tag(&tag) {
-                self.think_open = true;
-                self.think_open_is_thinking = tag == THINKING_OPEN;
+            let incomplete = incomplete_protected_text_start(&self.think_pending);
+            let stable_end = incomplete.unwrap_or(self.think_pending.len());
+            match next_think_tag(&self.think_pending) {
+                Some(tag) if tag.position < stable_end => {
+                    let visible = self.think_pending[..tag.position].to_string();
+                    self.think_pending =
+                        self.think_pending[tag.position + tag.length..].to_string();
+                    self.append_visible_text(&visible)?;
+                    match tag.kind {
+                        ThinkTagKind::ThinkOpen => self.think_open = Some(ReasoningSource::Think),
+                        ThinkTagKind::ThinkingOpen => {
+                            self.think_open = Some(ReasoningSource::Thinking)
+                        }
+                        ThinkTagKind::ThinkClose | ThinkTagKind::ThinkingClose => {}
+                    }
+                }
+                _ => {
+                    let mut release = stable_end;
+                    if release == self.think_pending.len() {
+                        release =
+                            release.saturating_sub(held_marker_suffix_len(&self.think_pending));
+                    }
+                    let visible = self.think_pending[..release].to_string();
+                    self.think_pending = self.think_pending[release..].to_string();
+                    self.append_visible_text(&visible)?;
+                    return Ok(());
+                }
             }
         }
     }
@@ -570,24 +660,26 @@ impl V3RelayChatClientStreamProjector {
     /// attempt has no complete tools. Mirror it here.
     fn flush_think_pending(&mut self) -> Result<(), String> {
         let pending = std::mem::take(&mut self.think_pending);
-        let was_thinking = self.think_open_is_thinking;
-        self.think_open = false;
-        self.think_open_is_thinking = false;
-        if was_thinking
-            && self
-                .message
-                .as_ref()
-                .is_none_or(|message| message.text.is_empty())
-            && self.reasoning.is_none()
-            && self.tool_calls.is_empty()
-        {
-            let block = pending.trim();
-            if !block.is_empty() {
-                return self.append_reasoning(block);
+        let source = self.think_open.take();
+        match source {
+            Some(ReasoningSource::Thinking) => {
+                if self
+                    .message
+                    .as_ref()
+                    .is_none_or(|message| message.text.is_empty())
+                    && !self.thinking_reasoning_seen
+                    && self.tool_calls.is_empty()
+                {
+                    let block = pending.trim();
+                    if !block.is_empty() {
+                        return self.append_reasoning_block(block, ReasoningSource::Thinking);
+                    }
+                    return Ok(());
+                }
+                self.append_visible_text(&pending)
             }
-            return Ok(());
+            _ => self.append_visible_text(&pending),
         }
-        self.append_visible_text(&pending)
     }
 
     fn append_visible_text(&mut self, text: &str) -> Result<(), String> {
@@ -637,6 +729,7 @@ impl V3RelayChatClientStreamProjector {
                 output_index,
                 item_id,
                 text: String::new(),
+                delivered_text: String::new(),
             });
         }
         let message = self
@@ -644,6 +737,14 @@ impl V3RelayChatClientStreamProjector {
             .as_mut()
             .ok_or_else(|| "relay client stream lost its message item".to_string())?;
         message.text.push_str(text);
+        // Once a governed marker is pending after the commit point, the tail
+        // stays buffered until the complete-attempt owner decides it. The raw
+        // bytes are not pushed now; `finish` emits the governed suffix from the
+        // finalized response instead.
+        if self.post_commit_governed {
+            return Ok(());
+        }
+        message.delivered_text.push_str(text);
         let output_index = message.output_index;
         let item_id = message.item_id.clone();
         self.push(super::build_v3_runtime_sse_json_frame(
@@ -659,9 +760,12 @@ impl V3RelayChatClientStreamProjector {
         ))
     }
 
-    fn ensure_reasoning_open(&mut self) -> Result<(), String> {
-        if self.reasoning.is_some() {
-            return Ok(());
+    fn ensure_reasoning_open(&mut self, source: ReasoningSource) -> Result<(), String> {
+        if let Some(reasoning) = &self.reasoning {
+            if reasoning.source == source {
+                return Ok(());
+            }
+            self.close_reasoning()?;
         }
         let output_index = self.next_output_index;
         self.next_output_index += 1;
@@ -680,6 +784,23 @@ impl V3RelayChatClientStreamProjector {
                 },
             }),
         ))?;
+        self.reasoning = Some(OpenReasoningItem {
+            output_index,
+            item_id,
+            source,
+            parts: Vec::new(),
+            announced: 0,
+            payload: serde_json::Map::new(),
+        });
+        Ok(())
+    }
+
+    fn push_reasoning_part_added(
+        &mut self,
+        output_index: usize,
+        item_id: &str,
+        summary_index: usize,
+    ) -> Result<(), String> {
         self.push(super::build_v3_runtime_sse_json_frame(
             "response.reasoning_summary_part.added",
             &json!({
@@ -687,27 +808,36 @@ impl V3RelayChatClientStreamProjector {
                 "response_id": self.response_id,
                 "output_index": output_index,
                 "item_id": item_id,
-                "summary_index": 0,
+                "summary_index": summary_index,
                 "part": {"type": "summary_text", "text": ""},
             }),
-        ))?;
-        self.reasoning = Some(OpenReasoningItem {
-            output_index,
-            item_id,
-            text: String::new(),
-            payload: serde_json::Map::new(),
-        });
-        Ok(())
+        ))
     }
 
-    fn append_reasoning_text_delta(&mut self, text: &str) -> Result<(), String> {
+    /// One harvested `<think>` or `<thinking>` block. Each block is its own
+    /// summary part, matching the Resp03 owner (`v3_resp03_reasoning_item`).
+    fn append_reasoning_block(
+        &mut self,
+        text: &str,
+        source: ReasoningSource,
+    ) -> Result<(), String> {
+        if text.is_empty() {
+            return Ok(());
+        }
+        if source == ReasoningSource::Thinking {
+            self.thinking_reasoning_seen = true;
+        }
+        self.ensure_reasoning_open(source)?;
         let reasoning = self
             .reasoning
             .as_mut()
             .ok_or_else(|| "relay client stream lost its reasoning item".to_string())?;
-        reasoning.text.push_str(text);
+        let summary_index = reasoning.parts.len();
+        reasoning.parts.push(text.to_string());
+        reasoning.announced = reasoning.announced.max(summary_index + 1);
         let output_index = reasoning.output_index;
         let item_id = reasoning.item_id.clone();
+        self.push_reasoning_part_added(output_index, &item_id, summary_index)?;
         self.push(super::build_v3_runtime_sse_json_frame(
             "response.reasoning_summary_text.delta",
             &json!({
@@ -715,7 +845,60 @@ impl V3RelayChatClientStreamProjector {
                 "response_id": self.response_id,
                 "output_index": output_index,
                 "item_id": item_id,
-                "summary_index": 0,
+                "summary_index": summary_index,
+                "delta": text,
+            }),
+        ))
+    }
+
+    /// Provider-supplied reasoning increments continue one accumulated summary
+    /// part, the same carrier the provider streamed.
+    fn append_provider_reasoning_text(&mut self, text: &str) -> Result<(), String> {
+        if text.is_empty() {
+            return Ok(());
+        }
+        self.ensure_reasoning_open(ReasoningSource::Provider)?;
+        let (summary_index, announced) = {
+            let reasoning = self
+                .reasoning
+                .as_mut()
+                .ok_or_else(|| "relay client stream lost its reasoning item".to_string())?;
+            let summary_index = if reasoning.parts.is_empty() {
+                reasoning.parts.push(String::new());
+                0
+            } else {
+                reasoning.parts.len() - 1
+            };
+            let announced = reasoning.announced;
+            reasoning.announced = reasoning.announced.max(summary_index + 1);
+            (summary_index, announced)
+        };
+        if summary_index >= announced {
+            let (output_index, item_id) = {
+                let reasoning = self
+                    .reasoning
+                    .as_ref()
+                    .ok_or_else(|| "relay client stream lost its reasoning item".to_string())?;
+                (reasoning.output_index, reasoning.item_id.clone())
+            };
+            self.push_reasoning_part_added(output_index, &item_id, summary_index)?;
+        }
+        let (output_index, item_id) = {
+            let reasoning = self
+                .reasoning
+                .as_mut()
+                .ok_or_else(|| "relay client stream lost its reasoning item".to_string())?;
+            reasoning.parts[summary_index].push_str(text);
+            (reasoning.output_index, reasoning.item_id.clone())
+        };
+        self.push(super::build_v3_runtime_sse_json_frame(
+            "response.reasoning_summary_text.delta",
+            &json!({
+                "type": "response.reasoning_summary_text.delta",
+                "response_id": self.response_id,
+                "output_index": output_index,
+                "item_id": item_id,
+                "summary_index": summary_index,
                 "delta": text,
             }),
         ))
@@ -729,20 +912,26 @@ impl V3RelayChatClientStreamProjector {
         if !Self::reasoning_item_has_business_payload(item) {
             return Ok(());
         }
-        self.ensure_reasoning_open()?;
+        self.ensure_reasoning_open(ReasoningSource::Provider)?;
         if let Some(reasoning) = self.reasoning.as_mut() {
             Self::merge_reasoning_payload(&mut reasoning.payload, item);
         }
-        let text = Self::reasoning_summary_text(item);
-        if text.is_empty() {
+        let parts = Self::reasoning_summary_parts(item);
+        if parts.is_empty() {
             return Ok(());
         }
-        self.append_reasoning_text_delta(&text)
-    }
-
-    fn append_reasoning(&mut self, text: &str) -> Result<(), String> {
-        self.ensure_reasoning_open()?;
-        self.append_reasoning_text_delta(text)
+        if parts.len() == 1 {
+            // A single provider summary part is an increment: continue the
+            // accumulated provider part, mirroring how the whole-attempt owner
+            // concatenates streamed `reasoning_content`.
+            return self.append_provider_reasoning_text(&parts[0]);
+        }
+        // A provider summary array carries explicit block boundaries. Keep one
+        // summary part per entry instead of joining them into one part.
+        for part in parts {
+            self.append_reasoning_block(&part, ReasoningSource::Provider)?;
+        }
+        Ok(())
     }
 
     fn append_refusal(&mut self, text: &str) -> Result<(), String> {
@@ -886,11 +1075,18 @@ impl V3RelayChatClientStreamProjector {
     /// Record one announced item at its output index. The terminal frame
     /// rebuilds its `output` array from this record, so a late governance rewrite
     /// can never contradict bytes the client already holds.
-    fn record_streamed_item(&mut self, output_index: usize, item_id: &str, item: Value) {
+    fn record_streamed_item(
+        &mut self,
+        output_index: usize,
+        item_id: &str,
+        item: Value,
+        source: Option<ReasoningSource>,
+    ) {
         self.streamed_items.push(StreamedItem {
             output_index,
             item_id: item_id.to_string(),
             item,
+            source,
         });
     }
 
@@ -900,10 +1096,14 @@ impl V3RelayChatClientStreamProjector {
         };
         let output_index = reasoning.output_index;
         let item_id = reasoning.item_id;
-        let text = reasoning.text;
-        let item = Self::finished_reasoning_item(item_id.clone(), text.clone(), reasoning.payload);
-        self.record_streamed_item(output_index, &item_id, item.clone());
-        if !text.is_empty() {
+        let source = reasoning.source;
+        let parts = reasoning.parts;
+        let item = Self::finished_reasoning_item(item_id.clone(), parts.clone(), reasoning.payload);
+        self.record_streamed_item(output_index, &item_id, item.clone(), Some(source));
+        for (summary_index, text) in parts.iter().enumerate() {
+            if text.is_empty() {
+                continue;
+            }
             self.push(super::build_v3_runtime_sse_json_frame(
                 "response.reasoning_summary_text.done",
                 &json!({
@@ -911,7 +1111,7 @@ impl V3RelayChatClientStreamProjector {
                     "response_id": self.response_id,
                     "output_index": output_index,
                     "item_id": item_id,
-                    "summary_index": 0,
+                    "summary_index": summary_index,
                     "text": text,
                 }),
             ))?;
@@ -922,7 +1122,7 @@ impl V3RelayChatClientStreamProjector {
                     "response_id": self.response_id,
                     "output_index": output_index,
                     "item_id": item_id,
-                    "summary_index": 0,
+                    "summary_index": summary_index,
                     "part": {"type": "summary_text", "text": text},
                 }),
             ))?;
@@ -955,6 +1155,7 @@ impl V3RelayChatClientStreamProjector {
                 "role": "assistant",
                 "content": [{"type": "output_text", "text": text}],
             }),
+            None,
         );
         self.push(super::build_v3_runtime_sse_json_frame(
             "response.output_text.done",
@@ -1009,7 +1210,7 @@ impl V3RelayChatClientStreamProjector {
             "role": "assistant",
             "content": [{"type": "refusal", "refusal": text}],
         });
-        self.record_streamed_item(output_index, &item_id, item.clone());
+        self.record_streamed_item(output_index, &item_id, item.clone(), None);
         self.observe_item_done(output_index, &item);
         self.push(super::build_v3_runtime_sse_json_frame(
             "response.refusal.done",
@@ -1052,6 +1253,7 @@ impl V3RelayChatClientStreamProjector {
                 call.output_index,
                 &call.item_id,
                 relay_function_call_item(&call, "completed"),
+                None,
             );
             let mut arguments_done = json!({
                 "type": "response.function_call_arguments.done",
@@ -1092,10 +1294,70 @@ impl V3RelayChatClientStreamProjector {
     /// of carrying it into a different provider response.
     pub(crate) fn close_round(&mut self) -> Result<(), String> {
         self.flush_think_pending()?;
+        self.thinking_reasoning_seen = false;
         self.close_reasoning()?;
         self.close_message()?;
         self.close_refusal()?;
         self.close_tool_calls()
+    }
+
+    /// Release a governed suffix the committed channel held back.
+    ///
+    /// Once `post_commit_governed` is set, `append_visible_text` keeps the tail
+    /// in the open message without pushing it. The complete-attempt owner's
+    /// finalized message is the source of truth: when it still starts with the
+    /// already-delivered prefix, the remaining governed text is emitted as the
+    /// missing deltas and the open message is sealed with that exact text.
+    fn release_governed_message_tail(&mut self, terminal: &Value) -> Result<(), String> {
+        if !self.post_commit_governed {
+            return Ok(());
+        }
+        let Some(delivered_text) = self
+            .message
+            .as_ref()
+            .map(|message| message.delivered_text.clone())
+        else {
+            return Ok(());
+        };
+        let terminal_items = terminal
+            .get("output")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let Some(governed_text) = terminal_items
+            .iter()
+            .rev()
+            .filter_map(Self::terminal_message_text)
+            .find(|text| text.starts_with(&delivered_text))
+        else {
+            return Ok(());
+        };
+        let Some(suffix) = governed_text.strip_prefix(&delivered_text) else {
+            return Ok(());
+        };
+        let (output_index, item_id) = self
+            .message
+            .as_ref()
+            .map(|message| (message.output_index, message.item_id.clone()))
+            .ok_or_else(|| "relay client stream lost its message item".to_string())?;
+        if let Some(message) = self.message.as_mut() {
+            message.text = governed_text.clone();
+            message.delivered_text = governed_text.clone();
+        }
+        if suffix.is_empty() {
+            return Ok(());
+        }
+        self.push(super::build_v3_runtime_sse_json_frame(
+            "response.output_text.delta",
+            &json!({
+                "type": "response.output_text.delta",
+                "response_id": self.response_id,
+                "output_index": output_index,
+                "item_id": item_id,
+                "content_index": 0,
+                "delta": suffix,
+            }),
+        ))
     }
 
     fn output_text_from_items(items: &[Value]) -> String {
@@ -1114,27 +1376,83 @@ impl V3RelayChatClientStreamProjector {
         text
     }
 
+    /// Visible output text of one terminal `message` item. A message without a
+    /// `content` array or `output_text` part is still a message and therefore
+    /// contributes an empty text, so a delivered empty prefix can reconcile.
+    fn terminal_message_text(item: &Value) -> Option<String> {
+        if item.get("type").and_then(Value::as_str) != Some("message") {
+            return None;
+        }
+        let mut text = String::new();
+        if let Some(content) = item.get("content").and_then(Value::as_array) {
+            for part in content {
+                if part.get("type").and_then(Value::as_str) == Some("output_text") {
+                    if let Some(part) = part.get("text").and_then(Value::as_str) {
+                        text.push_str(part);
+                    }
+                }
+            }
+        }
+        Some(text)
+    }
+
     /// True when two output items represent the same delivered business item.
     /// The delivered copy already carries the exact bytes and identity the client
     /// holds, so identity and terminal labels are ignored; only the business
     /// carriers must match.
-    fn streamed_item_matches_terminal_item(streamed: &Value, terminal: &Value) -> bool {
-        let streamed_type = streamed.get("type").and_then(Value::as_str);
+    /// Plaintext reasoning parts of one reasoning item. Prefer `summary`, then
+    /// `content`, so a provider that only carried `content` still reconciles.
+    fn reasoning_text_parts(item: &Value) -> Vec<String> {
+        for key in ["summary", "content"] {
+            let parts: Vec<String> = item
+                .get(key)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .filter(|text| !text.is_empty())
+                .map(str::to_string)
+                .collect();
+            if !parts.is_empty() {
+                return parts;
+            }
+        }
+        Vec::new()
+    }
+
+    /// True when two output items represent the same delivered business item.
+    /// The delivered copy already carries the exact bytes and identity the client
+    /// holds, so identity and terminal labels are ignored; only the business
+    /// carriers must match.
+    fn streamed_item_matches_terminal_item(streamed: &StreamedItem, terminal: &Value) -> bool {
+        let streamed_type = streamed.item.get("type").and_then(Value::as_str);
         if streamed_type != terminal.get("type").and_then(Value::as_str) {
             return false;
         }
         match streamed_type {
-            Some("message") => streamed.get("content") == terminal.get("content"),
+            Some("message") => streamed.item.get("content") == terminal.get("content"),
             Some("function_call" | "custom_tool_call" | "mcp_call") => {
-                streamed.get("call_id") == terminal.get("call_id")
-                    && streamed.get("name") == terminal.get("name")
-                    && streamed.get("arguments") == terminal.get("arguments")
+                streamed.item.get("call_id") == terminal.get("call_id")
+                    && streamed.item.get("name") == terminal.get("name")
+                    && streamed.item.get("arguments") == terminal.get("arguments")
             }
             Some("reasoning") => {
-                streamed.get("summary") == terminal.get("summary")
-                    || streamed.get("content") == terminal.get("content")
+                if streamed.item.get("summary") == terminal.get("summary")
+                    || streamed.item.get("content") == terminal.get("content")
+                {
+                    return true;
+                }
+                // A streamed part and a terminal part for the same block can
+                // split or join differently. The concatenated plaintext is the
+                // same business reasoning when the source family matches.
+                let streamed_parts = Self::reasoning_text_parts(&streamed.item);
+                let terminal_parts = Self::reasoning_text_parts(terminal);
+                !streamed_parts.is_empty()
+                    && !terminal_parts.is_empty()
+                    && streamed_parts.join("\n") == terminal_parts.join("\n")
+                    && streamed.source.is_some()
             }
-            _ => streamed == terminal,
+            _ => &streamed.item == terminal,
         }
     }
 
@@ -1147,16 +1465,33 @@ impl V3RelayChatClientStreamProjector {
     /// delivered. The finalized governed response is the source for that
     /// terminal-only tail.
     fn terminal_output_items_reconciled(&self, terminal_response: &Value) -> Vec<Value> {
-        let mut output = self.terminal_output_items();
+        let mut ordered: Vec<&StreamedItem> = self.streamed_items.iter().collect();
+        ordered.sort_by_key(|entry| entry.output_index);
+        let mut output: Vec<Value> = ordered
+            .iter()
+            .map(|entry| {
+                let mut item = entry.item.clone();
+                if let Some(object) = item.as_object_mut() {
+                    object.insert("id".to_string(), Value::String(entry.item_id.clone()));
+                }
+                item
+            })
+            .collect();
+        let mut consumed = vec![false; output.len()];
         let terminal_items = terminal_response
             .get("output")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
         for terminal_item in terminal_items {
-            if let Some(streamed) = output.iter_mut().find(|streamed| {
-                Self::streamed_item_matches_terminal_item(streamed, &terminal_item)
-            }) {
+            let matched = ordered.iter().enumerate().find_map(|(index, streamed)| {
+                (!consumed[index]
+                    && Self::streamed_item_matches_terminal_item(streamed, &terminal_item))
+                .then_some(index)
+            });
+            if let Some(index) = matched {
+                consumed[index] = true;
+                let streamed = &mut output[index];
                 if streamed.get("type").and_then(Value::as_str) == Some("reasoning") {
                     Self::merge_terminal_reasoning_fields(streamed, &terminal_item);
                 }
@@ -1175,24 +1510,6 @@ impl V3RelayChatClientStreamProjector {
         output
     }
 
-    /// Rebuild the terminal `output` from the announced items, ordered by output
-    /// index. Items close in arrival order, which interleaves a long message with
-    /// the reasoning items around it; the protocol orders `output` by index.
-    fn terminal_output_items(&self) -> Vec<Value> {
-        let mut ordered: Vec<&StreamedItem> = self.streamed_items.iter().collect();
-        ordered.sort_by_key(|entry| entry.output_index);
-        ordered
-            .into_iter()
-            .map(|entry| {
-                let mut item = entry.item.clone();
-                if let Some(object) = item.as_object_mut() {
-                    object.insert("id".to_string(), Value::String(entry.item_id.clone()));
-                }
-                item
-            })
-            .collect()
-    }
-
     /// Close every open item and seal the attempt. The terminal frame is held
     /// past the acceptance boundary, so a failed seal cannot deliver it first.
     pub(crate) fn finish(
@@ -1200,6 +1517,7 @@ impl V3RelayChatClientStreamProjector {
         terminal: &Value,
     ) -> Result<V3CommittedClientSseStream, String> {
         self.flush_think_pending()?;
+        self.release_governed_message_tail(terminal)?;
         self.close_reasoning()?;
         self.close_message()?;
         self.close_refusal()?;

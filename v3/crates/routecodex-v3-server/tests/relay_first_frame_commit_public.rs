@@ -283,6 +283,40 @@ fn response_sse_events(body: &str) -> Vec<Value> {
         .collect()
 }
 
+fn completed_response(events: &[Value]) -> &Value {
+    events
+        .iter()
+        .rev()
+        .find(|event| event["type"] == "response.completed")
+        .and_then(|event| event.get("response"))
+        .expect("completed response")
+}
+
+fn delivered_visible_text(events: &[Value]) -> String {
+    events
+        .iter()
+        .filter(|event| event["type"] == "response.output_text.delta")
+        .filter_map(|event| event["delta"].as_str())
+        .collect()
+}
+
+fn delivered_reasoning_summaries(events: &[Value]) -> Vec<Vec<String>> {
+    events
+        .iter()
+        .filter(|event| {
+            event["type"] == "response.output_item.done" && event["item"]["type"] == "reasoning"
+        })
+        .map(|event| {
+            event["item"]["summary"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|part| part["text"].as_str().map(str::to_string))
+                .collect()
+        })
+        .collect()
+}
+
 struct TimedWire {
     wire: Vec<u8>,
     first_delta_at: Option<Duration>,
@@ -502,6 +536,225 @@ async fn relay_public_reasoning_cipher_survives_first_frame_and_echoes_next_turn
     assert!(
         captured_text.contains("private plan"),
         "the next-turn provider request must keep the echoed reasoning plaintext: {captured_text}"
+    );
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn relay_public_governed_post_commit_tail_is_delivered_once() {
+    let _guard = TEST_LOCK.lock().await;
+    let plans = vec![vec![
+        chat_delta("answer"),
+        chat_delta("\n<|DSML|tool_calls>\nafter"),
+        chat_stop(),
+        "data: [DONE]\n\n".to_string(),
+    ]];
+    let (entry, _captures) = start_with_plans(plans).await;
+    let body = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
+    let events = response_sse_events(&body);
+
+    assert_eq!(
+        delivered_visible_text(&events),
+        "answer\nafter",
+        "the held governed tail must follow the delivered prefix: {body}"
+    );
+    assert!(
+        !body.contains("<|DSML|tool_calls>"),
+        "the standalone control label must not reach the client: {body}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["type"] == "response.completed")
+            .count(),
+        1,
+        "the stream must complete exactly once: {body}"
+    );
+    assert!(
+        !body.contains("\"error\"") && !body.contains("network_error"),
+        "the client must not receive a proxy-generated error: {body}"
+    );
+    let completed = completed_response(&events);
+    assert_eq!(
+        completed["output"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|item| item["type"] == "message")
+            .flat_map(|item| item["content"].as_array().into_iter().flatten())
+            .filter_map(|part| part["text"].as_str())
+            .collect::<String>(),
+        "answer\nafter",
+        "the terminal message must carry the governed tail: {completed}"
+    );
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn relay_public_thinking_projection_matches_owner_protected_ranges_and_families() {
+    let _guard = TEST_LOCK.lock().await;
+    let cases = [
+        (
+            vec![
+                "Example: \"<thin".to_string(),
+                "king>plan</thinking>\" tail".to_string(),
+            ],
+            "Example: \"<thinking>plan</thinking>\" tail",
+            Vec::<Vec<String>>::new(),
+        ),
+        (
+            vec![
+                "Example:\n```text\n<thin".to_string(),
+                "king>plan</thinking>\n```\nend".to_string(),
+            ],
+            "Example:\n```text\n<thinking>plan</thinking>\n```\nend",
+            Vec::<Vec<String>>::new(),
+        ),
+        (
+            vec![
+                "Example: `<thin".to_string(),
+                "king>plan</thinking>` end".to_string(),
+            ],
+            "Example: `<thinking>plan</thinking>` end",
+            Vec::<Vec<String>>::new(),
+        ),
+        (
+            vec![
+                "<think>a</thin".to_string(),
+                "k><thinking>b</thinking>visible".to_string(),
+            ],
+            "visible",
+            vec![vec!["a".to_string()], vec!["b".to_string()]],
+        ),
+    ];
+    let plans = cases
+        .iter()
+        .map(|(chunks, _, _)| {
+            let mut plan = chunks
+                .iter()
+                .map(|chunk| chat_delta(chunk))
+                .collect::<Vec<_>>();
+            plan.push(chat_stop());
+            plan.push("data: [DONE]\n\n".to_string());
+            plan
+        })
+        .collect();
+    let (entry, _captures) = start_with_plans(plans).await;
+    for (chunks, expected_visible, expected_reasoning) in cases {
+        let body = relay_body(
+            &entry,
+            json!({"model": "test", "input": "hello", "stream": true}),
+        )
+        .await;
+        let events = response_sse_events(&body);
+        assert_eq!(
+            delivered_visible_text(&events),
+            expected_visible,
+            "visible text must match the whole-attempt owner for {chunks:?}: {body}"
+        );
+        assert_eq!(
+            delivered_reasoning_summaries(&events),
+            expected_reasoning,
+            "reasoning items must match the whole-attempt owner for {chunks:?}: {body}"
+        );
+        assert!(
+            !body.contains("\"error\"") && !body.contains("network_error"),
+            "the client must not receive a proxy-generated error: {body}"
+        );
+    }
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn relay_public_multi_think_summary_parts_and_next_turn_echo() {
+    let _guard = TEST_LOCK.lock().await;
+    let plans = vec![
+        vec![
+            chat_delta("<think>a</thin"),
+            chat_delta("k><think>b</think>visible"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+        vec![
+            chat_delta("second"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+    ];
+    let (entry, mut captures) = start_with_plans(plans).await;
+    let body = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
+    let events = response_sse_events(&body);
+    assert_eq!(
+        delivered_reasoning_summaries(&events),
+        vec![vec!["a".to_string(), "b".to_string()]],
+        "each harvested block must be one summary part in one item: {body}"
+    );
+    let completed = completed_response(&events);
+    let output = completed["output"].as_array().expect("completed output");
+    assert_eq!(
+        output.len(),
+        2,
+        "one reasoning item and one message must be present exactly once: {completed}"
+    );
+    let reasoning = output
+        .iter()
+        .find(|item| item["type"] == "reasoning")
+        .expect("reasoning item");
+    assert_eq!(
+        reasoning["summary"],
+        json!([
+            {"type": "summary_text", "text": "a"},
+            {"type": "summary_text", "text": "b"}
+        ]),
+        "terminal summary parts must keep the owner block boundaries: {completed}"
+    );
+    let reasoning_done = events
+        .iter()
+        .find(|event| {
+            event["type"] == "response.output_item.done" && event["item"]["type"] == "reasoning"
+        })
+        .expect("reasoning done");
+    assert_eq!(
+        reasoning_done["item"]["id"], reasoning["id"],
+        "the terminal must preserve the streamed reasoning identity: {body}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| {
+                event["type"] == "response.output_item.done" && event["item"]["type"] == "reasoning"
+            })
+            .count(),
+        1,
+        "the owner reasoning must not be appended as a duplicate item: {body}"
+    );
+
+    let _first_capture = captures.try_recv().ok();
+    let next_body = json!({
+        "model": "test",
+        "stream": true,
+        "input": [
+            reasoning.clone(),
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "visible"}]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]}
+        ]
+    });
+    let _second = relay_body(&entry, next_body).await;
+    let captured = captures
+        .try_recv()
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    assert!(
+        captured.contains("a\\nb"),
+        "the next-turn request must echo both reasoning summary parts: {captured}"
     );
     entry.stop().await;
 }
