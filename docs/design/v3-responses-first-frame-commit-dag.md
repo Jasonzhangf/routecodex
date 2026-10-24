@@ -137,11 +137,66 @@ flowchart TD
 
 ### P2 Relay 逐事件出帧
 
-1. 为 anthropic / openai_chat / gemini 各补 reducer 到客户端帧的逐事件映射:
-   `message_start` → `response.created` + item 起始;文本增量 → `output_text.delta`;
-   `content_block_stop` → `content_part.done` / `output_item.done`;工具参数增量攒到 block 完整再发;终态补 usage。
-2. 红测:同一 provider 事件流在 relay 路径与 direct 路径产出等价客户端帧;到达时间分布跟随 provider。
-3. 证据:`cargo test -p routecodex-v3-runtime --lib relay_first_frame_commit`、`npm run test:v3-responses-direct-blackbox`。
+现状(0.90.4935 实测):Relay 的客户端帧只在整段归约后一次性产出。`responses_relay_runtime.rs:805-930`
+对 message item 只发 `output_item.done`,不发任何 `output_text.delta`;因此即使不缓冲也没有渐进显示。
+7777 真实回放(relay,openai_chat 线协议)在 49.89s 一次性收到
+`created / in_progress / output_item.done × 4 / completed`,共 7 帧。
+
+1. 逐事件映射(先 openai_chat,再 anthropic / gemini):
+   `delta.content` → `output_text.delta`(配 `output_item.added` + `content_part.added` 生命周期);
+   `delta.reasoning_content` → 推理摘要增量;工具调用 `function.name` 出现即 `output_item.added`,
+   参数增量挂起到块完整再发;`finish_reason` 关闭 open item;终态补 usage。
+2. 提交边界与 Direct 同构:首个业务帧(可见输出文本增量或带名字的 tool-call 起始帧)提交,
+   提交前仍是整段缓冲,可整体丢弃;提交后续发 append-only,提交后失败静默断流,不换候选。
+3. 治理闸:Relay 的 Resp01/02/03 与 Chat Process 在整段上运行。凡请求级证明会改写文本或工具形状的
+   (tool thinking、memory raw capture、声明了工具),不提交并保持今天的整段缓冲,逐字节不变;
+   只有证明不改写的请求才渐进投影。终态帧仍由整段 builder 产出(usage/status 只发一次)。
+4. 服务端复用 `V3CommittedClientFrameSink` 与 `accept_v3_client_sse_transport`:首帧提交后通道接管,
+   outcome 只补 `flushed_frames` 之后的剩余帧。
+5. 红测:同一 chat SSE 事件流在 relay 路径必须于 provider 终态前把首个 `output_text.delta`
+   送到客户端通道;并断言工具参数字节挂起到块完整。
+6. 证据:`cargo test -p routecodex-v3-runtime --lib relay_first_frame_commit`、真实入口 7777 到达时间分布。
+
+状态(P2 候选已构建安装并实测,未合入):逐事件投影落在 `responses_relay_runtime/relay_client_frames.rs`。
+openai_chat 线协议按上述映射逐帧出帧;提交谓词与 Direct 同构;工具参数挂起到 item 完成;
+终态帧在 seal 边界内。Relay refill 循环按请求持有同一投影状态,只在最终轮按合并后的响应
+seal 一次,避免提交后被下一轮重投影覆盖。
+
+请求级不提交条件有五个:客户端未要 SSE、无客户端帧通道、memory raw capture、tool thinking、
+声明了工具。工具声明算三种来源:顶层 `tools`、顶层 `additional_tools`、以及 input 条目里的
+`additional_tools` / `tool_search_output`。工具声明属于第 3 项的改写风险:Resp03 的工具治理
+会把序列化调用从正文搬进 tool_calls 条目,属于结构改写,已提交的正文无法撤回。
+
+三条已修的自洽性问题:
+1. 提交后失败不得换候选。两条 provider 失败分支(provider 流失败、响应 hook 失败)在重试后、
+   进入下一候选前检查已提交 sink,命中即按终态处置结束该传输,不再重建响应头。红测
+   `committed_relay_stream_ends_after_a_response_hook_failure_without_a_second_candidate`:
+   去掉该守卫后同一请求会选第二个候选。
+2. refill 轮次各自成条目。投影器新增 `close_round`,外层 refill 在已提交轮次结束时关闭当前
+   message / reasoning / tool 条目,下一轮在新 output_index 开新条目。
+3. 终态与已流出字节收敛。Chat Process 在 Resp03 摘取 think 块、删独立控制标记,发生在投影
+   之后。已提交时投影器记录每个已 announce 的条目,`finish` 用它们重建终态 `output`(同 id、
+   同顺序、同内容)与顶层 `output_text`,并按 output_index 排序;改写只影响内部与 refill 决策,
+   不再回头改写已交付帧。
+4. think 收割前移。既然已交付字节不可改写,投影器就在流式到达时应用 Chat Process 的同一条
+   规则:块内容只进 reasoning,正文只发块外文本;跨 provider 帧拆开的标记先扣住不判定,流结束
+   仍未闭合的块按整段收割语义保留为正文。两族标记都覆盖:`<think>` / `</think>`
+   (owner `harvest_v3_think_text`,无条件)与 `<thinking>` / `</thinking>`
+   (owner `project_v3_thinking_tag_text_with_tools`,complete attempt)。`<think>` 一族由逐字
+   逐切分 parity 红测与 owner 绑定,去掉前移逻辑该测转红;`<thinking>` 一族另有红测证明标记与
+   块内容不进正文。残留两处,均为边界:`<thinking>` owner 会保护围栏代码块、行内代码与双引号
+   区间,投影器不做这层保护,落在这些区间内的 `<thinking>` 会被当块收割;流结束时仍未闭合且
+   之前没有任何正文的 `<thinking>`,owner 在无工具时把块内容改成 reasoning,投影器按正文保留。
+
+真实入口回放(0.90.4935,`rccv3 restart` 后):7777 首帧 20.94s、终态 48.17s,89 个
+`response.output_text.delta` 分散在 27.19 秒、86 个不同到达时刻;终态 output 带 usage。
+4444 首帧 4.08s、终态 8.76s,80 个正文增量分散在 4.55 秒。
+
+gate:`relay_first_frame_commit` 13 条绿(轮次边界、终态重建、output 排序、工具声明闸、内联
+think 收割、think parity 六条红测:去掉对应修复后各自转红),加提交后 hook 失败守卫红测 1 条;
+`responses_relay` 211/211、`client_sse` 17/17、`multi_listener_server` 203/203、
+`openai_chat_namespace_names` 6/6。独立 review 已进行两轮,第一轮四项阻断、第二轮两项阻断
+均已修(第二轮 B2 think 残留改为前移收割)。尚未做:复评、合入与远端回执、合并后复验。
 
 ### P3 完整性闸(工具参数与整段改写)
 

@@ -284,6 +284,7 @@ impl V3ResponsesProtocolRelayHandoff {
             observability_accumulator: Some(self.observability_accumulator.clone()),
             request_execution_control: Some(self.request_execution_control.clone()),
             request_local_busy_candidates: self.request_local_busy_candidates.clone(),
+            ..Default::default()
         }
     }
 }

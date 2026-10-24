@@ -1,6 +1,6 @@
 use super::*;
 use crate::execution_control::V3AttemptStoreError;
-use futures_util::{stream, StreamExt};
+use futures_util::stream;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use serde_json::json;
 
@@ -1483,4 +1483,498 @@ fn openai_chat_provider_usage_normalizes_to_hub_canonical_token_names() {
             response["usage"].get("completion_tokens").is_none(),
             "Hub canonical response usage must not expose OpenAI Chat provider-wire completion_tokens: {response}"
         );
+}
+
+fn committed_hook_failure_manifest() -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
+allowed_transports = ["json", "sse"]
+
+[providers.openai_first]
+type = "openai_chat"
+base_url = "http://openai-first.invalid/v1"
+default_model = "chat-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "COMMITTED_FIRST_KEY" }] }
+[providers.openai_first.models.chat-test]
+wire_name = "chat-test"
+capabilities = ["text"]
+
+[providers.openai_second]
+type = "openai_chat"
+base_url = "http://openai-second.invalid/v1"
+default_model = "chat-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "COMMITTED_SECOND_KEY" }] }
+[providers.openai_second.models.chat-test]
+wire_name = "chat-test"
+capabilities = ["text"]
+
+[forwarders.mixed]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "openai_first", model = "chat-test", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "openai_second", model = "chat-test", key = "key", priority = 2 }
+]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
+"#,
+    )
+    .expect("committed hook failure authoring");
+    compile_v3_config_05_manifest(authoring).expect("committed hook failure manifest")
+}
+
+struct CommittedHookFailureTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+enum CommittedRoundReply {
+    SseFirst,
+    Json(Vec<u8>),
+}
+
+struct CommittedRoundTransport {
+    provider_ids: Mutex<Vec<String>>,
+    reply: CommittedRoundReply,
+}
+
+#[async_trait::async_trait]
+impl ResponsesTransport for CommittedRoundTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.provider_ids
+            .lock()
+            .expect("provider id recorder")
+            .push(request.provider_id().to_string());
+        match &self.reply {
+            CommittedRoundReply::SseFirst => {
+                let provider: routecodex_v3_provider_responses::V3ProviderSseStream =
+                    Box::pin(stream::iter(vec![
+                        Ok(b"data: {\"id\":\"chatcmpl_committed_refill\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"first\"}}]}\n\n".to_vec()),
+                        Ok(b"data: {\"id\":\"chatcmpl_committed_refill\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n".to_vec()),
+                        Ok(b"data: [DONE]\n\n".to_vec()),
+                    ]));
+                Ok(V3ProviderResp14Raw::from_sse(
+                    request.request_id().to_string(),
+                    request.provider_id().to_string(),
+                    200,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"text/event-stream".to_vec(),
+                    }],
+                    provider,
+                ))
+            }
+            CommittedRoundReply::Json(body) => Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                body.clone(),
+            )),
+        }
+    }
+}
+
+fn committed_round_input(request_id: &str) -> V3ResponsesRelayRuntimeInput {
+    V3ResponsesRelayRuntimeInput {
+        server_id: "test".to_string(),
+        failure_session_scope: V3ProviderFailureSessionScope::new(
+            "test",
+            "default",
+            "committed-cross-round-session",
+        )
+        .expect("session scope"),
+        request_id: request_id.to_string(),
+        payload: json!({"model": "client-model", "stream": true, "input": "hello"}),
+    }
+}
+
+async fn execute_committed_first_round(
+    manifest: &V3Config05ManifestPublished,
+    transport: &CommittedRoundTransport,
+    sink: &crate::nodes::V3CommittedClientFrameSink,
+    projection: &super::relay_client_frames::V3RelayClientProjectionHandle,
+) -> V3ResponsesRelayRuntimeOutput {
+    execute_v3_responses_relay_runtime_inner(
+        manifest,
+        committed_round_input("req-committed-first-round"),
+        transport,
+        V3ProviderFailureRuntimeHealth::from_manifest(manifest),
+        V3ResponsesRelayRetryPolicy::default(),
+        false,
+        None,
+        None,
+        None,
+        None,
+        BTreeSet::new(),
+        V3ResponsesRelayRuntimeSeeds {
+            client_frame_sink: Some(sink.clone()),
+            client_stream_projection: Some(projection.clone()),
+            ..V3ResponsesRelayRuntimeSeeds::default()
+        },
+    )
+    .await
+    .expect("the first visible text must commit the SSE round")
+}
+
+async fn execute_committed_follow_up_round(
+    manifest: &V3Config05ManifestPublished,
+    transport: &CommittedRoundTransport,
+    sink: &crate::nodes::V3CommittedClientFrameSink,
+    projection: &super::relay_client_frames::V3RelayClientProjectionHandle,
+    request_id: &str,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    execute_v3_responses_relay_runtime_inner(
+        manifest,
+        committed_round_input(request_id),
+        transport,
+        V3ProviderFailureRuntimeHealth::from_manifest(manifest),
+        V3ResponsesRelayRetryPolicy::default(),
+        false,
+        None,
+        None,
+        None,
+        None,
+        BTreeSet::new(),
+        V3ResponsesRelayRuntimeSeeds {
+            client_frame_sink: Some(sink.clone()),
+            client_stream_projection: Some(projection.clone()),
+            ..V3ResponsesRelayRuntimeSeeds::default()
+        },
+    )
+    .await
+}
+
+fn sse_payloads(frames: &[String]) -> Vec<serde_json::Value> {
+    frames
+        .iter()
+        .filter_map(|frame| {
+            let data = frame
+                .lines()
+                .filter_map(|line| line.strip_prefix("data:").map(str::trim))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!data.is_empty())
+                .then(|| serde_json::from_str(&data).ok())
+                .flatten()
+        })
+        .collect()
+}
+
+#[async_trait::async_trait]
+impl ResponsesTransport for CommittedHookFailureTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.provider_ids
+            .lock()
+            .expect("provider id recorder")
+            .push(request.provider_id().to_string());
+        // First visible text commits the client channel. The response governance
+        // then rejects the orphan tool-close marker, which is a response-hook
+        // failure that arrives after the client already holds business frames.
+        let provider: routecodex_v3_provider_responses::V3ProviderSseStream =
+            Box::pin(stream::iter(vec![
+                Ok(b"data: {\"id\":\"chatcmpl_committed\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hello\\n\"}}]}\n\n".to_vec()),
+                Ok(b"data: {\"id\":\"chatcmpl_committed\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"</\xef\xbd\x9cDSML\xef\xbd\x9ctool_calls>\"},\"finish_reason\":\"stop\"}]}\n\n".to_vec()),
+                Ok(b"data: [DONE]\n\n".to_vec()),
+            ]));
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            provider,
+        ))
+    }
+}
+
+#[tokio::test]
+async fn committed_relay_stream_ends_after_a_response_hook_failure_without_a_second_candidate() {
+    std::env::set_var("COMMITTED_FIRST_KEY", "first-secret");
+    std::env::set_var("COMMITTED_SECOND_KEY", "second-secret");
+    let manifest = committed_hook_failure_manifest();
+    let transport = CommittedHookFailureTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let projection: super::relay_client_frames::V3RelayClientProjectionHandle =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+
+    let _output = execute_v3_responses_relay_runtime_inner(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "test".to_string(),
+            failure_session_scope: V3ProviderFailureSessionScope::new(
+                "test",
+                "default",
+                "committed-hook-failure-session",
+            )
+            .expect("session scope"),
+            request_id: "req-committed-hook-failure".to_string(),
+            payload: json!({"model": "client-model", "stream": true, "input": "hello"}),
+        },
+        &transport,
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        V3ResponsesRelayRetryPolicy::default(),
+        false,
+        None,
+        None,
+        None,
+        None,
+        BTreeSet::new(),
+        V3ResponsesRelayRuntimeSeeds {
+            client_frame_sink: Some(sink),
+            client_stream_projection: Some(projection),
+            ..V3ResponsesRelayRuntimeSeeds::default()
+        },
+    )
+    .await
+    .expect("a committed stream must end through its typed provider failure");
+
+    // The committed channel owns the response head: no second candidate may be
+    // attempted, because a second attempt would append a second response.
+    assert_eq!(
+        transport.provider_ids.lock().expect("provider ids").len(),
+        1,
+        "a failure after the first business frame must not select another candidate"
+    );
+    let mut frames = Vec::new();
+    while let Ok(frame) = receiver.try_recv() {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let heads = frames
+        .iter()
+        .filter(|frame| frame.contains("response.created"))
+        .count();
+    assert_eq!(
+        heads, 1,
+        "the committed stream must carry exactly one response head, got {frames:?}"
+    );
+}
+
+#[tokio::test]
+async fn committed_relay_sse_round_then_json_hook_failure_does_not_retry_or_add_a_head() {
+    std::env::set_var("COMMITTED_FIRST_KEY", "first-secret");
+    std::env::set_var("COMMITTED_SECOND_KEY", "second-secret");
+    let manifest = committed_hook_failure_manifest();
+    let first_transport = CommittedRoundTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        reply: CommittedRoundReply::SseFirst,
+    };
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let projection: super::relay_client_frames::V3RelayClientProjectionHandle =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+
+    let _first_output =
+        execute_committed_first_round(&manifest, &first_transport, &sink, &projection).await;
+    {
+        let mut slot = projection.lock().expect("projection handle");
+        slot.as_mut()
+            .expect("committed projection")
+            .close_round()
+            .expect("close the committed round");
+    }
+
+    let second_transport = CommittedRoundTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        reply: CommittedRoundReply::Json(
+            json!({
+                "id": "chatcmpl_committed_json_failure",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": "second\n</\u{FF5C}DSML\u{FF5C}tool_calls>"
+                    }
+                }]
+            })
+            .to_string()
+            .into_bytes(),
+        ),
+    };
+    let failure = execute_committed_follow_up_round(
+        &manifest,
+        &second_transport,
+        &sink,
+        &projection,
+        "req-committed-json-hook-failure",
+    )
+    .await
+    .expect("a committed hook failure must end through its typed provider failure");
+
+    assert_eq!(
+        second_transport
+            .provider_ids
+            .lock()
+            .expect("provider ids")
+            .len(),
+        1,
+        "the JSON hook failure must not retry or select another candidate"
+    );
+    assert!(
+        failure.error_chain.is_some(),
+        "the typed response hook failure must remain observable"
+    );
+
+    let mut frames = Vec::new();
+    while let Ok(frame) = receiver.try_recv() {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let payloads = sse_payloads(&frames);
+    assert_eq!(
+        payloads
+            .iter()
+            .filter(
+                |payload| payload.get("type").and_then(serde_json::Value::as_str)
+                    == Some("response.created")
+            )
+            .count(),
+        1,
+        "the cross-round failure must not append a second response head: {frames:?}"
+    );
+    assert!(
+        !payloads.iter().any(|payload| {
+            payload.get("type").and_then(serde_json::Value::as_str) == Some("response.completed")
+        }),
+        "the failed follow-up round must not fabricate a completed terminal: {frames:?}"
+    );
+}
+
+#[tokio::test]
+async fn committed_relay_sse_round_then_json_refill_keeps_terminal_business_items_once() {
+    std::env::set_var("COMMITTED_FIRST_KEY", "first-secret");
+    std::env::set_var("COMMITTED_SECOND_KEY", "second-secret");
+    let manifest = committed_hook_failure_manifest();
+    let first_transport = CommittedRoundTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        reply: CommittedRoundReply::SseFirst,
+    };
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let projection: super::relay_client_frames::V3RelayClientProjectionHandle =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+
+    let first_output =
+        execute_committed_first_round(&manifest, &first_transport, &sink, &projection).await;
+    let accumulated_items = collect_v3_chat_process_business_output_items(
+        first_output
+            .finalized_response
+            .as_ref()
+            .expect("first round finalized response"),
+    );
+    {
+        let mut slot = projection.lock().expect("projection handle");
+        slot.as_mut()
+            .expect("committed projection")
+            .close_round()
+            .expect("close the committed round");
+    }
+
+    let second_transport = CommittedRoundTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        reply: CommittedRoundReply::Json(
+            json!({
+                "id": "chatcmpl_committed_json_refill",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "second"}
+                }]
+            })
+            .to_string()
+            .into_bytes(),
+        ),
+    };
+    let second_output = execute_committed_follow_up_round(
+        &manifest,
+        &second_transport,
+        &sink,
+        &projection,
+        "req-committed-json-refill",
+    )
+    .await
+    .expect("the JSON refill round must complete");
+    let mut merged = second_output
+        .finalized_response
+        .clone()
+        .expect("second round finalized response");
+    merge_v3_chat_process_refill_output_items(&mut merged, &accumulated_items);
+
+    let mut frames = Vec::new();
+    while let Ok(frame) = receiver.try_recv() {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let mut sealed = {
+        let mut slot = projection.lock().expect("projection handle");
+        slot.take()
+            .expect("committed projection")
+            .finish(&merged)
+            .expect("seal the merged cross-round response")
+    };
+    use futures_util::StreamExt;
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+
+    let terminal = sse_payloads(&frames)
+        .into_iter()
+        .find(|payload| {
+            payload.get("type").and_then(serde_json::Value::as_str) == Some("response.completed")
+        })
+        .expect("merged response terminal");
+    let terminal_items = terminal
+        .pointer("/response/output")
+        .and_then(serde_json::Value::as_array)
+        .expect("terminal output");
+    let mut texts = Vec::new();
+    for item in terminal_items {
+        if let Some(content) = item.get("content").and_then(serde_json::Value::as_array) {
+            for part in content {
+                if part.get("type").and_then(serde_json::Value::as_str) == Some("output_text") {
+                    texts.push(
+                        part.get("text")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default(),
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(
+        texts,
+        vec!["first", "second"],
+        "the terminal must keep each round's business text exactly once: {terminal}"
+    );
+    assert_eq!(
+        second_transport
+            .provider_ids
+            .lock()
+            .expect("provider ids")
+            .len(),
+        1,
+        "the successful refill round must use one provider attempt"
+    );
 }

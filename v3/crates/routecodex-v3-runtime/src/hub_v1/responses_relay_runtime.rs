@@ -38,6 +38,8 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "responses_relay_runtime/relay_client_frames.rs"]
+mod relay_client_frames;
 #[path = "responses_openai_chat_conversion.rs"]
 mod responses_openai_chat_conversion;
 #[path = "responses_relay_dry_run.rs"]
@@ -106,6 +108,7 @@ impl V3ResponsesRelayProviderHealthHandle {
 }
 pub(super) use responses_openai_chat_conversion::build_v3_responses_provider_response_from_openai_chat_payload;
 pub(crate) use responses_openai_chat_conversion::build_v3_responses_reasoning_item_from_openai_chat_message;
+pub(crate) use responses_openai_chat_conversion::V3OpenAiChatToolCallProjection;
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
 pub use responses_relay_dry_run::{
@@ -194,13 +197,23 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
             .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))?,
     };
     let max_refills = v3_chat_process_refill_max_consecutive();
+    // One request-scoped projection state survives the refill rounds: a round
+    // that committed its first business frames keeps them, and the final round
+    // seals the single tail over the merged response.
+    let mut relay_seeds = initial_relay_seeds.clone();
+    if relay_seeds.client_stream_projection.is_none() {
+        relay_seeds.client_stream_projection = relay_seeds
+            .client_frame_sink
+            .clone()
+            .map(|_| std::sync::Arc::new(std::sync::Mutex::new(None)));
+    }
     let mut payload = input.payload.clone();
     let mut accumulated_items: Vec<Value> = Vec::new();
     let mut accumulated_usage: Option<V3RuntimeUsageSummary> = None;
     let mut accumulated_attempts: Option<usize> = None;
     let mut rounds = 0usize;
     loop {
-        let mut seeds = initial_relay_seeds.clone();
+        let mut seeds = relay_seeds.clone();
         seeds.request_execution_control = Some(control.clone());
         if rounds > 0 {
             // The original client execution owns the route-policy commit. A
@@ -267,6 +280,25 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
                             &mut accumulated_usage,
                             extract_v3_runtime_usage_summary(finalized),
                         );
+                        // A round that never committed left no client bytes:
+                        // drop its projector so the next round starts a clean
+                        // frame sequence. A committed round keeps its state and
+                        // appends from the next round.
+                        if let Some(handle) = relay_seeds.client_stream_projection.as_ref() {
+                            let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
+                            match slot.as_mut() {
+                                Some(projection) if projection.is_committed() => {
+                                    // The next round is a separate business item
+                                    // in the delivered payload: close the open
+                                    // items so the client sees one item per round.
+                                    projection.close_round().map_err(
+                                        V3ResponsesRelayRuntimeError::ExecutionControlResponse,
+                                    )?;
+                                }
+                                Some(_) => *slot = None,
+                                None => {}
+                            }
+                        }
                         payload = next_payload;
                         rounds += 1;
                         continue;
@@ -304,6 +336,23 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
                 }
                 if accumulated_attempts.is_some() {
                     observability.attempts = accumulated_attempts;
+                }
+            }
+        }
+        // Seal the committed client tail over the delivered response. The
+        // terminal frame stays inside the seal, so a failed seal cannot deliver
+        // it first, and the already-flushed prefix is never replayed.
+        if let Some(handle) = relay_seeds.client_stream_projection.as_ref() {
+            let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
+            if let Some(projection) = slot.as_mut() {
+                if projection.is_committed() {
+                    if let Some(finalized) = output.finalized_response.clone() {
+                        output.client_body = V3ResponsesRelayClientBody::Sse(
+                            projection
+                                .finish(&finalized)
+                                .map_err(V3ResponsesRelayRuntimeError::ExecutionControlResponse)?,
+                        );
+                    }
                 }
             }
         }
@@ -790,7 +839,7 @@ fn read_v3_usage_u64(value: &Value, path: &[&str]) -> Option<u64> {
         })
 }
 
-fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
+pub(super) fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
     let data =
         serde_json::to_string(payload).expect("serde_json::Value serialization must not fail");
     format!("event: {event}\ndata: {data}\n\n").into_bytes()
@@ -1515,8 +1564,12 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
 }
 
 #[cfg(test)]
+#[path = "responses_relay_first_frame_commit_tests.rs"]
+mod responses_relay_first_frame_commit_tests;
+#[cfg(test)]
 #[path = "responses_relay_runtime_multi_interface_tests.rs"]
 mod responses_relay_runtime_multi_interface_tests;
+
 #[cfg(test)]
 #[path = "responses_relay_runtime_tests.rs"]
 mod responses_relay_runtime_tests;

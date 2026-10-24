@@ -36198,3 +36198,63 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - 静态与架构 gate：`verify:v3-architecture-ci` `35/35`；resource-map、module-boundaries、protocol-conversion-field-parity、provider-action-gate（48 edges）、cargo-fmt 与 `git diff --check` 通过。
 - 独立 Review：oauth/gpt-6.1-sol medium 对完整 worktree diff（base `7ad8e0e9a`）PASS，无 blocking findings，随后发现一个 P1：mixed reasoning blocks 中无扩展的块在下一轮 provider 请求被丢弃。当前修复改为保存每个 reasoning 块的有序记录，并保留 native type、明文、encrypted data 与可选扩展；redacted reasoning 不再只有 codec 级往返覆盖。未做 install/restart/live replay。
 - 边界：按 master 分工未 merge、未 push、未安装、未重启、未做 live replay；本 worktree 保留到 candidate commit 和交接完成。
+
+## 2026-10-23 849ed8f P2 relay 首帧提交 — review FAIL 记录
+
+- Worktree `/Volumes/Intel/playground/routecodex/849ed8f-relay-first-frame`，branch `codex/849ed8f-relay-first-frame`，HEAD `23676e502`（3 commits），未合入。base 已推进到 `origin/main 1a8705c09`（落后 13）。
+- 两份独立 review 都 FAIL。核对后确认两条阻断成立：
+  - B2 提交后失败换候选：inner 两条失败分支 `continue` 前未查 committed；投影器被丢弃，下一轮在同一已提交 sink 上重建并重放 response.created/in_progress + 重复 item。
+  - B3 refill 轮次不关闭条目：`append_text` 复用 open message；无工具 completed 文本会 refill 一轮，两轮文本并进同一 msg_0，终态两条目/单 id。
+  - B1（另一份 review 的阻断）Resp03 无条件 think/control 改写发生在投影之后，流出字节与终态不一致；需设计取舍（逐 chunk 改写 vs 让 openai_chat 文本保持整段）。
+- 非阻断：终态缺 usage 零填充；strip_client_response_id 未生效；`relay_client_stream_commit_eligible` 死代码；doc/status 与实现不符；id 按下标对齐有顺序假设；finish 把非 incomplete/in_progress 都投影成 completed；created/in_progress 手搓 8 字段而非复用 progress 投影。
+- 状态：候选已回滚，live 4444/7777 运行主干构建。分支保留，未清理 worktree。
+
+### B1 根因收敛（2026-10-23 续）
+
+- 逐条读实现：`harvest_v3_think_blocks_at_resp03` 无条件；OpenAiChat 走 `harvest_v3_openai_chat_think_blocks` → `harvest_v3_think_text`，只认 `<think>`、`</think>`（未闭合块把正文留在可见文本）。`govern_v3_relay_control_markers_at_resp03` 用 `ToolMarkupDeclarations::default()`，`removed_label` 只删整行等于独立协议标签的行（`removable_label`），是行级删除。`tool_markup::govern_thinking` 与 think 同族，`complete_provider_attempt` 恒真。
+- 结论：改写由模型输出触发，不存在请求级事实能证明正文不被改写，因此 B1 无法用 gate 收口；只有两条路：
+  - (a) 投影器逐 chunk 复刻同一套治理 + hold-back（未闭合 `<think>` 后不得流出、末尾部分标签前缀回退、未结束行回退），并与终态逐字节收敛。正确但要新建流式治理子系统，需专门红测证明多输入下逐字节一致。
+  - (b) 收敛方向反过来：已提交时把终态正文改写为已流出正文（投影器在 finish 覆写条目文本，按 类型+序号 对齐 id），收敛由构造保证，代价是 SSE 模式下 `<think>` 内联块不再被摘入 reasoning，形成模式相关的载荷语义差异。
+- 两项取舍都需要 owner 拍板；(b) 改动较小但留下可见语义差异，(a) 无差异但工作量与风险显著。
+- 已修：B2 提交后失败不换候选、B3 refill 轮次各自成条目（commit `f9ffca51c`）。未修：B1、终态 usage、strip_client_response_id、死代码、DAG 状态段、id 对齐、finish 状态映射。
+
+## 2026-10-23 849ed8f P2 三条阻断修复 + 候选上线实测
+
+- B1/B2/B3 三条阻断全部修完：提交后失败不换候选、refill 轮次各自成条目、终态由已流出条目重建并按 output_index 排序（收敛由构造保证）。
+- 红测证据：relay_first_frame_commit 5 条；去掉终态重建→"terminal introduces an item"红；去掉排序→"output index order got [148,411,279]"红；去掉守卫→提交后失败路径无覆盖（运行时级仍缺）。
+- 静态 gate：cargo fmt、verify:v3-resource-map、verify:v3-module-boundaries、verify:v3-dagpipe-governance、verify:v3-mainline-caller-flow 全绿。
+- 测试：relay_first_frame_commit 5/5、responses_relay 200/200、client_sse 17/17、multi_listener_server 192/192。
+- 构建 0.90.4935、安装、rccv3 restart 两次（第 2 次加载 output 排序修复）。
+- 7777 实测：首帧 20.94s / 终态 48.17s，89 个 output_text.delta 分散 27.19s、86 个不同到达时刻；终态带 usage；两轮 refill 各自成条目（rs_0,msg_1,rs_2,rs_3,msg_4）。
+- 4444 实测：首帧 4.08s / 终态 8.76s，80 个正文增量分散 4.55s；但出现 2 个 response.created，判定为 Direct refill 拼装行为（本分支未改 Direct），记为观察项未关闭。
+- 文档与 map：DAG P2 状态段、verification-map owner_modules + relay 门禁均已同步。
+- 独立复审：已派（gpt-6.1-sol medium），结果待收。
+
+## 2026-10-24 849ed8f P2 第二轮 review 修复 + think 收割前移
+
+- 第二轮 review 判 FAIL 的两条阻断已修：提交后失败守卫从 provider 流失败分支移到 hook 失败分支（原先重复插在同一分支、hook 分支空守卫）；终态重建同时覆盖顶层 `output_text`。
+- B2（think 内联残留）改为按 owner 指示前移收割，不再作为产品取舍：投影器在流式到达时应用 `harvest_v3_think_text` 的同一条 `<think>` / `</think>` 规则，块内容只进 reasoning、正文只发块外文本，跨帧拆分的标记先扣住，流结束仍未闭合的块按整段语义留作正文。规则真源仍是 `resp_chat_process_03_governed::harvest_v3_think_text`（类型与访问器放开给 gate 用）。
+- 新红测 `relay_first_frame_commit_matches_the_whole_attempt_think_harvest`：对 5 个样本、每个字符切分点比对正文与 reasoning 文本与整段收割逐字相等。去掉前移逻辑后该测转红（`<think>plan</think>answer` 得到整段原文）。
+- 新红测 `relay_first_frame_commit_harvests_inline_think_blocks_like_chat_process`：跨三帧拆分的标记，客户端帧里不出现 think 标记与块内容，块内容只走 reasoning，终态正文为块前后拼接。
+- 提交门标记集改为 Relay 自己的整段 owner 派生（`new_with_governed_markers`，DSML 控制标记按行、think 标记内联），探测到治理文本时 `hold_client_flush` 而不是静默丢帧；对应红测 `relay_committed_marker_prefix_releases_tail_but_real_marker_breaks`。
+- hook 失败分支的提交后守卫需要原始失败值，handler 参数改为 `failure.clone()`（与 provider 流失败分支同形）。
+- 门禁：relay_first_frame_commit 11/11、responses_relay 207/207、client_sse 17/17、resp_chat_process 109/109、openai_chat_namespace_names 6/6、multi_listener_server 203/203、field-parity 5/5、architecture-ci 33/33、fmt 干净。
+- HEAD `5fbda9029` 已推送 PR #472；第三轮独立 review 已派；CI 待收。
+
+## 2026-10-24 第三轮 review（ffcommit-review）verdict：FAIL（对 HEAD 5fbda9029）
+
+- 阻断 1：parity 期望值比错 owner。Relay 的 Chat 响应在 Resp03 前已换成 Responses 语义负载，真 owner 是 `harvest_v3_responses_think_blocks` + `v3_resp03_reasoning_item`（每块一个 summary part、不插 \n），不是 chat 的 `append_v3_resp03_openai_chat_reasoning_content`。投影器插 `\n` 导致多块 reasoning 与终态发叉。
+- 阻断 2：`<thinking>` 家族由投影器第二套语法实现，与真 owner `project_v3_thinking_tag_text_with_tools` 的 protected ranges / opaque invocation / has_complete_tools 未闭合语义不一致，正文会被改写（引号内标签、`<think>a</thinking>b`、无工具未闭合）。
+- 阻断 3：提交后出现 standalone 控制标签时 finish 无条件断流，吞掉标签外正文；probe 不能当 owner。
+- 非阻断：close_round 跨轮保留 think 状态应改为每轮 flush+reset；observe_item_added 死代码；注释错位/错别字；parity gate 只比 delta 文本不比终态结构。
+- 已闭合：提交后失败不换候选、终态重建（在阻断 2 修好后成立）、hold_client_flush 不泄漏、Direct 无回归。
+- 现场：一个 codex exec worker（pid 9879）正在同一 worktree 修 r4 的 3 个 P1（reasoning 载荷、DSML 行级剥除、close_round 重置），未提交改动编译缺 payload 字段。结论仅对 HEAD 5fbda9029 成立。
+
+## 2026-10-24 r4 修复合入 + 门禁复跑
+
+- r4 worker（codex exec 9879）在同一 worktree 完成 3 个 P1 修复并提交：
+  `e18ffb138` 终态决策改由完整治理 owner 结果判断（探针只作 hold，不再凭 confirmed 直接断流；fenced/quoted 保留则正常完成）；reasoning 增量保完整业务载荷（encrypted_content 等进 item.done 与终态账本，可下一轮回传）；close_round 按本轮完整治理释放未闭合 think 块并重置扫描状态。
+  `8c059909b` 对齐 relay 并发 fixture 与交付顺序（provider 先 content 后 reasoning → 客户端 message 在前、reasoning 在后；JSON 整段路径同样如此，非提交路径回归）。
+  `16246057d` 锁定流式 reasoning 载荷交付（防未完成载荷提前 done）。
+- 门禁复跑（worker 退出后干净树）：fmt 干净；relay_first_frame_commit 17/17、responses_relay 215/215、client_sse 17/17、resp_chat_process 109/109、commit_probe 28/28、resp03_think_harvest 5/5、relay_first_frame_commit_public 4/4、openai_chat_namespace_names 6/6、field-parity 5/5、architecture-ci 33/33。
+- HEAD 已推 PR #472；CI test 仍 pending（本地与 CI 用同一 fixture，基督徒r4 改动含 fixture）。
