@@ -2139,6 +2139,7 @@ where
         if disposition == super::common::V3ChatProcessRefillDisposition::RequestRefill {
             if let Ok(next_payload) =
                 super::resp_chat_process_03_governed::build_v3_chat_process_refill_continuation_request(
+                    C::ENTRY_PROTOCOL,
                     &payload,
                     &round.finalized_response,
                 )

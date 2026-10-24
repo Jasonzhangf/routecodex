@@ -1014,16 +1014,21 @@ pub(crate) struct V3ChatProcessGovernedFacts {
 
 /// Build the standard continuation request for one refill execution.
 ///
-/// The original payload is cloned and every field other than `input` is kept
-/// verbatim (model, instructions, tools, tool_choice, reasoning, parallel
-/// tool calls and unknown business extensions). Each collected business item of
-/// the just-finished execution is appended as an assistant message. A
-/// provider-origin reasoning item with real identity and opaque continuation
-/// material is appended verbatim because the target protocol can express it;
-/// RCC-synthesized reasoning is not replayable source material and is omitted.
-/// The refill instruction is appended as a new user turn. No counter, state or
-/// control field ever enters the payload.
+/// The original payload is cloned and every unrelated field is kept verbatim
+/// (model, instructions, tools, tool_choice, reasoning, parallel tool calls and
+/// unknown business extensions). The entry protocol decides which field carries
+/// the conversation history: `messages` for Chat and Anthropic, `input` for
+/// Responses, `contents` for Gemini. That is the same field the next execution's
+/// inbound canonicalization reads, so the appended history actually becomes the
+/// next provider request. Each collected business item of the just-finished
+/// execution is appended as an assistant turn; a provider-origin reasoning item
+/// with real identity and opaque continuation material is appended verbatim
+/// because the target protocol can express it, while RCC-synthesized reasoning
+/// is not replayable source material and is omitted. The refill instruction is
+/// appended as a new user turn. No counter, state or control field ever enters
+/// the payload.
 pub(crate) fn build_v3_chat_process_refill_continuation_request(
+    entry_protocol: V3HubEntryProtocol,
     original_request_payload: &Value,
     current_execution_finalized_response: &Value,
 ) -> Result<Value, String> {
@@ -1031,11 +1036,16 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
     let Some(payload_object) = payload.as_object_mut() else {
         return Err("refill continuation requires an object request payload".to_string());
     };
-    // A canonical Chat request carries `messages`; a Responses request carries
-    // `input`. Keep exactly the representation the original request used.
-    // Adding the other form makes the refill fail inbound canonicalization as
-    // conflicting `input` and `messages` histories.
-    if payload_object.get("messages").is_some_and(Value::is_array) {
+    // Inbound canonicalization owns the representation decision, including the
+    // Responses entry that carries the Chat shape. Ask it instead of sniffing
+    // field names: extending a field the next execution will not read leaves
+    // the provider request unchanged, and writing a second history form makes
+    // canonicalization fail on conflicting histories.
+    let history_field = super::req_inbound_02_normalized::v3_hub_inbound_history_field(
+        entry_protocol,
+        original_request_payload,
+    );
+    if history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::Messages {
         payload_object.remove("input");
         let messages = payload_object
             .get_mut("messages")
@@ -1113,7 +1123,7 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
     // only. The continuation must therefore extend that same representation;
     // writing `input` here would leave the next provider request identical to
     // the first one, without the answer and without the instruction.
-    if payload_object.get("contents").is_some_and(Value::is_array) {
+    if history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::Contents {
         let contents = payload_object
             .get_mut("contents")
             .and_then(Value::as_array_mut)
@@ -1123,29 +1133,11 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
             collect_v3_chat_process_business_output_items(current_execution_finalized_response)
         {
             // Refill only runs when the round produced no real tool call, so
-            // the replayable business content is the visible assistant text.
+            // the replayable business content is the assistant message parts.
             if item.get("type").and_then(Value::as_str) != Some("message") {
                 continue;
             }
-            let Some(content) = item.get("content").and_then(Value::as_array) else {
-                continue;
-            };
-            for part in content {
-                let Some(text) = part
-                    .as_object()
-                    .filter(|row| {
-                        matches!(
-                            row.get("type").and_then(Value::as_str),
-                            Some("output_text" | "text")
-                        )
-                    })
-                    .and_then(|row| row.get("text"))
-                    .and_then(Value::as_str)
-                else {
-                    continue;
-                };
-                model_parts.push(json!({"text": text}));
-            }
+            model_parts.extend(v3_chat_process_refill_gemini_parts(&item));
         }
         if !model_parts.is_empty() {
             contents.push(json!({"role": "model", "parts": model_parts}));
@@ -1216,6 +1208,59 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
     }));
     payload_object.insert("input".to_string(), input);
     Ok(payload)
+}
+
+/// Native Gemini business parts the governed projection keeps verbatim.
+const V3_GEMINI_NATIVE_PART_KEYS: [&str; 4] = [
+    "inlineData",
+    "fileData",
+    "executableCode",
+    "codeExecutionResult",
+];
+
+/// Project one governed business message into representable Gemini `Parts`.
+///
+/// Governance keeps the provider's parts and only adds canonical framing: a
+/// text part arrives as `output_text` while still carrying its native siblings
+/// (for example `thoughtSignature`), and a native part such as `inlineData`
+/// arrives verbatim. Only the canonical framing field is removed. Dropping the
+/// native parts would silently shrink the continuation history of a round that
+/// delivered multimodal business content, and an empty text part is not a valid
+/// Gemini Part.
+fn v3_chat_process_refill_gemini_parts(business_message: &Value) -> Vec<Value> {
+    let mut parts = Vec::new();
+    for part in business_message
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(row) = part.as_object() else {
+            continue;
+        };
+        if matches!(
+            row.get("type").and_then(Value::as_str),
+            Some("output_text" | "text")
+        ) {
+            let text = row.get("text").and_then(Value::as_str).unwrap_or("");
+            if text.is_empty() {
+                // A sibling native part in the same message still carries the
+                // real business content, so skip only this empty Part.
+                continue;
+            }
+            let mut part = row.clone();
+            part.remove("type");
+            parts.push(Value::Object(part));
+            continue;
+        }
+        if V3_GEMINI_NATIVE_PART_KEYS
+            .iter()
+            .any(|key| row.contains_key(*key))
+        {
+            parts.push(part.clone());
+        }
+    }
+    parts
 }
 
 /// Collect the business output items of one execution response, in order.

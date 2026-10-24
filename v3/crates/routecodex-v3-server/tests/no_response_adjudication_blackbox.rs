@@ -833,10 +833,17 @@ async fn refill_gemini_relay_entry_bounded_refill_public() {
 async fn refill_gemini_native_provider_entry_bounded_refill_public() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
+    // The first round delivers text, an empty text Part and a native image
+    // Part: the continuation must keep the representable parts and must not
+    // turn the empty Part into a model turn of its own.
     let first_round = json!({"candidates":[{
         "index": 0,
         "finishReason": "STOP",
-        "content": {"role": "model", "parts": [{"text": "GEMINI_NATIVE_FIRST"}]}
+        "content": {"role": "model", "parts": [
+            {"text": "GEMINI_NATIVE_FIRST"},
+            {"text": ""},
+            {"inlineData": {"mimeType": "image/png", "data": "R0VNSU5J"}}
+        ]}
     }]});
     // The final round is either a plain answer or a real tool call: the second
     // shape proves the delivered call stays associated with its candidate.
@@ -918,6 +925,24 @@ async fn refill_gemini_native_provider_entry_bounded_refill_public() {
                 .iter()
                 .any(|content| content["parts"].to_string().contains("GEMINI_NATIVE_FIRST")),
             "continuation must replay the first round answer to the provider: {}",
+            captured[1]
+        );
+        // Native multimodal parts and text siblings are real business content
+        // and must not be narrowed to plain text by the continuation.
+        assert!(
+            contents
+                .iter()
+                .any(|content| content["parts"].to_string().contains("inlineData")),
+            "continuation must preserve native gemini parts: {}",
+            captured[1]
+        );
+        let model_turns = contents
+            .iter()
+            .filter(|content| content["role"] == "model")
+            .count();
+        assert_eq!(
+            model_turns, 1,
+            "one model turn for the first round, no turn for its empty text part: {}",
             captured[1]
         );
         assert!(
@@ -5696,7 +5721,9 @@ health = {{ enabled = {health_enabled}, failure_threshold = 2, cooldown_ms = 500
 responses = {{ process = "{process}", streaming = "always" }}
         [providers.test.models."{model_key}"]
 wire_name = "{wire_model}"
-capabilities = ["text", "tools"]
+# The mock target declares vision so a refill continuation may replay a native
+# image part the provider itself produced in the earlier round.
+capabilities = ["text", "tools", "vision"]
 supports_streaming = true
 max_tokens = 4096
 max_context_tokens = 128000

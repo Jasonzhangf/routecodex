@@ -21,6 +21,41 @@ pub struct V3HubReqInbound02Normalized {
     pub(crate) memory_raw_capture_guidance_injected: bool,
 }
 
+/// Which request field carries the conversation history this stage will read.
+///
+/// Inbound canonicalization is the sole owner of that decision, because it
+/// chooses the canonicalizer by entry protocol but also handles a Responses
+/// request that carries the Chat shape. The refill continuation builder reads
+/// this same answer, so a continuation always extends the field the next
+/// execution will actually read instead of guessing from field names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3HubInboundHistoryField {
+    Messages,
+    Input,
+    Contents,
+}
+
+pub(crate) fn v3_hub_inbound_history_field(
+    entry_protocol: V3HubEntryProtocol,
+    payload: &Value,
+) -> V3HubInboundHistoryField {
+    match entry_protocol {
+        V3HubEntryProtocol::Gemini => V3HubInboundHistoryField::Contents,
+        V3HubEntryProtocol::Anthropic | V3HubEntryProtocol::OpenAiChat => {
+            V3HubInboundHistoryField::Messages
+        }
+        V3HubEntryProtocol::Responses => {
+            let has_input = payload.get("input").is_some();
+            let has_messages = payload.get("messages").and_then(Value::as_array).is_some();
+            if has_input || !has_messages {
+                V3HubInboundHistoryField::Input
+            } else {
+                V3HubInboundHistoryField::Messages
+            }
+        }
+    }
+}
+
 pub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(
     input: V3HubReqInbound01ClientRaw,
 ) -> V3HubReqInbound02Normalized {

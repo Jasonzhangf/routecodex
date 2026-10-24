@@ -688,8 +688,12 @@ fn refill_continuation_keeps_original_fields_and_appends_history_once() {
             {"type": "reasoning", "summary": [{"type": "summary_text", "text": "thinking"}]}
         ]
     });
-    let continuation = build_v3_chat_process_refill_continuation_request(&original, &finalized)
-        .expect("continuation must build");
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("continuation must build");
     assert_eq!(continuation["model"], json!("gpt-test"));
     assert_eq!(continuation["instructions"], json!("help the user"));
     assert_eq!(
@@ -755,8 +759,12 @@ fn refill_continuation_preserves_provider_reasoning_and_skips_synthesized() {
             }
         ]
     });
-    let continuation = build_v3_chat_process_refill_continuation_request(&original, &finalized)
-        .expect("continuation must build");
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("continuation must build");
     let input = continuation["input"].as_array().expect("input array");
     assert_eq!(
         input.len(),
@@ -809,8 +817,12 @@ fn refill_continuation_messages_merges_same_turn_reasoning_and_assistant_message
         ]
     });
 
-    let continuation = build_v3_chat_process_refill_continuation_request(&original, &finalized)
-        .expect("messages-shaped refill continuation must build");
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::OpenAiChat,
+        &original,
+        &finalized,
+    )
+    .expect("messages-shaped refill continuation must build");
     let messages = continuation["messages"].as_array().expect("messages array");
     assert_eq!(
         messages.len(),
@@ -895,8 +907,12 @@ fn refill_continuation_normalizes_string_input_and_keeps_image_parts() {
             }
         ]
     });
-    let continuation = build_v3_chat_process_refill_continuation_request(&original, &finalized)
-        .expect("continuation must build");
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("continuation must build");
     let input = continuation["input"].as_array().expect("input array");
     assert_eq!(input.len(), 3, "{input:?}");
     assert_eq!(input[0]["role"], json!("user"));
@@ -905,6 +921,96 @@ fn refill_continuation_normalizes_string_input_and_keeps_image_parts() {
     assert_eq!(
         input[1]["content"][1],
         json!({"type": "input_image", "image_url": "data:image/png;base64,AAAA"})
+    );
+}
+
+#[test]
+fn refill_continuation_gemini_keeps_native_parts_and_skips_empty_text() {
+    let original = json!({
+        "contents": [{"role": "user", "parts": [{"text": "describe"}]}],
+        "generationConfig": {"maxOutputTokens": 64}
+    });
+    let finalized = json!({
+        "id": "resp_gemini",
+        "status": "completed",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {"type": "output_text", "text": "caption", "thoughtSignature": "sig-1"},
+                {"type": "output_text", "text": ""},
+                {"inlineData": {"mimeType": "image/png", "data": "QUJD"}}
+            ]
+        }]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Gemini,
+        &original,
+        &finalized,
+    )
+    .expect("gemini-shaped refill continuation must build");
+    assert_eq!(
+        continuation["generationConfig"],
+        json!({"maxOutputTokens": 64}),
+        "the continuation must keep the rest of the client request"
+    );
+    assert!(
+        continuation.get("input").is_none() && continuation.get("messages").is_none(),
+        "a gemini request must keep its own history representation: {continuation}"
+    );
+    let contents = continuation["contents"].as_array().expect("contents array");
+    assert_eq!(
+        contents.len(),
+        3,
+        "original + model + instruction: {contents:?}"
+    );
+    assert_eq!(contents[0]["role"], json!("user"));
+    assert_eq!(contents[1]["role"], json!("model"));
+    let parts = contents[1]["parts"].as_array().expect("model parts");
+    assert_eq!(
+        parts,
+        &vec![
+            json!({"text": "caption", "thoughtSignature": "sig-1"}),
+            json!({"inlineData": {"mimeType": "image/png", "data": "QUJD"}}),
+        ],
+        "native parts and text siblings must survive, an empty text part must not: {parts:?}"
+    );
+    assert_eq!(contents[2]["role"], json!("user"));
+    assert_eq!(
+        contents[2]["parts"][0]["text"],
+        json!(V3_CHAT_PROCESS_REFILL_INSTRUCTION)
+    );
+}
+
+#[test]
+fn refill_continuation_responses_ignores_foreign_contents_extension() {
+    let original = json!({
+        "input": "original task",
+        "contents": [{"role": "user", "parts": [{"text": "extension data"}]}]
+    });
+    let finalized = json!({
+        "id": "resp_1",
+        "status": "completed",
+        "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}
+        ]
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &original,
+        &finalized,
+    )
+    .expect("responses continuation must build");
+    let input = continuation["input"].as_array().expect("input array");
+    assert_eq!(input.len(), 3, "original + answer + instruction: {input:?}");
+    assert_eq!(input[1]["role"], json!("assistant"));
+    assert_eq!(
+        input[2]["content"][0]["text"],
+        json!(V3_CHAT_PROCESS_REFILL_INSTRUCTION)
+    );
+    assert_eq!(
+        continuation["contents"], original["contents"],
+        "an unrelated preserved extension must not become the history owner"
     );
 }
 

@@ -494,6 +494,7 @@ async fn execute_v3_anthropic_relay_runtime_inner_with_refill<T: ResponsesTransp
             if let Ok(next_payload) =
                 super::resp_chat_process_03_governed::
                     build_v3_chat_process_refill_continuation_request(
+                        super::common::V3HubEntryProtocol::Anthropic,
                         &payload,
                         &round.finalized_response,
                     )
