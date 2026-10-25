@@ -442,30 +442,53 @@ fn provider_model_availability_excludes_candidate_outside_window() {
 }
 
 #[test]
-fn provider_model_availability_guard_expands_window_edges() {
+fn provider_model_availability_guard_shrinks_window_edges() {
     let manifest = provider_model_availability_manifest(Some(free_window_availability(10)));
     let target = V3TargetInterpreter::default();
     let available = Availability {
         blocked: BTreeSet::new(),
     };
-    // 08:05 Asia/Shanghai sits five minutes past the window end, inside guard.
+    // 07:45 Asia/Shanghai is inside the guarded 00:10-07:50 sub-window.
     let guarded = target
         .select_available(
             expanded_with(&manifest, &target, 0),
             &available,
-            1_767_225_900_000,
+            1_767_224_700_000,
         )
         .unwrap();
     assert_eq!(guarded.candidate.provider_id, "a");
-    // 08:15 Asia/Shanghai is past the guarded edge.
+    // 07:55 Asia/Shanghai is inside the declared window but inside the guard,
+    // so the model must stay unused there and provider b must win.
     let expired = target
         .select_available(
             expanded_with(&manifest, &target, 0),
             &available,
-            1_767_226_500_000,
+            1_767_225_300_000,
         )
         .unwrap();
     assert_eq!(expired.candidate.provider_id, "b");
+}
+
+#[test]
+fn provider_model_availability_outside_window_records_reason_and_keeps_health() {
+    let manifest = provider_model_availability_manifest(Some(free_window_availability(0)));
+    let target = V3TargetInterpreter::default();
+    let available = Availability {
+        blocked: BTreeSet::new(),
+    };
+    let expanded = expanded_with(&manifest, &target, 0);
+    let selected = target
+        .select_available(expanded, &available, 1_767_232_800_000)
+        .unwrap();
+    assert_eq!(selected.candidate.provider_id, "b");
+    assert!(
+        selected
+            .unavailable_candidates
+            .iter()
+            .any(|reason| reason.contains(":availability_inactive")),
+        "expected an availability_inactive reason, got {:?}",
+        selected.unavailable_candidates
+    );
 }
 
 #[test]

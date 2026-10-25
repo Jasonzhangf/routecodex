@@ -400,6 +400,20 @@ impl V3TargetInterpreter {
     ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
         let mut unavailable = Vec::new();
         let mut eligible = Vec::new();
+        // Automatic-cooldown exemption counts only candidates still admitted by
+        // capability and declared availability, so a window-inactive or
+        // capability-mismatched sibling cannot inflate the pool size.
+        let admitted_candidate_count = expanded
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                candidate_satisfies_required_capabilities(candidate)
+                    && candidate
+                        .model_availability
+                        .as_ref()
+                        .is_none_or(|availability| availability.is_available_at(now_ms))
+            })
+            .count();
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
@@ -416,8 +430,11 @@ impl V3TargetInterpreter {
                 .is_some_and(|availability| !availability.is_available_at(now_ms))
             {
                 unavailable.push(format!(
-                    "{}:{}:{}:availability_inactive",
-                    candidate.provider_id, candidate.auth_alias, candidate.model_id
+                    "{}:{}:{}:{}:availability_inactive",
+                    candidate.provider_id,
+                    candidate.interface_id,
+                    candidate.auth_alias,
+                    candidate.model_id
                 ));
                 continue;
             }
@@ -457,7 +474,7 @@ impl V3TargetInterpreter {
             // scheduling. Keep manual auth, capacity and request-local blocks.
             if !projection.available
                 && Self::ignores_single_candidate_automatic_cooldown(
-                    expanded.candidates.len(),
+                    admitted_candidate_count,
                     &projection.blocked_scopes,
                 )
             {
