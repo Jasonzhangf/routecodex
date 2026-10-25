@@ -974,6 +974,103 @@ async fn relay_public_governed_refill_releases_held_tail_before_round_close() {
     entry.stop().await;
 }
 
+/// A governed refill chain with three rounds must keep each round's governed
+/// probe and held-tail state private to that round.
+///
+/// Round one commits with a governed marker and releases its tail at the round
+/// boundary. Round two carries only a standalone governed marker that Chat
+/// Process strips to empty, so it must not open an empty message item or match
+/// an earlier round's message. Round three then streams visible business text
+/// and must be the only round that reconciles at the terminal. The delivered
+/// ledger keeps each round's message exactly once and never leaks the raw
+/// control label.
+#[tokio::test]
+async fn relay_public_849ed8f_governed_commit_public_refill_round_state_resets() {
+    let _guard = TEST_LOCK.lock().await;
+    let plans = vec![
+        vec![
+            chat_delta("one"),
+            chat_delta("\n<|DSML|tool_calls>\ntail-one"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+        vec![
+            chat_delta("<|DSML|tool_calls>\n"),
+            chat_delta("two"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+        vec![
+            chat_delta("three"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+    ];
+    let (entry, mut captures) = start_with_plans_and_refill(plans, Some(2)).await;
+    let body = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
+    let events = response_sse_events(&body);
+    assert_eq!(
+        captured_provider_requests(&mut captures),
+        3,
+        "three governed rounds must each consume one provider plan: {body}"
+    );
+    assert!(
+        !body.contains("<|DSML|tool_calls>"),
+        "a stripped standalone marker must never leak to the client: {body}"
+    );
+    assert_eq!(
+        delivered_visible_text(&events),
+        "one\ntail-onetwothree",
+        "each round's visible text must arrive exactly once, in order: {body}"
+    );
+    let message_added_count = events
+        .iter()
+        .filter(|event| event["type"] == "response.output_item.added")
+        .filter(|event| event["item"]["type"] == "message")
+        .count();
+    assert_eq!(
+        message_added_count, 3,
+        "the stripped marker round must not open an empty message item: {body}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["type"] == "response.completed")
+            .count(),
+        1,
+        "the refill chain must complete exactly once: {body}"
+    );
+    let completed = completed_response(&events);
+    let messages: Vec<String> = completed["output"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["type"] == "message")
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter(|part| part["type"] == "output_text")
+        .filter_map(|part| part["text"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(
+        messages,
+        vec![
+            "one\ntail-one".to_string(),
+            "two".to_string(),
+            "three".to_string()
+        ],
+        "the terminal must keep each round's message exactly once: {completed}"
+    );
+    assert!(
+        !body.contains("\"error\"") && !body.contains("network_error"),
+        "the client must not receive a proxy-generated error: {body}"
+    );
+    entry.stop().await;
+}
+
 fn captured_provider_requests(captures: &mut mpsc::UnboundedReceiver<Value>) -> usize {
     let mut count = 0;
     while captures.try_recv().is_ok() {

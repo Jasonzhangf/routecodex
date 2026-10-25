@@ -57,6 +57,11 @@ struct OpenMessageItem {
     output_index: usize,
     item_id: String,
     text: String,
+    /// A governed prefix can identify a message before the complete-attempt
+    /// owner confirms that the round has any visible message text. Keep those
+    /// bytes private until that decision so a stripped control marker cannot
+    /// create an empty client item.
+    announced: bool,
     /// Bytes of this item that have already crossed the client channel. A
     /// governed suffix is buffered until the complete-attempt owner decides it,
     /// so the terminal reconciliation must compare only this prefix.
@@ -247,6 +252,11 @@ pub(crate) struct V3RelayChatClientStreamProjector {
     tool_calls: Vec<OpenToolCallItem>,
     governance: V3DirectPrefixCommitProbe,
     post_commit_governed: bool,
+    /// Item boundaries for the current refill round. The projector's ledger is
+    /// request-wide for the final terminal, but governance decisions are
+    /// round-local.
+    round_streamed_item_start: usize,
+    round_terminal_item_start: usize,
     /// Chat Process harvests `<think>` and `<thinking>` blocks out of the
     /// visible content on the whole attempt. A committed stream cannot rewrite
     /// bytes it already sent, so the projector applies the same rule while the
@@ -284,6 +294,8 @@ impl V3RelayChatClientStreamProjector {
                 relay_governed_text_markers(),
             ),
             post_commit_governed: false,
+            round_streamed_item_start: 0,
+            round_terminal_item_start: 0,
             think_pending: String::new(),
             think_open: None,
             thinking_reasoning_seen: false,
@@ -476,16 +488,14 @@ impl V3RelayChatClientStreamProjector {
         }
     }
 
-    fn post_commit_governed_consistent_with_terminal(&self, terminal_response: &Value) -> bool {
+    fn post_commit_governed_consistent_with_terminal(&self, terminal_items: &[Value]) -> bool {
         if !self.post_commit_governed {
             return true;
         }
-        let terminal_items = terminal_response
-            .get("output")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let streamed_preserved = self.streamed_items.iter().all(|streamed| {
+        let round_start = self
+            .round_streamed_item_start
+            .min(self.streamed_items.len());
+        self.streamed_items[round_start..].iter().all(|streamed| {
             let kind = streamed.item.get("type").and_then(Value::as_str);
             match kind {
                 Some("message" | "function_call" | "custom_tool_call" | "mcp_call") => {
@@ -495,19 +505,6 @@ impl V3RelayChatClientStreamProjector {
                 }
                 _ => true,
             }
-        });
-        if !streamed_preserved {
-            return false;
-        }
-        // The open message may have a held governed suffix that is not in
-        // `streamed_items` yet. It is preservable when some terminal message
-        // starts with the already-delivered prefix.
-        self.message.as_ref().is_none_or(|message| {
-            terminal_items.iter().any(|terminal| {
-                terminal.get("type").and_then(Value::as_str) == Some("message")
-                    && Self::terminal_message_text(terminal)
-                        .is_some_and(|text| text.starts_with(&message.delivered_text))
-            })
         })
     }
 
@@ -698,51 +695,24 @@ impl V3RelayChatClientStreamProjector {
         {
             self.close_reasoning()?;
         }
-        self.observe_text(
-            self.message
-                .as_ref()
-                .map(|message| message.output_index)
-                .unwrap_or(self.next_output_index),
-            text,
-        );
-        self.mark_post_commit_governed_if_needed();
         if self.message.is_none() {
             let output_index = self.next_output_index;
             self.next_output_index += 1;
-            let item_id = format!("msg_{output_index}");
-            self.push(super::build_v3_runtime_sse_json_frame(
-                "response.output_item.added",
-                &json!({
-                    "type": "response.output_item.added",
-                    "response_id": self.response_id,
-                    "output_index": output_index,
-                    "item": {
-                        "id": item_id,
-                        "type": "message",
-                        "status": "in_progress",
-                        "role": "assistant",
-                        "content": [],
-                    },
-                }),
-            ))?;
-            self.push(super::build_v3_runtime_sse_json_frame(
-                "response.content_part.added",
-                &json!({
-                    "type": "response.content_part.added",
-                    "response_id": self.response_id,
-                    "output_index": output_index,
-                    "item_id": item_id,
-                    "content_index": 0,
-                    "part": {"type": "output_text", "text": ""},
-                }),
-            ))?;
             self.message = Some(OpenMessageItem {
                 output_index,
-                item_id,
+                item_id: format!("msg_{output_index}"),
                 text: String::new(),
+                announced: false,
                 delivered_text: String::new(),
             });
         }
+        let output_index = self
+            .message
+            .as_ref()
+            .map(|message| message.output_index)
+            .ok_or_else(|| "relay client stream lost its message item".to_string())?;
+        self.observe_text(output_index, text);
+        self.mark_post_commit_governed_if_needed();
         let message = self
             .message
             .as_mut()
@@ -750,12 +720,27 @@ impl V3RelayChatClientStreamProjector {
         message.text.push_str(text);
         // Once a governed marker is pending after the commit point, the tail
         // stays buffered until the complete-attempt owner decides it. The raw
-        // bytes are not pushed now; `finish` emits the governed suffix from the
-        // finalized response instead.
+        // bytes are not pushed now; the round closeout or `finish` emits the
+        // governed suffix from the finalized response instead.
         if self.post_commit_governed {
             return Ok(());
         }
-        message.delivered_text.push_str(text);
+        if !crate::hub_v1::v3_text_has_visible_content(&message.text) {
+            return Ok(());
+        }
+        let was_announced = message.announced;
+        let buffered_text = message.text.clone();
+        self.ensure_message_announced()?;
+        let delta = if was_announced {
+            text.to_string()
+        } else {
+            buffered_text
+        };
+        let message = self
+            .message
+            .as_mut()
+            .ok_or_else(|| "relay client stream lost its message item".to_string())?;
+        message.delivered_text.push_str(&delta);
         let output_index = message.output_index;
         let item_id = message.item_id.clone();
         self.push(super::build_v3_runtime_sse_json_frame(
@@ -766,9 +751,50 @@ impl V3RelayChatClientStreamProjector {
                 "output_index": output_index,
                 "item_id": item_id,
                 "content_index": 0,
-                "delta": text,
+                "delta": delta,
             }),
         ))
+    }
+
+    fn ensure_message_announced(&mut self) -> Result<(), String> {
+        let Some(message) = self.message.as_mut() else {
+            return Ok(());
+        };
+        if message.announced {
+            return Ok(());
+        }
+        let output_index = message.output_index;
+        let item_id = message.item_id.clone();
+        self.push(super::build_v3_runtime_sse_json_frame(
+            "response.output_item.added",
+            &json!({
+                "type": "response.output_item.added",
+                "response_id": self.response_id,
+                "output_index": output_index,
+                "item": {
+                    "id": item_id,
+                    "type": "message",
+                    "status": "in_progress",
+                    "role": "assistant",
+                    "content": [],
+                },
+            }),
+        ))?;
+        self.push(super::build_v3_runtime_sse_json_frame(
+            "response.content_part.added",
+            &json!({
+                "type": "response.content_part.added",
+                "response_id": self.response_id,
+                "output_index": output_index,
+                "item_id": item_id,
+                "content_index": 0,
+                "part": {"type": "output_text", "text": ""},
+            }),
+        ))?;
+        if let Some(message) = self.message.as_mut() {
+            message.announced = true;
+        }
+        Ok(())
     }
 
     fn ensure_reasoning_open(&mut self, source: ReasoningSource) -> Result<(), String> {
@@ -1153,6 +1179,9 @@ impl V3RelayChatClientStreamProjector {
         let Some(message) = self.message.take() else {
             return Ok(());
         };
+        if !message.announced {
+            return Ok(());
+        }
         let output_index = message.output_index;
         let item_id = message.item_id;
         let text = message.text;
@@ -1320,12 +1349,63 @@ impl V3RelayChatClientStreamProjector {
         self.flush_think_pending()?;
         self.thinking_reasoning_seen = false;
         if let Some(finalized) = finalized {
-            self.release_governed_message_tail(finalized)?;
+            let terminal_items = finalized
+                .get("output")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            self.release_governed_message_tail(&terminal_items)?;
         }
         self.close_reasoning()?;
         self.close_message()?;
         self.close_refusal()?;
-        self.close_tool_calls()
+        self.close_tool_calls()?;
+        if let Some(finalized) = finalized {
+            let terminal_items = finalized
+                .get("output")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            if self.post_commit_governed
+                && self.governance.confirmed_governed_marker()
+                && !self.post_commit_governed_consistent_with_terminal(terminal_items)
+            {
+                return Err(
+                    "relay governed round tail could not be reconciled at the refill boundary"
+                        .to_string(),
+                );
+            }
+        }
+        self.reset_governed_round_state();
+        self.round_streamed_item_start = self.streamed_items.len();
+        if let Some(finalized) = finalized {
+            self.round_terminal_item_start = self.round_terminal_item_start.saturating_add(
+                finalized
+                    .get("output")
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len),
+            );
+        }
+        Ok(())
+    }
+
+    /// Reset the per-round governed state after a committed refill round closes.
+    ///
+    /// The governance probe and the held-tail flag describe one provider
+    /// response. Once that round is reconciled and its items are sealed, the
+    /// next refill must start a fresh probe and resume live per-event
+    /// projection; otherwise a stale `post_commit_governed` keeps buffering
+    /// every later round and lets the tail matcher scan an earlier round's
+    /// message.
+    fn reset_governed_round_state(&mut self) {
+        self.post_commit_governed = false;
+        self.governance = V3DirectPrefixCommitProbe::new_with_governed_markers(
+            V3HubProviderWireProtocol::Responses,
+            relay_governed_text_markers(),
+        );
+        if let Some(builder) = self.builder.as_mut() {
+            builder.release_client_flush();
+        }
     }
 
     /// Release a governed suffix the committed channel held back.
@@ -1335,7 +1415,7 @@ impl V3RelayChatClientStreamProjector {
     /// finalized message is the source of truth: when it still starts with the
     /// already-delivered prefix, the remaining governed text is emitted as the
     /// missing deltas and the open message is sealed with that exact text.
-    fn release_governed_message_tail(&mut self, terminal: &Value) -> Result<(), String> {
+    fn release_governed_message_tail(&mut self, terminal_items: &[Value]) -> Result<(), String> {
         if !self.post_commit_governed {
             return Ok(());
         }
@@ -1346,16 +1426,14 @@ impl V3RelayChatClientStreamProjector {
         else {
             return Ok(());
         };
-        let terminal_items = terminal
-            .get("output")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
         let Some(governed_text) = terminal_items
             .iter()
             .rev()
             .filter_map(Self::terminal_message_text)
-            .find(|text| text.starts_with(&delivered_text))
+            .find(|text| {
+                crate::hub_v1::v3_text_has_visible_content(text)
+                    && text.starts_with(&delivered_text)
+            })
         else {
             return Ok(());
         };
@@ -1367,11 +1445,16 @@ impl V3RelayChatClientStreamProjector {
             .as_ref()
             .map(|message| (message.output_index, message.item_id.clone()))
             .ok_or_else(|| "relay client stream lost its message item".to_string())?;
+        let was_announced = self
+            .message
+            .as_ref()
+            .is_some_and(|message| message.announced);
+        self.ensure_message_announced()?;
         if let Some(message) = self.message.as_mut() {
             message.text = governed_text.clone();
             message.delivered_text = governed_text.clone();
         }
-        if suffix.is_empty() {
+        if suffix.is_empty() && was_announced {
             return Ok(());
         }
         self.push(super::build_v3_runtime_sse_json_frame(
@@ -1544,7 +1627,14 @@ impl V3RelayChatClientStreamProjector {
         terminal: &Value,
     ) -> Result<V3CommittedClientSseStream, String> {
         self.flush_think_pending()?;
-        self.release_governed_message_tail(terminal)?;
+        let terminal_items = terminal
+            .get("output")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let current_round_start = self.round_terminal_item_start.min(terminal_items.len());
+        let current_round_items = &terminal_items[current_round_start..];
+        self.release_governed_message_tail(current_round_items)?;
         self.close_reasoning()?;
         self.close_message()?;
         self.close_refusal()?;
@@ -1557,7 +1647,7 @@ impl V3RelayChatClientStreamProjector {
         // be reconciled with the finalized governed response.
         if self.post_commit_governed
             && self.governance.confirmed_governed_marker()
-            && !self.post_commit_governed_consistent_with_terminal(terminal)
+            && !self.post_commit_governed_consistent_with_terminal(current_round_items)
         {
             return Err(
                 "relay governed text arrived after the client channel was committed".to_string(),
