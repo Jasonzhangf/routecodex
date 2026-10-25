@@ -36,10 +36,8 @@ scope = "auth_key"
 duration_ms = 5000
 [[error.provider_error_action_policy.path]]
 step = "project"
-status = 400
 reason_code = "matched_class"
 public_code = "E_MATCHED_CLASS"
-message_mode = "code_only"
 "#
     .replace("__SCOPE__", scope);
     let manifest = compile_v3_config_05_manifest(

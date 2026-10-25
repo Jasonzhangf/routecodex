@@ -1097,7 +1097,7 @@ policy_id = "multi_chat_200"
 match = {{ http_status = 200 }}
 path = [
   {{ step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 2, backoff_ms = 0 }},
-  {{ step = "project", status = 502, reason_code = "provider_http_200_policy", message_mode = "code_only" }}
+  {{ step = "project", reason_code = "provider_http_200_policy" }}
 ]
 "#,
         hub_v1_declaration = hub_v1_declaration,

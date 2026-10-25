@@ -20,9 +20,7 @@ scope = "auth_key"
 duration_ms = 5000
 [[error.provider_error_action_policy.path]]
 step = "project"
-status = 502
 reason_code = "provider_account_http_401"
-message_mode = "code_only"
 
 [[error.provider_error_action_policy]]
 policy_id = "account_http_403_two_errors"
@@ -39,9 +37,7 @@ scope = "auth_key"
 duration_ms = 5000
 [[error.provider_error_action_policy.path]]
 step = "project"
-status = 502
 reason_code = "provider_account_http_403"
-message_mode = "code_only"
 
 [servers.account_threshold]
 bind = "127.0.0.1"
@@ -166,6 +162,7 @@ fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
     .expect("failure session scope");
     let policy = find_matching_provider_error_policy(
         &manifest,
+        session.routing_group(),
         "primary",
         Some("responses"),
         Some("gpt-test"),
@@ -313,6 +310,7 @@ fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
     .expect("failure session scope");
     let policy = find_matching_provider_error_policy(
         &manifest,
+        session.routing_group(),
         "primary",
         Some("responses"),
         Some("gpt-test"),
@@ -399,6 +397,7 @@ targets = [
         .expect("internal provider failure policy must compile");
     let policy = find_matching_provider_error_policy(
         &manifest,
+        "gateway_priority_4444",
         "cc-anthropic",
         Some("anthropic"),
         Some("opus-5"),
