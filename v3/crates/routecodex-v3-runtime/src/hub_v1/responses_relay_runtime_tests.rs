@@ -1931,7 +1931,7 @@ async fn committed_relay_sse_round_then_json_refill_keeps_terminal_business_item
         let mut slot = projection.lock().expect("projection handle");
         slot.take()
             .expect("committed projection")
-            .finish(&merged)
+            .finish(&merged, accumulated_items.len())
             .expect("seal the merged cross-round response")
     };
     use futures_util::StreamExt;

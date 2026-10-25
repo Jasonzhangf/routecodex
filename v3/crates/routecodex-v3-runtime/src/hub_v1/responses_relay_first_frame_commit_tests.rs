@@ -127,7 +127,7 @@ async fn relay_first_frame_commit_holds_tool_arguments_until_the_item_completes(
         }],
     });
     let mut sealed = projector
-        .finish(&terminal)
+        .finish(&terminal, 0)
         .expect("seal the committed stream");
     let mut tail = String::new();
     use futures_util::StreamExt;
@@ -185,7 +185,7 @@ async fn relay_refill_round_boundary_opens_a_new_business_item() {
             {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "second"}]}
         ],
     });
-    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut sealed = projector.finish(&terminal, 0).expect("seal");
     let mut frames = drain_frames(&mut receiver);
     while let Some(frame) = sealed.next().await {
         frames.push(String::from_utf8_lossy(&frame).to_string());
@@ -280,7 +280,7 @@ async fn relay_committed_marker_prefix_releases_tail_but_real_marker_breaks() {
                     "content": [{"type": "output_text", "text": "answer <= 3"}]}],
     });
     let mut sealed = projector
-        .finish(&terminal)
+        .finish(&terminal, 0)
         .expect("tail must seal normally");
     let mut frames = drain_frames(&mut receiver);
     use futures_util::StreamExt;
@@ -329,7 +329,7 @@ async fn relay_committed_marker_prefix_releases_tail_but_real_marker_breaks() {
                     "content": [{"type": "output_text", "text": "answer \n"}]}],
     });
     let mut sealed = projector
-        .finish(&terminal)
+        .finish(&terminal, 0)
         .expect("a preserved prefix must release the governed tail and seal");
     let mut frames = drain_frames(&mut receiver);
     while let Some(frame) = sealed.next().await {
@@ -382,7 +382,7 @@ async fn relay_committed_terminal_repeats_announced_items_after_governance() {
              "content": [{"type": "output_text", "text": "plain answer"}]}
         ],
     });
-    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut sealed = projector.finish(&terminal, 0).expect("seal");
     let mut frames = drain_frames(&mut receiver);
     while let Some(frame) = sealed.next().await {
         frames.push(String::from_utf8_lossy(&frame).to_string());
@@ -457,7 +457,7 @@ async fn relay_terminal_output_follows_output_index_not_close_order() {
             {"type": "reasoning", "summary": [{"type": "summary_text", "text": "r2"}]}
         ],
     });
-    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut sealed = projector.finish(&terminal, 0).expect("seal");
     let mut frames = drain_frames(&mut receiver);
     while let Some(frame) = sealed.next().await {
         frames.push(String::from_utf8_lossy(&frame).to_string());
@@ -515,7 +515,7 @@ async fn relay_terminal_joined_reasoning_consumes_delivered_segments() {
             {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer"}]},
         ],
     });
-    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut sealed = projector.finish(&terminal, 0).expect("seal");
     let mut frames = drain_frames(&mut receiver);
     while let Some(frame) = sealed.next().await {
         frames.push(String::from_utf8_lossy(&frame).to_string());
@@ -625,7 +625,7 @@ async fn relay_first_frame_commit_projects_reasoning_summary_before_terminal() {
              "content": [{"type": "output_text", "text": "answer"}]}
         ],
     });
-    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut sealed = projector.finish(&terminal, 0).expect("seal");
     let mut frames = drain_frames(&mut receiver);
     use futures_util::StreamExt;
     while let Some(frame) = sealed.next().await {
@@ -686,7 +686,7 @@ async fn relay_first_frame_commit_harvests_inline_thinking_blocks() {
         "status": "completed",
         "output": [],
     });
-    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut sealed = projector.finish(&terminal, 0).expect("seal");
     let mut frames = drain_frames(&mut receiver);
     use futures_util::StreamExt;
     while let Some(frame) = sealed.next().await {
@@ -772,7 +772,7 @@ async fn relay_first_frame_commit_matches_the_whole_attempt_think_harvest() {
                 "status": "completed",
                 "output": [],
             });
-            let mut sealed = projector.finish(&terminal).expect("seal");
+            let mut sealed = projector.finish(&terminal, 0).expect("seal");
             let mut frames = drain_frames(&mut receiver);
             use futures_util::StreamExt;
             while let Some(frame) = sealed.next().await {
@@ -859,7 +859,7 @@ async fn relay_first_frame_commit_harvests_inline_think_blocks_like_chat_process
              "content": [{"type": "output_text", "text": "beforeafter"}]}
         ],
     });
-    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut sealed = projector.finish(&terminal, 0).expect("seal");
     let mut frames = drain_frames(&mut receiver);
     use futures_util::StreamExt;
     while let Some(frame) = sealed.next().await {
@@ -938,7 +938,7 @@ async fn relay_first_frame_commit_preserves_streamed_refusal_in_terminal() {
              "content": [{"type": "refusal", "refusal": "cannot comply"}]}
         ],
     });
-    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut sealed = projector.finish(&terminal, 0).expect("seal");
     let mut frames = drain_frames(&mut receiver);
     use futures_util::StreamExt;
     while let Some(frame) = sealed.next().await {
@@ -993,7 +993,7 @@ async fn relay_committed_fenced_governed_marker_seals_when_owner_preserves_it() 
                     "content": [{"type": "output_text", "text": "Example:\n```\n</｜DSML｜tool_calls>\n```"}]}],
     });
     let mut sealed = projector
-        .finish(&terminal)
+        .finish(&terminal, 0)
         .expect("fenced marker must seal normally");
     let mut frames = drain_frames(&mut receiver);
     use futures_util::StreamExt;
@@ -1053,7 +1053,7 @@ async fn relay_reasoning_delta_preserves_encrypted_content_in_terminal() {
              "content": [{"type": "output_text", "text": "answer"}]}
         ],
     });
-    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut sealed = projector.finish(&terminal, 0).expect("seal");
     let mut frames = drain_frames(&mut receiver);
     use futures_util::StreamExt;
     while let Some(frame) = sealed.next().await {
@@ -1123,7 +1123,7 @@ async fn relay_refill_round_resets_think_scan_at_close_round() {
             {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "after"}]}
         ],
     });
-    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut sealed = projector.finish(&terminal, 0).expect("seal");
     let mut frames = drain_frames(&mut receiver);
     use futures_util::StreamExt;
     while let Some(frame) = sealed.next().await {
@@ -1201,7 +1201,7 @@ async fn relay_refill_round_releases_partial_marker_without_cross_round_reassemb
             {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "king>planafter"}]}
         ],
     });
-    let mut sealed = projector.finish(&terminal).expect("seal");
+    let mut sealed = projector.finish(&terminal, 0).expect("seal");
     let mut frames = drain_frames(&mut receiver);
     use futures_util::StreamExt;
     while let Some(frame) = sealed.next().await {

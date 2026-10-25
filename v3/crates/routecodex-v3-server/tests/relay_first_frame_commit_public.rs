@@ -52,6 +52,10 @@ fn chat_delta_value(delta: Value) -> String {
 }
 
 fn chat_stop() -> String {
+    chat_finish("stop")
+}
+
+fn chat_finish(reason: &str) -> String {
     format!(
         "data: {}\n\n",
         json!({
@@ -59,7 +63,7 @@ fn chat_stop() -> String {
             "object": "chat.completion.chunk",
             "created": 1,
             "model": "wire-relay",
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+            "choices": [{"index": 0, "delta": {}, "finish_reason": reason}]
         })
     )
 }
@@ -303,6 +307,19 @@ fn completed_response(events: &[Value]) -> &Value {
         .find(|event| event["type"] == "response.completed")
         .and_then(|event| event.get("response"))
         .expect("completed response")
+}
+
+/// The terminal response of a chain that may legitimately end `incomplete`
+/// (for example a provider `content_filter` terminal).
+fn completed_terminal(events: &[Value]) -> &Value {
+    events
+        .iter()
+        .rev()
+        .find(|event| {
+            event["type"] == "response.completed" || event["type"] == "response.incomplete"
+        })
+        .and_then(|event| event.get("response"))
+        .expect("terminal response")
 }
 
 fn delivered_visible_text(events: &[Value]) -> String {
@@ -1258,6 +1275,112 @@ async fn relay_public_governed_tail_before_refusal_delivers_both() {
     assert_eq!(
         refusal, "declined",
         "the terminal refusal message must keep the refusal: {completed}"
+    );
+    entry.stop().await;
+}
+
+/// A refill chain whose first round never commits must not let a later
+/// stripped-marker round re-emit an earlier round's terminal text.
+///
+/// Round one sends a governed marker before any visible text, so the commit
+/// probe never certifies the round and the projector is dropped; its message
+/// still enters the request-level accumulated terminal. Round two commits
+/// normally. Round three carries only a standalone marker that Chat Process
+/// strips to empty and finishes through the legal `content_filter` terminal.
+/// The merged terminal therefore starts with round one's message, which the
+/// projector never streamed. The projector must slice that merged terminal from
+/// the request-level accumulated offset, not from a counter only a surviving
+/// committed projector could have updated, so round three's empty governed tail
+/// cannot match round one's message again and re-send it.
+#[tokio::test]
+async fn relay_public_governed_uncommitted_round_does_not_reemit_earlier_text() {
+    let _guard = TEST_LOCK.lock().await;
+    let plans = vec![
+        vec![
+            chat_delta("<|DSML|tool_calls>\n"),
+            chat_delta("alpha"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+        vec![
+            chat_delta("beta"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+        vec![
+            chat_delta("<|DSML|tool_calls>\n"),
+            chat_finish("content_filter"),
+            "data: [DONE]\n\n".to_string(),
+        ],
+    ];
+    let (entry, mut captures) = start_with_plans_and_refill(plans, Some(2)).await;
+    let body = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
+    let events = response_sse_events(&body);
+    assert_eq!(
+        captured_provider_requests(&mut captures),
+        3,
+        "the refill chain must consume all three provider plans: {body}"
+    );
+    assert!(
+        !body.contains("<|DSML|tool_calls>"),
+        "the standalone control label must never leak to the client: {body}"
+    );
+    // Round one never committed, so it streamed no bytes; only round two's text
+    // reaches the client before the terminal. The regression this guards is that
+    // the stripped round three tail re-announced round two's text, so the delta
+    // appeared twice.
+    assert_eq!(
+        delivered_visible_text(&events),
+        "beta",
+        "a committed round's text must be streamed exactly once: {body}"
+    );
+    let terminal_events = events
+        .iter()
+        .filter(|event| {
+            event["type"] == "response.completed" || event["type"] == "response.incomplete"
+        })
+        .count();
+    assert_eq!(
+        terminal_events, 1,
+        "the refill chain must reach exactly one terminal: {body}"
+    );
+    let completed = completed_terminal(&events);
+    assert_eq!(
+        completed["status"], "incomplete",
+        "the legal content_filter terminal must be preserved: {completed}"
+    );
+    assert_eq!(
+        completed["incomplete_details"]["reason"], "content_filter",
+        "the content_filter reason must reach the terminal: {completed}"
+    );
+    let messages: Vec<String> = completed["output"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["type"] == "message")
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter(|part| part["type"] == "output_text")
+        .filter_map(|part| part["text"].as_str().map(str::to_string))
+        .filter(|text| !text.is_empty())
+        .collect();
+    assert_eq!(
+        messages.iter().filter(|text| *text == "alpha").count(),
+        1,
+        "round one's message must appear exactly once and must not be re-emitted: {completed}"
+    );
+    assert_eq!(
+        messages.iter().filter(|text| *text == "beta").count(),
+        1,
+        "round two's message must appear exactly once and must not be duplicated: {completed}"
+    );
+    assert!(
+        !body.contains("\"error\"") && !body.contains("network_error"),
+        "the client must not receive a proxy-generated error: {body}"
     );
     entry.stop().await;
 }

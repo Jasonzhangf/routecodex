@@ -345,7 +345,11 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
         }
         // Seal the committed client tail over the delivered response. The
         // terminal frame stays inside the seal, so a failed seal cannot deliver
-        // it first, and the already-flushed prefix is never replayed.
+        // it first, and the already-flushed prefix is never replayed. The merged
+        // terminal starts with every prior round's accumulated items, so the
+        // current round's governed tail must be sliced from that request-level
+        // offset rather than a projector-local counter a dropped uncommitted
+        // round can never have updated.
         if let Some(handle) = relay_seeds.client_stream_projection.as_ref() {
             let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
             if let Some(projection) = slot.as_mut() {
@@ -353,7 +357,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
                     if let Some(finalized) = output.finalized_response.clone() {
                         output.client_body = V3ResponsesRelayClientBody::Sse(
                             projection
-                                .finish(&finalized)
+                                .finish(&finalized, accumulated_items.len())
                                 .map_err(V3ResponsesRelayRuntimeError::ExecutionControlResponse)?,
                         );
                     }

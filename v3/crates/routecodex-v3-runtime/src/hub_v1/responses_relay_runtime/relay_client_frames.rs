@@ -256,7 +256,6 @@ pub(crate) struct V3RelayChatClientStreamProjector {
     /// request-wide for the final terminal, but governance decisions are
     /// round-local.
     round_streamed_item_start: usize,
-    round_terminal_item_start: usize,
     /// Chat Process harvests `<think>` and `<thinking>` blocks out of the
     /// visible content on the whole attempt. A committed stream cannot rewrite
     /// bytes it already sent, so the projector applies the same rule while the
@@ -295,7 +294,6 @@ impl V3RelayChatClientStreamProjector {
             ),
             post_commit_governed: false,
             round_streamed_item_start: 0,
-            round_terminal_item_start: 0,
             think_pending: String::new(),
             think_open: None,
             thinking_reasoning_seen: false,
@@ -1386,14 +1384,6 @@ impl V3RelayChatClientStreamProjector {
         }
         self.reset_governed_round_state();
         self.round_streamed_item_start = self.streamed_items.len();
-        if let Some(finalized) = finalized {
-            self.round_terminal_item_start = self.round_terminal_item_start.saturating_add(
-                finalized
-                    .get("output")
-                    .and_then(Value::as_array)
-                    .map_or(0, Vec::len),
-            );
-        }
         Ok(())
     }
 
@@ -1690,9 +1680,16 @@ impl V3RelayChatClientStreamProjector {
 
     /// Close every open item and seal the attempt. The terminal frame is held
     /// past the acceptance boundary, so a failed seal cannot deliver it first.
+    ///
+    /// `terminal` is the request-level merged response: its `output` starts with
+    /// every prior refill round's business items, then this round's own items.
+    /// A round that never committed drops its projector, so the projector
+    /// cannot reconstruct that prefix by itself; the caller passes the
+    /// request-level accumulated item count as `current_round_start`.
     pub(crate) fn finish(
         &mut self,
         terminal: &Value,
+        current_round_start: usize,
     ) -> Result<V3CommittedClientSseStream, String> {
         self.flush_think_pending()?;
         let terminal_items = terminal
@@ -1700,7 +1697,7 @@ impl V3RelayChatClientStreamProjector {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let current_round_start = self.round_terminal_item_start.min(terminal_items.len());
+        let current_round_start = current_round_start.min(terminal_items.len());
         let current_round_items = &terminal_items[current_round_start..];
         self.release_governed_message_tail(current_round_items)?;
         self.close_reasoning()?;
