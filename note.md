@@ -36258,3 +36258,20 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
   `16246057d` 锁定流式 reasoning 载荷交付（防未完成载荷提前 done）。
 - 门禁复跑（worker 退出后干净树）：fmt 干净；relay_first_frame_commit 17/17、responses_relay 215/215、client_sse 17/17、resp_chat_process 109/109、commit_probe 28/28、resp03_think_harvest 5/5、relay_first_frame_commit_public 4/4、openai_chat_namespace_names 6/6、field-parity 5/5、architecture-ci 33/33。
 - HEAD 已推 PR #472；CI test 仍 pending（本地与 CI 用同一 fixture，基督徒r4 改动含 fixture）。
+
+## 2026-10-24 r5-r11 演进与 P1-A 收口（对 HEAD 39f176dcf）
+
+- r6/r9 已并入：`16c1c8e10`（治理 refill 轮次状态每轮重置）+ `a3d7c0367`（P1-B 交错 reasoning 不再重复、P1-C refusal 不再过早封印治理尾巴）。合并 `d161428c4`（origin/main 833d420ac，#474 统一有界 refill）。
+- r11 lead 亲自实现 P1-A：轮次 terminal 偏移从 projector 内部累加改为请求级。根因：未提交轮次丢弃 projector，其内部计数永远看不到那一轮的条目；合并终态把累计条目 prepend 在最后一轮 output 前端，末轮剥离标记后的空治理尾巴按错误起点切片，匹配到早轮正文并重复下发（红证据：客户端收到 "betabeta"，终态 4 个 message）。
+- 修法：`finish(&terminal, current_round_start: usize)`；运行时调用处传 `accumulated_items.len()`（与 `merge_v3_chat_process_refill_output_items` prepend 数量恒等）；删除 `round_terminal_item_start` 字段/初始化/累加；`round_streamed_item_start`（已公告条目账本）保留不动。16 个单测调用点传 0（单轮），跨轮 merge 单测传 `accumulated_items.len()`。
+- 新黑盒回归 `relay_public_governed_uncommitted_round_does_not_reemit_earlier_text`：三轮 marker 先行不提交 → 正常提交 → 剥离标记 + content_filter；修复前 beta 下发两次，修复后每次正文恰好一次、content_filter 终端保真（status=incomplete + reason）。
+- 门禁（.worker-runs/472-r11-recheck/）：新测绿（exit 0）；public 14/14；runtime lib 18/18 + 跨轮 merge 1/1；governed public 12/12；architecture-ci 33/33；cargo fmt / git diff --check 干净。pre-commit hook verify:fast PASS。
+- 提交 `39f176dcf` 已推 PR #472；CI 三项（test / repo-sanity / scope）全 PASS（run 40163030009）。第 4 轮独立 review 已派 ffcommit-review（精确 head 39f176dcf，base 833d420ac），结果待收。
+- 未做：安装/restart/真实入口 replay/merge；等 review PASS 后按交付合同推进。
+
+## 2026-10-24 第 4 轮 review（ffcommit-review，精确 head 39f176dcf vs base 833d420ac）：PASS
+
+- 无 P0/P1。四核逐条成立：accumulated_items.len() == prepend 前缀长度（无 refill/全未提交/全已提交/混合/末轮空 5 个边界推演通过；唯一理论缺口=末轮无 output 数组时 merge 早退，Chat 经 Resp03 恒写 output，不可达，min 兜底）；finish 切片与 release_governed_message_tail / post_commit_governed_consistent_with_terminal 的轮次局部假设一致；round_streamed_item_start 职责不同必须保留且无残留；新测试真实走 HTTP 入口覆盖失败模式，"beta" 断言是修正错误期望（round1 首帧标记永不提交、alpha 不可能流出），非放宽（修复前 "betabeta" 仍击穿）。
+- P2 非阻断建议：1) relay_client_frames.rs:365 既有死代码 observe_item_added 建议删；2) pub 字段 client_stream_projection 暴露 pub(crate) 类型，建议字段降级 pub(crate)；3) DAG doc 未记录"混合轮次终态 output 顺序 [已公告,补发] 与 JSON 路径不同"产品决策，建议补文档；4) 观察：origin/main 已前进 6099a38e7（仅 docs/agents，不触 v3），候选证据仍有效。
+- Reviewer 实跑：relay_first_frame_commit* 18/18、responses_relay* 216/216、client_sse 17/17、relay_first_frame_commit_public 14/14、849ed8f_governed_commit_public 12/12、fmt/diff-check 干净；architecture-ci 33/33 采信作者日志。未做安装/restart/replay/merge（只读约束）。
+- 结论仅对 HEAD 39f176dcf；CI（run 40163030009）test/repo-sanity/scope 全 PASS。下一步：核 origin/main 后合入。

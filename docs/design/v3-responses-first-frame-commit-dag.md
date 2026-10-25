@@ -188,15 +188,30 @@ seal 一次,避免提交后被下一轮重投影覆盖。
    区间,投影器不做这层保护,落在这些区间内的 `<thinking>` 会被当块收割;流结束时仍未闭合且
    之前没有任何正文的 `<thinking>`,owner 在无工具时把块内容改成 reasoning,投影器按正文保留。
 
+5. 轮次边界由请求级偏移承载。未提交的轮次会丢弃投影器,该轮条目仍然进入请求级累计终态,
+   `merge_v3_chat_process_refill_output_items` 再把累计条目 prepend 到最后一轮 `output` 前端。
+   因此 `finish` 切"当前轮"必须用调用方传入的请求级累计条目数 `accumulated_items.len()`,
+   不能用投影器自己累加的值:投影器看不到被丢弃轮的条目,切错起点后,末轮剥离标记留下的空治理
+   尾巴会匹配到早轮正文并重复下发。`round_streamed_item_start` 保留,它索引投影器自己的
+   `streamed_items` 账本(已 announce 条目的 output_index),与终态切片起点职责不同。
+   混合轮次(早轮未提交、晚轮已提交)下终态 `output` 顺序为 [已公告条目, 终态补条目],故 streamed
+   文本与终态顺序可能不同(例:streamed `beta`,终态 `[beta, alpha]`)。这是 append-only 的固有
+   结果:重排等于改写已交付字节,丢弃等于吞业务内容,二者都被契约禁止。JSON 整段路径顺序仍是
+   业务顺序 [alpha, beta],两条路径不以顺序等价为验收条件。
+   红测 `relay_public_governed_uncommitted_round_does_not_reemit_earlier_text`:三轮依次为标记先行
+   不提交、正常提交、剥离标记加 `content_filter`;修复前客户端收到 `betabeta`,修复后每次正文恰好
+   一次且 content_filter 终端保真。
+
 真实入口回放(0.90.4935,`rccv3 restart` 后):7777 首帧 20.94s、终态 48.17s,89 个
 `response.output_text.delta` 分散在 27.19 秒、86 个不同到达时刻;终态 output 带 usage。
 4444 首帧 4.08s、终态 8.76s,80 个正文增量分散在 4.55 秒。
 
-gate:`relay_first_frame_commit` 13 条绿(轮次边界、终态重建、output 排序、工具声明闸、内联
-think 收割、think parity 六条红测:去掉对应修复后各自转红),加提交后 hook 失败守卫红测 1 条;
-`responses_relay` 211/211、`client_sse` 17/17、`multi_listener_server` 203/203、
-`openai_chat_namespace_names` 6/6。独立 review 已进行两轮,第一轮四项阻断、第二轮两项阻断
-均已修(第二轮 B2 think 残留改为前移收割)。尚未做:复评、合入与远端回执、合并后复验。
+gate:`relay_first_frame_commit` 18 条绿(轮次边界、终态重建、output 排序、工具声明闸、内联
+think 收割、think parity 六条红测:去掉对应修复后各自转红),加提交后 hook 失败守卫红测 1 条、
+跨轮 merge 1 条;`relay_first_frame_commit_public` 14 条(含 P1-A、P1-B、P1-C 三条公开回归)、
+`849ed8f_governed_commit_public` 12 条;`responses_relay` 216/216、`client_sse` 17/17。独立 review
+已进行四轮,前三轮阻断均已修(第三轮的 reasoning owner 错位、`<thinking>` 第二套语法、提交后
+无条件断流),第四轮对 `39f176dcf` 判 PASS。尚未做:合入与远端回执、合并后复验。
 
 ### P3 完整性闸(工具参数与整段改写)
 

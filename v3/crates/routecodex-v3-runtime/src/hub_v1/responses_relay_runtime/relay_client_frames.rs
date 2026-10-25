@@ -362,14 +362,6 @@ impl V3RelayChatClientStreamProjector {
         }));
     }
 
-    fn observe_item_added(&mut self, output_index: usize, item: &Value) {
-        self.governance.observe_event(&json!({
-            "type": "response.output_item.added",
-            "output_index": output_index,
-            "item": item,
-        }));
-    }
-
     fn observe_item_done(&mut self, output_index: usize, item: &Value) {
         self.governance.observe_event(&json!({
             "type": "response.output_item.done",
