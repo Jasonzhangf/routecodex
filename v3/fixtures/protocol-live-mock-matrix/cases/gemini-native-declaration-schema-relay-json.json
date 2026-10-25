@@ -1,54 +1,131 @@
 {
   "schema_version": 1,
   "case_id": "gemini-native-declaration-schema-relay-json",
-  "cell": {"entry_protocol": "gemini", "provider_protocol": "gemini", "transport": "json", "mode": "relay"},
+  "cell": {
+    "entry_protocol": "gemini",
+    "provider_protocol": "gemini",
+    "transport": "json",
+    "mode": "relay"
+  },
   "client_request": {
     "method": "POST",
     "path": "/v1beta/models/gemini-client/generateContent",
-    "headers": {"content-type": "application/json"},
+    "headers": {
+      "content-type": "application/json"
+    },
     "body": {
       "cachedContent": "caches/schema-dc83ed6",
-      "contents": [{"role": "user", "parts": [{"text": "use echo once"}]}],
-      "tools": [{"functionDeclarations": [{
-        "name": "echo",
-        "description": "declared schema tool echo",
-        "parametersJsonSchema": {
-          "type": "object",
-          "$defs": {"text": {"type": "string", "description": "echoed message"}},
-          "properties": {"text": {"$ref": "#/$defs/text"}},
-          "required": ["text"]
-        },
-        "responseJsonSchema": {
-          "type": "object",
-          "properties": {"ok": {"type": "boolean"}}
-        },
-        "behavior": "NON_BLOCKING"
-      }]}]
+      "contents": [
+        {
+          "role": "user",
+          "parts": [
+            {
+              "text": "use echo once"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "echo",
+              "description": "declared schema tool echo",
+              "parametersJsonSchema": {
+                "type": "object",
+                "$defs": {
+                  "text": {
+                    "type": "string",
+                    "description": "echoed message"
+                  }
+                },
+                "properties": {
+                  "text": {
+                    "$ref": "#/$defs/text"
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              },
+              "responseJsonSchema": {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "behavior": "NON_BLOCKING"
+            }
+          ]
+        }
+      ]
     }
   },
   "expected_provider": {
-    "paths": ["/v1beta/models/gemini-wire:generateContent"],
+    "paths": [
+      "/v1beta/models/gemini-wire:generateContent"
+    ],
     "method": "POST",
     "auth_required": true,
-    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot", "gemini_native_fields", "routecodex_chat_extension", "messages", "tool_choice"],
+    "body_must_not": [
+      "routecodex_internal",
+      "metadata_center",
+      "debug_snapshot",
+      "gemini_native_fields",
+      "routecodex_chat_extension",
+      "messages",
+      "tool_choice"
+    ],
     "exact": {
       "cachedContent": "caches/schema-dc83ed6",
-      "contents": [{"role": "user", "parts": [{"text": "use echo once"}]}],
-      "tools": [{"functionDeclarations": [{
-        "name": "echo",
-        "description": "declared schema tool echo",
-        "parametersJsonSchema": {
-          "type": "object",
-          "$defs": {"text": {"type": "string", "description": "echoed message"}},
-          "properties": {"text": {"$ref": "#/$defs/text"}},
-          "required": ["text"]
-        },
-        "responseJsonSchema": {
-          "type": "object",
-          "properties": {"ok": {"type": "boolean"}}
-        },
-        "behavior": "NON_BLOCKING"
-      }]}]
+      "contents": [
+        {
+          "role": "user",
+          "parts": [
+            {
+              "text": "use echo once"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "echo",
+              "description": "declared schema tool echo",
+              "parametersJsonSchema": {
+                "type": "object",
+                "$defs": {
+                  "text": {
+                    "type": "string",
+                    "description": "echoed message"
+                  }
+                },
+                "properties": {
+                  "text": {
+                    "$ref": "#/$defs/text"
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              },
+              "responseJsonSchema": {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "behavior": "NON_BLOCKING"
+            }
+          ]
+        }
+      ]
     }
   },
   "upstream_response": {
@@ -57,14 +134,31 @@
     "status": 200,
     "content_type": "application/json",
     "body": {
-      "candidates": [{
-        "index": 0,
-        "finishReason": "STOP",
-        "content": {"role": "model", "parts": [{
-          "functionCall": {"id": "call_schema_1", "name": "echo", "args": {"text": "native-tool-result"}}
-        }]}
-      }],
-      "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 2, "totalTokenCount": 5}
+      "candidates": [
+        {
+          "index": 0,
+          "finishReason": "STOP",
+          "content": {
+            "role": "model",
+            "parts": [
+              {
+                "functionCall": {
+                  "id": "call_schema_1",
+                  "name": "echo",
+                  "args": {
+                    "text": "native-tool-result"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "usageMetadata": {
+        "promptTokenCount": 3,
+        "candidatesTokenCount": 2,
+        "totalTokenCount": 5
+      }
     }
   },
   "expected_client": {
@@ -76,15 +170,26 @@
       "candidates.0.content.parts.0.functionCall.args.text": "native-tool-result",
       "candidates.0.finishReason": "STOP"
     },
-    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "body_must_not": [
+      "provider_error",
+      "internal_error",
+      "routecodex_internal",
+      "metadata_center"
+    ],
     "semantic_terminal_required": true
   },
-  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "assertions": {
+    "provider_attempt_count": 1,
+    "probe_attempts_may_occur": true,
+    "no_control_leakage": true
+  },
   "runtime_setup": {
     "provider_id": "mock-gemini",
     "model": "gemini-client",
     "wire_model": "gemini-wire",
-    "candidate_ids": ["mock-gemini/gemini-client"]
+    "candidate_ids": [
+      "mock-gemini/gemini-client"
+    ]
   },
   "source": {
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
@@ -115,53 +220,163 @@
       "client_request": {
         "method": "POST",
         "path": "/v1beta/models/gemini-client/generateContent",
-        "headers": {"content-type": "application/json"},
+        "headers": {
+          "content-type": "application/json"
+        },
         "body": {
           "cachedContent": "caches/schema-dc83ed6",
           "contents": [
-            {"role": "user", "parts": [{"text": "use echo once"}]},
-            {"role": "model", "parts": [{"functionCall": {"id": "call_schema_1", "name": "echo", "args": {"text": "native-tool-result"}}}]},
-            {"role": "user", "parts": [{"functionResponse": {"id": "call_schema_1", "name": "echo", "response": {"output": "native-tool-result"}}}]}
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "use echo once"
+                }
+              ]
+            },
+            {
+              "role": "model",
+              "parts": [
+                {
+                  "functionCall": {
+                    "id": "call_schema_1",
+                    "name": "echo",
+                    "args": {
+                      "text": "native-tool-result"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "call_schema_1",
+                    "name": "echo",
+                    "response": {
+                      "output": "native-tool-result"
+                    }
+                  }
+                }
+              ]
+            }
           ],
-          "tools": [{"functionDeclarations": [{
-            "name": "echo",
-            "description": "declared schema tool echo",
-            "parametersJsonSchema": {
-              "type": "object",
-              "$defs": {"text": {"type": "string", "description": "echoed message"}},
-              "properties": {"text": {"$ref": "#/$defs/text"}},
-              "required": ["text"]
-            },
-            "responseJsonSchema": {
-              "type": "object",
-              "properties": {"ok": {"type": "boolean"}}
-            },
-            "behavior": "NON_BLOCKING"
-          }]}]
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "echo",
+                  "description": "declared schema tool echo",
+                  "parametersJsonSchema": {
+                    "type": "object",
+                    "$defs": {
+                      "text": {
+                        "type": "string",
+                        "description": "echoed message"
+                      }
+                    },
+                    "properties": {
+                      "text": {
+                        "$ref": "#/$defs/text"
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ]
+                  },
+                  "responseJsonSchema": {
+                    "type": "object",
+                    "properties": {
+                      "ok": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "behavior": "NON_BLOCKING"
+                }
+              ]
+            }
+          ]
         }
       },
       "expected_provider_exact": {
         "cachedContent": "caches/schema-dc83ed6",
         "contents": [
-          {"role": "user", "parts": [{"text": "use echo once"}]},
-          {"role": "model", "parts": [{"functionCall": {"id": "call_schema_1", "name": "echo", "args": {"text": "native-tool-result"}}}]},
-          {"role": "user", "parts": [{"functionResponse": {"id": "call_schema_1", "name": "echo", "response": {"output": "native-tool-result"}}}]}
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "use echo once"
+              }
+            ]
+          },
+          {
+            "role": "model",
+            "parts": [
+              {
+                "functionCall": {
+                  "id": "call_schema_1",
+                  "name": "echo",
+                  "args": {
+                    "text": "native-tool-result"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "parts": [
+              {
+                "functionResponse": {
+                  "id": "call_schema_1",
+                  "name": "echo",
+                  "response": {
+                    "output": "native-tool-result"
+                  }
+                }
+              }
+            ]
+          }
         ],
-        "tools": [{"functionDeclarations": [{
-          "name": "echo",
-          "description": "declared schema tool echo",
-          "parametersJsonSchema": {
-            "type": "object",
-            "$defs": {"text": {"type": "string", "description": "echoed message"}},
-            "properties": {"text": {"$ref": "#/$defs/text"}},
-            "required": ["text"]
-          },
-          "responseJsonSchema": {
-            "type": "object",
-            "properties": {"ok": {"type": "boolean"}}
-          },
-          "behavior": "NON_BLOCKING"
-        }]}]
+        "tools": [
+          {
+            "functionDeclarations": [
+              {
+                "name": "echo",
+                "description": "declared schema tool echo",
+                "parametersJsonSchema": {
+                  "type": "object",
+                  "$defs": {
+                    "text": {
+                      "type": "string",
+                      "description": "echoed message"
+                    }
+                  },
+                  "properties": {
+                    "text": {
+                      "$ref": "#/$defs/text"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ]
+                },
+                "responseJsonSchema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "behavior": "NON_BLOCKING"
+              }
+            ]
+          }
+        ]
       },
       "upstream_response": {
         "protocol": "gemini",
@@ -169,31 +384,280 @@
         "status": 200,
         "content_type": "application/json",
         "body": {
-          "candidates": [{
-            "index": 0,
-            "finishReason": "STOP",
-            "content": {"role": "model", "parts": [{"text": "done"}]}
-          }],
-          "usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 2, "totalTokenCount": 9}
-        }
+          "candidates": [
+            {
+              "index": 0,
+              "finishReason": "STOP",
+              "content": {
+                "role": "model",
+                "parts": [
+                  {
+                    "text": "done"
+                  }
+                ]
+              }
+            }
+          ],
+          "usageMetadata": {
+            "promptTokenCount": 7,
+            "candidatesTokenCount": 2,
+            "totalTokenCount": 9
+          }
+        },
+        "attempts": [
+          {
+            "protocol": "gemini",
+            "mode": "json",
+            "status": 200,
+            "content_type": "application/json",
+            "body": {
+              "candidates": [
+                {
+                  "index": 0,
+                  "finishReason": "STOP",
+                  "content": {
+                    "role": "model",
+                    "parts": [
+                      {
+                        "text": "done"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "usageMetadata": {
+                "promptTokenCount": 7,
+                "candidatesTokenCount": 2,
+                "totalTokenCount": 9
+              }
+            }
+          },
+          {
+            "protocol": "gemini",
+            "mode": "json",
+            "status": 200,
+            "content_type": "application/json",
+            "body": {
+              "candidates": [
+                {
+                  "index": 0,
+                  "finishReason": "STOP",
+                  "content": {
+                    "role": "model",
+                    "parts": [
+                      {
+                        "text": "refill-ok"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "usageMetadata": {
+                "promptTokenCount": 14,
+                "candidatesTokenCount": 2,
+                "totalTokenCount": 16
+              }
+            }
+          }
+        ]
       },
       "expected_client_contract": {
         "transport": "complete",
         "status": 200,
-        "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+        "body_must_not": [
+          "provider_error",
+          "internal_error",
+          "routecodex_internal",
+          "metadata_center"
+        ],
         "semantic_terminal_required": true
       },
       "expected_client_must": {
         "candidates.0.content.parts.0.text": "done",
+        "candidates.0.content.parts.1.text": "refill-ok",
         "candidates.0.finishReason": "STOP",
-        "usageMetadata.totalTokenCount": 9
-      }
+        "usageMetadata.totalTokenCount": 25
+      },
+      "expected_provider_exact_attempts": [
+        {
+          "cachedContent": "caches/schema-dc83ed6",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "use echo once"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {
+                  "functionCall": {
+                    "args": {
+                      "text": "native-tool-result"
+                    },
+                    "id": "call_schema_1",
+                    "name": "echo"
+                  }
+                }
+              ],
+              "role": "model"
+            },
+            {
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "call_schema_1",
+                    "name": "echo",
+                    "response": {
+                      "output": "native-tool-result"
+                    }
+                  }
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "behavior": "NON_BLOCKING",
+                  "description": "declared schema tool echo",
+                  "name": "echo",
+                  "parametersJsonSchema": {
+                    "$defs": {
+                      "text": {
+                        "description": "echoed message",
+                        "type": "string"
+                      }
+                    },
+                    "properties": {
+                      "text": {
+                        "$ref": "#/$defs/text"
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ],
+                    "type": "object"
+                  },
+                  "responseJsonSchema": {
+                    "properties": {
+                      "ok": {
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "cachedContent": "caches/schema-dc83ed6",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "use echo once"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {
+                  "functionCall": {
+                    "args": {
+                      "text": "native-tool-result"
+                    },
+                    "id": "call_schema_1",
+                    "name": "echo"
+                  }
+                }
+              ],
+              "role": "model"
+            },
+            {
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "call_schema_1",
+                    "name": "echo",
+                    "response": {
+                      "output": "native-tool-result"
+                    }
+                  }
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {
+                  "text": "done"
+                }
+              ],
+              "role": "model"
+            },
+            {
+              "parts": [
+                {
+                  "text": "继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "behavior": "NON_BLOCKING",
+                  "description": "declared schema tool echo",
+                  "name": "echo",
+                  "parametersJsonSchema": {
+                    "$defs": {
+                      "text": {
+                        "description": "echoed message",
+                        "type": "string"
+                      }
+                    },
+                    "properties": {
+                      "text": {
+                        "$ref": "#/$defs/text"
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ],
+                    "type": "object"
+                  },
+                  "responseJsonSchema": {
+                    "properties": {
+                      "ok": {
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ],
   "tool_followup": {
     "consumer": "echo",
     "side_effect": "none",
-    "input": {"text": "native-tool-result"},
+    "input": {
+      "text": "native-tool-result"
+    },
     "expected_output": "native-tool-result",
     "assert_no_synthesized_tool_result": true,
     "assert_declared_tool_binding_only": true,

@@ -45,16 +45,42 @@
       {"data": {"id": "chatcmpl_media_image", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": "OK"}}]}},
       {"data": {"id": "chatcmpl_media_image", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}},
       {"data": "[DONE]"}
+    ],
+    "attempts": [
+      {"protocol": "openai_chat", "mode": "sse", "sse_events": [
+        {"data": {"id": "chatcmpl_media_image", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": "OK"}}]}},
+        {"data": {"id": "chatcmpl_media_image", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}},
+        {"data": "[DONE]"}
+      ]},
+      {"protocol": "openai_chat", "mode": "sse", "sse_events": [
+        {"data": {"id": "chatcmpl_media_image_refill", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": "refill-ok"}}]}},
+        {"data": {"id": "chatcmpl_media_image_refill", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}},
+        {"data": "[DONE]"}
+      ]}
     ]
   },
+  "expected_provider_by_attempt": [
+    {},
+    {"body_must": {
+      "messages.0.content.0.text": "用一句中文说出图中底部字幕和左上角水印",
+      "messages.1.tool_calls.0.id": "call_462432",
+      "messages.2.role": "tool",
+      "messages.2.tool_call_id": "call_462432",
+      "messages.3.role": "user",
+      "messages.3.content.0.type": "image_url",
+      "messages.4.role": "assistant",
+      "messages.4.content.0.text": "OK",
+      "messages.5.role": "user"
+    }}
+  ],
   "expected_client": {
     "transport": "complete",
     "status": 200,
-    "body_must": {"candidates.0.content.parts.0.text": "OK", "candidates.0.finishReason": "STOP"},
+    "body_must": {"candidates.0.content.parts.0.text": "OK", "candidates.0.content.parts.1.text": "refill-ok", "candidates.0.finishReason": "STOP"},
     "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
     "semantic_terminal_required": true
   },
-  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "assertions": {"provider_attempt_count": 2, "probe_attempts_may_occur": true, "no_control_leakage": true},
   "source": {
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/gemini_function_parts_test.go"],

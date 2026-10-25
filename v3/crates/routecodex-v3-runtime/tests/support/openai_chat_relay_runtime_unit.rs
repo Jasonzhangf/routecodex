@@ -371,6 +371,7 @@ mod tests {
             "MiniMax-M3",
             false,
             &crate::hub_v1::resp_chat_process_03_governed::V3HubRelaySerializedToolContext::default(),
+            None,
         )
         .expect("relay response hook must project without protocol failure");
 
