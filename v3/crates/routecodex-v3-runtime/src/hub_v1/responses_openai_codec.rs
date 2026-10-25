@@ -899,7 +899,14 @@ fn retain_anthropic_reasoning_block_association(
         .and_then(|extension| extension.get("type"))
         .and_then(Value::as_str)
         .unwrap_or_else(|| {
-            if reasoning_content.trim().is_empty() && item.contains_key("encrypted_content") {
+            // `encrypted_content: null` is a present key without ciphertext.
+            // Only non-empty ciphertext can form a legal `redacted_thinking`
+            // block; key presence alone would fabricate a data-less block.
+            let has_encrypted_content = item
+                .get("encrypted_content")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty());
+            if reasoning_content.trim().is_empty() && has_encrypted_content {
                 "redacted_thinking"
             } else {
                 "thinking"

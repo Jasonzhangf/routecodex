@@ -9,7 +9,7 @@ its registered root-level support scripts.
 - Rust workspace: `v3/Cargo.toml`
 - CLI crate: `v3/crates/routecodex-v3-cli`
 - Installed command: `rccv3`
-- Default config: `~/.rcc/config.v3.toml`
+- Default config: `~/.rcc/config.toml` (CLI default; install scripts still name `config.v3.toml`, tracked as `a9af206`)
 - Architecture maps: `docs/architecture/v3-*.yml`
 - Mainline review surface: `docs/architecture/wiki/v3-mainline-caller-flow.md`
 

@@ -97,6 +97,13 @@ pub struct V3ResponsesRelayRuntimeSeeds {
     pub observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     pub request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
     pub request_local_busy_candidates: BTreeSet<String>,
+    /// Client frame channel of the request. Present only when the client
+    /// requested SSE and the Server created the committed client channel.
+    /// Relay uses it to project its first business frame at provider arrival
+    /// time instead of the provider terminal.
+    pub client_frame_sink: Option<crate::nodes::V3CommittedClientFrameSink>,
+    /// Request-scoped projection state that survives Relay refill rounds.
+    pub client_stream_projection: Option<super::relay_client_frames::V3RelayClientProjectionHandle>,
 }
 
 pub enum V3ResponsesRelayDryRunOutcome {

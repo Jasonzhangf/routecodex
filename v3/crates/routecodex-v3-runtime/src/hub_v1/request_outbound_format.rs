@@ -1225,7 +1225,19 @@ pub(crate) fn build_responses_input_from_chat_messages(
                     .collect::<Vec<Value>>();
                 if !items.is_empty() {
                     output.extend(items);
-                    continue;
+                    // An assistant row may carry text and tool calls together.
+                    // Emitted tool calls do not discard representable non-empty
+                    // content; it falls through to the ordinary message item
+                    // after the tool-call items.
+                    let has_message_content = match row.get("content") {
+                        Some(Value::Null) | None => false,
+                        Some(Value::String(text)) => !text.is_empty(),
+                        Some(Value::Array(items)) => !items.is_empty(),
+                        Some(_) => true,
+                    };
+                    if !has_message_content {
+                        continue;
+                    }
                 }
             }
         }

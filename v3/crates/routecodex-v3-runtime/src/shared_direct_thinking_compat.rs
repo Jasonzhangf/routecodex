@@ -356,7 +356,7 @@ pub(crate) fn output_item_has_complete_tool(item: &Value) -> bool {
     )
 }
 
-fn find_unprotected(
+pub(crate) fn find_unprotected(
     text: &str,
     needle: &str,
     start: usize,
@@ -376,7 +376,7 @@ fn find_unprotected(
     None
 }
 
-fn protected_text_ranges(text: &str) -> Vec<(usize, usize)> {
+pub(crate) fn protected_text_ranges(text: &str) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
     collect_delimited_ranges(text, "```", &mut ranges);
     collect_delimited_ranges(text, "~~~", &mut ranges);
@@ -384,6 +384,105 @@ fn protected_text_ranges(text: &str) -> Vec<(usize, usize)> {
     collect_double_quoted_ranges(text, &mut ranges);
     ranges.sort_unstable();
     merge_ranges(ranges)
+}
+
+/// Start of an opening protected-range delimiter that is not closed yet.
+///
+/// The whole-attempt owner can only classify markers in this suffix after the
+/// delimiter closes. A streaming projection must hold from here until the
+/// owner can decide the range.
+pub(crate) fn incomplete_protected_text_start(text: &str) -> Option<usize> {
+    let mut candidates = Vec::new();
+    collect_incomplete_delimited_start(text, "```", &mut candidates);
+    collect_incomplete_delimited_start(text, "~~~", &mut candidates);
+    collect_incomplete_inline_code_start(text, &mut candidates);
+    collect_incomplete_double_quote_start(text, &mut candidates);
+    let complete = protected_text_ranges(text);
+    candidates
+        .into_iter()
+        .filter(|start| {
+            complete
+                .iter()
+                .all(|(range_start, range_end)| *start < *range_start || *start >= *range_end)
+        })
+        .min()
+}
+
+fn collect_incomplete_delimited_start(text: &str, delimiter: &str, candidates: &mut Vec<usize>) {
+    let mut cursor = 0usize;
+    while let Some(start_rel) = text[cursor..].find(delimiter) {
+        let start = cursor + start_rel;
+        let content_start = start + delimiter.len();
+        let Some(end_rel) = text[content_start..].find(delimiter) else {
+            candidates.push(start);
+            return;
+        };
+        cursor = content_start + end_rel + delimiter.len();
+    }
+}
+
+fn collect_incomplete_inline_code_start(text: &str, candidates: &mut Vec<usize>) {
+    let bytes = text.as_bytes();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'`' {
+            cursor += 1;
+            continue;
+        }
+        let start = cursor;
+        while cursor < bytes.len() && bytes[cursor] == b'`' {
+            cursor += 1;
+        }
+        let delimiter = &text[start..cursor];
+        let mut search = cursor;
+        let mut closed = false;
+        while let Some(end_rel) = text[search..].find(delimiter) {
+            let end_start = search + end_rel;
+            let end = end_start + delimiter.len();
+            if end <= text.len() {
+                cursor = end;
+                closed = true;
+                break;
+            }
+            search = end_start + 1;
+        }
+        if !closed {
+            candidates.push(start);
+            return;
+        }
+    }
+}
+
+fn collect_incomplete_double_quote_start(text: &str, candidates: &mut Vec<usize>) {
+    let bytes = text.as_bytes();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'"' {
+            cursor += 1;
+            continue;
+        }
+        let start = cursor;
+        cursor += 1;
+        let mut escaped = false;
+        let mut closed = false;
+        while cursor < bytes.len() {
+            let byte = bytes[cursor];
+            if byte == b'"' && !escaped {
+                cursor += 1;
+                closed = true;
+                break;
+            }
+            escaped = byte == b'\\' && !escaped;
+            if byte != b'\\' {
+                escaped = false;
+            }
+            cursor += 1;
+        }
+        if !closed {
+            candidates.push(start);
+            return;
+        }
+    }
 }
 
 fn collect_delimited_ranges(text: &str, delimiter: &str, ranges: &mut Vec<(usize, usize)>) {

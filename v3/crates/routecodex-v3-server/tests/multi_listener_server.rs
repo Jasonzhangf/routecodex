@@ -5102,6 +5102,114 @@ async fn responses_client_anthropic_reasoning_cache_control_survives_two_turn_to
 }
 
 #[tokio::test]
+async fn responses_client_anthropic_null_encrypted_content_reasoning_history_completes_two_turns() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream().await;
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
+    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
+
+    let first = client
+        .post(format!("{base}/v1/responses"))
+        .json(&json!({"model":"client-test","input":"look up p0 reasoning","stream":true,"tools":tools}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_body = reasoning_client_completed_response(&first.text().await.unwrap());
+    let output = first_body["output"].as_array().expect("output array");
+    let assistant_text = output
+        .iter()
+        .find(|item| item["type"] == "message")
+        .expect("assistant message")
+        .clone();
+    let call = output
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .expect("function_call")
+        .clone();
+    let call_id = call["call_id"].as_str().expect("call_id").to_string();
+    let _first_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+
+    for (label, reasoning) in [
+        (
+            "key-null",
+            json!({"type":"reasoning","summary":[],"encrypted_content":null}),
+        ),
+        ("key-absent", json!({"type":"reasoning","summary":[]})),
+    ] {
+        let second = client
+            .post(format!("{base}/v1/responses"))
+            .json(
+                &json!({"model":"client-test","stream":true,"tools":tools,"input":[
+                    {"role":"user","content":"look up p0 reasoning"},
+                    reasoning,
+                    assistant_text.clone(),
+                    call.clone(),
+                    {"type":"function_call_output","call_id":call_id,"output":"42"}
+                ]}),
+            )
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::OK, "{label}");
+        let second_body = reasoning_client_completed_response(&second.text().await.unwrap());
+        assert_eq!(second_body["status"], "completed", "{label}: {second_body}");
+
+        let capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let history = capture.body["messages"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{label}: missing provider messages: {}", capture.body));
+        assert!(
+            !history.iter().any(|message| {
+                message["content"].as_array().is_some_and(|content| {
+                    content
+                        .iter()
+                        .any(|block| block["type"] == "redacted_thinking")
+                })
+            }),
+            "{label}: data-less ciphertext must not become a redacted_thinking block on provider wire: {}",
+            capture.body
+        );
+        assert!(
+            history.iter().any(|message| {
+                message["content"].as_array().is_some_and(|content| {
+                    content
+                        .iter()
+                        .any(|block| block["type"] == "tool_use" && block["id"] == call_id)
+                })
+            }),
+            "{label}: paired tool call must reach provider wire: {}",
+            capture.body
+        );
+    }
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn responses_client_anthropic_redacted_reasoning_association_survives_two_turn_tool_roundtrip(
 ) {
     let _test_guard = TEST_LOCK.lock().await;

@@ -1,139 +1,26 @@
-# 26 Toolreason 双 Dry-Run 诊断
+# ToolThinking / Toolreason 投影差异
 
-## 触发
+仅在真实工具参数中的 reason 与客户端 reasoning/正文不一致时读取。普通工具治理仍保留；它不依赖已退役的 RCC servertool、CLI descriptor、搜索 sidecar 或 Stopless。当前边界见[工具路由](../../../../docs/agent-routing/30-servertool-lifecycle-routing.md)。
 
-- `TOOLREASON MISSING` 比例高、偶发 `OK`，或 provider 原始工具参数与客户端显示不一致。
-- `/v1/responses` Direct 或 `/v1/messages` Relay 的 reason 剥离、Resp03、reasoning/正文投影异常。
-- request dry-run 已绿，但真实客户端仍看不到 Toolreason。
+## 先判断偏离位置
 
-## 完成口径
+复用 [Pipe debug](10-pipedebug-flow.md) 的同请求四件套，不另建采证流程。
 
-必须用同一 `request_id`、同一入口协议、同一 Direct/Relay 路径、同一 provider/model 绑定四件套：
+| 已有证据 | 下一步 |
+|---|---|
+| Provider raw 没有 reason | 检查请求声明或 Provider 行为；不能在响应端猜测或补值 |
+| raw 有 reason，治理后缺失或工具损坏 | 对照当前注册的工具治理 owner、字段合同和完整响应消费证据 |
+| 治理结果正确，客户端不可见 | 检查对应协议投影与事件生命周期 |
 
-```text
-client request
-→ final provider request
-→ provider raw response
-→ client response
-```
+## 必要边界
 
-请求 dry-run 只证明 provider-bound payload；响应 dry-run 只证明捕获的 provider raw 能经过当前 Rust 响应链。两者都绿后，仍需安装、聚合 restart、4444 同入口真实五轮。Direct 与 Relay 必须分别闭环，不能互相替代。
+- 按当前注册字段处理，不因可选辅助字段缺失拒绝合法工具，也不强制所有工具声明 reason 或 goal_alignment_confidence。
+- 保留原工具身份、完整参数与 call/result 配对。缺 reason 不伪造 reasoning，不删除原工具调用。
+- Relay 的改写归 Chat Process；Direct 的改写归注册 Direct hook。不得在 handler、SSE transport、Provider 或普通 Outbound 新建 parser/projector。
+- 响应 dry-run 使用捕获的完整 raw JSON/SSE，证明已消费并生成客户端结果。node trace、请求 dry-run 或未消费的 lazy stream 不替代响应证据；具体入口沿 Pipe debug。
+- Responses 文本投影须具有合法 message/content/delta/done 生命周期；Anthropic 使用标准 text block。只验证受影响协议；Direct 与 Relay 同时受影响时分别取证。
+- RCC 合成的 reasoning/toolreason 文本不能冒充 Provider 源显式 summary，不能据此结束 bounded refill。来源判断沿当前整合设计，不在本参考另设策略。
 
-## 固定顺序
+## 验收
 
-### 1. 锁请求身份与路径
-
-先记录：
-
-- `request_id`、port、entry protocol；
-- `direct|relay` 的 node trace / execution decision；
-- provider、model、provider wire protocol；
-- canonical `request.json`、`provider-request.json`、`provider-response.json`、`response.json`。
-
-只看 console、最终 200、node trace 或另一次成功请求都不算同请求证据。
-
-### 2. Provider A/B/C 增量
-
-先执行 `98-provider-request-dryrun-and-request-error-debug.md` 的 A/B/C。Toolreason 额外要求：A/B 各重复五次，记录 raw reason 命中率；provider、model、key、endpoint、协议、body 和路由保持不变。
-
-### 3. 请求 dry-run
-
-对真实客户端 payload 使用同一入口的 `x-routecodex-dry-run: provider-request`，检查最终 `providerRequest`：
-
-- 实际 provider/model/wire protocol 正确；
-- 当前轮 system/instructions 只使用当前 V3 contract 的 guidance；
-- 工具 schema 只声明已注册的 reason 与 goal_alignment_confidence 字段；
-- 原始 system/history/tool 不被改写；
-- `providerNetworkSend=false`，且 provider pipeline 已执行。
-
-guidance 只能落在当前 provider-facing slice；多 system history 不得用第一个 system 作为无条件注入点。请求 dry-run 的合成 `response_payload` 不是 provider 行为证据。
-
-### 4. 先判 raw response
-
-- provider raw 没有 reason：回请求构造和 A/B；禁止在响应端伪造、补值或 fallback。
-- provider raw 有 reason、client 没有：继续追 `ProviderResp14Raw → RespInbound → Resp03 → client projection`。
-- 响应兼容判罚只按当前 V3 注册字段执行；缺少可选辅助字段不得拒绝合法 tool call。
-
-### 5. V3 Rust 响应 dry-run
-
-调用当前 server 的 `POST /_routecodex/debug/dry-run`，完整 fixture 必须同时带原请求和捕获的 provider raw：
-
-```json
-{
-  "fixture_id": "toolreason-response-replay",
-  "method": "POST",
-  "path": "/v1/responses",
-  "request_payload": {},
-  "response_payload": {
-    "object": "routecodex.v3.provider_response_snapshot",
-    "stage": "provider-response",
-    "bodyKind": "sse",
-    "rawSse": "data: {...}\n\n"
-  }
-}
-```
-
-Anthropic Relay 使用 `path=/v1/messages`；JSON provider response 使用：
-
-```json
-{
-  "object": "routecodex.v3.provider_response_snapshot",
-  "stage": "provider-response",
-  "bodyKind": "json",
-  "body": {}
-}
-```
-
-有效响应证据必须同时满足：
-
-- `kind=provider_response`；
-- `evidence.providerNetworkSend=false`；
-- `evidence.providerResponseConsumed=true`；
-- `clientResponse` 已 materialize；
-- raw reason 被 Resp03 剥离，原生 tool call 仍可执行；
-- 客户端投影含对应 reasoning 或独立正文。
-
-只出现响应 node trace 不够：Direct SSE 是 lazy stream，未消费就不能证明 Resp03 执行。不得恢复已退休的旧响应 facade 或第二套 parser。
-
-### 6. Direct 与 Relay 投影
-
-- Direct：语义只能在注册的 Direct hook / Rust Resp03 处理；禁止在普通 SSE transport、HTTP handler 或 RespOutbound 补偿。
-- Direct 独立正文必须有完整 Responses message lifecycle：`output_item.added(message) → content_part.added → output_text.delta/done → content_part.done → output_item.done(message)`，并在 `response.completed` 前结束。
-- Relay：先由对应 provider RespInbound 归一化，再由同一 Rust Resp03 剥离，最后走目标客户端协议投影；不得复用 Direct 证据。
-- Anthropic 独立正文使用标准 text block，原 `tool_use.input` 去除 reason 后仍保持合法。
-
-### 7. 正反测试与在线闭环
-
-正向：raw 含合法 reason 与可选辅助字段时，reason 被剥离、原工具可执行、client reasoning/正文可见；raw 只有合法 reason 时也必须完成同一剥离和投影。
-
-反向：
-
-- raw 无 reason：不伪造 reasoning/正文，不删除原工具调用；
-- malformed snapshot：显式进入 typed response error chain；
-- Direct message lifecycle 不完整：测试必须红；
-- Relay 路径不能由 Direct fixture 代替。
-
-源码绿后执行 `50-rcc-config-ssot.md`，再做同一真实 artifact 响应回放、Direct 五轮、Relay 五轮。每轮按 request_id 核对四件套和客户端证据。
-
-## 首次偏离判定
-
-```text
-provider request 无 guidance/schema
-  → Req04 / provider outbound owner
-provider raw 无 reason
-  → 请求方法或 provider 执行率
-provider raw 有 reason，Resp03 未观测
-  → RespInbound / lazy stream consumption / Resp03 owner
-Resp03 已剥离，client 不可见
-  → Direct/Relay 注册投影合同
-```
-
-## 反模式
-
-- 用 request dry-run 宣称响应链已闭环。
-- 用 CURL 方法成功宣称 RouteCodex 流水线已部署正确。
-- 用 node trace 宣称 lazy SSE 已消费。
-- 用普通 smoke、另一 provider、另一协议、另一路径代替真实失败 artifact。
-- 在 handler、SSE、RespOutbound、provider runtime 增加第二套 Toolreason parser/projector。
-- 缺 reason 时文本猜测、伪造 reason、静默吞错或切 provider。
-- 把 debug snapshot/control 字段写入 provider/client normal payload。
+覆盖本次变化中的 reason 存在/缺失、工具可执行性和客户端投影；复用稳定反例。间歇问题按任务计划采样，保留用户明确轮次，不默认固定五轮。真实入口验收、运行加载和 Review 沿主 Skill，只执行一次适用流程。

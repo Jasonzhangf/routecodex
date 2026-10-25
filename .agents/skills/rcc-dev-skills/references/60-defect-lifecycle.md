@@ -3,7 +3,7 @@
 ## Issue DAG
 
 Use the project's canonical defect flow in `AGENTS.md` and issue contract in
-the installed `~/.agents/skills/appsdk-project-governance/SKILL.md`. This reference supplies the
+`.appsdk/skills/appsdk-project-governance/SKILL.md`. This reference supplies the
 per-issue DAG and the required post-restart Codex sample decision. Intake or
 deduplicate every execution-bound defect and carry its authoritative bug ID
 through its own worktree, evidence, review, merge, cleanup, and solution receipt.
@@ -47,7 +47,8 @@ Use the task branch, necessary diff and actual test/runtime results to describe
 the tested changes. Do not freeze a candidate or add identity checks. A commit
 is not the delivery merge and does not authorize integration. Source or upstream
 changes require only affected validation; unchanged evidence remains usable.
-Keep the work under the same bug ID. Do not reuse results for changed behavior.
+Keep the work under the same bug ID. Do not silently reuse results for changed
+behavior.
 Review pending never means solved. Blocking findings require repair
 and affected revalidation; a confirmed delivered regression follows the global
 traceable revert/rebuild/restart/replay recovery contract.
@@ -79,6 +80,16 @@ issue's gate; independent known local failures require their own bug and
 pre-candidate evidence before they can be excluded from the regression
 comparison. Every repeated regression must have a focused regression test in the
 mapped required gate.
+
+## Issue Close Evidence
+
+Before closing an AppSDK bug record, including one attached to a functional work
+item, write the stable public-entry black-box test IDs and their exact execution
+commands with `appsdk bug comment <id> -m <test IDs and commands>`. Read back with
+`appsdk bug show <id> --json` and confirm the record. Close with `appsdk bug close`
+only after that confirmation and every other applicable delivery condition pass.
+Missing confirmation keeps the record open. This is the existing project close
+requirement, not an additional check at each test or progress update.
 
 ## Post-Restart Codex Samples
 

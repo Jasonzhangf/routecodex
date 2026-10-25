@@ -1,10 +1,10 @@
 ---
 name: rcc-v3-architecture
-description: "RouteCodex V3 architecture lookup: use AGENTS.md for project truth, then query resource/function/mainline/verification maps for the unique owner, boundaries, caller edges, and gates. Use before architecture or ownership decisions; use rcc-dev-skills for implementation and debugging."
+description: "查询 RouteCodex V3 的唯一 owner、模块边界、调用关系与必需验收。"
 ---
 
-# RouteCodex V3 Architecture Lookup
+# RouteCodex V3 架构查询
 
-Read `../../../AGENTS.md` for project facts and invariants. Follow `../rcc-dev-skills/SKILL.md` for command-first map queries, implementation, verification, runtime evidence, and review.
+项目事实与边界见 [AGENTS.md](../../../AGENTS.md)；map 查询和开发流程见 [rcc-dev-skills](../rcc-dev-skills/SKILL.md)。本入口不维护第二份架构或执行流程。
 
-Missing or conflicting map bindings block edits; do not infer architecture from grep count or duplicate project facts here.
+缺失或冲突绑定只阻止依赖它的修改。按实际调用关系判断 owner，不按搜索命中数量推断。
