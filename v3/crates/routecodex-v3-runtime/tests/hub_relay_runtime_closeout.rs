@@ -1583,7 +1583,7 @@ match = {{ http_status = {status} }}
 path = [
   {{ step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = {delay} }},
   {{ step = "cooldown", scope = "auth_key", duration_ms = 5000 }},
-  {{ step = "project", status = 502, message_mode = "code_only", reason_code = "controlled_outage" }}
+  {{ step = "project", reason_code = "controlled_outage" }}
 ]
 "#
                 )
