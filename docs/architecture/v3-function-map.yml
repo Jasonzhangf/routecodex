@@ -4500,7 +4500,9 @@ features:
   - v3/scripts/build.mjs
   - v3/scripts/install-cli.mjs
   - v3/tests/scripts/v3-cli-distribution.spec.mjs
+  - v3/tests/scripts/install-lifecycle-boundary.spec.mjs
   - scripts/ensure-cli-command-shim.mjs
+  - scripts/ensure-cli-executable.mjs
   - scripts/install-global.sh
   - v3/crates/routecodex-v3-config/Cargo.toml
   - v3/crates/routecodex-v3-config/build.rs
@@ -4518,7 +4520,9 @@ features:
   - scripts/install-v3-cli.mjs
   - v3/scripts/build.mjs
   - v3/tests/scripts/v3-cli-distribution.spec.mjs
+  - v3/tests/scripts/install-lifecycle-boundary.spec.mjs
   - scripts/ensure-cli-command-shim.mjs
+  - scripts/ensure-cli-executable.mjs
   - scripts/install-global.sh
   - tests/scripts/v3-cli-distribution.spec.mjs
   - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
@@ -4533,6 +4537,7 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/v3-build-tool-module-registry.yml
+  - scripts/ensure-cli-executable.mjs
   - .github/workflows/test.yml
   - package.json
   - package-lock.json
