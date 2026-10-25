@@ -291,9 +291,11 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
                                     // The next round is a separate business item
                                     // in the delivered payload: close the open
                                     // items so the client sees one item per round.
-                                    projection.close_round().map_err(
-                                        V3ResponsesRelayRuntimeError::ExecutionControlResponse,
-                                    )?;
+                                    projection
+                                        .close_round_with_finalized(Some(finalized))
+                                        .map_err(
+                                            V3ResponsesRelayRuntimeError::ExecutionControlResponse,
+                                        )?;
                                 }
                                 Some(_) => *slot = None,
                                 None => {}

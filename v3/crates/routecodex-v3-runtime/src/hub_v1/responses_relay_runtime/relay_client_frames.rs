@@ -686,7 +686,18 @@ impl V3RelayChatClientStreamProjector {
         if text.is_empty() {
             return Ok(());
         }
-        self.close_reasoning()?;
+        // Provider-native reasoning increments are separate business carriers;
+        // visible text between them must close the current one. Inline
+        // `<think>`/`<thinking>` blocks belong to one complete-attempt reasoning
+        // item, so those stay open across intervening text and reconcile as one
+        // finalized item instead of being duplicated.
+        if self
+            .reasoning
+            .as_ref()
+            .is_some_and(|reasoning| reasoning.source == ReasoningSource::Provider)
+        {
+            self.close_reasoning()?;
+        }
         self.observe_text(
             self.message
                 .as_ref()
@@ -1293,8 +1304,24 @@ impl V3RelayChatClientStreamProjector {
     /// this round's unclosed block or partial marker before the boundary instead
     /// of carrying it into a different provider response.
     pub(crate) fn close_round(&mut self) -> Result<(), String> {
+        self.close_round_with_finalized(None)
+    }
+
+    /// Close a refill round with the round's own finalized response.
+    ///
+    /// A committed round can hold a governed suffix until the complete-attempt
+    /// owner decides it. At a refill boundary that round still needs the suffix
+    /// before its items are recorded and sealed; otherwise the raw control text
+    /// leaks into the finished item and the final round cannot reconcile it.
+    pub(crate) fn close_round_with_finalized(
+        &mut self,
+        finalized: Option<&Value>,
+    ) -> Result<(), String> {
         self.flush_think_pending()?;
         self.thinking_reasoning_seen = false;
+        if let Some(finalized) = finalized {
+            self.release_governed_message_tail(finalized)?;
+        }
         self.close_reasoning()?;
         self.close_message()?;
         self.close_refusal()?;

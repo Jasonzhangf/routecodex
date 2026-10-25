@@ -124,10 +124,18 @@ impl Entry {
             .unwrap()
             .unwrap();
         std::env::remove_var(PROVIDER_KEY_ENV);
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(None);
     }
 }
 
 async fn start_with_plans(plans: Vec<Vec<String>>) -> (Entry, mpsc::UnboundedReceiver<Value>) {
+    start_with_plans_and_refill(plans, None).await
+}
+
+async fn start_with_plans_and_refill(
+    plans: Vec<Vec<String>>,
+    refill_max: Option<u32>,
+) -> (Entry, mpsc::UnboundedReceiver<Value>) {
     std::env::set_var(PROVIDER_KEY_ENV, "owned-fixture-key");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_addr = listener.local_addr().unwrap();
@@ -160,6 +168,11 @@ async fn start_with_plans(plans: Vec<Vec<String>>) -> (Entry, mpsc::UnboundedRec
         "{}\nattempt_store = {{ residence_timeout_ms = 5000 }}\n",
         hub_v1_fixture::hub_v1_server_execution("owned")
     );
+    if let Some(max) = refill_max {
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(
+            max,
+        ));
+    }
     let port = test_ports::free_port();
     let source = format!(
         r#"
@@ -757,4 +770,214 @@ async fn relay_public_multi_think_summary_parts_and_next_turn_echo() {
         "the next-turn request must echo both reasoning summary parts: {captured}"
     );
     entry.stop().await;
+}
+
+#[tokio::test]
+async fn relay_public_think_blocks_separated_by_text_keep_one_reasoning_item() {
+    let _guard = TEST_LOCK.lock().await;
+    let plans = vec![
+        vec![
+            chat_delta("<think>a</thin"),
+            chat_delta("k>x<think>b</think>y"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+        vec![
+            chat_delta("second"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+    ];
+    let (entry, mut captures) = start_with_plans(plans).await;
+    let body = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
+    let events = response_sse_events(&body);
+    assert_eq!(
+        delivered_visible_text(&events),
+        "xy",
+        "visible text between the blocks must remain a single message: {body}"
+    );
+    assert_eq!(
+        delivered_reasoning_summaries(&events),
+        vec![vec!["a".to_string(), "b".to_string()]],
+        "the streamed ledger must keep one reasoning item across intervening text: {body}"
+    );
+    let completed = completed_response(&events);
+    let output = completed["output"].as_array().expect("completed output");
+    assert_eq!(
+        output.len(),
+        2,
+        "the terminal must repeat the streamed reasoning and message exactly once: {completed}"
+    );
+    let reasoning = output
+        .iter()
+        .find(|item| item["type"] == "reasoning")
+        .expect("reasoning item");
+    assert_eq!(
+        reasoning["summary"],
+        json!([
+            {"type": "summary_text", "text": "a"},
+            {"type": "summary_text", "text": "b"}
+        ]),
+        "terminal reasoning must keep both owner summary parts: {completed}"
+    );
+    let reasoning_done = events
+        .iter()
+        .find(|event| {
+            event["type"] == "response.output_item.done" && event["item"]["type"] == "reasoning"
+        })
+        .expect("reasoning done");
+    assert_eq!(
+        reasoning_done["item"]["id"], reasoning["id"],
+        "terminal reasoning must keep the streamed identity: {body}"
+    );
+
+    let _first_capture = captures.try_recv().ok();
+    let next_body = json!({
+        "model": "test",
+        "stream": true,
+        "input": [
+            reasoning.clone(),
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "xy"}]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]}
+        ]
+    });
+    let _second = relay_body(&entry, next_body).await;
+    let captured = captures
+        .try_recv()
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    assert!(
+        captured.contains("a\\nb"),
+        "the next-turn request must echo both reasoning summary parts: {captured}"
+    );
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn relay_public_thinking_body_whitespace_matches_owner() {
+    let _guard = TEST_LOCK.lock().await;
+    let plans = vec![vec![
+        chat_delta("<thinking> bo"),
+        chat_delta("dy </thinking>answer"),
+        chat_stop(),
+        "data: [DONE]\n\n".to_string(),
+    ]];
+    let (entry, _captures) = start_with_plans(plans).await;
+    let body = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
+    let events = response_sse_events(&body);
+    assert_eq!(
+        delivered_visible_text(&events),
+        "answer",
+        "visible text must match the owner: {body}"
+    );
+    assert_eq!(
+        delivered_reasoning_summaries(&events),
+        vec![vec!["body".to_string()]],
+        "the streamed thinking body must match the finalized owner: {body}"
+    );
+    let completed = completed_response(&events);
+    let output = completed["output"].as_array().expect("completed output");
+    let reasoning: Vec<&Value> = output
+        .iter()
+        .filter(|item| item["type"] == "reasoning")
+        .collect();
+    assert_eq!(
+        reasoning.len(),
+        1,
+        "the terminal must represent the thinking block exactly once: {completed}"
+    );
+    assert_eq!(
+        reasoning[0]["summary"],
+        json!([{"type": "summary_text", "text": "body"}]),
+        "the terminal summary must carry the exact thinking body: {completed}"
+    );
+    assert!(
+        !body.contains("\"error\"") && !body.contains("network_error"),
+        "the client must not receive a proxy-generated error: {body}"
+    );
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn relay_public_governed_refill_releases_held_tail_before_round_close() {
+    let _guard = TEST_LOCK.lock().await;
+    let plans = vec![
+        vec![
+            chat_delta("answer"),
+            chat_delta("\n<|DSML|tool_calls>\nafter"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+        vec![
+            chat_delta("final"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+    ];
+    let (entry, mut captures) = start_with_plans_and_refill(plans, Some(1)).await;
+    let body = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
+    let events = response_sse_events(&body);
+    assert_eq!(
+        captured_provider_requests(&mut captures),
+        2,
+        "the first round must admit one refill execution: {body}"
+    );
+    assert!(
+        !body.contains("<|DSML|tool_calls>"),
+        "the held control label must not leak from the round closeout: {body}"
+    );
+    assert_eq!(
+        delivered_visible_text(&events),
+        "answer\nafterfinal",
+        "both the governed round-one suffix and the refill text must arrive: {body}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["type"] == "response.completed")
+            .count(),
+        1,
+        "the refill chain must complete exactly once: {body}"
+    );
+    let completed = completed_response(&events);
+    let messages: Vec<String> = completed["output"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["type"] == "message")
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter(|part| part["type"] == "output_text")
+        .filter_map(|part| part["text"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(
+        messages,
+        vec!["answer\nafter".to_string(), "final".to_string()],
+        "each round must keep one fully governed message item: {completed}"
+    );
+    assert!(
+        !body.contains("\"error\"") && !body.contains("network_error"),
+        "the client must not receive a proxy-generated error: {body}"
+    );
+    entry.stop().await;
+}
+
+fn captured_provider_requests(captures: &mut mpsc::UnboundedReceiver<Value>) -> usize {
+    let mut count = 0;
+    while captures.try_recv().is_ok() {
+        count += 1;
+    }
+    count
 }
