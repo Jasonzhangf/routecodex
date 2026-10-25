@@ -377,4 +377,27 @@ assert.deepEqual(settled.stages, [true, false, true]);
   assert.equal(state.patrolDirty, true, "a late delete must not clear the newer draft flag");
 }
 
+// Same-provider case: a delete that returns after a newer edit in the very same
+// editor must keep the newer draft instead of reloading the deleted plan.
+{
+  assert.equal(state.patrolProvider, "beta");
+  assert.equal(state.patrolDirty, true);
+  const editorBeforeDelete = planHost.querySelector(".patrol-editor");
+  const betaNumber = planHost.querySelector("input[type=number]");
+  betaNumber.value = "777";
+  fire(betaNumber, "input");
+  const gate = holdNextApi();
+  planHost.querySelectorAll("button").find((button) => button.textContent === "Delete plan").click();
+  await settle(1);
+  betaNumber.value = "654";
+  fire(betaNumber, "input");
+  await gate.release();
+  await settle();
+  const afterSameProviderDelete = readState();
+  assert.equal(afterSameProviderDelete.interval, "654", "a late delete must not discard a newer same-provider edit");
+  assert.equal(planHost.querySelector(".patrol-editor"), editorBeforeDelete, "a late delete must not rebuild the same-provider editor");
+  assert.equal(state.patrolDirty, true, "a late delete must retain the newer same-provider draft flag");
+  assert.equal(state.patrolEditorProvider, "beta");
+}
+
 console.log("providers patrol draft smoke passed");

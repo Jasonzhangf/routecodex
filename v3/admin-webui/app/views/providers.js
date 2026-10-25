@@ -1230,9 +1230,10 @@ async function loadPatrol() {
       });
       const remove = el("button", "btn", "Delete plan");
       remove.addEventListener("click", async () => {
+        const removedDraftVersion = draftVersion;
         await api(`/api/providers/${encodeURIComponent(id)}/patrol`, { method: "DELETE" });
         showStatus("ok", `patrol plan removed for ${id}`);
-        if (state.patrolEditorProvider === id && state.patrolEditorEpoch === epoch) {
+        if (state.patrolEditorProvider === id && state.patrolEditorEpoch === epoch && draftVersion === removedDraftVersion) {
           state.patrolDirty = false;
           state.patrolEditorProvider = null;
           loadPatrol();
