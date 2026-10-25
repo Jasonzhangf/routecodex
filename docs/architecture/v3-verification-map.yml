@@ -532,7 +532,7 @@ features:
   - When the client supplied no output limit, the provider-declared model output cap is projected into the provider wire payload; a client-supplied output limit is never overwritten on any registered provider protocol.
   - When a provider-directory TOML declares `provider.v3.reasoning_effort`, the configured value becomes the final OpenAI Chat `reasoning_effort` or Responses `reasoning.effort` provider wire value; a configured `medium` overrides a client `xhigh`, and a configured `low` overrides the absence of a client effort.
   - When no provider reasoning-effort policy is declared, the client/protocol/compat effort result is preserved unchanged.
-  - OpenAI Chat targets in the declared free GLM Chat wire scope (xcreate-free, xcreate/openai_free, nvidia) whose selected model_id or wire_model basename starts with GLM remove prompt_cache_key and verbosity mechanically; non-GLM models, paid or unrelated hosts, and explicit compatibility profiles preserve their declared fields.
+  - OpenAI Chat targets in the declared free GLM Chat wire scope (xcreate-free, xcreate/openai_free, nvidia) whose selected model_id or wire_model basename starts with GLM remove prompt_cache_key, verbosity, and the Responses-only include field mechanically; non-GLM models, paid or unrelated hosts, Responses provider wire, and explicit compatibility profiles preserve their declared fields.
   - Explicit chat:opencode-zen-tcm binds the actual compatible executor and performs a reversible native bash/read to client executor to native-history conversion with unchanged call IDs and actual paired output/error content.
   - Original custom executor scripts and passable direct exec_command calls preserve complete UTF8 file contents, actual execution receipts and paired history through public Responses SSE entry.
   - Responses gateways that reject custom tool history accept the equivalent function-call wire shape, while public Responses JSON and SSE clients receive custom_tool_call items with unwrapped input.
@@ -570,7 +570,7 @@ features:
     command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test xcreate_glm_prompt_cache_public -- --nocapture --test-threads=1
     test_ids:
     - xcreate_free_glm_chat_public_entry_omits_prompt_cache_key_and_completes_tool_followup
-    - nvidia_glm_chat_public_entry_omits_prompt_cache_key_and_verbosity
+    - nvidia_glm_chat_public_entry_omits_unsupported_chat_fields
     - unrelated_glm_chat_public_entry_preserves_prompt_cache_key_and_verbosity
   custom_tool_function_black_box_regression:
     command: npm run test:v3-custom-tool-function-compat-blackbox
