@@ -1531,6 +1531,154 @@ impl ResponsesTransport for ResponsesDefaultFloorFailsThenSucceedsTransport {
     }
 }
 
+struct GroupPolicyFailureTransport {
+    response_failure: bool,
+    providers: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for GroupPolicyFailureTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.providers
+            .lock()
+            .unwrap()
+            .push(request.provider_id().into());
+        if request.provider_id() == "limited" {
+            if self.response_failure {
+                return ResponsesSseBodyReadErrorTransport.send(request).await;
+            }
+            return Err(V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: request.request_id().into(),
+                    provider_id: request.provider_id().into(),
+                    status: 503,
+                    headers: vec![],
+                    body: br#"{"error":{"type":"upstream_unavailable","message":"controlled outage"}}"#.to_vec(),
+                    body_read_failure: None,
+                }),
+            });
+        }
+        ResponsesContextErrorThenSuccessTransport {
+            captures: Mutex::new(Vec::new()),
+        }
+        .send(request)
+        .await
+    }
+}
+
+async fn assert_issue720eb7f_group_isolation(response_failure: bool) {
+    for scoped in [true, false] {
+        for group in ["group_a", "group_b"] {
+            let status = if response_failure { 502 } else { 503 };
+            let policy = |id: &str, scope: &str, delay: u64| {
+                format!(
+                    r#"
+[[error.provider_error_action_policy]]
+policy_id = "{id}"
+scope = {{ provider_id = "limited"{scope} }}
+match = {{ http_status = {status} }}
+path = [
+  {{ step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = {delay} }},
+  {{ step = "cooldown", scope = "auth_key", duration_ms = 5000 }},
+  {{ step = "project", status = 502, message_mode = "code_only", reason_code = "controlled_outage" }}
+]
+"#
+                )
+            };
+            let mut policies = String::new();
+            if scoped {
+                policies.push_str(&policy("a_only", ", routing_group = \"group_a\"", 7000));
+            }
+            policies.push_str(&policy("global", "", 11000));
+            let manifest = responses_reselect_manifest_with_policies(group, &policies);
+            let health =
+                V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+            let transport = GroupPolicyFailureTransport {
+                response_failure,
+                providers: Mutex::new(Vec::new()),
+            };
+            // The explicit auth-key policy cools the attempted identity. The
+            // healthy alternative prevents last-candidate neutrality hiding it.
+            {
+                let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+                    &manifest,
+                    V3ResponsesRelayRuntimeInput {
+                        server_id: group.into(),
+                        failure_session_scope:
+                            routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                                group,
+                                group,
+                                &format!("issue720eb7f-{scoped}-{response_failure}-{group}"),
+                            )
+                            .unwrap(),
+                        request_id: "issue720eb7f".into(),
+                        payload: json!({"model":"client-responses","input":"hello","stream":false}),
+                    },
+                    &transport,
+                    &health,
+                    V3ResponsesRelayRetryPolicy {
+                        same_candidate_retries: 0,
+                    },
+                )
+                .await
+                .unwrap();
+                let events = &output
+                    .observability
+                    .as_ref()
+                    .unwrap()
+                    .provider_failure_events;
+                assert_eq!(events.len(), 1);
+                let event = &events[0];
+                assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
+                assert_eq!(event.wait_ms, Some(if scoped && group == "group_a" { 7000 } else { 11000 }),
+                    "wrong policy consumed: scoped={scoped}, group={group}, response={response_failure}");
+                assert_eq!(event.failure_count, 1);
+                assert_eq!(event.health_state, "cooldown");
+                assert_eq!(output.status, 200);
+                let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+                    panic!("expected business JSON")
+                };
+                assert_eq!(body["id"], "resp_context_retry");
+                assert_eq!(body["output"][0]["content"][0]["text"], "retried", "{body}");
+                assert!(body.get("error").is_none());
+            }
+            assert_eq!(*transport.providers.lock().unwrap(), ["limited", "minimax"]);
+            assert!(
+                !health
+                    .store()
+                    .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
+                    .available
+            );
+            for (provider, key, model) in [
+                ("limited", "key2", "gpt-5.5"),
+                ("limited", "key1", "other-model"),
+                ("minimax", "key1", "MiniMax-M3"),
+            ] {
+                assert!(
+                    health
+                        .store()
+                        .availability(provider, Some(key), Some(model), u64::MAX)
+                        .available,
+                    "untried identity was cooled: {provider}.{model}.{key}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn issue720eb7f_source_policy_group_isolation() {
+    assert_issue720eb7f_group_isolation(false).await;
+}
+
+#[tokio::test]
+async fn issue720eb7f_response_failure_policy_group_isolation() {
+    assert_issue720eb7f_group_isolation(true).await;
+}
+
 struct ResponsesSseBodyReadErrorTransport;
 
 #[async_trait]
@@ -2923,6 +3071,13 @@ async fn provider_error_closeout_returns_terminal_exhaustion_instead_of_hanging(
 fn responses_reselect_manifest_for_scope(
     scope: &str,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    responses_reselect_manifest_with_policies(scope, "")
+}
+
+fn responses_reselect_manifest_with_policies(
+    scope: &str,
+    policies: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let source = r#"
 version = 3
 [servers.__SCOPE__]
@@ -2974,7 +3129,7 @@ targets = [
 ]
 "#;
     compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&source.replace("__SCOPE__", scope)).unwrap(),
+        parse_v3_config_02_authoring(&(source.replace("__SCOPE__", scope) + policies)).unwrap(),
     )
     .unwrap()
 }
