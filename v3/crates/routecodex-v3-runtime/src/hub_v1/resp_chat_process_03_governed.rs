@@ -1094,6 +1094,8 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
         let mut turn_assistant_tail_index: Option<usize> = None;
         for item in
             collect_v3_chat_process_business_output_items(current_execution_finalized_response)
+                .into_iter()
+                .map(v3_chat_process_refill_history_item)
         {
             match item.get("type").and_then(Value::as_str) {
                 Some("message") => {
@@ -1165,6 +1167,8 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
         let mut model_parts: Vec<Value> = Vec::new();
         for item in
             collect_v3_chat_process_business_output_items(current_execution_finalized_response)
+                .into_iter()
+                .map(v3_chat_process_refill_history_item)
         {
             // Refill only runs when the round produced no real tool call, so
             // the replayable business content is the assistant message parts.
@@ -1201,6 +1205,8 @@ pub(crate) fn build_v3_chat_process_refill_continuation_request(
         .as_array_mut()
         .ok_or_else(|| "refill continuation input must normalize to an array".to_string())?;
     for item in collect_v3_chat_process_business_output_items(current_execution_finalized_response)
+        .into_iter()
+        .map(v3_chat_process_refill_history_item)
     {
         let Some(item_type) = item.get("type").and_then(Value::as_str) else {
             continue;
@@ -1313,6 +1319,28 @@ pub(crate) fn collect_v3_chat_process_business_output_items(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+/// Fold one round's business item into the assistant-message shape the
+/// continuation replay reads.
+///
+/// A canonical shape can carry assistant text as a bare `output_text` item:
+/// that is what the OpenAI Chat provider canonicalization produces for
+/// `message.content`, and the same row the Responses, Gemini and Anthropic
+/// canonical shapes wrap inside a `message` item's `content`. The replay folds
+/// assistant business content from `message` items, so leaving the bare form
+/// untouched silently drops the answer that the next round has to continue.
+/// Normalizing here keeps that rule in its single owner rather than teaching
+/// every history branch a second item shape.
+fn v3_chat_process_refill_history_item(item: Value) -> Value {
+    match item.get("type").and_then(Value::as_str) {
+        Some("output_text") => json!({
+            "type": "message",
+            "role": "assistant",
+            "content": [item],
+        }),
+        _ => item,
+    }
 }
 
 /// Fold prior-round business items and the summed usage into this execution's

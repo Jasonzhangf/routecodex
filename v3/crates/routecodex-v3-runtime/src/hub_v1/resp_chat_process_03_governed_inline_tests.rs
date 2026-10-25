@@ -1733,3 +1733,102 @@ fn refill_usage_write_back_writes_only_observed_fields() {
         "all-missing usage must keep usage absent: {empty}"
     );
 }
+
+/// A round whose canonical business text is a bare `output_text` item still
+/// carries the answer the next round has to continue.
+///
+/// The OpenAI Chat provider canonicalization emits assistant text as a bare
+/// `output_text` row (the same row every other canonical shape wraps inside a
+/// `message` item's `content`). A continuation that only folds `message` items
+/// silently drops that text, so the refill round re-asks the original question
+/// without the answer it must continue. Each entry representation reads the
+/// same normalized item.
+#[test]
+fn refill_continuation_keeps_bare_output_text_answer_for_every_entry() {
+    let finalized = json!({
+        "id": "resp_bare_text",
+        "status": "completed",
+        "output": [{"type": "output_text", "text": "ok"}]
+    });
+    // Chat and Anthropic entries replay the answer as an assistant message.
+    for (entry, history_key) in [
+        (V3HubEntryProtocol::OpenAiChat, "messages"),
+        (V3HubEntryProtocol::Anthropic, "messages"),
+    ] {
+        let original = json!({
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 64
+        });
+        let continuation =
+            build_v3_chat_process_refill_continuation_request(entry, &original, &finalized)
+                .expect("messages-shaped refill continuation must build");
+        let messages = continuation[history_key]
+            .as_array()
+            .expect("messages array");
+        assert_eq!(
+            messages.len(),
+            3,
+            "{entry:?} continuation must be original + answer + instruction: {continuation}"
+        );
+        assert_eq!(messages[1]["role"], json!("assistant"));
+        assert!(
+            messages[1].to_string().contains("ok") && messages[1].get("tool_calls").is_none(),
+            "{entry:?} continuation must carry the answer the next round continues: {messages:?}"
+        );
+        assert_eq!(messages[2]["role"], json!("user"));
+        assert!(
+            messages[2]
+                .to_string()
+                .contains(V3_CHAT_PROCESS_REFILL_INSTRUCTION),
+            "{entry:?} continuation must carry the instruction: {messages:?}"
+        );
+    }
+    // The Gemini entry replays it as a model turn of the native shape.
+    let gemini_original = json!({
+        "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+        "generationConfig": {"maxOutputTokens": 64}
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Gemini,
+        &gemini_original,
+        &finalized,
+    )
+    .expect("gemini-shaped refill continuation must build");
+    let contents = continuation["contents"].as_array().expect("contents array");
+    assert_eq!(
+        contents.len(),
+        3,
+        "original + model + instruction: {contents:?}"
+    );
+    assert_eq!(contents[1]["role"], json!("model"));
+    assert_eq!(contents[1]["parts"], json!([{"text": "ok"}]));
+    assert_eq!(contents[2]["role"], json!("user"));
+    assert!(contents[2]
+        .to_string()
+        .contains(V3_CHAT_PROCESS_REFILL_INSTRUCTION));
+    // The Responses entry replays it as assistant `input` content.
+    let responses_original = json!({
+        "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}],
+        "max_output_tokens": 64
+    });
+    let continuation = build_v3_chat_process_refill_continuation_request(
+        V3HubEntryProtocol::Responses,
+        &responses_original,
+        &finalized,
+    )
+    .expect("responses-shaped refill continuation must build");
+    let input = continuation["input"].as_array().expect("input array");
+    assert_eq!(
+        input.len(),
+        3,
+        "original + answer + instruction: {continuation}"
+    );
+    assert_eq!(input[1]["role"], json!("assistant"));
+    assert_eq!(
+        input[1]["content"],
+        json!([{"type": "output_text", "text": "ok"}])
+    );
+    assert!(input[2]
+        .to_string()
+        .contains(V3_CHAT_PROCESS_REFILL_INSTRUCTION));
+}
