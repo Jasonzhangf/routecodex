@@ -6,7 +6,7 @@ Use when history placeholders, protocol conversion, reasoning/tool projection, o
 
 ## Contract
 
-Provider-bound request N+1 must preserve request N rendered prefix byte-for-byte or token-for-token, then append finalized assistant output and current turn. Any transformation inside persisted prefix requires round-trip equivalence; otherwise reject at owning adjacent codec.
+For the same continuation scope and provider rendering, request N+1 preserves request N's rendered prefix, then appends finalized assistant output and the current turn. A mismatch is evidence for the save/restore or codec owner to investigate and repair; it does not authorize a new runtime rejection of forwardable traffic. Preserve protocol meaning and paired history under the project transparent-proxy contract.
 
 ## Procedure
 

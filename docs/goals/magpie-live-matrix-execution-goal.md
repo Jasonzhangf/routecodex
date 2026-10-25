@@ -1,5 +1,7 @@
 # 本轮执行目标：Magpie live mock-provider 基线矩阵
 
+此文件记录 2026-10-12 的基线设施子任务，不作为当前全节点重构的并发或权限安排。历史结果继续保留；未核实的集成与清理项不自动改为完成。当前全节点实现由 REQ02 owner 推进。
+
 ## 执行身份与目标
 
 当前 Codex goal 执行者是本轮编排者。按 `codex-orchestrator` 派独立 worker、验收、解阻、审查和交付，不接管既有 REQ02 重构。
@@ -39,7 +41,7 @@
 
 mock 只根据 case 返回固定 JSON/SSE/fault，并抓取真实 provider request。fixture 中使用假 token，不读取真实账户。所有 provider URL 指向自有 loopback upstream。probe 与业务 attempt 分开；状态隔离避免 cooldown 污染后续 case。
 
-真实 client 必须访问 RCC HTTP listener。内部 codec、Rust driver、dry-run 或 health 不替代该证据。候选 build/test 与稳定 installed-runtime 行为分别标注；记录实际 binary path/hash/version，不能从源码 SHA 推断已安装 runtime。
+真实 client 必须访问 RCC HTTP listener。内部 codec、Rust driver、dry-run 或 health 不替代该证据。候选 build/test 与稳定 installed-runtime 行为分别标注；记录实际 binary path、运行命令及安装/运行回执，不额外计算哈希，也不能从源码提交推断已安装 runtime。
 
 断言至少覆盖 provider wire、client 语义/原始字节及副作用。工具代表用例使用无副作用 echo consumer 执行后提交 output；不授予来源请求未声明的工具权限。SSE 分片/终态/提前 EOF 按实际语义断言。
 
@@ -51,6 +53,6 @@ mock 只根据 case 返回固定 JSON/SSE/fault，并抓取真实 provider reque
 
 基线 product failure 可以保留，不要求本轮修 runtime；这不豁免测试设施本身的正确性，也不将失败案例计为产品成功。报告应有明确计数和 P2 缺口列表。
 
-证据保存 RCC/binary 身份、config/fixture identity、Magpie 源测试、provider capture、client 原始结果、断言和清理回执。保留失败恢复需要的资料，不保存秘密。源码、测试、build、installed、live、review、merge 和远端 receipt 分开记录。
+证据保存实际 RCC 入口、所用 config/fixture 引用、Magpie 源测试、provider capture、client 原始结果、断言和清理回执。共享输入只记录一次，不另建身份清单。保留失败恢复需要的资料，不保存秘密。源码、测试、build、installed、live、review、merge 和远端 receipt 分开记录。
 
 停止/恢复：实际权限拒绝不绕过；共享资源冲突只停该链；runtime gap 记入 P2，继续其余基线；实现范围需扩大或架构变更时交编排者重新规划。只删除自有且已移交证据的资源。
