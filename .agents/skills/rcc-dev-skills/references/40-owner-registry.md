@@ -6,15 +6,12 @@ Use after the main skill resolves current maps and the task changes ownership, m
 
 ## Migration
 
-1. Update resource relations when ownership changes cross-module flow.
-2. Update the V3 function-map owner, scope, builders, and allowed/forbidden paths.
-3. Update the V3 mainline edge and source anchor.
-4. Update the V3 verification map and named gate.
-5. Add a red fixture for the old, duplicate, or wrong-layer owner.
-6. Run mapped gates, then the project architecture gate from `../SKILL.md`.
+1. Update only the bindings changed by this task: resource relations, function owner/scope/builders/paths, mainline edges/anchors, or verification gates. Unchanged maps need no edit.
+2. For a changed ownership boundary, reuse or add a regression that detects the concrete old, duplicate or wrong-layer behavior; do not add a fixture only to mirror a map edit.
+3. Run the main skill's required checks once. Reuse umbrella sub-gate results instead of running the same gates before and after the umbrella.
 
 Missing or conflicting bindings block implementation. Never invent caller edges or infer ownership from grep count.
 
 ## Evidence
 
-Report feature id, resource edge, unique owner, allowed edit path, ruled-out adjacent layers, required gates, and review surface.
+Keep the feature id, resource edge, unique owner, allowed edit path, ruled-out adjacent layers, required gates, and review surface in the task's existing evidence record. User-facing feedback follows the main skill's Report section; do not repeat this inventory at each stage.
