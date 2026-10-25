@@ -166,6 +166,10 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             v3_responses_relay_transport_intent_from_stream_field(&input.payload);
         let provider_request_transport_intent = client_response_transport_intent;
         let local_tool_output_ids = find_responses_tool_output_ids(&input.payload)?;
+        // A request that declares tools enters Relay Chat Process tool
+        // governance, which may rewrite tool markup in the complete response.
+        // Such a request keeps the whole-attempt client projection.
+        let relay_request_declares_tools = relay_request_declares_tools(&input.payload);
         if input
             .payload
             .get("previous_response_id")
@@ -1121,7 +1125,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     handle_v3_responses_relay_provider_failure(
                                         &failure_context,
                                         selected,
-                                        failure,
+                                        failure.clone(),
                                         &mut V3ResponsesRelayProviderRetryState {
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
@@ -1139,6 +1143,27 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 );
                                 if let Some(failure) = terminal_failure {
                                     return Ok(provider_failure_output(failure, trace, 0));
+                                }
+                                // A committed client channel already owns the
+                                // response head: a second candidate would append a
+                                // second response to the same stream. End this
+                                // transport silently and keep the typed cause.
+                                if initial_relay_seeds
+                                    .client_frame_sink
+                                    .as_ref()
+                                    .is_some_and(|sink| sink.is_committed())
+                                {
+                                    return Ok(provider_failure_output_with_observation(
+                                        attach_v3_provider_failure_events_to_failure(
+                                            terminalize_v3_responses_relay_provider_failure(
+                                                failure,
+                                                last_external_http.clone(),
+                                            ),
+                                            &provider_failure_events,
+                                        ),
+                                        trace,
+                                        None,
+                                    ));
                                 }
                                 continue;
                             }
@@ -1244,8 +1269,39 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             attempt_budget.residence_deadline(),
                         );
                     let stream_observation = V3RuntimeStreamObservation::default();
+                    // Relay projects the client frames at provider arrival time
+                    // for the requests whose response governance cannot rewrite
+                    // already-projected business carriers. Everything else keeps
+                    // the whole-attempt buffering. The first business frame
+                    // commits; the server channel takes over from there.
+                    let projection_handle = initial_relay_seeds.client_stream_projection.clone();
+                    let mut relay_client_projection = if client_response_transport_intent
+                        == V3HubTransportIntent::Sse
+                        && provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat
+                        && !manifest.memory_raw_capture.enabled
+                        && !request_tool_thinking_enabled
+                        && !relay_request_declares_tools
+                    {
+                        projection_handle.as_ref().and_then(|handle| {
+                            let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
+                            if slot.is_none() {
+                                if let Some(sink) = initial_relay_seeds.client_frame_sink.clone() {
+                                    *slot = Some(
+                                            super::relay_client_frames::
+                                                V3RelayChatClientStreamProjector::new(
+                                                    sink,
+                                                    attempt_budget.clone(),
+                                                ),
+                                        );
+                                }
+                            }
+                            slot.take()
+                        })
+                    } else {
+                        None
+                    };
                     let provider_value_result =
-                    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+                    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context_and_projection(
                         provider_wire_protocol,
                         crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
                             &input.request_id,
@@ -1255,6 +1311,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         ),
                         &stream_observation,
                         &anthropic_response_projection_context,
+                        relay_client_projection.as_mut(),
                     )
                     .await;
                     handle_error_before_resp03!(runtime_timing
@@ -1300,6 +1357,27 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             if let Some(failure) = terminal_failure {
                                 return Ok(provider_failure_output_with_observation(
                                     failure,
+                                    trace,
+                                    Some(stream_observation),
+                                ));
+                            }
+                            // A committed client channel already owns the
+                            // response head: a second candidate would append a
+                            // second response to the same stream. End this
+                            // transport silently and keep the typed cause.
+                            if initial_relay_seeds
+                                .client_frame_sink
+                                .as_ref()
+                                .is_some_and(|sink| sink.is_committed())
+                            {
+                                return Ok(provider_failure_output_with_observation(
+                                    attach_v3_provider_failure_events_to_failure(
+                                        terminalize_v3_responses_relay_provider_failure(
+                                            failure,
+                                            last_external_http.clone(),
+                                        ),
+                                        &provider_failure_events,
+                                    ),
                                     trace,
                                     Some(stream_observation),
                                 ));
@@ -1370,7 +1448,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     handle_v3_responses_relay_provider_failure(
                                         &failure_context,
                                         selected,
-                                        failure,
+                                        failure.clone(),
                                         &mut V3ResponsesRelayProviderRetryState {
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
@@ -1388,6 +1466,27 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 );
                                 if let Some(failure) = terminal_failure {
                                     return Ok(provider_failure_output(failure, trace, 0));
+                                }
+                                // A committed client channel already owns the
+                                // response head: a second candidate would append a
+                                // second response to the same stream. End this
+                                // transport silently and keep the typed cause.
+                                if initial_relay_seeds
+                                    .client_frame_sink
+                                    .as_ref()
+                                    .is_some_and(|sink| sink.is_committed())
+                                {
+                                    return Ok(provider_failure_output_with_observation(
+                                        attach_v3_provider_failure_events_to_failure(
+                                            terminalize_v3_responses_relay_provider_failure(
+                                                failure,
+                                                last_external_http.clone(),
+                                            ),
+                                            &provider_failure_events,
+                                        ),
+                                        trace,
+                                        None,
+                                    ));
                                 }
                                 continue;
                             }
@@ -1477,15 +1576,36 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         );
                     chat_process_refill.set(disposition);
                     let finalized_response = finalized_provider_value.clone();
-                    let client_body = project_v3_responses_relay_client_body(
-                        client_response_transport_intent,
-                        finalized_provider_value,
-                        crate::shared::v3_strip_client_response_id_enabled_for_server(
-                            manifest,
-                            &input.server_id,
-                        ),
-                        attempt_budget.clone(),
-                    )?;
+                    // A committed Relay attempt already handed its first
+                    // business frames to the client channel; the remaining
+                    // frames come from the projector's sealed tail. A failed
+                    // seal ends the committed transport without an error frame.
+                    // A committed projection already handed its first business
+                    // frames to the client channel. Its remaining tail is sealed
+                    // by the refill owner over the merged response, so this
+                    // execution reports no second client body.
+                    let committed_projection = relay_client_projection
+                        .as_ref()
+                        .is_some_and(|projection| projection.is_committed());
+                    let client_body = if committed_projection {
+                        V3ResponsesRelayClientBody::Json(Value::Null)
+                    } else {
+                        project_v3_responses_relay_client_body(
+                            client_response_transport_intent,
+                            finalized_provider_value,
+                            crate::shared::v3_strip_client_response_id_enabled_for_server(
+                                manifest,
+                                &input.server_id,
+                            ),
+                            attempt_budget.clone(),
+                        )?
+                    };
+                    if let (Some(handle), Some(projection)) =
+                        (projection_handle.as_ref(), relay_client_projection.take())
+                    {
+                        *handle.lock().unwrap_or_else(|error| error.into_inner()) =
+                            Some(projection);
+                    }
                     commit_route_policy_if_present!();
                     return Ok(V3ResponsesRelayRuntimeOutput {
                         status: 200,
@@ -1557,4 +1677,38 @@ pub(crate) fn find_responses_tool_output_ids(
         }
     }
     Ok(ids)
+}
+
+/// A request that declares tools enters Relay Chat Process tool governance,
+/// which may rewrite tool markup in the complete response. Such a request keeps
+/// the whole-attempt client projection; only a tool-free request may commit its
+/// first business frame at provider arrival time.
+pub(crate) fn relay_request_declares_tools(payload: &Value) -> bool {
+    fn declares_tools(value: &Value) -> bool {
+        value
+            .get("tools")
+            .and_then(Value::as_array)
+            .is_some_and(|tools| !tools.is_empty())
+    }
+    // Top-level declarations.
+    if ["tools", "additional_tools"].iter().any(|field| {
+        payload
+            .get(*field)
+            .and_then(Value::as_array)
+            .is_some_and(|tools| !tools.is_empty())
+    }) {
+        return true;
+    }
+    // A Responses client can also declare tools as an input item. Chat Process
+    // rewrites the business carriers for every declared tool, so an item that
+    // adds declarations keeps whole-attempt buffering too.
+    payload
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                let kind = item.get("type").and_then(Value::as_str).unwrap_or_default();
+                kind.contains("tool") || declares_tools(item)
+            })
+        })
 }

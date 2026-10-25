@@ -206,8 +206,8 @@ object in the run note. At minimum include the AppSDK contract root and its
 records/maps, `.appsdk-control/`, declared generated roots, Active/Protected,
 business source/runtime data, every Collab initialization root, daemon
 PID/socket, identity and route binding, mailbox/journal, claims, tasks, and
-worktrees. For each item record its owner, observed status, content or
-identity digest when applicable, retention class, proposed disposition, and
+worktrees. For each affected item record its owner, observed status,
+retention class, proposed disposition, and
 the evidence that makes the classification trustworthy. A filename, stale
 screen, or successful daemon status is not an inventory decision.
 
@@ -267,8 +267,9 @@ live communication.
    switch, extra review or lifecycle ceremony.
 
 The heavier parts of delivery are conditional, not a default. Take a clean owner
-worktree from latest `origin/main`, register peer and task/file scope through
-Collab, review under the shared standard, and reuse stage evidence under
+worktree from latest `origin/main` when project code changes. Apply Collab task/file
+scope only when already registered; development does not require registration.
+Review under the shared standard, and reuse stage evidence under
 [Stage gates: re-entry and reuse](#stage-gates-re-entry-and-reuse) only when the
 changed module or the requested delivery actually needs them.
 
@@ -508,19 +509,19 @@ still require cause, owner, unblock condition, and recovery trigger.
 
 ### Stage gates: re-entry and reuse
 
-Treat each lifecycle phase as its own persisted gate. The phase projection is
-bound to the candidate/tree, module scope, dependencies, artifact and
-environment, map hashes, evidence IDs, and phase-specific mainline or cleanup
-identity. On a new invocation, validate the current projection and upstream
-records before doing work.
+Reuse the existing applicable lifecycle records. Check the affected source,
+module, dependency, artifact or environment inputs only when they change or at
+the relevant action boundary. Recording a note, dispatching work or reporting
+progress does not trigger another validation. Do not add pre-release hashes,
+frozen candidates or identity packaging; the project contract takes precedence
+over historical record examples.
 
-- A matching PASS projection with unexpired evidence returns `reused: true`
-  and skips the external action that produced it. Keep the lightweight
-  integrity, identity, and freshness checks; `reused` is not fresh test,
+- A matching PASS projection with applicable evidence returns `reused: true`
+  and skips the external action that produced it. `reused` is not fresh test,
   deployment, merge, or publication evidence.
-- If any bound input drifts, the current phase and its downstream phases are
-  stale. Keep the immutable PASS record and produce a new candidate-bound
-  projection; do not rewrite or downgrade the old record.
+- If a relevant input changes, revalidate only the conclusions and dependent
+  checks it affects. Keep prior evidence as historical evidence; do not rewrite
+  it or invalidate unrelated work solely because another input changed.
 - `fail`, `unknown`, malformed, and expired records never count as PASS. The
   same non-PASS identity returns `LIFECYCLE_CHAIN_STAGE_NOT_PASS`; a changed
   identity archives the prior projection and re-enters the phase. Attempt
