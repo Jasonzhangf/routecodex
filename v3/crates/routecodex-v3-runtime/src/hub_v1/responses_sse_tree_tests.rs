@@ -707,3 +707,149 @@ fn responses_reasoning_content_round_trips_all_json_shapes_losslessly() {
         }
     }
 }
+
+fn apply_annotation_item_added(reducer: &mut V3ResponsesSseReducerState) {
+    reducer
+        .apply_event(&json!({
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {
+                "type": "message",
+                "id": "msg_1",
+                "status": "in_progress",
+                "role": "assistant",
+                "content": []
+            }
+        }))
+        .unwrap();
+}
+
+fn apply_annotation_content_part_done(
+    reducer: &mut V3ResponsesSseReducerState,
+    annotations: &serde_json::Value,
+) {
+    reducer
+        .apply_event(&json!({
+            "type": "response.content_part.done",
+            "output_index": 0,
+            "item_id": "msg_1",
+            "content_index": 0,
+            "part": {
+                "type": "output_text",
+                "text": "cited text",
+                "annotations": annotations
+            }
+        }))
+        .unwrap();
+}
+
+fn apply_annotation_item_done(
+    reducer: &mut V3ResponsesSseReducerState,
+    content: serde_json::Value,
+) {
+    reducer
+        .apply_event(&json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {
+                "type": "message",
+                "id": "msg_1",
+                "status": "completed",
+                "role": "assistant",
+                "content": content
+            }
+        }))
+        .unwrap();
+}
+
+#[test]
+fn responses_item_done_merge_preserves_content_part_annotations() {
+    let annotations = json!([{
+        "type": "url_citation",
+        "url": "https://example.com/cited",
+        "title": "cited"
+    }]);
+    let mut reducer = V3ResponsesSseReducerState::default();
+    apply_annotation_item_added(&mut reducer);
+    apply_annotation_content_part_done(&mut reducer, &annotations);
+    assert_eq!(
+        reducer.items[0].item().to_normalized_value()["content"][0]["annotations"],
+        annotations,
+        "content part events must merge annotations into the reduced item"
+    );
+
+    apply_annotation_item_done(
+        &mut reducer,
+        json!([{"type": "output_text", "text": "cited text"}]),
+    );
+    let normalized = reducer.items[0].item().to_normalized_value();
+    assert_eq!(normalized["content"][0]["text"], json!("cited text"));
+    assert_eq!(
+        normalized["content"][0]["annotations"], annotations,
+        "response.output_item.done must keep annotations that only intermediate events carried"
+    );
+}
+
+#[test]
+fn responses_item_done_merge_keeps_explicit_and_empty_content_part_annotations() {
+    let intermediate = json!([{
+        "type": "url_citation",
+        "url": "https://example.com/intermediate"
+    }]);
+    let done_owned = json!([{
+        "type": "url_citation",
+        "url": "https://example.com/done"
+    }]);
+    let cases: Vec<(Option<Value>, Value, &str)> = vec![
+        (
+            Some(done_owned.clone()),
+            done_owned.clone(),
+            "annotations declared by the closing part must win",
+        ),
+        (
+            Some(json!([])),
+            json!([]),
+            "an explicitly empty annotation list must stay empty",
+        ),
+        (
+            None,
+            intermediate.clone(),
+            "a closing part without annotations must be backfilled",
+        ),
+    ];
+    for (done_annotations, expected, label) in cases {
+        let mut reducer = V3ResponsesSseReducerState::default();
+        apply_annotation_item_added(&mut reducer);
+        apply_annotation_content_part_done(&mut reducer, &intermediate);
+        let mut part = json!({"type": "output_text", "text": "cited text"});
+        if let Some(done_annotations) = done_annotations {
+            part["annotations"] = done_annotations;
+        }
+        apply_annotation_item_done(&mut reducer, json!([part]));
+        assert_eq!(
+            reducer.items[0].item().to_normalized_value()["content"][0]["annotations"],
+            expected,
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn responses_item_done_merge_does_not_move_annotations_across_part_types() {
+    let mut reducer = V3ResponsesSseReducerState::default();
+    apply_annotation_item_added(&mut reducer);
+    apply_annotation_content_part_done(
+        &mut reducer,
+        &json!([{"type": "url_citation", "url": "https://example.com/cited"}]),
+    );
+    apply_annotation_item_done(
+        &mut reducer,
+        json!([{"type": "refusal", "refusal": "not citing"}]),
+    );
+    let normalized = reducer.items[0].item().to_normalized_value();
+    assert_eq!(normalized["content"][0]["refusal"], json!("not citing"));
+    assert!(
+        normalized["content"][0].get("annotations").is_none(),
+        "annotations belong to the output_text part and must not attach to a refusal part"
+    );
+}
