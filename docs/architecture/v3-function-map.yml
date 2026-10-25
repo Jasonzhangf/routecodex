@@ -4859,6 +4859,14 @@ features:
   - V3RuntimeProviderAdmission::drop
   - V3PreAcquiredProviderAdmission::release
   - V3AdaptiveConcurrencyPermitGuard::drop
+  - V3AdaptiveConcurrencyController::observe_rate_limit
+  - V3AdaptiveConcurrencyController::observe_business_success
+  - V3AdaptiveConcurrencyController::complete_probe
+  - V3AdaptiveConcurrencyController::process_shared
+  - V3AdaptiveConcurrencyController::snapshot
+  - V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS
+  - V3_DEFAULT_PROVIDER_MAX_IN_FLIGHT
+  - V3AdaptiveConcurrencyRateLimitSample
   - V3ProviderResponsesTransport::send
   - ProviderResponsesTransport::send_probe
   - execute_v3_anthropic_relay_runtime_inner

@@ -606,6 +606,12 @@ resources:
     identity: [providerId, authAlias, lease]
     semantic_contract:
       capacity: business leases are bounded by the provider+authAlias adaptive budget and hard maximum; scheduled probes remain independently bounded
+      budget_source: provider.concurrency.maxInFlight is only a static hard ceiling, defaulting to 40; the effective budget starts at that ceiling and is lowered from observed 429 watermarks
+      rate_limit_watermark: an HTTP 429 records the in-flight count at that moment, including the refused request, as that identity's rate-limit sample
+      rate_limit_window: samples live in a trailing one-hour window; samples older than one hour are pruned before any budget update
+      rate_limit_smoothing: the budget ceiling implied by the window is the median refused watermark minus one slot, clamped to the range one through the hard maximum; an empty window implies the hard maximum
+      rate_limit_adjustment: an observed 429 lowers the budget to the smaller of the current budget and the smoothed ceiling, so the decrease follows the measured watermark instead of a fixed single-step decrement
+      recovery: a business 2xx or an accepted probe restores one budget unit up to the hard maximum and clears saturation
       acquisition: Runtime immediately skips a full provider+authAlias and selects the next eligible candidate without waiting or changing provider health
       websocket_order: WebSocketV2 preserves a granted lease for an immediately available session slot and releases it before an actual slot wait; readmission after that wait is immediate and a losing capacity race returns typed ConcurrencyBusy to Runtime for reselect
       handoff: Provider consumes a matching Runtime lease exactly once; a mismatched lease is released and rejected

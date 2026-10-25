@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
 };
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::sync::{mpsc, Barrier, Mutex, Semaphore};
 use tokio::time::timeout;
 
 #[derive(Clone)]
@@ -17,6 +17,10 @@ struct Peer {
     failures: Arc<Mutex<u32>>,
     success_release: Arc<Semaphore>,
     fail_streaming_probe: bool,
+    /// 429 前的并发闸门。适配后 adaptive 预算按 429 观测水位塌缩：只有三个
+    /// 业务请求同时到达上游（水位=held+3=4），平滑预算才保留 held 与探针
+    /// 同时在途的余量。仅在 in_flight_success 变体设置。
+    rate_limit_barrier: Option<Arc<Barrier>>,
 }
 
 async fn upstream(
@@ -47,9 +51,19 @@ async fn upstream(
             }
             return (axum::http::StatusCode::OK, "not-json; no semantic terminal").into_response();
         }
-        let mut failures = peer.failures.lock().await;
-        if *failures < 3 {
-            *failures += 1;
+        let refused = {
+            let mut failures = peer.failures.lock().await;
+            if *failures < 3 {
+                *failures += 1;
+                true
+            } else {
+                false
+            }
+        };
+        if refused {
+            if let Some(barrier) = &peer.rate_limit_barrier {
+                barrier.wait().await;
+            }
             return (
                 axum::http::StatusCode::TOO_MANY_REQUESTS,
                 Json(json!({"error":{"code":"insufficient_quota","message":"controlled 429"}})),
@@ -129,6 +143,16 @@ async fn automatic_recovery(in_flight_success: bool, fail_streaming_probe: bool)
         failures: failures.clone(),
         success_release: success_release.clone(),
         fail_streaming_probe,
+        // The held request stays in flight for the whole refusal phase, so the
+        // new 429 watermark collapses the budget below anything the held
+        // request leaves free unless all three business attempts are refused
+        // simultaneously. A three-party gate makes that watermark (held + 3)
+        // deterministic instead of scheduler-dependent.
+        rate_limit_barrier: if in_flight_success {
+            Some(Arc::new(Barrier::new(3)))
+        } else {
+            None
+        },
     };
     let task = tokio::spawn(async move {
         axum::serve(
@@ -186,13 +210,36 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
     } else {
         None
     };
-    for attempt in 1..=3 {
-        assert!(business(&client, &managed).await.contains("spare-secret"));
+    if in_flight_success {
+        // The held request already owns one slot, so the three business
+        // attempts must be refused together: each 429 records the in-flight
+        // watermark (held + 3), the hour-window median stays above the held
+        // request, and the smoothed budget keeps room for the later probe.
+        let mut attempts = Vec::new();
+        for _ in 0..3 {
+            let client = client.clone();
+            let base = managed.base.clone();
+            attempts.push(tokio::spawn(async move {
+                business_at(&client, &base, "binary state business").await
+            }));
+        }
+        for attempt in attempts {
+            assert!(attempt.await.unwrap().contains("spare-secret"));
+        }
         assert_eq!(
             *failures.lock().await,
-            attempt,
-            "real business attempt must reach exact key"
+            3,
+            "all three business attempts must reach exact key before cooldown"
         );
+    } else {
+        for attempt in 1..=3 {
+            assert!(business(&client, &managed).await.contains("spare-secret"));
+            assert_eq!(
+                *failures.lock().await,
+                attempt,
+                "real business attempt must reach exact key"
+            );
+        }
     }
     wait_receipt(&mut rx, ("Bearer controlled-secret", true)).await;
     let entries = pool_entries(&client, managed.pool_url()).await;
@@ -292,6 +339,7 @@ async fn business_success_restores_budget_for_a_later_business_request() {
         failures: failures.clone(),
         success_release: success_release.clone(),
         fail_streaming_probe: false,
+        rate_limit_barrier: None,
     };
     let task = tokio::spawn(async move {
         axum::serve(
@@ -328,18 +376,23 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
-    // Held A is dispatched before the failures accumulate, so it completes with
-    // a real 2xx once three business 429s have drained the budget to 1.
+    // Two failures are already banked when held A is dispatched, so the third
+    // business 429 is refused while held A occupies a slot: the 429 watermark
+    // (held + 1) collapses the budget to 1 exactly as the old three-429
+    // sequence did, and held A still lands on the 2xx gate the mock opens.
     let held_a = {
         let client = client.clone();
         let base = managed.base.clone();
         tokio::spawn(async move { business_at(&client, &base, "held success").await })
     };
     wait_receipt(&mut rx, ("Bearer controlled-secret", false)).await;
-    for expected in 1..=3u32 {
-        assert!(business(&client, &managed).await.contains("spare-secret"));
-        assert_eq!(*failures.lock().await, expected);
-    }
+    *failures.lock().await = 2;
+    assert!(business(&client, &managed).await.contains("spare-secret"));
+    assert_eq!(
+        *failures.lock().await,
+        3,
+        "the business attempt must reach the exact key while held A is in flight"
+    );
     // Held A completes with a real 2xx; it must restore the budget from 1 to 2.
     success_release.add_permits(1);
     let held_a_body = held_a.await.unwrap();
