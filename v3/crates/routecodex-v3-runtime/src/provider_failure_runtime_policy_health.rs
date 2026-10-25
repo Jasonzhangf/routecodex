@@ -646,16 +646,18 @@ impl V3ProviderFailureRuntimeHealth {
                 ))
                 .map_err(|error| error.to_string())?;
         }
+        let provider_scope = V3ProviderActionProviderScope::new(
+            failure_session_scope,
+            v3_relay_provider_candidate_key_parts(
+                provider_id,
+                Some(interface_id),
+                auth_alias,
+                model_id,
+            ),
+        )?;
         self.action_gate
-            .record_provider_success(&V3ProviderActionProviderScope::new(
-                failure_session_scope,
-                v3_relay_provider_candidate_key_parts(
-                    provider_id,
-                    Some(interface_id),
-                    auth_alias,
-                    model_id,
-                ),
-            )?)
+            .record_provider_success(&provider_scope.clone().rate_limit_global())?;
+        self.action_gate.record_provider_success(&provider_scope)
     }
 
     /// 瞬态失败（SSE 流内/挂起）耗尽 3 次尝试后的 session 级短期绕行：
@@ -966,6 +968,7 @@ impl V3ProviderFailureRuntimeHealth {
         &self,
         witness: &V3Error05RecoveryAdmissionWitness,
         selected: &V3Target10ConcreteProviderSelected,
+        deadline: std::time::Instant,
     ) -> Result<V3ProviderActionRecoveryTransition, String> {
         let provider_scope = V3ProviderActionProviderScope::new(
             witness.failure_session_scope(),
@@ -976,27 +979,31 @@ impl V3ProviderFailureRuntimeHealth {
                 Some(&selected.candidate.model_id),
             ),
         )?;
-        self.action_gate
-            .wait_for_recovery_witness(witness, provider_scope)
-            .await
+        tokio::time::timeout_at(
+            tokio::time::Instant::from_std(deadline),
+            self.action_gate
+                .wait_for_recovery_witness(witness, provider_scope),
+        )
+        .await
+        .map_err(|_| "provider action wait exceeded request residence deadline".to_string())?
     }
 
-    pub(crate) async fn wait_for_exact_selected_provider_action(
+    pub(crate) fn try_admit_candidate_rate_limit(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
-        selected: &V3Target10ConcreteProviderSelected,
-    ) -> Result<Option<V3ProviderActionAdmission>, String> {
+        candidate: &V3TargetCandidate,
+    ) -> Result<crate::provider_action_gate::V3ExactRateLimitAdmission, String> {
+        let scope = V3ProviderActionProviderScope::new(
+            failure_session_scope,
+            v3_relay_provider_candidate_key_parts(
+                &candidate.provider_id,
+                Some(&candidate.interface_id),
+                Some(&candidate.auth_alias),
+                Some(&candidate.model_id),
+            ),
+        )?;
         self.action_gate
-            .wait_for_exact_provider_action(&V3ProviderActionProviderScope::new(
-                failure_session_scope,
-                v3_relay_provider_candidate_key_parts(
-                    &selected.candidate.provider_id,
-                    Some(&selected.candidate.interface_id),
-                    Some(&selected.candidate.auth_alias),
-                    Some(&selected.candidate.model_id),
-                ),
-            )?)
-            .await
+            .try_admit_exact_rate_limit(&scope.rate_limit_global())
     }
 
     pub(crate) fn store(&self) -> V3ProviderHealthStore {

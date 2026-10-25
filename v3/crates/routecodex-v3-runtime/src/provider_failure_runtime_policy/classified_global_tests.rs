@@ -8,7 +8,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::V3ProviderRecoveryKind;
 
 #[test]
-fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure() {
+fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
     let mut manifest = global_pool_alive_manifest("global_status_policy_classified");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -44,10 +44,9 @@ fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), now_ms)
             .available;
-        assert_eq!(
+        assert!(
             available,
-            attempt < 2,
-            "429 cools only after the third same-class failure; attempt={attempt}"
+            "429 must remain health-neutral; attempt={attempt}"
         );
     }
 
@@ -154,7 +153,7 @@ fn classified_provider_error(
 }
 
 #[test]
-fn recoverable_http_429_blocks_after_third_global_failure() {
+fn http_429_never_enters_global_cooldown() {
     let mut manifest = global_pool_alive_manifest("recoverable_http_429_global_threshold");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -199,10 +198,9 @@ fn recoverable_http_429_blocks_after_third_global_failure() {
             .scheduling_projection("first", "key1", "gpt-test", 100, 1, now_ms)
             .expect("health projection");
         let available = projection.available;
-        assert_eq!(
+        assert!(
             available,
-            attempt < 2,
-            "provider must cool only after consecutive third 429; attempt={attempt}"
+            "429 must not cool provider health; attempt={attempt}"
         );
     }
 }

@@ -13,6 +13,8 @@ fn v3_direct_retired_continuation_error(
 
 fn v3_direct_admit_pinned_target(
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    failure_scope: &routecodex_v3_error::V3ProviderFailureSessionScope,
     last_external_http: &Option<V3ExternalHttpWitness>,
     trace: &[&'static str],
     hook_registry: &V3HookRegistry,
@@ -24,7 +26,15 @@ fn v3_direct_admit_pinned_target(
     V3ResponsesDirectRuntimeOutput,
 > {
     match try_admit_v3_selected_target(&selected) {
-        Ok(Some(admission)) => Ok((selected, Some(admission))),
+        Ok(Some(mut admission)) => {
+            let control = provider_health.try_admit_candidate_rate_limit(failure_scope, &selected.candidate)
+                .map_err(|reason| direct_runtime_helpers_stream::source_failure_output(
+                    runtime_source("V3ProviderActionGateAdmission", reason),
+                    last_external_http.clone(), trace.to_vec(), hook_registry,
+                ))?;
+            admission.bind_pinned_rate_limit_control(control);
+            Ok((selected, Some(admission)))
+        },
         Ok(None) => Err(
             direct_runtime_helpers_stream::target_exhausted_output_with_observability(
                 crate::shared::direct_plain_error(
@@ -231,18 +241,22 @@ fn run_v3_direct_policy_error_02_to_05_decision(
     default_pool_available: bool,
     same_provider_retry_available: bool,
     recovery: Option<routecodex_v3_error::V3Error05RecoveryAdmissionWitness>,
+    target_recovery_pending: bool,
 ) -> Result<V3Error05ExecutionDecision, DirectPolicyFailure> {
     let source_projection = serde_json::to_value(original_source)
         .map_err(|error| direct_policy_failure(original_source, "V3Error02Classified", error))?;
-    run_v3_direct_policy_error_02_to_05_decision_from_projection(
+    crate::operation_runner::run_v3_error_02_to_05_decision_operators_with_target_recovery(
         source_projection,
-        original_source,
+        original_source.clone(),
         scope,
         route_pool_remaining_after_exclusion,
         default_pool_available,
         same_provider_retry_available,
         recovery,
+        target_recovery_pending,
     )
+    .map(|(_, decision)| decision)
+    .map_err(|error| direct_policy_failure(original_source, "V3Error05ExecutionDecision", error))
 }
 
 fn record_v3_direct_provider_failure_record(
@@ -351,6 +365,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test-model", 
             false,
             false,
             Some(witness),
+            false,
         )
         .expect("nonterminal policy decision");
         assert!(matches!(
@@ -562,6 +577,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             false,
             false,
             None,
+            false,
         )?;
         return Ok(V3DirectProviderFailurePolicyResult {
             decision,
@@ -576,6 +592,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         .and_then(|error| error.status)
         .filter(|external_status| *external_status >= 400)
         .unwrap_or(status);
+    let rate_limited = observed_status == 429;
     let is_response_processing_failure =
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&source);
     let is_health_neutral_failure = is_response_processing_failure
@@ -599,10 +616,13 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         }
     };
     let request_local_excluded = BTreeSet::from([failed_key.clone()]);
-    state
-        .failed_candidates
-        .extend(request_local_excluded.clone());
-    let failed_with_current = state.failed_candidates.clone();
+    if !rate_limited {
+        state
+            .failed_candidates
+            .extend(request_local_excluded.clone());
+    }
+    let mut failed_with_current = state.failed_candidates.clone();
+    failed_with_current.extend(request_local_excluded);
     let mut remaining = expanded_candidates.map_or(0, |expanded_candidates| {
         remaining_available_candidates(
             expanded_candidates,
@@ -657,13 +677,37 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             }
         }
     }
+    let rate_limit_alternative = if rate_limited {
+        context.expanded.and_then(|expanded| {
+            crate::provider_failure_runtime_policy::select_v3_target_with_session_then_global(
+                &routecodex_v3_target::V3TargetInterpreter::default(),
+                expanded.clone(),
+                context.availability,
+                context.provider_health,
+                &failed_with_current,
+                context.now_epoch_ms,
+                0,
+            )
+            .ok()
+        })
+    } else {
+        None
+    };
+    if rate_limited {
+        remaining = usize::from(rate_limit_alternative.is_some());
+        next_provider_key = rate_limit_alternative
+            .as_ref()
+            .map(|alternative| candidate_key(&alternative.candidate));
+    }
     // Health changes are allowed only after the captured target proves that
     // another eligible, untried identity can take this request.
-    let health_record = if is_health_neutral_failure || remaining == 0 {
+    let health_record = if rate_limited || is_health_neutral_failure || remaining == 0 {
         V3ProviderFailureRecord {
             scope_label: failed_key.clone(),
             provider_key: failed_key.clone(),
-            state: if is_response_processing_failure {
+            state: if rate_limited {
+                "rate_limit_capacity_wait"
+            } else if is_response_processing_failure {
                 "request_local_response_processing"
             } else if is_health_neutral_failure {
                 "request_local_provider_compat"
@@ -703,7 +747,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         auth_alias: selected.candidate.auth_alias.clone(),
         model_id: selected.candidate.model_id.clone(),
     };
-    let recovery_record = if remaining > 0 && !is_health_neutral_failure {
+    let recovery_record = if (remaining > 0 || rate_limited) && !is_health_neutral_failure {
         Some(
             context
                 .provider_health
@@ -713,7 +757,11 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                     &selected.candidate.interface_id,
                     Some(&selected.candidate.auth_alias),
                     Some(&selected.candidate.model_id),
-                    &source.code,
+                    if rate_limited {
+                        "provider_http_429"
+                    } else {
+                        &source.code
+                    },
                 )
                 .map_err(|error| {
                     direct_policy_failure(&source, "V3ProviderActionGateAdmission", error)
@@ -739,20 +787,26 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         ),
         None => None,
     };
+    let target_recovery_pending = remaining == 0 && context.expanded.is_some_and(|expanded| {
+        crate::provider_failure_runtime_policy::v3_exhaustion_is_cooldown_only(
+            expanded, &failed_with_current, context.failure_session_scope,
+            context.provider_health, context.now_epoch_ms)
+    });
     let decision = run_v3_direct_policy_error_02_to_05_decision(
         &source,
         provider_key_model_scope,
         remaining,
         false,
-        false,
+        rate_limited && remaining == 0,
         recovery_witness,
+        target_recovery_pending,
     )?;
     state
         .trace
         .extend(V3_ERROR_CHAIN_NODE_IDS.iter().take(5).copied());
     if matches!(
         decision.action,
-        V3Error05ExecutionAction::WaitThenReselect { .. }
+        V3Error05ExecutionAction::WaitThenReselect { .. } | V3Error05ExecutionAction::ReevaluateTarget
     ) {
         state.trace.push("V3TargetLocalReselected");
         let event = Some(build_v3_direct_provider_failure_observation(
@@ -770,7 +824,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         ));
         return Ok(V3DirectProviderFailurePolicyResult {
             decision,
-            retry_selected: None,
+            retry_selected: rate_limit_alternative.map(Box::new),
             event,
             // Candidate-scoped request/provider compatibility failures are
             // health-neutral and must reselect immediately without entering
@@ -782,6 +836,25 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         decision.action,
         V3Error05ExecutionAction::WaitThenRetrySame { .. }
     ) {
+        if rate_limited {
+            let event = Some(build_v3_direct_provider_failure_observation(
+                selected,
+                observed_status,
+                &source,
+                &health_record,
+                "wait_rate_limit_capacity",
+                Some(failed_key),
+                recovery_record
+                    .as_ref()
+                    .map(|record| record.minimum_delay_ms),
+            ));
+            return Ok(V3DirectProviderFailurePolicyResult {
+                decision,
+                retry_selected: Some(Box::new(selected.clone())),
+                event,
+                retryable_transient: false,
+            });
+        }
         return Err(direct_policy_failure(
             &source,
             "V3Error05ExecutionDecision",

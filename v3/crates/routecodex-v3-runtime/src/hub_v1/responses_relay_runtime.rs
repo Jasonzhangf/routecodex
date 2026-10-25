@@ -479,6 +479,11 @@ async fn handle_v3_responses_relay_provider_failure(
     }
     failure = attach_v3_provider_failure_events_to_failure(failure, state.provider_failure_events);
     match result.decision.action {
+        V3Error05ExecutionAction::ReevaluateTarget => {
+            *state.retry_selected = None;
+            *state.pending_recovery = None;
+            Ok(None)
+        }
         V3Error05ExecutionAction::WaitThenReselect { recovery } => {
             *state.retry_selected = result.retry_selected.map(|selected| *selected);
             if result.event.wait_ms.is_some() {

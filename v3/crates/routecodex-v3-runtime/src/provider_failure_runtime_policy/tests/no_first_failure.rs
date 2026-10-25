@@ -28,7 +28,7 @@ fn source(kind: V3ErrorSourceKind, code: &str, status: u16) -> V3Error01SourceRa
 }
 
 #[test]
-fn no_first_failure_default_counts_real_failure_and_success_resets_exact_identity() {
+fn no_first_failure_429_retains_diagnostics_without_health_cooldown() {
     let mut manifest = global_pool_alive_manifest("no_first_failure_counted");
     normalize_global_pool_priorities(&mut manifest);
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
@@ -77,11 +77,11 @@ fn no_first_failure_default_counts_real_failure_and_success_resets_exact_identit
             health
                 .availability("first", Some("key1"), Some("gpt-test"), now_ms)
                 .available,
-            now_ms < 104
+            true
         );
     }
     assert!(
-        !health
+        health
             .availability("first", Some("key1"), Some("gpt-test"), 102)
             .available
     );
@@ -105,28 +105,14 @@ fn no_first_failure_default_counts_real_failure_and_success_resets_exact_identit
             .store()
             .provider_cooldown_probe_keys_due(5_104)
             .unwrap()
-            .iter()
-            .any(|(provider, key, model)| {
-                provider == "first"
-                    && key.as_deref() == Some("key1")
-                    && model.as_deref() == Some("gpt-test")
-            }),
-        "an existing cooldown must remain recoverable by an exact-identity semantic probe"
+            .is_empty(),
+        "429 backpressure must not create a cooldown probe"
     );
     assert!(
-        !health
+        health
             .availability("first", Some("key1"), Some("gpt-test"), 104)
             .available
     );
-    let permit = health
-        .store()
-        .acquire_provider_cooldown_probe_if_due("first", Some("key1"), Some("gpt-test"), 5_104)
-        .unwrap()
-        .expect("matching due semantic probe");
-    health
-        .store()
-        .complete_provider_cooldown_probe_success_with_permit(&permit, 5_105)
-        .unwrap();
     assert!(
         health
             .availability("first", Some("key1"), Some("gpt-test"), 5_105)
@@ -142,8 +128,8 @@ fn no_first_failure_default_counts_real_failure_and_success_resets_exact_identit
             5_106,
         )
         .unwrap();
-    // This source wrapper returns session bookkeeping. Semantic recovery
-    // resets the global health streak, while retaining the session history.
+    // This source wrapper retains request/session error bookkeeping even though
+    // provider health stays routable and never needs a recovery probe.
     assert_eq!(after_recovery.failure_count, 4);
     assert!(
         health
@@ -246,7 +232,7 @@ fn no_first_failure_irrecoverable_quota_and_auth_keep_immediate_boundary() {
 }
 
 #[test]
-fn quota_429_waits_for_three_failures_then_business_success_recovers() {
+fn quota_429_stays_health_neutral_before_and_after_business_success() {
     let store = V3ProviderHealthStore::default();
     let failure = source(
         V3ErrorSourceKind::ProviderFailure,
@@ -260,15 +246,18 @@ fn quota_429_waits_for_three_failures_then_business_success_recovers() {
         429,
         "insufficient_quota",
     );
-    assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-    assert_eq!(action.failure_threshold, 3);
+    assert_eq!(
+        action.recovery,
+        V3ProviderRecoveryKind::HealthNeutralTransient
+    );
+    assert_eq!(action.failure_threshold, 0);
     for time in 100..103 {
         assert_eq!(
             store
                 .record_provider_failure_action("p", "k", "m", &action, time)
                 .unwrap()
                 .cooldown,
-            time == 102
+            false
         );
     }
     assert!(

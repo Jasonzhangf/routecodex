@@ -411,6 +411,15 @@ const cases = [
     diagnostic: /admission_permit must lock explicit ownership/u,
   },
   {
+    name: 'V3 manifest allows fresh requests to bypass active HTTP 429 recovery',
+    path: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
+    mutate: (source) => source.replace(
+      '  fresh_request_consumes_active_recovery_lane: http_429_only\n',
+      '  fresh_request_consumes_active_recovery_lane: false\n',
+    ),
+    diagnostic: /admission_permit must lock explicit ownership/u,
+  },
+  {
     name: 'V3 manifest moves typed Error05 to the Server owner',
     path: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
     mutate: (source) => source.replace(

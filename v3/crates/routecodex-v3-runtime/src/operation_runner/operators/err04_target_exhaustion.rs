@@ -3,8 +3,8 @@ use crate::operation_runner::{
 };
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use routecodex_v3_error::{
-    build_v3_error_04_target_exhaustion_decision_with_provider_availability,
-    V3Error03TargetLocalAction, V3Error04TargetExhaustionDecision,
+    build_v3_error_04_target_exhaustion_decision_with_target_recovery, V3Error03TargetLocalAction,
+    V3Error04TargetExhaustionDecision,
 };
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
@@ -18,6 +18,7 @@ struct V3Error04TargetExhaustionOperator {
     route_pool_remaining_after_exclusion: usize,
     default_pool_available: bool,
     same_provider_retry_available: bool,
+    target_recovery_pending: bool,
     side_output: Arc<Mutex<Option<V3Error04TargetExhaustionDecision>>>,
 }
 
@@ -27,6 +28,7 @@ impl V3Error04TargetExhaustionOperator {
         route_pool_remaining_after_exclusion: usize,
         default_pool_available: bool,
         same_provider_retry_available: bool,
+        target_recovery_pending: bool,
         side_output: Arc<Mutex<Option<V3Error04TargetExhaustionDecision>>>,
     ) -> Self {
         Self {
@@ -34,6 +36,7 @@ impl V3Error04TargetExhaustionOperator {
             route_pool_remaining_after_exclusion,
             default_pool_available,
             same_provider_retry_available,
+            target_recovery_pending,
             side_output,
         }
     }
@@ -57,11 +60,12 @@ impl Operator for V3Error04TargetExhaustionOperator {
     }
 
     fn execute(&self, _input: Value, _context: &OperatorContext) -> Result<Value, String> {
-        let result = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+        let result = build_v3_error_04_target_exhaustion_decision_with_target_recovery(
             self.local_action.clone(),
             self.route_pool_remaining_after_exclusion,
             self.default_pool_available,
             self.same_provider_retry_available,
+            self.target_recovery_pending,
         );
         let projection = serde_json::to_value(&result).map_err(|error| error.to_string())?;
         let mut holder = self
@@ -80,6 +84,24 @@ pub(crate) fn run_v3_error_04_target_exhaustion_operator(
     default_pool_available: bool,
     same_provider_retry_available: bool,
 ) -> Result<(Value, V3Error04TargetExhaustionDecision), OperationRunnerError> {
+    run_v3_error_04_target_exhaustion_operator_with_target_recovery(
+        input,
+        local_action,
+        route_pool_remaining_after_exclusion,
+        default_pool_available,
+        same_provider_retry_available,
+        false,
+    )
+}
+
+pub(crate) fn run_v3_error_04_target_exhaustion_operator_with_target_recovery(
+    input: Value,
+    local_action: V3Error03TargetLocalAction,
+    route_pool_remaining_after_exclusion: usize,
+    default_pool_available: bool,
+    same_provider_retry_available: bool,
+    target_recovery_pending: bool,
+) -> Result<(Value, V3Error04TargetExhaustionDecision), OperationRunnerError> {
     let side_output = Arc::new(Mutex::new(None));
     let output = run_v3_single_node_operator(
         V3OperationGraph::Error,
@@ -90,6 +112,7 @@ pub(crate) fn run_v3_error_04_target_exhaustion_operator(
             route_pool_remaining_after_exclusion,
             default_pool_available,
             same_provider_retry_available,
+            target_recovery_pending,
             Arc::clone(&side_output),
         ),
     )?;

@@ -721,10 +721,12 @@ features:
   - V3RelayErrorOperatorFault
   - run_v3_err01_source_raised_operator
   - run_v3_error_02_to_05_decision_operators
+  - run_v3_error_02_to_05_decision_operators_with_target_recovery
   - run_v3_error_06_terminal_projection_operator
   - run_v3_err02_classified_operator
   - run_v3_error_03_target_local_action_operator
   - run_v3_error_04_target_exhaustion_operator
+  - run_v3_error_04_target_exhaustion_operator_with_target_recovery
   - execute_v3_operation_runner_error_err05_execution_decision
   - execute_v3_operation_runner_error_err06_client_projected
   - build_v3_error_01_source_raised
@@ -738,6 +740,7 @@ features:
   - build_v3_error_02_classified_from_v3_error_01
   - build_v3_error_03_target_local_action_from_v3_error_02
   - build_v3_error_04_target_exhaustion_decision_with_provider_availability
+  - build_v3_error_04_target_exhaustion_decision_with_target_recovery
   - build_v3_error_05_execution_decision_from_v3_error_04
   - build_v3_error_06_client_projected_from_v3_error_05
   - V3ProviderFailureRuntimeHealth::record_provider_failure_record
@@ -864,6 +867,9 @@ features:
   - build_v3_execution_11_protocol_decision_from_v3_target_10
   - plan_v3_responses_protocol_execution_with_provider_health
   - project_v3_protocol_execution_plan_failure
+  - plan_v3_responses_protocol_execution_with_recovery
+  - plan_v3_responses_protocol_execution_recovery_inner
+  - plan_v3_responses_protocol_execution_with_captured_target
   - finish_v3_protocol_execution_plan_failure
   - kernel::tests::protocol_plan_failure_preserves_source_status_and_pool_exhausted
   - tests::protocol_plan_operator_fault_consumer_preserves_sources_without_error06
@@ -4260,8 +4266,16 @@ features:
   - v3-provider-action-gate-49
   - v3-provider-action-gate-50
   - v3-provider-action-gate-51
+  - v3-provider-action-gate-52
+  - v3-provider-action-gate-53
+  - v3-provider-action-gate-54
+  - v3-provider-action-gate-55
+  - v3-provider-action-gate-56
   entry_symbols:
   - V3ProviderActionGate
+  - V3ProviderActionGate::try_admit_exact_rate_limit
+  - V3ProviderFailureRuntimeHealth::try_admit_candidate_rate_limit
+  - V3RuntimeProviderAdmission::take_rate_limit_control
   - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
   - provider_failure_runtime_policy::tests::post_commit_response_stream_failure_updates_global_key_health
   - provider_failure_runtime_policy::tests::post_commit_transient_stream_failures_count_toward_global_cooldown
@@ -4273,7 +4287,9 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
@@ -4852,6 +4868,7 @@ features:
   - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
   - build_v3_provider_global_probe_target
   - run_v3_plan_execution_operator_with_probes
+  - await_v3_plan_execution_with_deadline
   - PlanExecutionOperator::execute_plan
   - step_v3_target_planning_with_admission_sync
   - try_admit_v3_selected_target

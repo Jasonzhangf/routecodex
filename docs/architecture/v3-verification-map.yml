@@ -1329,7 +1329,8 @@ features:
   - Provider transport dispatches by selected provider_type; Anthropic targets use /v1/messages, x-api-key, anthropic-version, Anthropic wire, and Responses client projection
   - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
   - 'Adaptive provider concurrency is keyed by providerId plus authAlias: admission is atomic and a full candidate is skipped immediately for this request'
-  - 'Configured maxInFlight bounds business admission without queuing; Direct and Relay select the next eligible candidate and all-full pools exhaust immediately'
+  - 'Business HTTP429 releases its providerId:authAlias capacity lease without shrinking the shared budget; only the exact provider.model.key Error/action gate controls backpressure. issue44cc3af_429_healthy_alternatives_keep_parallelism and issue44cc3af_direct_429_healthy_alternatives_keep_parallelism hold eight sibling-model requests before any success and require all eight configured slots'
+  - 'Configured maxInFlight bounds business admission; Direct and Relay try the next eligible candidate, then wait within the acquisition budget when remaining candidates are temporarily full'
   - 'Pure all-busy exhaustion retains TargetPoolExhausted/provider_concurrency_busy only when every captured Target09 candidate key was proven capacity-busy; mixed exhaustion remains selected_target_exhausted'
   - 'Concurrency exclusions remain request-local and never mutate provider failure health or cooldown; scheduled probes remain separately bounded'
   - 'WebSocketV2 preserves a granted lease for an available session slot, releases it before an actual slot wait, and returns typed ConcurrencyBusy on a losing readmission race for Runtime reselect; the exact candidate busy provenance survives subsequent request-local exhaustion'
@@ -1341,9 +1342,9 @@ features:
   - A Responses selection-time pool exhaustion (every candidate excluded by the context window before any provider attempt) breaks the client transport for both the streaming and the nonstreaming boundary instead of projecting the synthesized 502 `network_error` body, which stays provider-private Error06 evidence
   - A provider terminal disposition records provider-private evidence before the client transport breaks: the real external upstream status, headers, and body are persisted for the failed request, and a terminal with no provider response records that instead of a fabricated status
   required_contract:
-  - Provider concurrency policy is Config-owned; maxInFlight bounds business admission and acquireTimeoutMs bounds only scheduled probe admission; neither is reconstructed from payload, MetadataCenter, or Debug
+  - Provider concurrency policy is Config-owned; maxInFlight bounds business admission and acquireTimeoutMs bounds temporary capacity recovery and scheduled probe admission; neither is reconstructed from payload, MetadataCenter, or Debug
   - Reaching the adaptive concurrency budget immediately selects another request-eligible candidate without a capacity wait or Router reentry
-  - An explicit provider.model request remains pinned; a full pinned candidate exhausts immediately and cannot escape its pin
+  - An explicit provider.model request remains pinned; a full pinned candidate waits within its acquisition budget and cannot escape its pin
   - Only an actual typed provider failure such as HTTP 429 may enter Error recovery and select another provider after transport
   - routecodex-v3-provider-responses remains generic across provider IDs and may branch only by provider_type/protocol, never by deployment provider ID
   - Provider consumes an already selected target and never reads config, Virtual Router, Target interpreter, route groups, or Forwarder resources; only the probe-only Runtime target builder reads the published manifest to construct that target
@@ -3005,6 +3006,11 @@ features:
   - v3-provider-action-gate-49
   - v3-provider-action-gate-50
   - v3-provider-action-gate-51
+  - v3-provider-action-gate-52
+  - v3-provider-action-gate-53
+  - v3-provider-action-gate-54
+  - v3-provider-action-gate-55
+  - v3-provider-action-gate-56
   required_positive:
   - Responses Relay provider-bound request compatibility and wire encoding failures enter the shared provider failure policy and typed Error05 action lane before retry or reselect.
   - Terminal provider HTTP errors reach the public `/v1/responses` failure boundary without waiting for provider action admission.
@@ -3322,19 +3328,24 @@ features:
   - matched HTTP 401 and HTTP 403 automatic cooldown policies retain the exact selected provider+auth_alias+model identity
   - every automatic failure excludes and cools only the failed complete candidate; untried sibling keys, models and providers remain available
   - 401 auth-key business cooldown remains until HTTP 2xx probe success, while its first recovery probe is due after 5 seconds and later failures advance the shared 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s ladder
-  - every HTTP 429 requires three consecutive HTTP 429 failures of the exact provider+auth_alias+model identity regardless of body code or fingerprint; success or a non-429 failure resets its streak; success immediately clears its exact 429-owned cooldown; other failures retain typed thresholds
+  - HTTP 429 is health-neutral backpressure; global exact-identity recovery admission coordinates waiting across sessions, and matching business success wakes waiters; other failures retain typed thresholds
   - private-profile probes preserve provider-specific request compatibility and accept HTTP 2xx before a successful next business request
   - a provider-declared terminal that carries a legal business result is forwarded as-is and never becomes a provider failure even without visible text: Responses incomplete content_filter, Anthropic refusal, and the OpenAI Chat empty-content content_filter finish; a complete attempt with no deliverable business content at all (empty end_turn/stop terminal with no text/tool/refusal/reasoning) is instead classified as an internal typed 502 for the Error chain
   - a completely received upstream HTTP 502 with an empty or non-JSON body remains last_candidate_terminal and never enters provider cooldown; a truncated 2xx body at the last or only candidate through Direct or Relay likewise terminates detectably without cooldown, retry, fallback, or recovery probe
   - a Relay client disconnect after a partial provider frame stays health-neutral, releases the request-local attempt, reaches the public Server boundary, and starts no additional provider attempt
   - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
-  - Public `/v1/responses` switches to a spare provider while the first provider remains held; all-full pools terminate promptly without an extra upstream request
+  - Public `/v1/responses` switches to a spare provider while the first remains held; all-full pools wait for capacity without extra upstream requests and terminate only after their declared wait budget
   - provider_concurrency_saturated_candidates_exhaust_without_send and provider_concurrency_relay_saturated_candidates_exhaust_without_send prove pure all-busy exhaustion retains TargetPoolExhausted/provider_concurrency_busy
   - The async admission and WebSocket readmission paths preserve exact capacity-busy keys until the final direct or relay terminal source is built
-  - all_busy_async_admission_preserves_provider_concurrency_busy_source proves async pre-admission rejects every captured candidate as capacity-busy without waiting and returns TargetPoolExhausted/provider_concurrency_busy
+  - all_busy_async_admission_preserves_provider_concurrency_busy_source proves final budget-exhausted admission retains TargetPoolExhausted/provider_concurrency_busy after waiting
   - mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhausted proves a non-busy request-local exclusion prevents all-busy source relabeling and leaves generic selected_target_exhausted
   - Concurrency exclusions are request-local and health-neutral; reselect stays inside the captured Target09 candidate set without Router reentry
+  - Mixed prior-failure and temporary-busy exhaustion carries both exact typed sets and waits within the acquisition budget; a source label never reconstructs busy identities
+  - Successful admission removes scan-local busy exclusions before callers adopt the returned exclusion state; a busy candidate freed while its selected peer fails remains eligible for Direct and Relay recovery
+  - A received HTTP429 constrains only its exact identity; current and fresh requests immediately use healthy alternatives without joining that identity's wait lane, and unrelated keys/models retain their configured parallelism
+  - Post-attempt failure with only cooled peers remaining uses typed Error04 target_recovery_pending and Error05 ReevaluateTarget before bounded captured-target planning; the eight failed_attempt public cases cover Direct/Relay recovery, acquisition-budget exhaustion, whole-request residence deadline and client cancellation without retrying excluded A or forwarding its error payload
   - A full preferred candidate does not disable the caller-authorized semantic recovery of another eligible cooled candidate in Direct or Relay
+  - Direct Chat and Messages precommit SSE failures consume ReevaluateTarget and recover on a cooled peer; live Responses initial protocol preplanning shares one residence deadline with subsequent Direct or Relay execution
   - Business leases remain bounded and release after completion, error, cancellation, or stream drop; due scheduled probes retain their separate bounded admission
   required_negative:
   - stale successful or failed probe generations cannot mutate newer provider health state
@@ -3371,6 +3382,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_probe_fairness -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_probe_fairness_tests -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server pool_empty_recovery -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue44cc3af -- --nocapture --test-threads=1
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture

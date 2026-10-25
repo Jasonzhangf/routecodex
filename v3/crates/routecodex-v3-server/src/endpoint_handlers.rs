@@ -243,6 +243,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             );
         }
     };
+    let mut responses_request_execution_control = None;
     let responses_protocol_plan = if entry_protocol == "responses"
         && responses_entry_facts
             .as_ref()
@@ -260,13 +261,18 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             Some(request_identity.pipeline_id.clone()),
             payload.clone(),
         );
-        let plan = match plan_v3_responses_protocol_execution_with_provider_health(
+        let plan = match plan_v3_responses_protocol_execution_with_recovery(
             &state.manifest,
             raw,
             state.provider_health.runtime_health(),
             current_epoch_ms(),
-        ) {
-            Ok(plan) => plan,
+        )
+        .await
+        {
+            Ok((plan, control)) => {
+                responses_request_execution_control = Some(control);
+                plan
+            }
             Err(failure) => {
                 let node_trace = failure.node_trace.clone();
                 let projected = match finish_v3_protocol_execution_plan_failure(
@@ -455,6 +461,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             BTreeSet::new(),
             plan.map_or_else(V3ResponsesRelayRuntimeSeeds::default, |plan| {
                 let mut seeds = plan.relay_runtime_seeds();
+                seeds.request_execution_control = responses_request_execution_control.clone();
                 seeds.client_frame_sink = client_frame_sink.clone();
                 seeds
             }),
@@ -732,7 +739,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 .as_ref()
                 .map(V3MetadataCenterExecutionPlan::protocol_plan),
             None,
-            None,
+            responses_request_execution_control,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
             client_frame_sink,

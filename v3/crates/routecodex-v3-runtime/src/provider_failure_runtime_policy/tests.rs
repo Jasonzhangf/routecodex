@@ -358,8 +358,8 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let mut manifest = global_pool_alive_manifest("global_status_policy");
     normalize_global_pool_priorities(&mut manifest);
     // Account/billing classes (401/403) are typed irrecoverable and cool on their
-    // first failure. Ordinary 429 keeps a three-failure threshold; other typed
-    // recoverable classes currently use the shared threshold of one.
+    // first failure. Observe three 429s without cooldown; other typed recoverable
+    // classes retain the shared threshold of one.
     let cases = [(401, 1), (403, 1), (429, 3), (500, 1), (502, 1), (599, 1)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -390,14 +390,14 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                     "ordinary provider policy failure must remain distinct from a Source01 fault",
                 );
             assert_eq!(record.failure_count, attempt + 1);
-            let expected_state = if attempt + 1 == threshold {
+            let expected_state = if status != 429 && attempt + 1 == threshold {
                 "cooldown"
             } else {
                 "healthy"
             };
             assert_eq!(
                 record.state, expected_state,
-                "status {status} must cool only after {threshold} consecutive same-class failures"
+                "status {status} must follow its declared health policy"
             );
             assert_eq!(
                 health
@@ -408,16 +408,17 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                         10_000 + attempt as u64
                     )
                     .available,
-                attempt + 1 < threshold,
+                status == 429 || attempt + 1 < threshold,
                 "status {status} availability must honor its failure threshold"
             );
         }
-        assert!(
-            !health
+        assert_eq!(
+            health
                 .store()
                 .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000)
                 .available,
-            "status {status} must block after {threshold} consecutive failures"
+            status == 429,
+            "only the observed 429 case stays health-neutral in this failure matrix"
         );
     }
 
@@ -1198,10 +1199,10 @@ targets = [
 [[error.provider_error_action_policy]]
 policy_id = "path_only"
 scope = { provider_type = "responses", model_id = "gpt-test" }
-match = { http_status = 429 }
+match = { http_status = 503 }
 [[error.provider_error_action_policy.path]]
 step = "project"
-status = 429
+status = 503
 reason_code = "path_rate_limit"
 public_code = "E_PATH_RATE_LIMIT"
 message_mode = "code_only"
@@ -1239,9 +1240,9 @@ message_mode = "code_only"
         &context,
         selected,
         "V3ProviderReqOutbound09TransportRequest",
-        429,
-        Some("provider_http_429".to_string()),
-        "quota exceeded".to_string(),
+        503,
+        Some("provider_http_503".to_string()),
+        "service unavailable".to_string(),
         None,
         &mut state,
     )
@@ -1250,7 +1251,7 @@ message_mode = "code_only"
 
     let projection = result
         .terminal_projection
-        .expect("default-floor exhausted 429 must be terminal");
+        .expect("default-floor exhausted non-429 failure must be terminal");
     assert_eq!(
         projection.status, 502,
         "terminal pool exhaustion must use the declared public network error"

@@ -80,6 +80,18 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .as_ref()
         .and_then(|error| error.status);
     let failure_fingerprint = build_v3_provider_failure_identity_from_classified(classified);
+    if status == Some(429) {
+        return V3ProviderFailureAction {
+            class_code: classified.source.code.clone(),
+            failure_fingerprint,
+            recovery: V3ProviderRecoveryKind::HealthNeutralTransient,
+            scope: V3ProviderHealthScope::None,
+            score_delta_milli: 0,
+            failure_threshold: 0,
+            cooldown_ms: 0,
+            long_probe_backoff: false,
+        };
+    }
     // Real recoverable failures count toward the shared repeat threshold.
     // Authentication/account failures retain their immediate typed boundary.
     if status != Some(429)
@@ -181,8 +193,8 @@ pub fn build_v3_provider_global_error_fingerprint(
 /// Provider health policy per upstream status.
 ///
 /// Account/billing classes (`401..=403`) are the typed irrecoverable group and
-/// still cool on their first occurrence. Ordinary 429 requires three consecutive
-/// failures; other recoverable classes use the shared threshold. Every streak
+/// still cool on their first occurrence. HTTP 429 is capacity backpressure and
+/// has no health cooldown policy. Other recoverable classes use the shared threshold. Every streak
 /// and cooldown belongs to the exact provider + auth_alias + model identity.
 pub fn build_v3_provider_global_failure_policy(
     status: u16,
@@ -190,11 +202,6 @@ pub fn build_v3_provider_global_failure_policy(
     match status {
         401..=403 => Some(V3ProviderGlobalFailurePolicy {
             failure_threshold: 1,
-            cooldown_ms: 5_000,
-            probe_interval_ms: 5_000,
-        }),
-        429 => Some(V3ProviderGlobalFailurePolicy {
-            failure_threshold: 3,
             cooldown_ms: 5_000,
             probe_interval_ms: 5_000,
         }),
@@ -340,8 +347,11 @@ mod tests {
             "insufficient_quota",
             429,
         ));
-        assert_eq!(quota.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(quota.failure_threshold, 3);
+        assert_eq!(
+            quota.recovery,
+            V3ProviderRecoveryKind::HealthNeutralTransient
+        );
+        assert_eq!(quota.failure_threshold, 0);
 
         for (code, status) in [("account_disabled", 403)] {
             let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -381,10 +391,13 @@ mod tests {
             "rate_limit_error",
             429,
         ));
-        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
-        assert_eq!(action.score_delta_milli, -5);
+        assert_eq!(
+            action.recovery,
+            V3ProviderRecoveryKind::HealthNeutralTransient
+        );
+        assert_eq!(action.scope, V3ProviderHealthScope::None);
+        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.score_delta_milli, 0);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",

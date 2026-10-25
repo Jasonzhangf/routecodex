@@ -2,6 +2,7 @@ use super::operators::{
     execute_v3_operation_runner_error_err05_execution_decision,
     execute_v3_operation_runner_error_err06_client_projected, run_v3_err02_classified_operator,
     run_v3_error_03_target_local_action_operator, run_v3_error_04_target_exhaustion_operator,
+    run_v3_error_04_target_exhaustion_operator_with_target_recovery,
 };
 use super::OperationRunnerError;
 use routecodex_v3_error::{
@@ -19,6 +20,28 @@ pub(crate) fn run_v3_error_02_to_05_decision_operators(
     same_provider_retry_available: bool,
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
 ) -> Result<(Value, V3Error05ExecutionDecision), OperationRunnerError> {
+    run_v3_error_02_to_05_decision_operators_with_target_recovery(
+        source_projection,
+        source,
+        scope,
+        route_pool_remaining_after_exclusion,
+        default_pool_available,
+        same_provider_retry_available,
+        recovery,
+        false,
+    )
+}
+
+pub(crate) fn run_v3_error_02_to_05_decision_operators_with_target_recovery(
+    source_projection: Value,
+    source: V3Error01SourceRaised,
+    scope: V3ErrorActionScope,
+    route_pool_remaining_after_exclusion: usize,
+    default_pool_available: bool,
+    same_provider_retry_available: bool,
+    recovery: Option<V3Error05RecoveryAdmissionWitness>,
+    target_recovery_pending: bool,
+) -> Result<(Value, V3Error05ExecutionDecision), OperationRunnerError> {
     let (classified_projection, classified) =
         run_v3_err02_classified_operator(source_projection, source, None)?;
     let (action_projection, action) = run_v3_error_03_target_local_action_operator(
@@ -27,13 +50,15 @@ pub(crate) fn run_v3_error_02_to_05_decision_operators(
         scope,
         route_pool_remaining_after_exclusion,
     )?;
-    let (exhaustion_projection, exhaustion) = run_v3_error_04_target_exhaustion_operator(
-        action_projection,
-        action,
-        route_pool_remaining_after_exclusion,
-        default_pool_available,
-        same_provider_retry_available,
-    )?;
+    let (exhaustion_projection, exhaustion) =
+        run_v3_error_04_target_exhaustion_operator_with_target_recovery(
+            action_projection,
+            action,
+            route_pool_remaining_after_exclusion,
+            default_pool_available,
+            same_provider_retry_available,
+            target_recovery_pending,
+        )?;
     execute_v3_operation_runner_error_err05_execution_decision(
         exhaustion_projection,
         exhaustion,
@@ -122,6 +147,35 @@ mod tests {
         assert_eq!(decision.exhaustion.route_pool_remaining_after_exclusion, 1);
         assert!(!decision.exhaustion.default_pool_available);
         assert!(!decision.exhaustion.same_provider_retry_available);
+    }
+
+    #[test]
+    fn cooled_target_handoff_keeps_zero_available_without_fabricating_provider_admission() {
+        let (projection, source) = provider_source();
+        let original_source = source.clone();
+        let (_, decision) = run_v3_error_02_to_05_decision_operators_with_target_recovery(
+            projection,
+            source,
+            provider_scope(),
+            0,
+            false,
+            false,
+            None,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            decision.exhaustion.local_action.classified.source,
+            original_source
+        );
+        assert_eq!(decision.exhaustion.route_pool_remaining_after_exclusion, 0);
+        assert!(!decision.exhaustion.default_pool_available);
+        assert!(!decision.exhaustion.same_provider_retry_available);
+        assert!(decision.exhaustion.target_recovery_pending);
+        assert!(!decision.exhaustion.target_exhausted);
+        assert_eq!(decision.action, V3Error05ExecutionAction::ReevaluateTarget);
+        assert!(decision.action.recovery_witness().is_none());
+        assert!(decision.try_into_terminal().is_err());
     }
 
     #[test]

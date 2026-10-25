@@ -18,9 +18,65 @@ fn key(session_id: &str) -> V3ProviderActionGateKey {
     V3ProviderActionGateKey::new(
         &session(session_id),
         "provider-a:key-a:model-a",
-        "provider_http_429",
+        "provider_transport_error",
     )
     .expect("session-bound provider action key")
+}
+
+#[test]
+fn rate_limit_backoff_is_independent_for_other_auth_keys() {
+    let gate = V3ProviderActionGate::default();
+    let first = V3ProviderActionGateKey::new(
+        &session("session-a"),
+        "provider-a:key-a:model-a",
+        "provider_http_429",
+    )
+    .unwrap();
+    let second = V3ProviderActionGateKey::new(
+        &session("session-b"),
+        "provider-a:key-b:model-a",
+        "provider_http_429",
+    )
+    .unwrap();
+    assert_eq!(gate.record_failure(&first).unwrap().minimum_delay_ms, 1000);
+    assert_eq!(
+        gate.record_failure(&second).unwrap().minimum_delay_ms,
+        1000,
+        "another auth key must retain its independent first-failure backoff"
+    );
+}
+
+#[tokio::test]
+async fn rate_limit_lane_and_success_release_are_shared_across_sessions() {
+    let gate = V3ProviderActionGate::default();
+    let a = V3ProviderActionGateKey::new(
+        &session("session-a"),
+        "provider-a:key-a:model-a",
+        "provider_http_429",
+    )
+    .unwrap();
+    let b = V3ProviderActionGateKey::new(
+        &session("session-b"),
+        "provider-a:key-a:model-a",
+        "provider_http_429",
+    )
+    .unwrap();
+    assert_eq!(a, b);
+    gate.record_failure(&a).unwrap();
+    assert!(tokio::time::timeout(
+        Duration::from_millis(100),
+        gate.wait_for_exact_provider_action(&b.provider_scope)
+    )
+    .await
+    .is_err());
+    gate.record_provider_success(&b.provider_scope).unwrap();
+    tokio::time::timeout(
+        Duration::from_millis(100),
+        gate.wait_for_exact_provider_action(&a.provider_scope),
+    )
+    .await
+    .unwrap()
+    .unwrap();
 }
 
 #[test]

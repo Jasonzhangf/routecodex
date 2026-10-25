@@ -213,6 +213,7 @@ struct V3AttemptBudgetInner {
     limits: V3AttemptStoreLimits,
     transport_attempt_limit: AtomicUsize,
     transport_attempts: AtomicUsize,
+    rate_limited_attempts: AtomicUsize,
     refill_used: AtomicU32,
     request_resident_bytes: AtomicUsize,
     process_resident_bytes: V3ProcessResidentBytes,
@@ -285,6 +286,7 @@ impl V3AttemptBudget {
                 // admission then uses the configured request ceiling.
                 transport_attempt_limit: AtomicUsize::new(0),
                 transport_attempts: AtomicUsize::new(0),
+                rate_limited_attempts: AtomicUsize::new(0),
                 refill_used: AtomicU32::new(0),
                 request_resident_bytes: AtomicUsize::new(0),
                 process_resident_bytes,
@@ -328,7 +330,11 @@ impl V3AttemptBudget {
         self.inner
             .transport_attempts
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                (current < limit).then_some(current + 1)
+                // A received 429 consumed a real attempt (keep its sequence),
+                // but its recovery is bounded by the request residence deadline,
+                // not the non-rate-limit candidate-failure count.
+                let rate_limited = self.inner.rate_limited_attempts.load(Ordering::Acquire);
+                (current.saturating_sub(rate_limited) < limit).then_some(current + 1)
             })
             .map(|previous| previous + 1)
             .map_err(|_| {
@@ -343,6 +349,12 @@ impl V3AttemptBudget {
         self.inner
             .transport_attempt_limit
             .fetch_max(candidate_count.max(1), Ordering::AcqRel);
+    }
+
+    pub(crate) fn record_rate_limited_attempt(&self) {
+        self.inner
+            .rate_limited_attempts
+            .fetch_add(1, Ordering::AcqRel);
     }
 
     pub(crate) fn transport_attempts(&self) -> usize {

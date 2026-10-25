@@ -7234,7 +7234,7 @@ async fn responses_provider_concurrency_full_switches_without_queueing() {
 }
 
 #[tokio::test]
-async fn responses_provider_concurrency_all_full_exhausts_without_queueing() {
+async fn responses_provider_concurrency_all_full_exhausts_after_wait_budget() {
     let _test_guard = TEST_LOCK.lock().await;
     // This case counts upstream provider attempts, so the Chat Process
     // continuation must not add an extra execution.
@@ -7244,9 +7244,11 @@ async fn responses_provider_concurrency_all_full_exhausts_without_queueing() {
     let (second_url, mut second_captures, second_release, second_shutdown) =
         start_controlled_held_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-exhaustion");
-    let handle = spawn_v3_server_aggregate(concurrency_switch_manifest(&first_url, &second_url))
-        .await
-        .unwrap();
+    let mut manifest = concurrency_switch_manifest(&first_url, &second_url);
+    for provider in manifest.providers.values_mut() {
+        provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 150;
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
     let first = spawn_concurrency_client(&endpoint, "concurrency-held-first");
     timeout(Duration::from_secs(2), first_captures.recv())
@@ -7258,6 +7260,7 @@ async fn responses_provider_concurrency_all_full_exhausts_without_queueing() {
         .await
         .unwrap()
         .unwrap();
+    let wait_started = std::time::Instant::now();
     let exhausted = timeout(
         Duration::from_millis(500),
         reqwest::Client::new()
@@ -7268,7 +7271,8 @@ async fn responses_provider_concurrency_all_full_exhausts_without_queueing() {
             .send(),
     )
     .await
-    .expect("all full must exhaust without waiting for capacity");
+    .expect("all full must finish after its declared wait budget");
+    assert!(wait_started.elapsed() >= Duration::from_millis(100));
     assert!(
         exhausted.is_err(),
         "selection exhaustion must preserve the existing transport-break boundary"
@@ -7449,7 +7453,13 @@ async fn run_concurrency_typed_source_case(
     };
     std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-typed-source");
 
-    let manifest = concurrency_switch_manifest_with_mode(&first_url, &second_url, execution_mode);
+    let mut manifest =
+        concurrency_switch_manifest_with_mode(&first_url, &second_url, execution_mode);
+    // Exercise the terminal source after a real bounded wait, rather than
+    // requiring immediate all-busy rejection (superseded by issue44cc3af).
+    for provider in manifest.providers.values_mut() {
+        provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 150;
+    }
     let second_id = format!("concurrency_second_{}", manifest.servers["a"].port);
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
@@ -7549,7 +7559,7 @@ async fn run_concurrency_typed_source_case(
             let first_activity = first_captures.try_recv().ok();
             let second_activity = second_captures.try_recv().ok();
             panic!(
-                "capacity exhaustion must not wait for release; first_activity={first_activity:?} second_activity={second_activity:?}"
+                "capacity exhaustion must complete after the declared wait budget; first_activity={first_activity:?} second_activity={second_activity:?}"
             );
         }
     };

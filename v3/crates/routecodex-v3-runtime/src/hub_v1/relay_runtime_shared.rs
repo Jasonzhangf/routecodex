@@ -390,6 +390,11 @@ pub(crate) async fn handle_provider_failure_with_response_code(
     provider_failure_events
         .push(build_v3_runtime_provider_failure_observation_from_policy_event(&result.event));
     match result.decision.action {
+        V3Error05ExecutionAction::ReevaluateTarget => {
+            *retry_selected = None;
+            *pending_recovery = None;
+            Ok(None)
+        }
         V3Error05ExecutionAction::WaitThenReselect { recovery } => {
             *retry_selected = result.retry_selected.map(|selected| *selected);
             if result.event.wait_ms.is_some() {

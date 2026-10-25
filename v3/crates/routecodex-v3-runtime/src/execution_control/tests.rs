@@ -65,6 +65,22 @@ fn attempt_budget_counts_all_transport_attempts_without_reset() {
 }
 
 #[test]
+fn issue44cc3af_429_wait_does_not_consume_failure_slots_or_reset_attempt_sequence() {
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), Arc::new(AtomicUsize::new(0)));
+    budget.set_transport_attempt_limit(1);
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 1);
+    budget.record_rate_limited_attempt();
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 2);
+    budget.record_rate_limited_attempt();
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 3);
+    assert!(
+        budget.admit_transport_attempt().is_err(),
+        "non-429 failures remain bounded"
+    );
+    assert_eq!(budget.transport_attempts(), 3);
+}
+
+#[test]
 fn attempt_budget_limit_follows_candidate_plan() {
     let process_bytes = Arc::new(AtomicUsize::new(0));
     let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), process_bytes);

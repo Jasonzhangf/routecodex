@@ -696,7 +696,6 @@ for (const [nodeId, owner] of [
   ['V3Error05ExecutionDecision', 'routecodex-v3-error'],
   ['V3Error05RecoveryWitness', 'routecodex-v3-error'],
   ['V3ProviderActionGateAdmission', 'routecodex-v3-runtime'],
-  ['V3ExecutionRetryOrReselect', 'routecodex-v3-runtime'],
   ['V3ProviderActionGateTerminalAdmission', 'routecodex-v3-runtime'],
   ['V3ProviderActionGateTerminalCommitted', 'routecodex-v3-runtime'],
   ['V3ProviderActionPermitInFlight', 'routecodex-v3-runtime'],
@@ -724,7 +723,7 @@ assertExactStrings(
 assertExactStrings(
   manifest?.return_path,
   [
-    'V3ExecutionRetryOrReselect',
+    'V3ProviderActionPermitInFlight',
     'V3ProviderActionGateTerminalCommitted',
     'V3ProviderActionSuccessRecorded',
     'V3ProviderActionFailureRecorded',
@@ -818,11 +817,11 @@ assertIncludes(
 if (
   manifest?.admission_permit?.owner_type !== 'V3ProviderActionPermit'
   || manifest?.admission_permit?.wall_clock_expiry !== 'forbidden'
-  || manifest?.admission_permit?.fresh_request_consumes_active_recovery_lane !== false
+  || manifest?.admission_permit?.fresh_request_consumes_active_recovery_lane !== 'http_429_only'
   || manifest?.admission_permit?.waiter_order !== 'fifo_ticket'
 ) {
   failures.push(
-    `${files.manifest}: admission_permit must lock explicit ownership, no wall-clock expiry, FIFO, and fresh-request isolation`,
+    `${files.manifest}: admission_permit must lock explicit ownership, no wall-clock expiry, FIFO, and fresh-request sharing only for HTTP 429`,
   );
 }
 if (Object.hasOwn(manifest, 'admission_lease')) {
@@ -853,7 +852,7 @@ for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-04', 'Witness', 'Gate'],
   ['v3-provider-action-gate-05', 'E05', 'E06'],
   ['v3-provider-action-gate-06', 'TerminalAdmission', 'TerminalCommit'],
-  ['v3-provider-action-gate-07', 'Gate', 'Retry'],
+  ['v3-provider-action-gate-07', 'Wire', 'Witness'],
   ['v3-provider-action-gate-08', 'Witness', 'Gate'],
   ['v3-provider-action-gate-10', 'Witness', 'Gate'],
   ['v3-provider-action-gate-11', 'Witness', 'Gate'],
@@ -895,6 +894,11 @@ for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-49', 'ProviderCodec', 'ProviderOutcome'],
   ['v3-provider-action-gate-50', 'ProviderRaw', 'ProviderCodec'],
   ['v3-provider-action-gate-51', 'ProviderCodec', 'ProviderOutcome'],
+  ['v3-provider-action-gate-52', 'Wire', 'Witness'],
+  ['v3-provider-action-gate-53', 'Wire', 'Witness'],
+  ['v3-provider-action-gate-54', 'Wire', 'Witness'],
+  ['v3-provider-action-gate-55', 'Wire', 'Witness'],
+  ['v3-provider-action-gate-56', 'Wire', 'Witness'],
 ]) {
   assertWikiEdge(v3WikiMermaid, files.wiki, stepId, fromAlias, toAlias);
 }

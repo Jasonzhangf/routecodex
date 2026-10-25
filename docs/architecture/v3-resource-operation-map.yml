@@ -585,12 +585,12 @@ resources:
     owner_node: V3Config05ManifestPublished
     identity: [providerId, transportKind, websocketEndpoint, maxInFlight, acquireTimeoutMs, staleLeaseMs]
     semantic_contract:
-      source: provider concurrency maxInFlight bounds business admission; acquireTimeoutMs bounds background probe admission only
+      source: provider concurrency maxInFlight bounds business admission; acquireTimeoutMs bounds target capacity and cooldown recovery waiting
       propagation: Target carries the configured provider concurrency signal into the selected Provider transport target
       admission: Runtime atomically acquires capacity for each selected provider+authAlias before transport; a full candidate is immediately excluded for this request and the next eligible candidate is selected
       hard_limit: business admission cannot exceed the current adaptive budget or hard maximum; scheduled probes remain independently bounded
-      selection: capacity exclusions are request-local and health-neutral; all full candidates exhaust the selected target immediately without Router reentry or provider transport
-      timeout: business request selection and transport never wait for concurrency capacity; acquireTimeoutMs cannot delay a client request
+      selection: capacity exclusions are temporary and health-neutral; all full candidates wait with increasing backoff inside the captured target before a final eligibility check
+      timeout: capacity/cooldown waits and their awaited exhaustion rescue probes share the declared acquisition budget; rate-limit transport retries retain the shared request residence deadline
       boundary: this control resource never enters request, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [V3Config05ManifestPublished]
     allowed_readers: [routecodex-v3-target, routecodex-v3-provider-responses, build_v3_provider_global_probe_target]
@@ -1258,8 +1258,10 @@ resources:
     lifecycle: v3.debug_error_foundation.mainline
     owner_crate: routecodex-v3-error
     owner_node: V3Error04TargetExhaustionDecision
-    identity: [candidatesRemaining, targetExhausted]
-    allowed_writers: [build_v3_error_04_target_exhaustion_decision_with_provider_availability, run_v3_error_04_target_exhaustion_operator, run_v3_error_02_to_05_decision_operators]
+    identity: [candidatesRemaining, targetRecoveryPending, targetExhausted]
+    semantic_contract:
+      pending_recovery: zero currently available candidates remains zero; typed target_recovery_pending defers terminalization to captured target planning without inventing provider admission or changing the original error
+    allowed_writers: [build_v3_error_04_target_exhaustion_decision_with_provider_availability, build_v3_error_04_target_exhaustion_decision_with_target_recovery, run_v3_error_04_target_exhaustion_operator, run_v3_error_04_target_exhaustion_operator_with_target_recovery, run_v3_error_02_to_05_decision_operators, run_v3_error_02_to_05_decision_operators_with_target_recovery]
     allowed_readers: [V3Error05ExecutionDecision, execute_v3_operation_runner_error_err05_execution_decision, run_v3_error_02_to_05_decision_operators]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
     may_enter_provider_body: false
@@ -1277,6 +1279,7 @@ resources:
       retry_rule: recoverable retry/reselect decisions exit at Error05 without invoking Error06; RuntimeRetryLaunch consumes the decision and runs typed attempt_cleanup, then launches a new attempt outside the static graph without client SSE commit and without RuntimeRequestFinalizer
       terminal_rule: the legacy terminal_client_error value means terminal no-commit; Error06 retains internal diagnostic evidence only, Server consumes the typed transport outcome and ends the affected transport without error bytes or success completion; RuntimeAttemptCleanup releases attempt scope before RuntimeRequestFinalizer releases request scope
       payload_rule: this decision is typed control resource; it is never reconstructed from response payload or debug state
+      target_recovery_rule: ReevaluateTarget carries no provider-action witness; runtime excludes the failed identity and re-enters captured target admission for bounded waiting, probes and final exhaustion
     allowed_writers: [build_v3_error_05_execution_decision_from_v3_error_04, execute_v3_operation_runner_error_err05_execution_decision, run_v3_error_02_to_05_decision_operators]
     allowed_readers: [V3Error06ClientProjected, RuntimeClientCommit, RuntimeRetryLaunch, RuntimeAttemptCleanup, RuntimeRequestFinalizer, execute_v3_operation_runner_error_err06_client_projected, run_v3_error_06_terminal_projection_operator]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
@@ -1355,10 +1358,10 @@ resources:
       score_contract: clamp(score + delta, 0, 150) with no hidden credit above the cap
       zero_cooldown_trigger: a globally scored identity reaching score 0 enters cooldown for the exact providerId+interfaceId+authAlias+modelId
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
-      cooldown_condition: every HTTP 429 requires three consecutive HTTP 429 failures of the exact providerId+interfaceId+authAlias+modelId regardless of body code or fingerprint; other typed failures retain declared thresholds; real success clears that identity's streak
+      cooldown_condition: HTTP 429 is health-neutral capacity backpressure and uses global recovery admission; other typed failures retain declared thresholds; real success preserves provider health
       revival_rule: only a successful provider transport probe may remove cooldown state
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
-      exhaustion_disposition: after one request-owned rescue pass, reselect from the captured candidates and return internal exhaustion if none is available; do not wait for future scheduled recovery or the attempt-store residence deadline
+      exhaustion_disposition: after rescue, wait with increasing backoff for due recovery inside the declared acquisition budget; perform a final health and eligibility check before internal exhaustion
       healthy_rescue_initiation: immediately admit and poll an eligible guarded probe once before healthy later-tier commitment, then transfer pending work to the aggregate owner without awaiting DNS or transport completion
       aggregate_probe_lifetime: one aggregate supervisor retains a recovery owner per listener; each polls its own due and transferred probes; shutdown and exec cancel and join every owner, aggregate drop aborts all; cancellation releases matching ownership without recording a provider failure
       generation_state: rescueProbeAttempted remains attached to the providerId+authAlias+modelId cooldown block until an HTTP 2xx probe or matching 429-owned business success removes the block
@@ -1399,7 +1402,7 @@ resources:
       cross_session: shared
       cross_model_same_key: isolated
       sibling_keys: isolated
-      cooldown_condition: every HTTP 429 blocks only after three consecutive HTTP 429 failures of this complete identity regardless of body code or fingerprint; other typed failures retain declared thresholds
+      cooldown_condition: HTTP 429 is health-neutral and uses exact-identity global backpressure admission; other typed failures retain declared thresholds
       cooldown_deadline: provider-owned adaptive ladder 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s
       revival_rule: HTTP 2xx probe success clears the matching identity's cooldown and consecutive failure counts; matching business success immediately clears 429-owned cooldown; Zen probes use the selected private streaming profile
       dry_run_rule: dry-run never acquires or sends an auth-key health probe
@@ -2082,12 +2085,18 @@ resources:
     lifecycle: v3.provider_action_gate.mainline
     owner_crate: routecodex-v3-runtime
     owner_node: V3ProviderActionGateAdmission
+    semantic_contract:
+      rate_limit_scope: HTTP 429 families share one process-global exact provider-runtime-identity lane across sessions and listeners; unrelated failure families retain session isolation
+      success: matching real business success wakes the global rate-limit lane as well as the original session lane without clearing unrelated key eligibility
+      candidate_admission: Target10 atomically reserves one due recovery attempt for the exact identity; blocked identities are skipped while another candidate can be admitted
+      waiting: only requests with no admissible alternative wait; waiting releases business capacity and does not escalate backoff merely because other waiters exist
     identity:
       - provider_action_scope
       - generation
       - waiter_ticket
     allowed_writers:
       - V3ProviderActionGate::abandon_admission
+      - V3ProviderActionGate::try_admit_exact_rate_limit
       - V3ProviderActionGate::commit_terminal_admission
       - V3ProviderActionGate::record_failure_and_commit_terminal_projection
     allowed_readers:
@@ -2969,7 +2978,7 @@ resources:
       current_binding: Resident Direct/Relay controllers carry one opaque V3RequestExecutionControl across typed protocol handoffs and retain the originating target plan and Error05 state.
       target_contract: One resident request controller owns immutable target plan, cumulative attempt/deadline budget, cancellation, Error05 recovery execution, and terminal closeout.
       runtime_driver: Provider network requests and lazy response streams remain on a resident Tokio Runtime for their complete lifetime.
-    allowed_writers: [execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core]
+    allowed_writers: [plan_v3_responses_protocol_execution_with_recovery, execute_v3_direct_runtime_kernel_core_resident, execute_v3_responses_direct_runtime_kernel_core_resident, execute_v3_relay_runtime_core]
     allowed_readers: [V3Error05ExecutionDecision, ProviderTransport, AttemptPayloadStore, relay_request_execution_control]
     forbidden_writers: [SSE_stream_wrapper, routecodex-v3-server, protocol_codec, compat_hook, observability, provider_payload, client_payload]
     may_enter_provider_body: false

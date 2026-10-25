@@ -15,6 +15,26 @@ pub const V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000;
 pub const V3_PROVIDER_ACTION_MEDIUM_DELAY_MS: u64 = 3_000;
 pub const V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 5_000;
 
+#[cfg(test)]
+#[test]
+fn issue44cc3af_rate_limit_gate_is_shared_across_sessions_only_for_rate_limits() {
+    let first = V3ProviderFailureSessionScope::new("server", "route", "session-a").unwrap();
+    let second = V3ProviderFailureSessionScope::new("server", "route", "session-b").unwrap();
+    let a =
+        V3ProviderActionGateKey::new(&first, "provider:key:model", "provider_http_429").unwrap();
+    let b =
+        V3ProviderActionGateKey::new(&second, "provider:key:model", "provider_http_429").unwrap();
+    assert_eq!(a, b, "429 capacity must use one global recovery lane");
+    let a = V3ProviderActionGateKey::new(&first, "provider:key:model", "provider_transport_error")
+        .unwrap();
+    let b = V3ProviderActionGateKey::new(&second, "provider:key:model", "provider_transport_error")
+        .unwrap();
+    assert_ne!(
+        a, b,
+        "unrelated failure lanes retain their existing session scope"
+    );
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct V3ProviderActionProviderScope {
     pub server_id: String,
@@ -24,6 +44,12 @@ pub struct V3ProviderActionProviderScope {
 }
 
 impl V3ProviderActionProviderScope {
+    pub(crate) fn rate_limit_global(mut self) -> Self {
+        self.server_id = "rate-limit-global".to_string();
+        self.routing_group = self.provider_runtime_identity.clone();
+        self.session_id = "rate-limit-global".to_string();
+        self
+    }
     pub fn new(
         failure_session_scope: &V3ProviderFailureSessionScope,
         provider_runtime_identity: impl Into<String>,
@@ -60,15 +86,19 @@ impl V3ProviderActionGateKey {
         provider_runtime_identity: impl Into<String>,
         normalized_error_family: impl Into<String>,
     ) -> Result<Self, String> {
-        let provider_scope =
+        let mut provider_scope =
             V3ProviderActionProviderScope::new(failure_session_scope, provider_runtime_identity)?;
+        let error_family =
+            required_scope_part(normalized_error_family.into(), "normalized_error_family")?;
+        // Runtime supplies this family only from a received upstream HTTP 429.
+        // A provider's error-code spelling alone is not status evidence.
+        if error_family == "provider_http_429" {
+            provider_scope = provider_scope.rate_limit_global();
+        }
         Ok(Self {
             session_id: provider_scope.session_id.clone(),
             provider_scope,
-            normalized_error_family: required_scope_part(
-                normalized_error_family.into(),
-                "normalized_error_family",
-            )?,
+            normalized_error_family: error_family,
         })
     }
 
@@ -236,6 +266,13 @@ pub(crate) struct V3ProviderActionPermit {
     armed: bool,
 }
 
+#[derive(Debug)]
+pub(crate) enum V3ExactRateLimitAdmission {
+    Unrestricted,
+    Admitted(V3ProviderActionPermit),
+    Blocked(V3Error05RecoveryAdmissionWitness),
+}
+
 impl Drop for V3ProviderActionPermit {
     fn drop(&mut self) {
         if !self.armed {
@@ -247,6 +284,36 @@ impl Drop for V3ProviderActionPermit {
 }
 
 impl V3ProviderActionGate {
+    /// Read and reserve this identity in one transaction. Other identities and
+    /// healthy traffic never enter this lane's waiter queue.
+    pub(crate) fn try_admit_exact_rate_limit(
+        &self,
+        scope: &V3ProviderActionProviderScope,
+    ) -> Result<V3ExactRateLimitAdmission, String> {
+        let mut states = self.lock_states()?;
+        let Some((key, state)) = states.iter_mut().find(|(key, _)| {
+            key.provider_scope == *scope && key.normalized_error_family == "provider_http_429"
+        }) else {
+            return Ok(V3ExactRateLimitAdmission::Unrestricted);
+        };
+        let now = Instant::now();
+        if now < state.next_admission_at || state.admitted_generation.is_some() {
+            return Ok(V3ExactRateLimitAdmission::Blocked(
+                key.recovery_witness(state.generation)?,
+            ));
+        }
+        state.admitted_generation = Some(state.generation);
+        state.admitted_action_scope = Some(scope.clone());
+        state.updated_at = now;
+        Ok(V3ExactRateLimitAdmission::Admitted(
+            V3ProviderActionPermit {
+                gate: self.clone(),
+                key: key.clone(),
+                generation: state.generation,
+                armed: true,
+            },
+        ))
+    }
     pub fn process_shared() -> Self {
         static SHARED: OnceLock<V3ProviderActionGate> = OnceLock::new();
         SHARED.get_or_init(Self::default).clone()
@@ -389,9 +456,10 @@ impl V3ProviderActionGate {
         let now = Instant::now();
         let removed = {
             let mut states = self.lock_states()?;
-            let retain_for_waiters = states
-                .get(key)
-                .is_some_and(|state| !state.waiter_queue.is_empty());
+            let retain_for_waiters = key.normalized_error_family != "provider_http_429"
+                && states
+                    .get(key)
+                    .is_some_and(|state| !state.waiter_queue.is_empty());
             if retain_for_waiters {
                 let state = states
                     .get_mut(key)
@@ -435,9 +503,10 @@ impl V3ProviderActionGate {
             let has_matching_action = !keys.is_empty();
             let mut removed = Vec::new();
             for key in keys {
-                let retain_for_waiters = states
-                    .get(&key)
-                    .is_some_and(|state| !state.waiter_queue.is_empty());
+                let retain_for_waiters = key.normalized_error_family != "provider_http_429"
+                    && states
+                        .get(&key)
+                        .is_some_and(|state| !state.waiter_queue.is_empty());
                 if retain_for_waiters {
                     let state = states
                         .get_mut(&key)
@@ -498,11 +567,18 @@ impl V3ProviderActionGate {
     ) -> Result<bool, String> {
         let now = Instant::now();
         let mut states = self.lock_states()?;
-        let Some(state) = states.get(key) else {
+        let Some(state) = states.get_mut(key) else {
             return Ok(false);
         };
         if state.admitted_generation != Some(generation) {
             return Ok(false);
+        }
+        if key.normalized_error_family == "provider_http_429" {
+            state.admitted_generation = None;
+            state.admitted_action_scope = None;
+            state.updated_at = now;
+            let _ = state.change_tx.send(state.generation);
+            return Ok(true);
         }
         let server_id = key.provider_scope.server_id.clone();
         let routing_group = key.provider_scope.routing_group.clone();
@@ -658,7 +734,7 @@ impl V3ProviderActionGate {
                 && active_key.provider_scope.routing_group == key.provider_scope.routing_group
                 && active_key.provider_scope.session_id == key.provider_scope.session_id
                 && state.admitted_generation.is_some()
-        });
+        }) && key.normalized_error_family != "provider_http_429";
         if active_sibling_lane_generation.is_some() {
             for (_active_key, state) in states.iter_mut().filter(|(active_key, _)| {
                 *active_key != key
@@ -763,7 +839,10 @@ impl V3ProviderActionGate {
             let ticket = state.next_waiter_ticket;
             state.next_waiter_ticket = state.next_waiter_ticket.saturating_add(1);
             state.waiter_queue.push_back(ticket);
-            if state.waiter_queue.len() > 1 && state.mode == V3ProviderActionGateMode::Isolated {
+            if key.normalized_error_family != "provider_http_429"
+                && state.waiter_queue.len() > 1
+                && state.mode == V3ProviderActionGateMode::Isolated
+            {
                 state.mode = V3ProviderActionGateMode::Sustained;
                 state.minimum_delay_ms = state.minimum_delay_ms.max(sustained_delay_ms());
                 state.next_admission_at = now + Duration::from_millis(state.minimum_delay_ms);
@@ -842,6 +921,14 @@ impl V3ProviderActionWaiter {
                 });
                 let Some(state) = states.get_mut(&self.key) else {
                     self.registered = false;
+                    if self.key.normalized_error_family == "provider_http_429" {
+                        return Ok(V3ProviderActionRecoveryTransition::Consumed(
+                            V3ProviderActionRecoveryTicket::new(
+                                self.key.clone(),
+                                self.registered_generation,
+                            )?,
+                        ));
+                    }
                     return Err(
                         "provider action gate state disappeared without an explicit transition"
                             .to_string(),
@@ -1056,6 +1143,86 @@ fn required_scope_part(value: String, field: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn issue44cc3af_exact_due_admission_is_atomic_and_other_identity_is_free() {
+        let session = V3ProviderFailureSessionScope::new("server", "route", "session").unwrap();
+        let key = V3ProviderActionGateKey::new(&session, "provider:key:model", "provider_http_429")
+            .unwrap();
+        let other =
+            V3ProviderActionGateKey::new(&session, "provider:other:model", "provider_http_429")
+                .unwrap();
+        let gate = V3ProviderActionGate::default();
+        gate.record_failure(&key).unwrap();
+        assert!(matches!(
+            gate.try_admit_exact_rate_limit(&key.provider_scope)
+                .unwrap(),
+            V3ExactRateLimitAdmission::Blocked(_)
+        ));
+        assert!(matches!(
+            gate.try_admit_exact_rate_limit(&other.provider_scope)
+                .unwrap(),
+            V3ExactRateLimitAdmission::Unrestricted
+        ));
+        gate.lock_states()
+            .unwrap()
+            .get_mut(&key)
+            .unwrap()
+            .next_admission_at = Instant::now();
+        let V3ExactRateLimitAdmission::Admitted(permit) = gate
+            .try_admit_exact_rate_limit(&key.provider_scope)
+            .unwrap()
+        else {
+            panic!("due identity must admit one attempt")
+        };
+        assert!(matches!(
+            gate.try_admit_exact_rate_limit(&key.provider_scope)
+                .unwrap(),
+            V3ExactRateLimitAdmission::Blocked(_)
+        ));
+        drop(permit);
+        let V3ExactRateLimitAdmission::Admitted(permit) = gate
+            .try_admit_exact_rate_limit(&key.provider_scope)
+            .unwrap()
+        else {
+            panic!("cancellation must release the due identity without new backoff")
+        };
+        gate.record_provider_success(&key.provider_scope).unwrap();
+        assert!(matches!(
+            gate.try_admit_exact_rate_limit(&key.provider_scope)
+                .unwrap(),
+            V3ExactRateLimitAdmission::Unrestricted
+        ));
+        drop(permit);
+    }
+
+    #[tokio::test]
+    async fn issue44cc3af_matching_success_releases_429_waiters_without_sustained_delay() {
+        let session = V3ProviderFailureSessionScope::new("server", "route", "session").unwrap();
+        let key = V3ProviderActionGateKey::new(&session, "provider:key:model", "provider_http_429")
+            .unwrap();
+        let gate = V3ProviderActionGate::default();
+        let failure = gate.record_failure(&key).unwrap();
+        let witness = failure.recovery_witness().unwrap();
+        let mut waiter =
+            Box::pin(gate.wait_for_recovery_witness(&witness, key.provider_scope.clone()));
+        assert!(tokio::time::timeout(Duration::from_millis(10), &mut waiter)
+            .await
+            .is_err());
+        gate.record_provider_success(&key.provider_scope).unwrap();
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_millis(100), waiter)
+                .await
+                .unwrap()
+                .unwrap(),
+            V3ProviderActionRecoveryTransition::Consumed(_)
+        ));
+        assert!(matches!(
+            gate.try_admit_exact_rate_limit(&key.provider_scope)
+                .unwrap(),
+            V3ExactRateLimitAdmission::Unrestricted
+        ));
+    }
 
     #[tokio::test]
     async fn provider_success_wakes_same_session_sibling_recovery_waiter() {

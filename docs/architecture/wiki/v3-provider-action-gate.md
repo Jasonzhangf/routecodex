@@ -12,7 +12,6 @@ flowchart TD
   E06[V3Error06ClientProjected]
   Witness[V3Error05RecoveryWitness]
   Gate[V3ProviderActionGateAdmission]
-  Retry[V3ExecutionRetryOrReselect]
   TerminalAdmission[V3ProviderActionGateTerminalAdmission]
   TerminalCommit[V3ProviderActionGateTerminalCommitted]
   Permit[V3ProviderActionPermitInFlight]
@@ -36,7 +35,7 @@ flowchart TD
   Witness -->|v3-provider-action-gate-04| Gate
   E05 -->|v3-provider-action-gate-05| E06
   TerminalAdmission -->|v3-provider-action-gate-06| TerminalCommit
-  Gate -->|v3-provider-action-gate-07| Retry
+  Wire -->|v3-provider-action-gate-07| Witness
   Witness -->|v3-provider-action-gate-08| Gate
   Witness -->|v3-provider-action-gate-10| Gate
   Witness -->|v3-provider-action-gate-11| Gate
@@ -78,13 +77,19 @@ flowchart TD
   ProviderCodec -->|v3-provider-action-gate-49| ProviderOutcome
   ProviderRaw -->|v3-provider-action-gate-50| ProviderCodec
   ProviderCodec -->|v3-provider-action-gate-51| ProviderOutcome
+  Wire -->|v3-provider-action-gate-52| Witness
+  Wire -->|v3-provider-action-gate-53| Witness
+  Wire -->|v3-provider-action-gate-54| Witness
+  Wire -->|v3-provider-action-gate-55| Witness
+  Wire -->|v3-provider-action-gate-56| Witness
   Success -->|reset scoped failure state| Gate
   Terminal -->|advance sustained generation| Gate
   Gate -->|typed terminal wake, no provider send| Reevaluate
 ```
 
 The gate is a process-local control side channel keyed by server, routing group,
-provider runtime identity, and normalized error family. It does not enter request,
+session, provider runtime identity, and normalized error family. Received HTTP 429
+uses an exact-identity lane shared across sessions and listeners. It does not enter request,
 response, metadata, continuation, snapshot, or persistent provider-health truth.
 
 Review locks:
@@ -127,7 +132,11 @@ Review locks:
   Terminal handling never authorizes a model-client error response; AGENTS.md's
   mandatory all-entry no-client-error contract applies even on exhaustion. A concurrent
   routing-group success cannot turn a stale failure into client output.
-- A fresh request bypasses an unrelated recovery lane.
+- A fresh request reads the active exact-identity HTTP 429 lane before sending and
+  enters its typed recovery witness. It releases business capacity before waiting,
+  then reacquires it and retains the admitted action permit through the send.
+  A request residence deadline bounds gate queueing, including retry waits.
+  Unrelated identities and non-429 session-local lanes retain their isolation.
 - Client disconnect is health-neutral and does not enter this gate.
 - SSE transport/decode/malformed-event/EOF/hang is also provider-health-neutral. Before
   business-byte commit it uses the existing retry/reselect path; after commit it only

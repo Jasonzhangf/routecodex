@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 93 functional paths, 577 caller edges.
+Generated view: 93 functional paths, 584 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -63,7 +63,7 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime__hub_v1 -->|2 edges / 2 paths| module_v3_error
   module_v3_runtime__hub_v1 -->|8 edges / 6 paths| module_v3_provider_responses
-  module_v3_runtime__hub_v1 -->|41 edges / 8 paths| module_v3_runtime
+  module_v3_runtime__hub_v1 -->|44 edges / 8 paths| module_v3_runtime
   module_v3_runtime__hub_v1 -->|141 edges / 30 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|1 edges / 1 paths| module_provider_compat_core
   module_v3_runtime -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
@@ -72,7 +72,7 @@ flowchart TD
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|8 edges / 5 paths| module_v3_error
   module_v3_runtime -->|24 edges / 8 paths| module_v3_provider_responses
-  module_v3_runtime -->|68 edges / 21 paths| module_v3_runtime
+  module_v3_runtime -->|71 edges / 21 paths| module_v3_runtime
   module_v3_runtime -->|44 edges / 13 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|3 edges / 1 paths| module_v3_target
   module_v3_runtime -->|5 edges / 2 paths| module_v3_virtual_router
@@ -80,7 +80,7 @@ flowchart TD
   module_v3_server -->|2 edges / 2 paths| module_v3_config
   module_v3_server -->|9 edges / 5 paths| module_v3_debug
   module_v3_server -->|2 edges / 2 paths| module_v3_error
-  module_v3_server -->|7 edges / 5 paths| module_v3_runtime
+  module_v3_server -->|8 edges / 6 paths| module_v3_runtime
   module_v3_server -->|7 edges / 5 paths| module_v3_runtime__hub_v1
   module_v3_server -->|48 edges / 20 paths| module_v3_server
   module_v3_server -->|1 edges / 1 paths| module_v3_vendor
@@ -120,7 +120,7 @@ flowchart TD
 | v3-runtime::hub_v1 | routecodex-v3-sse | 1 | `v3.sse.protocol_codec_projection_boundary` |
 | v3-runtime::hub_v1 | v3-error | 2 | `v3.provider_global_subscription_probe`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime::hub_v1 | v3-provider-responses | 8 | `v3-provider-admission-lease-lifecycle`<br/>`v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
-| v3-runtime::hub_v1 | v3-runtime | 41 | `v3.openai_chat_relay.controlled_runtime`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_tool_markup.relay_parser_bindings`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
+| v3-runtime::hub_v1 | v3-runtime | 44 | `v3.openai_chat_relay.controlled_runtime`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_tool_markup.relay_parser_bindings`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | v3-runtime::hub_v1 | 141 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.protocol_conversion.gemini_standard_bridge`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.relay_parser_bindings`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.gemini_materialization`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | provider-compat-core | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
@@ -129,7 +129,7 @@ flowchart TD
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime | v3-provider-responses | 24 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime | v3-runtime | 68 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.direct_parser_binding`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-runtime | 71 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.direct_parser_binding`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-runtime::hub_v1 | 44 | `v3.error.raw_wire_evidence`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 3 | `v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 5 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
@@ -137,7 +137,7 @@ flowchart TD
 | v3-server | v3-config | 2 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.models.capability_catalog` |
 | v3-server | v3-debug | 9 | `v3.codex_sample_retention_snap_scope`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.managed_restart_attempt`<br/>`v3.server.internal_observability_projection`<br/>`v3.server.startup` |
 | v3-server | v3-error | 2 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
-| v3-server | v3-runtime | 7 | `v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.server.startup` |
+| v3-server | v3-runtime | 8 | `v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.server.startup`<br/>`v3.target.session_global_selection` |
 | v3-server | v3-runtime::hub_v1 | 7 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
 | v3-server | v3-server | 48 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-server | v3/vendor | 1 | `v3.server.startup` |
@@ -541,21 +541,30 @@ Owner feature: `v3.virtual_router_target_interpreter`
 ```mermaid
 flowchart TD
   subgraph c_12_v3_target_session_global_selection_m_v3_runtime["v3-runtime"]
-    c_12_v3_target_session_global_selection_0["v3-runtime<br/>plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
-    c_12_v3_target_session_global_selection_1["v3-runtime<br/>select_v3_target_with_session_then_global<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_12_v3_target_session_global_selection_2["v3-runtime<br/>execute_v3_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small>"]
-    c_12_v3_target_session_global_selection_3["v3-runtime<br/>resolve_v3_relay_target_outcome<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_12_v3_target_session_global_selection_4["v3-runtime<br/>reselect_from_captured_target_plan<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_12_v3_target_session_global_selection_1["v3-runtime<br/>plan_v3_responses_protocol_execution_with_recovery<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
+    c_12_v3_target_session_global_selection_2["v3-runtime<br/>plan_v3_responses_protocol_execution_with_captured_target<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
+    c_12_v3_target_session_global_selection_3["v3-runtime<br/>select_v3_target_with_session_then_global<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_12_v3_target_session_global_selection_4["v3-runtime<br/>run_v3_direct_provider_failure_policy<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small>"]
+    c_12_v3_target_session_global_selection_5["v3-runtime<br/>execute_v3_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small>"]
+    c_12_v3_target_session_global_selection_6["v3-runtime<br/>resolve_v3_relay_target_outcome<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_12_v3_target_session_global_selection_7["v3-runtime<br/>reselect_from_captured_target_plan<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
   end
-  c_12_v3_target_session_global_selection_0 -->|v3-rd-target-select-direct-plan<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_12_v3_target_session_global_selection_1
-  c_12_v3_target_session_global_selection_2 -->|v3-rd-target-select-direct-kernel<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_12_v3_target_session_global_selection_1
-  c_12_v3_target_session_global_selection_3 -->|v3-rd-target-select-relay-initial<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_12_v3_target_session_global_selection_1
-  c_12_v3_target_session_global_selection_4 -->|v3-rd-target-select-relay-reselection<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_12_v3_target_session_global_selection_1
+  subgraph c_12_v3_target_session_global_selection_m_v3_server["v3-server"]
+    c_12_v3_target_session_global_selection_0["v3-server<br/>pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
+  end
+  c_12_v3_target_session_global_selection_0 -->|v3-rd-target-select-live-recovery<br/>V3Server03HttpRequestRaw → V3Target10ConcreteProviderSelected| c_12_v3_target_session_global_selection_1
+  c_12_v3_target_session_global_selection_2 -->|v3-rd-target-select-direct-plan<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_12_v3_target_session_global_selection_3
+  c_12_v3_target_session_global_selection_4 -->|v3-rd-target-select-rate-limit-alternative<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_12_v3_target_session_global_selection_3
+  c_12_v3_target_session_global_selection_5 -->|v3-rd-target-select-direct-kernel<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_12_v3_target_session_global_selection_3
+  c_12_v3_target_session_global_selection_6 -->|v3-rd-target-select-relay-initial<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_12_v3_target_session_global_selection_3
+  c_12_v3_target_session_global_selection_7 -->|v3-rd-target-select-relay-reselection<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_12_v3_target_session_global_selection_3
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-rd-target-select-direct-plan` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | select_v3_target_with_session_then_global<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.virtual_router_target_interpreter` |
+| `v3-rd-target-select-live-recovery` | `V3Server03HttpRequestRaw` → `V3Target10ConcreteProviderSelected` | anchored | pending_endpoint_after_responses_admission_inner<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | plan_v3_responses_protocol_execution_with_recovery<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | `v3.virtual_router_target_interpreter` |
+| `v3-rd-target-select-direct-plan` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | plan_v3_responses_protocol_execution_with_captured_target<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | select_v3_target_with_session_then_global<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.virtual_router_target_interpreter` |
+| `v3-rd-target-select-rate-limit-alternative` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | run_v3_direct_provider_failure_policy<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small> | select_v3_target_with_session_then_global<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.virtual_router_target_interpreter` |
 | `v3-rd-target-select-direct-kernel` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small> | select_v3_target_with_session_then_global<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.virtual_router_target_interpreter` |
 | `v3-rd-target-select-relay-initial` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | resolve_v3_relay_target_outcome<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | select_v3_target_with_session_then_global<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.virtual_router_target_interpreter` |
 | `v3-rd-target-select-relay-reselection` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | reselect_from_captured_target_plan<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | select_v3_target_with_session_then_global<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.virtual_router_target_interpreter` |
@@ -1031,7 +1040,7 @@ flowchart TD
     c_25_v3_responses_direct_required_mainline_1["v3-runtime<br/>build_v3_server_03_http_request_raw<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
     c_25_v3_responses_direct_required_mainline_2["v3-runtime<br/>execute_v3_p5_routing_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
     c_25_v3_responses_direct_required_mainline_3["v3-runtime<br/>build_v3_req_04_standardized_responses_from_v3_server_03<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
-    c_25_v3_responses_direct_required_mainline_10["v3-runtime<br/>plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
+    c_25_v3_responses_direct_required_mainline_10["v3-runtime<br/>plan_v3_responses_protocol_execution_with_captured_target<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
     c_25_v3_responses_direct_required_mainline_11["v3-runtime<br/>build_v3_execution_11_protocol_decision_from_v3_target_10<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
     c_25_v3_responses_direct_required_mainline_12["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
     c_25_v3_responses_direct_required_mainline_13["v3-runtime<br/>responses_direct_route_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
@@ -1084,7 +1093,7 @@ flowchart TD
 | `v3-rd-06` | `V3Router07OpaqueTargetHitOnce` → `V3Target08KindClassified` | anchored | execute_v3_p5_routing_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3TargetInterpreter::classify_kind<br/><small>routecodex-v3-target/src/lib.rs</small> | `v3.virtual_router_target_interpreter` |
 | `v3-rd-07` | `V3Target08KindClassified` → `V3Target09CandidateSetExpanded` | anchored | execute_v3_p5_routing_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3TargetInterpreter::expand_candidates<br/><small>routecodex-v3-target/src/lib.rs</small> | `v3.virtual_router_target_interpreter` |
 | `v3-rd-08` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_p5_routing_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3TargetInterpreter::select_available<br/><small>routecodex-v3-target/src/lib.rs</small> | `v3.virtual_router_target_interpreter` |
-| `v3-rd-09` | `V3Target10ConcreteProviderSelected` → `V3Execution11ProtocolDecision` | anchored | plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | build_v3_execution_11_protocol_decision_from_v3_target_10<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | `v3.responses_direct_mvp_architecture` |
+| `v3-rd-09` | `V3Target10ConcreteProviderSelected` → `V3Execution11ProtocolDecision` | anchored | plan_v3_responses_protocol_execution_with_captured_target<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | build_v3_execution_11_protocol_decision_from_v3_target_10<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | `v3.responses_direct_mvp_architecture` |
 | `v3-rd-09-direct-policy` | `V3Execution11ProtocolDecision` → `V3ResponsesDirect11Policy` | anchored | execute_v3_responses_direct_runtime_kernel<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | responses_direct_route_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | `v3.responses_direct_mvp_architecture` |
 | `v3-rd-10` | `V3ResponsesDirect11Policy` → `V3Provider12ResponsesWirePayload` | anchored | responses_direct_request_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | build_v3_provider_12_responses_wire_payload<br/><small>routecodex-v3-provider-responses/src/wire.rs</small> | `v3.responses_provider_runtime` |
 | `v3-rd-11` | `V3Provider12ResponsesWirePayload` → `V3Transport13ResponsesHttpRequest` | anchored | responses_direct_provider_transport_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | build_v3_transport_13_responses_http_request_from_v3_provider_12<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.responses_provider_runtime` |
@@ -2664,8 +2673,8 @@ flowchart TD
     c_64_v3_provider_action_gate_mainline_6["v3-runtime<br/>terminal_projection_for<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_64_v3_provider_action_gate_mainline_7["v3-runtime<br/>V3ProviderActionGate::record_failure_and_commit_terminal_projection<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small>"]
     c_64_v3_provider_action_gate_mainline_8["v3-runtime<br/>V3ProviderActionGate::commit_terminal_generation_locked<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small>"]
-    c_64_v3_provider_action_gate_mainline_9["v3-runtime<br/>V3ProviderFailureRuntimeHealth::wait_for_exact_selected_provider_action<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_64_v3_provider_action_gate_mainline_10["v3-runtime<br/>V3ProviderActionGate::wait_for_exact_provider_action<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small>"]
+    c_64_v3_provider_action_gate_mainline_9["v3-runtime<br/>V3ProviderFailureRuntimeHealth::try_admit_candidate_rate_limit<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs</small>"]
+    c_64_v3_provider_action_gate_mainline_10["v3-runtime<br/>V3ProviderActionGate::try_admit_exact_rate_limit<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small>"]
     c_64_v3_provider_action_gate_mainline_11["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
     c_64_v3_provider_action_gate_mainline_14["v3-runtime<br/>run_v3_direct_provider_failure_policy<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small>"]
     c_64_v3_provider_action_gate_mainline_16["v3-runtime<br/>V3ProviderActionAdmission::take_permit<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small>"]
@@ -2677,6 +2686,8 @@ flowchart TD
     c_64_v3_provider_action_gate_mainline_25["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_64_v3_provider_action_gate_mainline_28["v3-runtime<br/>record_direct_sse_provider_event_json_chunk<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small>"]
     c_64_v3_provider_action_gate_mainline_30["v3-runtime<br/>process_sse_object_frame<br/><small>routecodex-v3-runtime/src/sse_object_pipeline.rs</small>"]
+    c_64_v3_provider_action_gate_mainline_35["v3-runtime<br/>V3RuntimeProviderAdmission::take_rate_limit_control<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
+    c_64_v3_provider_action_gate_mainline_36["v3-runtime<br/>execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small>"]
   end
   subgraph c_64_v3_provider_action_gate_mainline_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_64_v3_provider_action_gate_mainline_0["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner_with_refill<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
@@ -2701,7 +2712,7 @@ flowchart TD
   c_64_v3_provider_action_gate_mainline_4 -->|v3-provider-action-gate-04<br/>V3Error05RecoveryWitness → V3ProviderActionGateAdmission| c_64_v3_provider_action_gate_mainline_5
   c_64_v3_provider_action_gate_mainline_2 -->|v3-provider-action-gate-05<br/>V3Error05ExecutionDecision → V3Error06ClientProjected| c_64_v3_provider_action_gate_mainline_6
   c_64_v3_provider_action_gate_mainline_7 -->|v3-provider-action-gate-06<br/>V3ProviderActionGateTerminalAdmission → V3ProviderActionGateTerminalCommitted| c_64_v3_provider_action_gate_mainline_8
-  c_64_v3_provider_action_gate_mainline_9 -->|v3-provider-action-gate-07<br/>V3ProviderActionGateAdmission → V3ExecutionRetryOrReselect| c_64_v3_provider_action_gate_mainline_10
+  c_64_v3_provider_action_gate_mainline_9 -->|v3-provider-action-gate-07<br/>V3ProviderReqOutbound08WirePayload → V3Error05RecoveryWitness| c_64_v3_provider_action_gate_mainline_10
   c_64_v3_provider_action_gate_mainline_11 -->|v3-provider-action-gate-08<br/>V3Error05RecoveryWitness → V3ProviderActionGateAdmission| c_64_v3_provider_action_gate_mainline_4
   c_64_v3_provider_action_gate_mainline_0 -->|v3-provider-action-gate-10<br/>V3Error05RecoveryWitness → V3ProviderActionGateAdmission| c_64_v3_provider_action_gate_mainline_4
   c_64_v3_provider_action_gate_mainline_12 -->|v3-provider-action-gate-11<br/>V3Error05RecoveryWitness → V3ProviderActionGateAdmission| c_64_v3_provider_action_gate_mainline_4
@@ -2743,6 +2754,11 @@ flowchart TD
   c_64_v3_provider_action_gate_mainline_28 -->|v3-provider-action-gate-49<br/>V3ProviderResponsesEventCodec → V3ProviderResponsesTerminalOrFailureObserved| c_64_v3_provider_action_gate_mainline_30
   c_64_v3_provider_action_gate_mainline_31 -->|v3-provider-action-gate-50<br/>V3ProviderRespInbound01Raw → V3ProviderResponsesEventCodec| c_64_v3_provider_action_gate_mainline_32
   c_64_v3_provider_action_gate_mainline_33 -->|v3-provider-action-gate-51<br/>V3ProviderResponsesEventCodec → V3ProviderResponsesTerminalOrFailureObserved| c_64_v3_provider_action_gate_mainline_34
+  c_64_v3_provider_action_gate_mainline_11 -->|v3-provider-action-gate-52<br/>V3ProviderReqOutbound08WirePayload → V3Error05RecoveryWitness| c_64_v3_provider_action_gate_mainline_35
+  c_64_v3_provider_action_gate_mainline_36 -->|v3-provider-action-gate-53<br/>V3ProviderReqOutbound08WirePayload → V3Error05RecoveryWitness| c_64_v3_provider_action_gate_mainline_35
+  c_64_v3_provider_action_gate_mainline_0 -->|v3-provider-action-gate-54<br/>V3ProviderReqOutbound08WirePayload → V3Error05RecoveryWitness| c_64_v3_provider_action_gate_mainline_35
+  c_64_v3_provider_action_gate_mainline_13 -->|v3-provider-action-gate-55<br/>V3ProviderReqOutbound08WirePayload → V3Error05RecoveryWitness| c_64_v3_provider_action_gate_mainline_35
+  c_64_v3_provider_action_gate_mainline_12 -->|v3-provider-action-gate-56<br/>V3ProviderReqOutbound08WirePayload → V3Error05RecoveryWitness| c_64_v3_provider_action_gate_mainline_35
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -2753,7 +2769,7 @@ flowchart TD
 | `v3-provider-action-gate-04` | `V3Error05RecoveryWitness` → `V3ProviderActionGateAdmission` | anchored | V3ProviderFailureRuntimeHealth::wait_for_error05_recovery<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderActionGate::wait_for_recovery_witness<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-05` | `V3Error05ExecutionDecision` → `V3Error06ClientProjected` | anchored | run_v3_relay_provider_failure_policy_with_response_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | terminal_projection_for<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-06` | `V3ProviderActionGateTerminalAdmission` → `V3ProviderActionGateTerminalCommitted` | anchored | V3ProviderActionGate::record_failure_and_commit_terminal_projection<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small> | V3ProviderActionGate::commit_terminal_generation_locked<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small> | `v3.provider_action_gate` |
-| `v3-provider-action-gate-07` | `V3ProviderActionGateAdmission` → `V3ExecutionRetryOrReselect` | anchored | V3ProviderFailureRuntimeHealth::wait_for_exact_selected_provider_action<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderActionGate::wait_for_exact_provider_action<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small> | `v3.provider_action_gate` |
+| `v3-provider-action-gate-07` | `V3ProviderReqOutbound08WirePayload` → `V3Error05RecoveryWitness` | anchored | V3ProviderFailureRuntimeHealth::try_admit_candidate_rate_limit<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs</small> | V3ProviderActionGate::try_admit_exact_rate_limit<br/><small>routecodex-v3-runtime/src/provider_action_gate.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-08` | `V3Error05RecoveryWitness` → `V3ProviderActionGateAdmission` | anchored | execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3ProviderFailureRuntimeHealth::wait_for_error05_recovery<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-10` | `V3Error05RecoveryWitness` → `V3ProviderActionGateAdmission` | anchored | execute_v3_responses_relay_runtime_inner_with_refill<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | V3ProviderFailureRuntimeHealth::wait_for_error05_recovery<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-11` | `V3Error05RecoveryWitness` → `V3ProviderActionGateAdmission` | anchored | execute_v3_anthropic_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | V3ProviderFailureRuntimeHealth::wait_for_error05_recovery<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_action_gate` |
@@ -2795,6 +2811,11 @@ flowchart TD
 | `v3-provider-action-gate-49` | `V3ProviderResponsesEventCodec` → `V3ProviderResponsesTerminalOrFailureObserved` | anchored | record_direct_sse_provider_event_json_chunk<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small> | process_sse_object_frame<br/><small>routecodex-v3-runtime/src/sse_object_pipeline.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-50` | `V3ProviderRespInbound01Raw` → `V3ProviderResponsesEventCodec` | anchored | build_v3_hub_resp_inbound_02_from_responses_provider_stream_events<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs</small> | observe_v3_runtime_responses_sse_transport_chunk_typed<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs</small> | `v3.provider_action_gate` |
 | `v3-provider-action-gate-51` | `V3ProviderResponsesEventCodec` → `V3ProviderResponsesTerminalOrFailureObserved` | anchored | apply_v3_typed_responses_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs</small> | V3ResponsesSseReducerState::apply_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small> | `v3.provider_action_gate` |
+| `v3-provider-action-gate-52` | `V3ProviderReqOutbound08WirePayload` → `V3Error05RecoveryWitness` | anchored | execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3RuntimeProviderAdmission::take_rate_limit_control<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_action_gate` |
+| `v3-provider-action-gate-53` | `V3ProviderReqOutbound08WirePayload` → `V3Error05RecoveryWitness` | anchored | execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small> | V3RuntimeProviderAdmission::take_rate_limit_control<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_action_gate` |
+| `v3-provider-action-gate-54` | `V3ProviderReqOutbound08WirePayload` → `V3Error05RecoveryWitness` | anchored | execute_v3_responses_relay_runtime_inner_with_refill<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | V3RuntimeProviderAdmission::take_rate_limit_control<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_action_gate` |
+| `v3-provider-action-gate-55` | `V3ProviderReqOutbound08WirePayload` → `V3Error05RecoveryWitness` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | V3RuntimeProviderAdmission::take_rate_limit_control<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_action_gate` |
+| `v3-provider-action-gate-56` | `V3ProviderReqOutbound08WirePayload` → `V3Error05RecoveryWitness` | anchored | execute_v3_anthropic_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | V3RuntimeProviderAdmission::take_rate_limit_control<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | `v3.provider_action_gate` |
 
 ## v3.build_test_artifact_budget
 
@@ -3172,7 +3193,7 @@ flowchart TD
   end
   subgraph c_74_v3_route_policy_condition_evaluation_m_v3_runtime["v3-runtime"]
     c_74_v3_route_policy_condition_evaluation_4["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
-    c_74_v3_route_policy_condition_evaluation_6["v3-runtime<br/>plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
+    c_74_v3_route_policy_condition_evaluation_6["v3-runtime<br/>plan_v3_responses_protocol_execution_with_captured_target<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
     c_74_v3_route_policy_condition_evaluation_7["v3-runtime<br/>V3RoutePolicyRuntimeState::commit_request<br/><small>routecodex-v3-runtime/src/route_policy.rs</small>"]
     c_74_v3_route_policy_condition_evaluation_10["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_74_v3_route_policy_condition_evaluation_12["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
@@ -3205,7 +3226,7 @@ flowchart TD
 | `v3-route-policy-01` | `V3RouteTurnObservation` → `V3RouteHistoryWindow` | anchored | V3RouteHistoryWindow::record_turn<br/><small>routecodex-v3-route-classifier/src/policy.rs</small> | V3RouteHistoryWindow::facts<br/><small>routecodex-v3-route-classifier/src/policy.rs</small> | `v3.route_policy_condition_evaluation` |
 | `v3-route-policy-02` | `V3RouteHistoryWindow` → `V3RoutePolicyAction` | anchored | evaluate_v3_route_policies<br/><small>routecodex-v3-route-classifier/src/policy.rs</small> | V3RoutePolicyAction<br/><small>routecodex-v3-route-classifier/src/policy.rs</small> | `v3.route_policy_condition_evaluation` |
 | `v3-route-policy-03` | `V3RoutePolicyAction` → `V3Router06RoutePoolResolved` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3VirtualRouter::resolve_route_pool_plan<br/><small>routecodex-v3-virtual-router/src/lib.rs</small> | `v3.route_policy_condition_evaluation` |
-| `v3-route-policy-04` | `V3Router05RequestClassified` → `V3Router06RoutePoolResolved` | anchored | plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | V3VirtualRouter::resolve_route_pool_plan<br/><small>routecodex-v3-virtual-router/src/lib.rs</small> | `v3.route_policy_condition_evaluation` |
+| `v3-route-policy-04` | `V3Router05RequestClassified` → `V3Router06RoutePoolResolved` | anchored | plan_v3_responses_protocol_execution_with_captured_target<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | V3VirtualRouter::resolve_route_pool_plan<br/><small>routecodex-v3-virtual-router/src/lib.rs</small> | `v3.route_policy_condition_evaluation` |
 | `v3-route-policy-05` | `V3Router05RequestClassified` → `V3RouteHistoryWindow` | anchored | V3RoutePolicyRuntimeState::commit_request<br/><small>routecodex-v3-runtime/src/route_policy.rs</small> | V3RouteHistoryWindow::record_turn<br/><small>routecodex-v3-route-classifier/src/policy.rs</small> | `v3.route_policy_condition_evaluation` |
 | `v3-provider-global-probe-relay-error-source` | `V3HubRespChatProcess03Governed` → `V3Error01SourceRaised` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-05` | `V3ProviderFailureRuntimeHealth` → `V3ProviderHealthStore` | anchored | V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::record_provider_failure_in_session_with_policy<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_subscription_probe` |

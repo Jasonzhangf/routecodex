@@ -541,7 +541,7 @@ async fn stale_rescue_probe_completion_does_not_abort_reselection_of_next_provid
 }
 
 #[tokio::test]
-async fn cooldown_only_exhaustion_does_not_wait_for_other_requests_successful_probe() {
+async fn cooldown_only_exhaustion_waits_for_other_requests_successful_probe() {
     let server_id = "cooldown_only_exhaustion";
     let manifest = global_pool_alive_manifest(server_id);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -611,8 +611,8 @@ async fn cooldown_only_exhaustion_does_not_wait_for_other_requests_successful_pr
     selection_started.notified().await;
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(
-        selection.is_finished(),
-        "cooldown-only exhaustion must not await another request's probe"
+        !selection.is_finished(),
+        "cooldown-only exhaustion must await an eligible recovery"
     );
 
     health
@@ -622,8 +622,8 @@ async fn cooldown_only_exhaustion_does_not_wait_for_other_requests_successful_pr
 
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(
-        selection.is_finished(),
-        "later recovery must not revive the already exhausted request"
+        !selection.is_finished(),
+        "success of the permanently excluded candidate must not release this request"
     );
 
     health
@@ -635,10 +635,10 @@ async fn cooldown_only_exhaustion_does_not_wait_for_other_requests_successful_pr
         .await
         .expect("selection must wake after rescue probe success")
         .expect("selection task must not panic");
-    assert!(matches!(
-        selection,
-        Err(V3PlanExecutionStop::Exhausted { .. })
-    ));
+    let Ok((_, plan)) = selection else {
+        panic!("eligible successful probe must restore selection")
+    };
+    assert_eq!(plan.selected.candidate.provider_id, second.provider_id);
     assert!(
         health
             .availability(
@@ -723,8 +723,8 @@ async fn cooldown_only_exhaustion_preserves_independent_failed_and_successful_pr
     selection_started.notified().await;
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(
-        selection.is_finished(),
-        "probes owned elsewhere must not hold an exhausted request"
+        !selection.is_finished(),
+        "in-flight probes must retain the request within its recovery budget"
     );
 
     health
@@ -734,8 +734,8 @@ async fn cooldown_only_exhaustion_preserves_independent_failed_and_successful_pr
 
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(
-        selection.is_finished(),
-        "a failed independent probe must not revive the exhausted request"
+        !selection.is_finished(),
+        "one failed probe must not terminate the remaining eligible recovery"
     );
 
     health
@@ -747,10 +747,10 @@ async fn cooldown_only_exhaustion_preserves_independent_failed_and_successful_pr
         .await
         .expect("selection must wake after a later rescue probe succeeds")
         .expect("selection task must not panic");
-    assert!(matches!(
-        selection,
-        Err(V3PlanExecutionStop::Exhausted { .. })
-    ));
+    let Ok((_, plan)) = selection else {
+        panic!("eligible successful probe must restore selection")
+    };
+    assert_eq!(plan.selected.candidate.provider_id, second.provider_id);
     assert!(
         !health
             .availability(
@@ -774,7 +774,7 @@ async fn cooldown_only_exhaustion_preserves_independent_failed_and_successful_pr
 }
 
 #[tokio::test]
-async fn cooldown_only_exhaustion_does_not_retry_after_an_independent_probe_fails() {
+async fn cooldown_only_exhaustion_waits_until_budget_after_independent_probe_failure() {
     let server_id = "cooldown_only_exhaustion_due_retry";
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -811,6 +811,10 @@ async fn cooldown_only_exhaustion_does_not_retry_after_an_independent_probe_fail
     };
     put_all_candidates_in_provider_cooldown(&health, &expanded);
     let second = expanded.candidates[1].clone();
+    let mut expanded = expanded;
+    for candidate in &mut expanded.candidates {
+        candidate.concurrency_acquire_timeout_ms = 200;
+    }
     let second_permit = acquire_rescue_probe(
         &health,
         &second.provider_id,
@@ -843,8 +847,8 @@ async fn cooldown_only_exhaustion_does_not_retry_after_an_independent_probe_fail
     });
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
-        selection.is_finished(),
-        "failed owned rescue pass must exhaust without waiting for another probe"
+        !selection.is_finished(),
+        "failed rescue must wait for the declared acquisition budget"
     );
     health
         .store
@@ -871,6 +875,8 @@ async fn cooldown_only_exhaustion_does_not_retry_after_an_independent_probe_fail
             .is_some(),
         "independent failed probe must retain its next scheduled recovery"
     );
+    // A rescue may already have reached the listener before cancellation.
+    let _initial_probe = tokio::time::timeout(Duration::from_millis(50), listener.accept()).await;
     assert!(
         tokio::time::timeout(Duration::from_millis(50), listener.accept())
             .await
@@ -880,7 +886,7 @@ async fn cooldown_only_exhaustion_does_not_retry_after_an_independent_probe_fail
 }
 
 #[tokio::test]
-async fn cooldown_only_exhaustion_terminates_without_residence_wait() {
+async fn cooldown_only_exhaustion_terminates_after_acquisition_budget() {
     let server_id = "cooldown_only_exhaustion_rescue_deadline";
     let manifest = global_pool_alive_manifest_with_rescue_timeout(server_id, Some(900_000));
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -906,7 +912,11 @@ async fn cooldown_only_exhaustion_terminates_without_residence_wait() {
         Err(_) => panic!("expanded candidates failed"),
     };
     put_all_candidates_in_provider_cooldown(&health, &expanded);
-
+    let mut expanded = expanded;
+    for candidate in &mut expanded.candidates {
+        candidate.concurrency_acquire_timeout_ms = 150;
+    }
+    let started = tokio::time::Instant::now();
     let selection = tokio::time::timeout(
         Duration::from_secs(2),
         run_v3_plan_execution_operator_with_probes(
@@ -927,10 +937,11 @@ async fn cooldown_only_exhaustion_terminates_without_residence_wait() {
         ),
     )
     .await
-    .expect("cooldown-only rescue must not await its residence deadline");
+    .expect("cooldown-only recovery must use acquisition rather than residence budget");
+    assert!(started.elapsed() >= Duration::from_millis(150));
     assert!(
         matches!(selection, Err(V3PlanExecutionStop::Exhausted { .. })),
-        "failed rescue pass must return terminal exhaustion without future recovery wait"
+        "failed recovery must exhaust only after its declared acquisition budget"
     );
 }
 
@@ -1056,8 +1067,8 @@ async fn auth_key_cooldown_exhaustion_preserves_independent_probe_recovery() {
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(
-        selection.is_finished(),
-        "auth-key cooldown-only exhaustion must not wait for independent probe recovery"
+        !selection.is_finished(),
+        "auth-key cooldown must wait for independent recovery within its budget"
     );
 
     health
@@ -1066,8 +1077,8 @@ async fn auth_key_cooldown_exhaustion_preserves_independent_probe_recovery() {
         .expect("failed auth-key probe");
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(
-        selection.is_finished(),
-        "a failed auth-key probe must not revive the exhausted request"
+        !selection.is_finished(),
+        "a failed auth-key probe must retain recovery waiting"
     );
     let retry_deadline_ms = health
         .store
@@ -1093,8 +1104,8 @@ async fn auth_key_cooldown_exhaustion_preserves_independent_probe_recovery() {
         .expect("selection must wake after auth-key probe success")
         .expect("selection task must not panic");
     assert!(
-        matches!(selection, Err(V3PlanExecutionStop::Exhausted { .. })),
-        "successful independent retry must not revive the exhausted request"
+        selection.is_ok(),
+        "successful independent retry must restore the held request"
     );
     assert!(
         health
@@ -1104,7 +1115,7 @@ async fn auth_key_cooldown_exhaustion_preserves_independent_probe_recovery() {
 }
 
 #[tokio::test]
-async fn auth_key_cooldown_exhaustion_does_not_wait_for_other_requests_successful_probe() {
+async fn auth_key_cooldown_exhaustion_waits_for_other_requests_successful_probe() {
     let server_id = "auth_key_cooldown_with_successful_provider_probe";
     let manifest = global_pool_alive_manifest(server_id);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -1176,8 +1187,8 @@ async fn auth_key_cooldown_exhaustion_does_not_wait_for_other_requests_successfu
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(
-        selection.is_finished(),
-        "auth-key cooldown-only exhaustion must not await another request's probe"
+        !selection.is_finished(),
+        "auth-key cooldown must await an eligible in-flight probe"
     );
     health
         .store
@@ -1188,8 +1199,8 @@ async fn auth_key_cooldown_exhaustion_does_not_wait_for_other_requests_successfu
         .expect("a successful auth-key probe must resume the held request")
         .expect("selection task must not panic");
     assert!(
-        matches!(selection, Err(V3PlanExecutionStop::Exhausted { .. })),
-        "successful independent probe recovery must not revive the exhausted request"
+        selection.is_ok(),
+        "successful independent probe recovery must restore the held request"
     );
     assert!(
         health
@@ -1532,7 +1543,7 @@ async fn all_busy_async_admission_preserves_provider_concurrency_busy_source() {
         manifest.providers.get_mut(id).unwrap().concurrency =
             Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
                 max_in_flight: 1,
-                acquire_timeout_ms: 60_000,
+                acquire_timeout_ms: 150,
                 stale_lease_ms: 300_000,
             });
     }
@@ -1582,7 +1593,7 @@ async fn all_busy_async_admission_preserves_provider_concurrency_busy_source() {
         ),
     )
     .await
-    .expect("all-busy async admission must not wait");
+    .expect("all-busy async admission must finish after its declared wait budget");
     for lease in held {
         controller.release(lease.into_permit()).unwrap();
     }
@@ -1605,7 +1616,7 @@ async fn mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhauste
         manifest.providers.get_mut(id).unwrap().concurrency =
             Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
                 max_in_flight: 1,
-                acquire_timeout_ms: 60_000,
+                acquire_timeout_ms: 150,
                 stale_lease_ms: 300_000,
             });
     }
@@ -1638,6 +1649,7 @@ async fn mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhauste
         .map(v3_relay_provider_candidate_key)
         .expect("second candidate key");
     let excluded = BTreeSet::from([second_candidate_key]);
+    let started = tokio::time::Instant::now();
     let selection = tokio::time::timeout(
         Duration::from_millis(500),
         run_v3_plan_execution_operator_with_probes(
@@ -1658,8 +1670,9 @@ async fn mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhauste
         ),
     )
     .await
-    .expect("mixed async admission must not wait");
+    .expect("mixed async admission must finish after its bounded capacity wait");
     controller.release(held.into_permit()).unwrap();
+    assert!(started.elapsed() >= Duration::from_millis(150));
     let Err(V3PlanExecutionStop::Exhausted { source, .. }) = selection else {
         panic!("expected async mixed exhaustion");
     };

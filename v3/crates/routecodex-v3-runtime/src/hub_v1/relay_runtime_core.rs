@@ -602,22 +602,29 @@ where
         Some(handoff) => V3PlanExecutionTargetSource::Expanded(handoff.expanded.clone()),
         None => V3PlanExecutionTargetSource::OpaqueHit(resolved_target.opaque_hit),
     };
+    // Reuse the incoming absolute deadline, including during initial planning.
+    let request_execution_control = refill.request_execution_control.clone();
     let (execution_planned_request, initial_plan) =
-        match run_v3_plan_execution_operator_with_probes(
-            target_resolved_request,
-            manifest,
-            target_source,
-            &failure_session_scope,
-            &provider_health,
-            &failed_candidates,
-            &request_local_busy_candidates,
-            v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
-            deterministic_sample,
-            allow_exhaustion_rescue_probe,
-            retry_selected.take(),
-            V3PlanExecutionModePolicy::RelayOnly {
-                entry_protocol: C::ENTRY_PROTOCOL,
-            },
+        match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
+            request_execution_control
+                .attempt_budget()
+                .residence_deadline(),
+            run_v3_plan_execution_operator_with_probes(
+                target_resolved_request,
+                manifest,
+                target_source,
+                &failure_session_scope,
+                &provider_health,
+                &failed_candidates,
+                &request_local_busy_candidates,
+                v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
+                deterministic_sample,
+                allow_exhaustion_rescue_probe,
+                retry_selected.take(),
+                V3PlanExecutionModePolicy::RelayOnly {
+                    entry_protocol: C::ENTRY_PROTOCOL,
+                },
+            ),
         )
         .await
         {
@@ -677,8 +684,8 @@ where
         };
     req02.previous.payload.0 = std::sync::Arc::new(execution_planned_request);
     let retained_expanded = initial_plan.expanded;
-    failed_candidates.extend(initial_plan.request_local_excluded_candidates);
-    request_local_busy_candidates.extend(initial_plan.request_local_busy_candidates);
+    failed_candidates = initial_plan.request_local_excluded_candidates;
+    request_local_busy_candidates = initial_plan.request_local_busy_candidates;
     let planned_execution_mode = initial_plan.execution_mode;
     let mut initial_admitted = Some((initial_plan.selected, initial_plan.admission));
     let request_outcome = compile_v3_hub_relay_request_hooks()
@@ -697,9 +704,6 @@ where
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut last_external_http = None;
-    // 入口已按 handoff 建好请求作用域控制；骨架只消费它，确保同一请求的多次
-    // 执行共享同一份续杯额度与驻留截止时间。
-    let request_execution_control = refill.request_execution_control.clone();
     let attempt_budget = request_execution_control.attempt_budget();
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
@@ -717,29 +721,34 @@ where
         ) = if let Some((selected, admission)) = initial_admitted.take() {
             (selected, Some(admission))
         } else {
-            let target_resolution = run_v3_plan_execution_operator_with_probes(
-                (*req05.previous.previous.previous.payload.0).clone(),
-                manifest,
-                V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
-                &failure_session_scope,
-                &provider_health,
-                &failed_candidates,
-                &request_local_busy_candidates,
-                v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
-                deterministic_sample,
-                allow_exhaustion_rescue_probe,
-                preferred_selected,
-                V3PlanExecutionModePolicy::RelayOnly {
-                    entry_protocol: C::ENTRY_PROTOCOL,
-                },
-            )
-            .await;
+            let target_resolution =
+                crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
+                    attempt_budget.residence_deadline(),
+                    run_v3_plan_execution_operator_with_probes(
+                        (*req05.previous.previous.previous.payload.0).clone(),
+                        manifest,
+                        V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
+                        &failure_session_scope,
+                        &provider_health,
+                        &failed_candidates,
+                        &request_local_busy_candidates,
+                        v3_relay_provider_policy_now_epoch_ms()
+                            .map_err(V3RelayCoreError::Target)?,
+                        deterministic_sample,
+                        allow_exhaustion_rescue_probe,
+                        preferred_selected,
+                        V3PlanExecutionModePolicy::RelayOnly {
+                            entry_protocol: C::ENTRY_PROTOCOL,
+                        },
+                    ),
+                )
+                .await;
             match target_resolution {
                 Ok((execution_planned_request, plan)) => {
                     req05.previous.previous.previous.payload.0 =
                         std::sync::Arc::new(execution_planned_request);
-                    failed_candidates.extend(plan.request_local_excluded_candidates);
-                    request_local_busy_candidates.extend(plan.request_local_busy_candidates);
+                    failed_candidates = plan.request_local_excluded_candidates;
+                    request_local_busy_candidates = plan.request_local_busy_candidates;
                     (plan.selected, Some(plan.admission))
                 }
                 Err(V3PlanExecutionStop::Failed(source)) => {
@@ -814,7 +823,7 @@ where
             drop(provider_action_permit.take());
             provider_action_permit_target = None;
         }
-        attempt_budget.set_transport_attempt_limit(selected.candidate_count);
+        attempt_budget.set_transport_attempt_limit(retained_expanded.candidates.len());
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_interface_id = selected.candidate.interface_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
@@ -994,12 +1003,19 @@ where
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let provider_request_snapshot = transport_request.provider_request_projection();
+        let _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
+            admission.take_rate_limit_control(&mut pending_provider_action_recovery)
+        });
         if pending_provider_action_recovery.is_some() {
             drop(selected_admission.take());
         }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
-                .wait_for_error05_recovery(&recovery, &selected)
+                .wait_for_error05_recovery(
+                    &recovery,
+                    &selected,
+                    attempt_budget.residence_deadline(),
+                )
                 .await
                 .map_err(|error| V3RelayCoreError::Target(error.to_string()))?
             {
@@ -1095,6 +1111,9 @@ where
                     continue;
                 }
                 Err(V3ProviderError::HttpStatus { response }) => {
+                    if response.status == 429 {
+                        attempt_budget.record_rate_limited_attempt();
+                    }
                     last_external_http = Some(
                         crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
                     );
@@ -1199,6 +1218,9 @@ where
             return Err(V3RelayCoreError::Target(timing_error));
         }
         let provider_status = provider_raw.status();
+        if provider_status == 429 {
+            attempt_budget.record_rate_limited_attempt();
+        }
         match provider_raw.into_body() {
             V3ProviderResponseBody::Json(bytes) => {
                 let provider_value: Value = match serde_json::from_slice(&bytes) {

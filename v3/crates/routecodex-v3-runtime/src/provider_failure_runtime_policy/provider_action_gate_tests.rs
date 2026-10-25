@@ -145,7 +145,11 @@ async fn unmatched_transient_reselect_keeps_returned_recovery_witness_admissible
 
     let transition = tokio::time::timeout(
         Duration::from_secs(30),
-        health.wait_for_error05_recovery(recovery, reselected),
+        health.wait_for_error05_recovery(
+            recovery,
+            reselected,
+            std::time::Instant::now() + Duration::from_secs(30),
+        ),
     )
     .await
     .expect("unmatched transient reselect must not hang on recovery admission")

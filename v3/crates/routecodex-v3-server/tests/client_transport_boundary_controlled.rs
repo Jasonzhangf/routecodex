@@ -71,10 +71,10 @@ async fn controlled_gated_openai_chat_upstream(
     if stream_requested && content == "fail-slow" {
         // A real provider terminal whose raw body must never reach the client.
         return Response::builder()
-            .status(StatusCode::TOO_MANY_REQUESTS)
+            .status(StatusCode::UNAUTHORIZED)
             .header("content-type", "application/json")
             .body(Body::from(
-                r#"{"error":{"type":"rate_limit_error","message":"raw provider secret detail"}}"#,
+                r#"{"error":{"type":"invalid_api_key","message":"raw provider secret detail"}}"#,
             ))
             .unwrap();
     }

@@ -735,7 +735,7 @@ async fn changed_provider_lanes_admit_one_action_per_routing_group_interval() {
         "server-serial",
         "group-serial",
         "provider-b:key:model",
-        "provider_http_429",
+        "provider_http_500",
     );
     gate.record_failure(&first).expect("first provider failure");
     gate.record_failure(&second)
@@ -767,7 +767,7 @@ async fn admitted_action_failure_advances_the_group_before_reselecting() {
         "server-outcome",
         "group-outcome",
         "provider-a:key:model",
-        "provider_http_429",
+        "provider_http_503",
     );
     gate.record_failure_and_commit_terminal_projection(terminal.clone())
         .expect("terminal projection admission");
@@ -800,7 +800,7 @@ async fn admitted_action_failure_advances_the_group_before_reselecting() {
 #[tokio::test]
 async fn admitted_action_requires_explicit_drop_before_replacement_generation() {
     let gate = V3ProviderActionGate::default();
-    let scope = key("provider_http_429");
+    let scope = key("provider_http_503");
     gate.record_failure(&scope)
         .expect("record provider failure");
     let admitted = gate

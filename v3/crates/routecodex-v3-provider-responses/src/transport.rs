@@ -886,24 +886,15 @@ impl ResponsesTransport for ProviderResponsesTransport {
                             reason,
                         })?;
                 }
-                if is_rate_limited(&error) {
-                    if was_probe {
-                        drop(
-                            permit_guard
-                                .with_probe_result(V3AdaptiveConcurrencyProbeResult::RateLimited),
-                        );
-                    } else {
-                        controller
-                            .observe_rate_limit(&provider_key, now_ms)
-                            .map_err(|reason| V3ProviderError::InternalTransport {
-                                request_id: request_id.clone(),
-                                provider_id: provider_id.clone(),
-                                lane: V3ProviderInternalTransportLane::Response,
-                                reason,
-                            })?;
-                        drop(permit_guard);
-                    }
+                if is_rate_limited(&error) && was_probe {
+                    drop(
+                        permit_guard
+                            .with_probe_result(V3AdaptiveConcurrencyProbeResult::RateLimited),
+                    );
                 } else {
+                    // Business429 backpressure belongs to the exact model's
+                    // typed Error/action gate. Shared provider:key capacity
+                    // must not shrink for its untried sibling models.
                     drop(permit_guard);
                 }
                 Err(error)
