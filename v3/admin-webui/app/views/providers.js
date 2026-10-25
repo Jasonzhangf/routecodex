@@ -44,6 +44,9 @@ const state = {
   // identify which provider owns it so an inventory refresh can leave it alone.
   patrolDirty: false,
   patrolEditorProvider: null,
+  // Bumped whenever a new editor is built, so a late save/delete response from
+  // an older editor cannot clear the draft of the current one.
+  patrolEditorEpoch: 0,
   importText: "",
   // Bulk-action selection over the provider list. Kept here so it survives the
   // auto-refresh re-render; pruned whenever a provider disappears from the list.
@@ -1154,6 +1157,8 @@ async function loadPatrol() {
     if (readOnly && existingEditor) {
       renderRows(readOnly);
     } else {
+      const epoch = ++state.patrolEditorEpoch;
+      let draftVersion = 0;
       planHost.innerHTML = "";
       const readOnlyHost = el("div", "patrol-readonly");
       renderRows(readOnlyHost);
@@ -1189,6 +1194,7 @@ async function loadPatrol() {
       });
       const markDirty = () => {
         state.patrolDirty = true;
+        draftVersion += 1;
       };
       enabledBox.addEventListener("change", markDirty);
       intervalInput.addEventListener("input", markDirty);
@@ -1197,6 +1203,7 @@ async function loadPatrol() {
       const save = el("button", "btn primary", "Save plan");
       save.addEventListener("click", async () => {
         save.disabled = true;
+        const savedDraftVersion = draftVersion;
         try {
           await api(`/api/providers/${encodeURIComponent(id)}/patrol`, {
             method: "PUT",
@@ -1207,9 +1214,14 @@ async function loadPatrol() {
             }),
           });
           showStatus("ok", `patrol plan saved for ${id}`);
-          state.patrolDirty = false;
-          state.patrolEditorProvider = null;
-          loadPatrol();
+          // Only the editor that started this save may adopt the saved truth.
+          // A switch to another provider, or a newer edit made while the PUT
+          // was in flight, keeps its own draft untouched.
+          if (state.patrolEditorProvider === id && state.patrolEditorEpoch === epoch && draftVersion === savedDraftVersion) {
+            state.patrolDirty = false;
+            state.patrolEditorProvider = null;
+            loadPatrol();
+          }
         } catch (error) {
           showStatus("err", `patrol plan rejected: ${error.message}`);
         } finally {
@@ -1220,9 +1232,11 @@ async function loadPatrol() {
       remove.addEventListener("click", async () => {
         await api(`/api/providers/${encodeURIComponent(id)}/patrol`, { method: "DELETE" });
         showStatus("ok", `patrol plan removed for ${id}`);
-        state.patrolDirty = false;
-        state.patrolEditorProvider = null;
-        loadPatrol();
+        if (state.patrolEditorProvider === id && state.patrolEditorEpoch === epoch) {
+          state.patrolDirty = false;
+          state.patrolEditorProvider = null;
+          loadPatrol();
+        }
       });
       const runNow = el("button", "btn", "Run now");
       runNow.addEventListener("click", async () => {

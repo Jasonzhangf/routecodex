@@ -8,9 +8,9 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const source = fs.readFileSync(new URL("./app/views/providers.js", import.meta.url), "utf8");
-const start = source.indexOf("async function loadPatrol()");
+const start = source.indexOf("function selectPatrolProvider(");
 const end = source.indexOf("function resultRow(", start);
-assert.ok(start >= 0 && end > start, "providers.js must expose the loadPatrol owner");
+assert.ok(start >= 0 && end > start, "providers.js must expose the patrol editor owners");
 const patrolSource = source.slice(start, end);
 
 // Minimal DOM: enough for the patrol editor, rows and refresh path. It is not a
@@ -120,6 +120,7 @@ const elements = {
   "patrol-plan": planHost,
   "patrol-history": historyHost,
   "patrol-status": statusHost,
+  "patrol-panel": new FakeNode("div"),
 };
 const document = {
   getElementById: (id) => elements[id] || null,
@@ -133,13 +134,36 @@ const document = {
   },
 };
 
-const state = { patrolProvider: "alpha", patrolDirty: false, patrolEditorProvider: null };
+const state = {
+  patrolProvider: "alpha",
+  patrolDirty: false,
+  patrolEditorProvider: null,
+  patrolEditorEpoch: 0,
+};
 const plans = {
   alpha: { enabled: false, interval_secs: 300, stages: ["l1_contract", "l2_reachability_auth"] },
   beta: { enabled: true, interval_secs: 600, stages: ["l1_contract"] },
 };
 const calls = [];
 let statusTick = 0;
+let nextMutationGate = null;
+
+// Hold the next PUT/DELETE so a test can interleave a provider switch.
+function holdNextApi() {
+  let release;
+  const promise = new Promise((resolve) => {
+    release = resolve;
+  });
+  const gate = {
+    promise,
+    release: () => {
+      release();
+      return promise;
+    },
+  };
+  nextMutationGate = gate;
+  return gate;
+}
 
 async function api(path, options = {}) {
   calls.push(`${options.method || "GET"} ${path}`);
@@ -156,6 +180,11 @@ async function api(path, options = {}) {
   if (match[2] === "/run") return { ok: true, result: { stages: [] } };
   if (!options.method) {
     return { provider_id: id, stored: true, plan: structuredClone(plans[id]), last_run_epoch_ms: null };
+  }
+  if (nextMutationGate) {
+    const gate = nextMutationGate;
+    nextMutationGate = null;
+    await gate.promise;
   }
   if (options.method === "PUT") {
     plans[id] = JSON.parse(options.body);
@@ -183,8 +212,15 @@ const context = vm.createContext({
   encodeURIComponent,
   JSON,
 });
-vm.runInContext(`let patrolLoadSeq = 0;\n${patrolSource}\nthis.__loadPatrol = loadPatrol;`, context);
+vm.runInContext(`${patrolSource}\nthis.__loadPatrol = loadPatrol;\nthis.__selectPatrolProvider = selectPatrolProvider;`, context);
 const loadPatrol = context.__loadPatrol;
+const selectPatrolProvider = context.__selectPatrolProvider;
+
+async function settle(turns = 25) {
+  for (let turn = 0; turn < turns; turn += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
 
 function fire(node, type) {
   node.dispatch(type);
@@ -292,5 +328,53 @@ const settled = readState();
 assert.equal(settled.interval, "900");
 assert.equal(settled.enabled, true);
 assert.deepEqual(settled.stages, [true, false, true]);
+
+// A save whose response arrives after a provider switch and a newer draft must
+// not clear, rebuild or overwrite that newer draft.
+{
+  const saveNumber = planHost.querySelector("input[type=number]");
+  saveNumber.value = "1200";
+  fire(saveNumber, "input");
+  const gate = holdNextApi();
+  planHost.querySelectorAll("button").find((button) => button.textContent === "Save plan").click();
+  await settle(1);
+  selectPatrolProvider("beta");
+  await settle();
+  const betaEditor = planHost.querySelector(".patrol-editor");
+  const betaNumber = planHost.querySelector("input[type=number]");
+  betaNumber.value = "888";
+  fire(betaNumber, "input");
+  assert.equal(state.patrolDirty, true);
+  await gate.release();
+  await settle();
+  const afterLateSave = readState();
+  assert.equal(afterLateSave.interval, "888", "a late save must not overwrite a newer provider draft");
+  assert.equal(afterLateSave.focused, false);
+  assert.equal(planHost.querySelector(".patrol-editor"), betaEditor, "a late save must not rebuild the current editor");
+  assert.equal(state.patrolDirty, true, "a late save must not clear the newer draft flag");
+  assert.equal(state.patrolEditorProvider, "beta");
+}
+
+// The same guard applies to a delete response that arrives after a switch.
+{
+  selectPatrolProvider("alpha");
+  await settle();
+  const gate = holdNextApi();
+  planHost.querySelectorAll("button").find((button) => button.textContent === "Delete plan").click();
+  await settle(1);
+  selectPatrolProvider("beta");
+  await settle();
+  const betaEditor = planHost.querySelector(".patrol-editor");
+  const betaNumber = planHost.querySelector("input[type=number]");
+  betaNumber.value = "555";
+  fire(betaNumber, "input");
+  assert.equal(state.patrolDirty, true);
+  await gate.release();
+  await settle();
+  const afterLateDelete = readState();
+  assert.equal(afterLateDelete.interval, "555", "a late delete must not overwrite a newer provider draft");
+  assert.equal(planHost.querySelector(".patrol-editor"), betaEditor, "a late delete must not rebuild the current editor");
+  assert.equal(state.patrolDirty, true, "a late delete must not clear the newer draft flag");
+}
 
 console.log("providers patrol draft smoke passed");
