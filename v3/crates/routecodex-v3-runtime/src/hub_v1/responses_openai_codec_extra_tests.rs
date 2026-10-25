@@ -874,6 +874,113 @@ fn responses_summary_reasoning_item_projects_plaintext_reasoning_content() {
 }
 
 #[test]
+fn responses_null_encrypted_content_does_not_fabricate_redacted_thinking() {
+    // A Responses reasoning item can carry `encrypted_content: null` with no
+    // plaintext. Key presence alone must not infer `redacted_thinking`: the
+    // Anthropic outbound projection rejects a data-less redacted block and
+    // failed the whole request before provider wire.
+    for (label, encrypted_content) in [("null", Some(Value::Null)), ("absent", None)] {
+        let mut reasoning = json!({
+            "type": "reasoning",
+            "id": format!("reasoning-{label}"),
+            "summary": []
+        });
+        if let Some(value) = encrypted_content {
+            reasoning["encrypted_content"] = value;
+        }
+        let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "deepseek-v4.1-flash",
+            "input": [
+                reasoning,
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "previous answer"}]
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "continue"}]
+                }
+            ]
+        }))
+        .unwrap_or_else(|error| {
+            panic!("{label}: reasoning item must reach Chat canonical: {error}")
+        });
+
+        let blocks = canonical["messages"][0]["routecodex_chat_extension"]
+            ["anthropic_reasoning_blocks"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{label}: missing reasoning block record: {canonical}"));
+        assert_eq!(blocks.len(), 1, "{label}: {canonical}");
+        assert_eq!(
+            blocks[0]["type"], "thinking",
+            "{label}: data-less ciphertext must not fabricate redacted_thinking: {canonical}"
+        );
+
+        let provider =
+            crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+                canonical,
+            )
+            .unwrap_or_else(|error| {
+                panic!("{label}: Anthropic outbound must not reject the request: {error}")
+            });
+        let assistant_content = provider["messages"][0]["content"]
+            .as_array()
+            .expect("assistant content");
+        assert!(
+            !assistant_content
+                .iter()
+                .any(|block| block["type"] == "redacted_thinking"),
+            "{label}: empty ciphertext must not become an Anthropic redacted block: {provider}"
+        );
+    }
+}
+
+#[test]
+fn responses_nonempty_encrypted_content_still_restores_redacted_thinking() {
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "deepseek-v4.1-flash",
+        "input": [
+            {
+                "type": "reasoning",
+                "id": "reasoning-redacted",
+                "encrypted_content": "redacted-payload"
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "previous answer"}]
+            }
+        ]
+    }))
+    .expect("ciphertext-only reasoning must reach Chat canonical");
+
+    let blocks = canonical["messages"][0]["routecodex_chat_extension"]
+        ["anthropic_reasoning_blocks"]
+        .as_array()
+        .expect("reasoning block record");
+    assert_eq!(blocks[0]["type"], "redacted_thinking");
+    assert_eq!(blocks[0]["encrypted_content"], "redacted-payload");
+
+    let provider =
+        crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+            canonical,
+        )
+        .expect("real ciphertext must restore on the Anthropic wire");
+    assert!(
+        provider["messages"][0]["content"]
+            .as_array()
+            .expect("assistant content")
+            .iter()
+            .any(|block| {
+                block["type"] == "redacted_thinking" && block["data"] == "redacted-payload"
+            }),
+        "non-empty ciphertext must still restore a redacted block: {provider}"
+    );
+}
+
+#[test]
 fn responses_tool_result_status_survives_chat_canonical_carrier() {
     let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "model": "MiniMax-M3",
