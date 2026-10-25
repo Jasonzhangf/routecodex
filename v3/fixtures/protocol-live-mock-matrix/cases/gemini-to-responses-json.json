@@ -21,16 +21,24 @@
     "mode": "json",
     "status": 200,
     "content_type": "application/json",
-    "body": {"id": "resp_gemini_to_responses_json", "status": "completed", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}], "usage": {"input_tokens": 7, "output_tokens": 2, "total_tokens": 9}}
+    "body": {"id": "resp_gemini_to_responses_json", "status": "completed", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}], "usage": {"input_tokens": 7, "output_tokens": 2, "total_tokens": 9}},
+    "attempts": [
+      {"protocol": "responses", "mode": "json", "body": {"id": "resp_gemini_to_responses_json", "status": "completed", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}], "usage": {"input_tokens": 7, "output_tokens": 2, "total_tokens": 9}}},
+      {"protocol": "responses", "mode": "json", "body": {"id": "resp_gemini_to_responses_json_refill", "status": "completed", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "refill-ok"}]}], "usage": {"input_tokens": 14, "output_tokens": 2, "total_tokens": 16}}}
+    ]
   },
+  "expected_provider_by_attempt": [
+    {},
+    {"body_must": {"model": "responses-model", "input.0.role": "user", "input.0.content.0.text": "hello", "input.1.role": "assistant", "input.1.content.0.text": "ok", "input.2.role": "user", "input.2.content.0.text": "继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。"}}
+  ],
   "expected_client": {
     "transport": "complete",
     "status": 200,
-    "body_must": {"candidates.0.content.parts.0.text": "ok", "candidates.0.finishReason": "STOP"},
+    "body_must": {"candidates.0.content.parts.0.text": "ok", "candidates.0.content.parts.1.text": "refill-ok", "candidates.0.finishReason": "STOP"},
     "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
     "semantic_terminal_required": true
   },
-  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "assertions": {"provider_attempt_count": 2, "probe_attempts_may_occur": true, "no_control_leakage": true},
   "source": {
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/gemini_function_parts_test.go"],

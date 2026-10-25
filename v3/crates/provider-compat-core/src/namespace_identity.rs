@@ -156,19 +156,20 @@ impl NamespaceToolIdentityRegistry {
 
     pub fn from_request(request: &Value, protocol: &str) -> Result<Self, String> {
         let mut registry = Self::default();
-        if let Some(tools) = request.get("tools").and_then(Value::as_array) {
-            registry.merge_tools(tools)?;
-        }
+        // A history record states the tools a past search already discovered;
+        // the request's own declaration surface states what it declares now.
+        // Records therefore merge first, so a current declaration always
+        // refreshes them no matter which representation carries the history.
+        // A collapsed continuation keeps the record in `messages` while the
+        // refreshed declaration becomes the root `tools`, so positional order
+        // alone cannot express this precedence.
         for item in request
             .get("input")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
         {
-            if matches!(
-                item.get("type").and_then(Value::as_str),
-                Some("additional_tools" | "tool_search_output")
-            ) {
+            if item.get("type").and_then(Value::as_str) == Some("tool_search_output") {
                 if let Some(tools) = item.get("tools").and_then(Value::as_array) {
                     registry.merge_tools(tools)?;
                 }
@@ -193,6 +194,21 @@ impl NamespaceToolIdentityRegistry {
                     None => continue,
                 };
                 if let Some(tools) = tools.as_array() {
+                    registry.merge_tools(tools)?;
+                }
+            }
+        }
+        if let Some(tools) = request.get("tools").and_then(Value::as_array) {
+            registry.merge_tools(tools)?;
+        }
+        for item in request
+            .get("input")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
+                if let Some(tools) = item.get("tools").and_then(Value::as_array) {
                     registry.merge_tools(tools)?;
                 }
             }
@@ -1510,5 +1526,75 @@ mod tests {
             request["input"][0], additional,
             "TCM additional_tools history must remain exactly unchanged"
         );
+    }
+
+    #[test]
+    fn current_declaration_refreshes_history_discovery_record() {
+        // A tool_search_output records tools discovered by a past search; a
+        // later additional_tools declaration refreshes the same identity. The
+        // current declaration must win regardless of whether the record lives
+        // in `input` (either position) or in merged Chat messages, because the
+        // collapser may keep either representation.
+        for record_source in ["input_before", "input_after", "messages"] {
+            let mut request = json!({
+                "tools":[],
+                "input":[
+                    {"type":"additional_tools","role":"developer","tools":[
+                        {"type":"function","name":"read_value","description":"current declaration",
+                         "parameters":{"type":"object","properties":{"fresh":{"type":"string"}}}}
+                    ]}
+                ]
+            });
+            if record_source.starts_with("input") {
+                // A collapsed continuation can leave the record either before
+                // or after the refreshed declaration on the same surface, so
+                // precedence must not depend on the record's position.
+                let record = json!(
+                    {"type":"tool_search_output","call_id":"search_1","tools":[
+                        {"type":"function","name":"read_value","description":"stale discovery",
+                         "parameters":{"type":"object","properties":{"old":{"type":"string"}}}}
+                    ]}
+                );
+                let position = if record_source == "input_before" {
+                    0
+                } else {
+                    1
+                };
+                request["input"]
+                    .as_array_mut()
+                    .unwrap()
+                    .insert(position, record);
+            } else {
+                request["messages"] = json!([
+                    {"role":"tool","tool_call_id":"search_1",
+                     "content": "[{\"type\":\"function\",\"name\":\"read_value\",\"description\":\"stale discovery\",\"parameters\":{\"type\":\"object\",\"properties\":{\"old\":{\"type\":\"string\"}}}}]",
+                     "routecodex_chat_extension":{"responses_tool_output_type":"tool_search_output"}}
+                ]);
+            }
+            let registry =
+                NamespaceToolIdentityRegistry::from_request(&request, "openai-responses").unwrap();
+            let identity = registry
+                .identity_for_client_path("read_value")
+                .expect("the refreshed identity must be present");
+            assert_eq!(
+                identity.source["description"], "current declaration",
+                "record_source={record_source}: the current declaration must refresh the stale record"
+            );
+            assert!(
+                identity.source["parameters"]["properties"]["fresh"].is_object(),
+                "record_source={record_source}: the current schema must win"
+            );
+            let projected = registry
+                .project_tools("openai-responses", request["tools"].as_array().unwrap())
+                .unwrap();
+            let tool = projected
+                .iter()
+                .find(|tool| tool["name"] == "read_value")
+                .unwrap();
+            assert_eq!(
+                tool["description"], "current declaration",
+                "record_source={record_source}: projection must use the refreshed source"
+            );
+        }
     }
 }

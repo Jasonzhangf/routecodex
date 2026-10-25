@@ -2015,7 +2015,7 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_unit:
-  - Same original namespace components, leaf and tool kind across Responses `tools`, `additional_tools` and discovered tools use the later source schema; distinct identities and kinds receive unique target wire names from one request-local binding and restore without overwrite.
+  - Same original namespace components, leaf and tool kind resolve to one request-local identity whose schema comes from the current declaration surface — `tools` and `additional_tools` state what the request declares now and refresh each other in source order, while a discovered-tool history record (`input` `tool_search_output` or the merged Chat tool message) records a past search and never overrides them, so a collapsed continuation keeps its refreshed schema. Distinct identities and kinds receive unique target wire names from one request-local binding and restore without overwrite.
   - One complete registered custom-wrapper boundary is shared by Anthropic mechanical inverse and Resp03 serialized/provenance restoration. An unrecognized object with valid reason and extra fields remains complete through JSON/SSE and paired consumer-error follow-up; valid wrappers retain exact input and existing reasoning authorization.
   - Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens and preserves OpenAI Chat data-plane metadata/stop, tool schema, tool_choice, user, sampling, response_format,
     token fields, and projects Responses reasoning config to `reasoning_effort` while rejecting non-standard client_metadata and the raw Responses `reasoning` object from provider wire.
@@ -4007,6 +4007,7 @@ features:
   - Direct/Relay, ToolThinking, inverse context, attempt projection, and response binding have one writer and declared readers
   - a refill is a new execution that re-enters the same request mainline before client commit; the static DAG has no back-edge
   - refill_continuation_signal is produced only by Resp03 when execution_disposition=refill_requested, read only by the Relay and Direct Runtime refill executors, and released after typed attempt cleanup before the new request execution
+  - the Responses entry (direct and Relay), the openai_chat Relay entry, the gemini Relay entry and the anthropic Relay entry reuse the single decide_v3_chat_process_refill policy with one continuation/accumulation primitive set; the continuation extends whatever request representation the entry actually carried (`messages` for Chat, `input` for Responses, `contents` for Gemini) because the next execution rebuilds its history from that same field, and the accumulation rebases native Gemini candidate `output_indices` so earlier rounds stay reachable; the anthropic runtime keeps its own buffered request loop because it has no shared relay codec skeleton, and both its JSON and SSE client transports publish the same round facts
   - SSE is the only client projection/communication exit
   - the first node has two real Server callers: the four-protocol HTTP dispatcher and the Responses WebSocket message handler; both call the same Runtime capture operation before their mode dispatch
   - capture_client_json output is the same serde_json::Value and is adapted without payload changes into current Direct and protocol-specific Relay owners
@@ -4139,6 +4140,15 @@ features:
     - refill_tool_call_stops_public
     - refill_default_one_tool_roundtrip_public
     - refill_concurrent_cancel_public
+    - refill_chat_relay_entry_bounded_refill_public
+    - refill_gemini_relay_entry_bounded_refill_public
+    - refill_gemini_native_provider_entry_bounded_refill_public
+    - refill_responses_dual_history_continuation_stays_acceptable_public
+    - refill_responses_dual_twin_extension_survives_public
+    - refill_responses_dual_tool_result_history_survives_public
+    - refill_responses_dual_additional_tools_survive_public
+    - refill_responses_history_record_does_not_revert_refreshed_declaration
+    - refill_anthropic_relay_entry_bounded_refill_public
     command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox refill_ -- --test-threads=1 --nocapture
   required_gates:
   - npm run verify:v3-operation-runner-dagpipe

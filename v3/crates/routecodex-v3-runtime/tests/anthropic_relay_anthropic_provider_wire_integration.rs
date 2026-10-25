@@ -16,6 +16,10 @@ use std::sync::Mutex;
 fn ensure_isolated_provider_state_dir() {
     static INITIALIZE: std::sync::Once = std::sync::Once::new();
     INITIALIZE.call_once(|| {
+        // These wire-parity fixtures replay one completed provider response and
+        // count provider attempts, so the bounded Chat Process continuation is
+        // pinned off; refill coverage lives in the public server entry tests.
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock must follow the Unix epoch")
@@ -702,6 +706,7 @@ async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() 
 
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_sse_eof_reselects_next_candidate() {
+    ensure_isolated_provider_state_dir();
     let server_id = "anthropic_wire_sse_eof_reselect";
     let manifest = anthropic_reselect_manifest(server_id);
     let provider_health =

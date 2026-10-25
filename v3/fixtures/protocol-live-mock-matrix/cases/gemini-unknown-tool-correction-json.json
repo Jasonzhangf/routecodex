@@ -621,7 +621,63 @@
             "candidatesTokenCount": 2,
             "totalTokenCount": 9
           }
-        }
+        },
+        "attempts": [
+          {
+            "protocol": "gemini",
+            "mode": "json",
+            "status": 200,
+            "content_type": "application/json",
+            "body": {
+              "candidates": [
+                {
+                  "index": 0,
+                  "finishReason": "STOP",
+                  "content": {
+                    "role": "model",
+                    "parts": [
+                      {
+                        "text": "correction-complete"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "usageMetadata": {
+                "promptTokenCount": 7,
+                "candidatesTokenCount": 2,
+                "totalTokenCount": 9
+              }
+            }
+          },
+          {
+            "protocol": "gemini",
+            "mode": "json",
+            "status": 200,
+            "content_type": "application/json",
+            "body": {
+              "candidates": [
+                {
+                  "index": 0,
+                  "finishReason": "STOP",
+                  "content": {
+                    "role": "model",
+                    "parts": [
+                      {
+                        "text": "refill-ok"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "usageMetadata": {
+                "promptTokenCount": 14,
+                "candidatesTokenCount": 2,
+                "totalTokenCount": 16
+              }
+            }
+          }
+        ]
       },
       "expected_client_contract": {
         "transport": "complete",
@@ -636,9 +692,222 @@
       },
       "expected_client_must": {
         "candidates.0.content.parts.0.text": "correction-complete",
+        "candidates.0.content.parts.1.text": "refill-ok",
         "candidates.0.finishReason": "STOP",
-        "usageMetadata.totalTokenCount": 9
-      }
+        "usageMetadata.totalTokenCount": 25
+      },
+      "expected_provider_exact_attempts": [
+        {
+          "cachedContent": "caches/correction",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "correct an unknown tool call"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {
+                  "text": "early-authorized"
+                },
+                {
+                  "functionCall": {
+                    "args": {
+                      "text": "must-not-execute"
+                    },
+                    "id": "call_unknown_1",
+                    "name": "outside_declared"
+                  },
+                  "thoughtSignature": "late-signature"
+                }
+              ],
+              "role": "model"
+            },
+            {
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "call_unknown_1",
+                    "name": "outside_declared",
+                    "response": {
+                      "error": {
+                        "code": "unknown_tool",
+                        "message": "unknown tool outside_declared"
+                      }
+                    }
+                  }
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {
+                  "functionCall": {
+                    "args": {
+                      "text": "corrected"
+                    },
+                    "id": "call_corrected_1",
+                    "name": "echo"
+                  }
+                }
+              ],
+              "role": "model"
+            },
+            {
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "call_corrected_1",
+                    "name": "echo",
+                    "response": {
+                      "output": "corrected"
+                    }
+                  }
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "description": "Return the provided text unchanged.",
+                  "name": "echo",
+                  "parametersJsonSchema": {
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ],
+                    "type": "object"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "cachedContent": "caches/correction",
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "correct an unknown tool call"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {
+                  "text": "early-authorized"
+                },
+                {
+                  "functionCall": {
+                    "args": {
+                      "text": "must-not-execute"
+                    },
+                    "id": "call_unknown_1",
+                    "name": "outside_declared"
+                  },
+                  "thoughtSignature": "late-signature"
+                }
+              ],
+              "role": "model"
+            },
+            {
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "call_unknown_1",
+                    "name": "outside_declared",
+                    "response": {
+                      "error": {
+                        "code": "unknown_tool",
+                        "message": "unknown tool outside_declared"
+                      }
+                    }
+                  }
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {
+                  "functionCall": {
+                    "args": {
+                      "text": "corrected"
+                    },
+                    "id": "call_corrected_1",
+                    "name": "echo"
+                  }
+                }
+              ],
+              "role": "model"
+            },
+            {
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "call_corrected_1",
+                    "name": "echo",
+                    "response": {
+                      "output": "corrected"
+                    }
+                  }
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {
+                  "text": "correction-complete"
+                }
+              ],
+              "role": "model"
+            },
+            {
+              "parts": [
+                {
+                  "text": "继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "description": "Return the provided text unchanged.",
+                  "name": "echo",
+                  "parametersJsonSchema": {
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ],
+                    "type": "object"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ],
   "tool_followup": {

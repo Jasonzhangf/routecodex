@@ -248,9 +248,11 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
         }
         if chat_process_refill == Some(V3ChatProcessRefillDisposition::RequestRefill) {
             if let Some(finalized) = output.finalized_response.as_ref() {
-                if let Ok(next_payload) =
-                    build_v3_chat_process_refill_continuation_request(&payload, finalized)
-                {
+                if let Ok(next_payload) = build_v3_chat_process_refill_continuation_request(
+                    V3HubEntryProtocol::Responses,
+                    &payload,
+                    finalized,
+                ) {
                     // Request-local cancellation witness: the control carries no
                     // independent cancel flag, so the residence deadline is the
                     // only one. An expired deadline delivers the current real

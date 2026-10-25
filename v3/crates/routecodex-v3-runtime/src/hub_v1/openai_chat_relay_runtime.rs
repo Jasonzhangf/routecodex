@@ -241,60 +241,59 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     execution_mode: V3HubExecutionMode,
-    mut initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
+    initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
-    // 协议差异收敛在 V3OpenAiChatRelayCodec。
+    // 协议差异收敛在 V3OpenAiChatRelayCodec；Chat Process 有界续杯循环在骨架之上的
+    // 共享入口，策略仍只有 decide_v3_chat_process_refill 一处实现。
     let routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?
         .to_string();
-    let mut failure_events = initial_handoff
-        .as_mut()
-        .map(|handoff| std::mem::take(&mut handoff.provider_failure_events))
-        .unwrap_or_default();
-    execute_v3_relay_runtime_core::<V3OpenAiChatRelayCodec, T>(
-        manifest,
-        &input.server_id,
-        input.failure_session_scope.clone(),
-        &input.request_id,
-        "/v1/chat/completions",
-        execution_mode,
-        input.payload,
-        transport,
-        provider_health,
-        retry_policy,
-        Vec::new(),
-        true,
-        initial_handoff,
-        &mut failure_events,
-    )
-    .await
-    .map_err(|error| {
-        let source = match error {
-            V3RelayCoreError::ProviderPoolExhausted {
-                attempted_candidates,
-            } => V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
-                attempted_candidates,
-            },
-            V3RelayCoreError::ResponseGovernance(error) => {
-                V3OpenAiChatRelayRuntimeError::Response(error)
+    let (output, _failure_events) =
+        super::relay_runtime_core::execute_v3_relay_runtime_with_chat_process_refill::<
+            V3OpenAiChatRelayCodec,
+            T,
+        >(
+            manifest,
+            &input.server_id,
+            input.failure_session_scope.clone(),
+            &input.request_id,
+            "/v1/chat/completions",
+            execution_mode,
+            input.payload,
+            transport,
+            provider_health,
+            retry_policy,
+            initial_handoff,
+        )
+        .await
+        .map_err(|(error, failure_events)| {
+            let source = match error {
+                V3RelayCoreError::ProviderPoolExhausted {
+                    attempted_candidates,
+                } => V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
+                    attempted_candidates,
+                },
+                V3RelayCoreError::ResponseGovernance(error) => {
+                    V3OpenAiChatRelayRuntimeError::Response(error)
+                }
+                // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
+                V3RelayCoreError::Target(message)
+                | V3RelayCoreError::StaticRegistry(message)
+                | V3RelayCoreError::EndpointPath(message) => {
+                    V3OpenAiChatRelayRuntimeError::Target(message)
+                }
+            };
+            if failure_events.is_empty() {
+                source
+            } else {
+                V3OpenAiChatRelayRuntimeError::WithProviderFailureEvidence {
+                    source: Box::new(source),
+                    attempts: failure_events,
+                }
             }
-            // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
-            V3RelayCoreError::Target(message)
-            | V3RelayCoreError::StaticRegistry(message)
-            | V3RelayCoreError::EndpointPath(message) => {
-                V3OpenAiChatRelayRuntimeError::Target(message)
-            }
-        };
-        if failure_events.is_empty() {
-            source
-        } else {
-            V3OpenAiChatRelayRuntimeError::WithProviderFailureEvidence {
-                source: Box::new(source),
-                attempts: failure_events,
-            }
-        }
-    })
+        })?;
+    Ok(output)
 }
 
 pub fn project_v3_openai_chat_relay_runtime_failure(
@@ -376,6 +375,7 @@ fn project_json_response(
     expected_model_id: &str,
     complete_provider_attempt: bool,
     serialized_tool_context: &super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext,
+    refill: Option<&mut super::relay_runtime_core::V3RelayRefillCarrier>,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
     match provider_protocol {
         V3HubProviderWireProtocol::OpenAiChat => {
@@ -457,14 +457,41 @@ fn project_json_response(
     if let Some(session_id) = session_id {
         response_profile = response_profile.with_toolreason_observation_session_id(session_id);
     }
+    let has_source_summary =
+        super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
+            resp02.provider_payload(),
+        );
     let resp03 = hooks.govern(resp02, &response_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp03 = resp03.into_governed();
     let source_terminal_reason = resp03.previous.source_terminal_reason.clone();
     let source_terminal_completed = resp03.previous.source_terminal_completed;
+    let (accumulated_items, accumulated_usage) = match refill {
+        Some(refill) => {
+            super::relay_runtime_core::publish_v3_relay_chat_process_round(
+                &resp03,
+                has_source_summary,
+                source_terminal_completed,
+                refill,
+            );
+            (
+                Some(refill.accumulated_items.clone()),
+                refill.accumulated_usage.clone(),
+            )
+        }
+        None => (None, None),
+    };
     let resp05 = try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
         resp03,
-        move |payload| {
+        move |mut payload| {
+            if let Some(accumulated_items) = accumulated_items.as_deref() {
+                super::resp_chat_process_03_governed::
+                    apply_v3_chat_process_refill_accumulation(
+                        &mut payload,
+                        accumulated_items,
+                        accumulated_usage.as_ref(),
+                    );
+            }
             if payload.get("output").and_then(Value::as_array).is_some() {
                 super::openai_chat_codec::project_v3_openai_chat_client_response_with_source_terminal(
                     &payload,
@@ -1282,6 +1309,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         tool_thinking_enabled: bool,
         expected_model_id: &str,
         namespace_registry: &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
+        refill: &mut super::relay_runtime_core::V3RelayRefillCarrier,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response(
             Some(request_id),
@@ -1299,6 +1327,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             &super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext::from_registry(
                 namespace_registry,
             ),
+            Some(refill),
         )
         .map_err(|error| match error {
             V3OpenAiChatRelayRuntimeError::Response(error) => {
