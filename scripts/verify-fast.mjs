@@ -209,7 +209,7 @@ function isV3RootScript(relative) {
     || relative === 'scripts/ci/repo-sanity.mjs'
     || relative === 'scripts/ci/mempalace-scan-artifact-audit.mjs'
     || relative === 'scripts/tests/repository-filesystem-governance-red-fixtures.mjs'
-    || /^(?:scripts\/install-v3-cli|scripts\/ensure-cli-command-shim)\.mjs$/u.test(relative)
+    || /^(?:scripts\/install-v3-cli|scripts\/ensure-cli-command-shim|scripts\/ensure-cli-executable)\.mjs$/u.test(relative)
     || /^scripts\/tests\/v3-/u.test(relative)
     || /^tests\/scripts\/(?:v3-cli-distribution|install-v3-cli-target-cleanup)\.spec\.mjs$/u.test(relative)
     || /^scripts\/install-(?:global|release)\.sh$/u.test(relative)
@@ -251,7 +251,7 @@ function classifyV3FineScopes(paths, { workflowScope }) {
         || isV3ArchitectureRootScript(path)) add('v3_architecture');
     if (/^v3\/(?:Cargo\.toml|Cargo\.lock|package(?:-lock)?\.json)$/u.test(path)
         || /^v3\/crates\//u.test(path)
-        || /^scripts\/(?:install-v3-cli|ensure-cli-command-shim)\.mjs$/u.test(path)
+        || /^scripts\/(?:install-v3-cli|ensure-cli-command-shim|ensure-cli-executable)\.mjs$/u.test(path)
         || /^scripts\/install-(?:global|release)\.sh$/u.test(path)) add('v3_build');
     if (isV3Path && /(?:^|[\/_-])provider(?:[\/_-]|$)/iu.test(path)) add('v3_provider');
     if (isV3Path && /(?:^|[\/_-])session(?:[\/_-]|$)|continuation/iu.test(path)) add('v3_session');
