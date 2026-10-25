@@ -13,20 +13,18 @@ V3 remains the existing runtime baseline. V4 must not modify, rename, or consume
 
 ## Architecture maps
 
-AppSDK 0.1.5 owns the canonical governance skeleton in `.appsdk/maps/`, and its
+The AppSDK version declared by `.appsdk/sdk.lock` owns the governance skeleton in `.appsdk/maps/`, and its
 contents must remain exactly aligned with the SDK lock. V4 product truth lives in
 `docs/architecture/maps/`: `function-map.json`, `resource-map.json`,
 `mainline-call-map.json`, and `verification-map.json`. Architecture gates read
 these product maps from that path; `.appsdk/maps/module-registry.json` remains
 the AppSDK-owned module registry.
 
-AppSDK lifecycle `ReviewRecord` fields continue to bind the SDK-owned map
-skeleton required by AppSDK verification. V4 reviews created on or after the
-2026-08-23 product-map cutover must additionally bind
-`v4_product_map_root = docs/architecture/maps`, the four current product-map
-hashes, and a DSH reviewer. The V4 isolation gate rejects missing, stale, or
-wrong-surface bindings and rejects architecture scripts that read product truth
-from `.appsdk/maps/`.
+Review uses the current host's independent-review contract and the affected
+product maps. Do not add map hashes or a DSH-only reviewer requirement to
+ordinary development. Preserve the distinction between SDK governance and V4
+product truth; architecture scripts must not read product truth from
+`.appsdk/maps/`.
 
 ## Product completion
 
