@@ -34,7 +34,7 @@ description: "RouteCodex V3 开发与排障：定位首次偏离和唯一 owner�
 
 ## Review Gate
 
-作者完成适用验收后，沿全局宿主合同取得一次有效独立整体 Review，再提交/集成。finding 修复只补受影响验证。候选、安装运行与 main 交付分开记录，不增加 SHA、冻结快照或身份包装；未交付部分如实保留。
+Review 的触发、角色与提交/集成顺序沿项目 AGENTS.md 和全局宿主合同；本入口不新增审查节点。适用 Review 在作者完成必要验证后执行，finding 修复只补受影响验证。候选、安装运行与 main 交付分开记录，不增加 SHA、冻结快照或身份包装；未交付部分如实保留。
 
 ## Routes
 
