@@ -684,10 +684,10 @@ impl V3RelayChatClientStreamProjector {
             return Ok(());
         }
         // Provider-native reasoning increments are separate business carriers;
-        // visible text between them must close the current one. Inline
-        // `<think>`/`<thinking>` blocks belong to one complete-attempt reasoning
-        // item, so those stay open across intervening text and reconcile as one
-        // finalized item instead of being duplicated.
+        // visible text between them closes the current one. The terminal
+        // reconciliation later consumes several delivered reasoning segments
+        // against one complete terminal reasoning item when the whole-attempt
+        // reducer joined them.
         if self
             .reasoning
             .as_ref()
@@ -975,7 +975,13 @@ impl V3RelayChatClientStreamProjector {
         if text.is_empty() {
             return Ok(());
         }
-        self.close_message()?;
+        // A governed tail is still waiting for the complete-attempt owner to
+        // decide its final text. Closing the message now would freeze the raw
+        // governed marker into the ledger and strand the buffered tail, so the
+        // refusal must open beside the pending message instead of sealing it.
+        if !self.post_commit_governed {
+            self.close_message()?;
+        }
         self.close_reasoning()?;
         if self.refusal.is_none() {
             let output_index = self.next_output_index;
@@ -1033,7 +1039,9 @@ impl V3RelayChatClientStreamProjector {
     }
 
     fn append_tool_call(&mut self, call: &Value) -> Result<(), String> {
-        self.close_message()?;
+        if !self.post_commit_governed {
+            self.close_message()?;
+        }
         self.close_reasoning()?;
         self.close_refusal()?;
         let wire_index = call.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
@@ -1530,6 +1538,51 @@ impl V3RelayChatClientStreamProjector {
         Vec::new()
     }
 
+    /// Plaintext of one reasoning item with its parts joined without a
+    /// separator. The whole-attempt owner concatenates a streamed
+    /// `reasoning_content` carrier directly, so this matches delivered
+    /// provider segments against the complete terminal reasoning text.
+    fn reasoning_plaintext(item: &Value) -> String {
+        Self::reasoning_text_parts(item).join("")
+    }
+
+    /// Indices of unconsumed provider reasoning segments whose joined plaintext
+    /// equals one complete terminal reasoning text. Provider reasoning can be
+    /// split across visible text, so one terminal reasoning item may correspond
+    /// to several already-delivered items that must not be appended again.
+    fn joined_reasoning_indices(
+        ordered: &[&StreamedItem],
+        consumed: &[bool],
+        terminal_text: &str,
+    ) -> Option<Vec<usize>> {
+        if terminal_text.is_empty() {
+            return None;
+        }
+        let mut running = String::new();
+        let mut indices = Vec::new();
+        for (index, streamed) in ordered.iter().enumerate() {
+            if consumed[index] {
+                continue;
+            }
+            if !matches!(streamed.source, Some(ReasoningSource::Provider)) {
+                continue;
+            }
+            let part = Self::reasoning_plaintext(&streamed.item);
+            if part.is_empty() {
+                continue;
+            }
+            running.push_str(&part);
+            indices.push(index);
+            if running == terminal_text {
+                return Some(indices);
+            }
+            if running.len() > terminal_text.len() {
+                return None;
+            }
+        }
+        None
+    }
+
     /// True when two output items represent the same delivered business item.
     /// The delivered copy already carries the exact bytes and identity the client
     /// holds, so identity and terminal labels are ignored; only the business
@@ -1555,11 +1608,11 @@ impl V3RelayChatClientStreamProjector {
                 // A streamed part and a terminal part for the same block can
                 // split or join differently. The concatenated plaintext is the
                 // same business reasoning when the source family matches.
-                let streamed_parts = Self::reasoning_text_parts(&streamed.item);
-                let terminal_parts = Self::reasoning_text_parts(terminal);
-                !streamed_parts.is_empty()
-                    && !terminal_parts.is_empty()
-                    && streamed_parts.join("\n") == terminal_parts.join("\n")
+                let streamed_text = Self::reasoning_plaintext(&streamed.item);
+                let terminal_text = Self::reasoning_plaintext(terminal);
+                !streamed_text.is_empty()
+                    && !terminal_text.is_empty()
+                    && streamed_text == terminal_text
                     && streamed.source.is_some()
             }
             _ => &streamed.item == terminal,
@@ -1606,6 +1659,21 @@ impl V3RelayChatClientStreamProjector {
                     Self::merge_terminal_reasoning_fields(streamed, &terminal_item);
                 }
                 continue;
+            }
+            if terminal_item.get("type").and_then(Value::as_str) == Some("reasoning") {
+                if let Some(indices) = Self::joined_reasoning_indices(
+                    &ordered,
+                    &consumed,
+                    &Self::reasoning_plaintext(&terminal_item),
+                ) {
+                    for index in indices.iter().copied() {
+                        consumed[index] = true;
+                    }
+                    if let Some(first) = indices.first().copied() {
+                        Self::merge_terminal_reasoning_fields(&mut output[first], &terminal_item);
+                    }
+                    continue;
+                }
             }
             if terminal_item.get("type").and_then(Value::as_str) == Some("reasoning")
                 && !Self::reasoning_item_has_business_payload(&terminal_item)

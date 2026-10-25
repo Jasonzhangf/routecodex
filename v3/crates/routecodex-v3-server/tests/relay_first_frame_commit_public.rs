@@ -330,6 +330,14 @@ fn delivered_reasoning_summaries(events: &[Value]) -> Vec<Vec<String>> {
         .collect()
 }
 
+fn delivered_refusal_text(events: &[Value]) -> String {
+    events
+        .iter()
+        .filter(|event| event["type"] == "response.refusal.delta")
+        .filter_map(|event| event["delta"].as_str())
+        .collect()
+}
+
 struct TimedWire {
     wire: Vec<u8>,
     first_delta_at: Option<Duration>,
@@ -1067,6 +1075,189 @@ async fn relay_public_849ed8f_governed_commit_public_refill_round_state_resets()
     assert!(
         !body.contains("\"error\"") && !body.contains("network_error"),
         "the client must not receive a proxy-generated error: {body}"
+    );
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn relay_public_interleaved_provider_reasoning_echoes_without_duplication() {
+    let _guard = TEST_LOCK.lock().await;
+    let plans = vec![
+        vec![
+            chat_delta_value(json!({"reasoning_content": "r1"})),
+            chat_delta_value(json!({"content": "answer"})),
+            chat_delta_value(json!({"reasoning_content": "r2"})),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+        vec![
+            chat_delta("second"),
+            chat_stop(),
+            "data: [DONE]\n\n".to_string(),
+        ],
+    ];
+    let (entry, mut captures) = start_with_plans(plans).await;
+    let body = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
+    let events = response_sse_events(&body);
+    let delivered_reasoning = delivered_reasoning_summaries(&events)
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        delivered_reasoning.concat(),
+        "r1r2",
+        "interleaved provider reasoning must be delivered exactly once: {body}"
+    );
+    let completed = completed_response(&events);
+    let output = completed["output"].as_array().expect("completed output");
+    assert_eq!(
+        output
+            .iter()
+            .filter(|item| item["type"] == "message")
+            .count(),
+        1,
+        "the terminal must keep one message exactly once: {completed}"
+    );
+    let reasoning = output
+        .iter()
+        .filter(|item| item["type"] == "reasoning")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        !reasoning.is_empty(),
+        "terminal reasoning is missing: {completed}"
+    );
+    let terminal_reasoning = reasoning
+        .iter()
+        .flat_map(|item| item["summary"].as_array().into_iter().flatten())
+        .filter_map(|part| part["text"].as_str())
+        .collect::<String>();
+    assert_eq!(
+        terminal_reasoning, "r1r2",
+        "the terminal reasoning must hold each fragment once regardless of item grouping: {completed}"
+    );
+    assert!(
+        !body.contains("\"error\"") && !body.contains("network_error"),
+        "the client must not receive a proxy-generated error: {body}"
+    );
+
+    let _first_capture = captures.try_recv().ok();
+    let mut next_input = reasoning;
+    next_input.push(json!({
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "answer"}]
+    }));
+    next_input.push(json!({
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": "continue"}]
+    }));
+    let next_body = json!({
+        "model": "test",
+        "stream": true,
+        "input": next_input
+    });
+    let _second = relay_body(&entry, next_body).await;
+    let captured_text = captures
+        .try_recv()
+        .ok()
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    assert_eq!(
+        captured_text.matches("r1").count(),
+        1,
+        "the next-turn provider request must carry r1 once: {captured_text}"
+    );
+    assert_eq!(
+        captured_text.matches("r2").count(),
+        1,
+        "the next-turn provider request must carry r2 once: {captured_text}"
+    );
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn relay_public_governed_tail_before_refusal_delivers_both() {
+    let _guard = TEST_LOCK.lock().await;
+    let plans = vec![vec![
+        chat_delta("hello"),
+        chat_delta_value(json!({"content": "\n<|DSML|tool_calls>\nworld"})),
+        chat_delta_value(json!({"refusal": "declined"})),
+        chat_stop(),
+        "data: [DONE]\n\n".to_string(),
+    ]];
+    let (entry, _captures) = start_with_plans(plans).await;
+    let body = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
+    let events = response_sse_events(&body);
+    assert_eq!(
+        delivered_visible_text(&events),
+        "hello\nworld",
+        "the governed tail must follow the committed prefix before the refusal: {body}"
+    );
+    assert_eq!(
+        delivered_refusal_text(&events),
+        "declined",
+        "the refusal must be delivered after the governed tail: {body}"
+    );
+    assert!(
+        !body.contains("<|DSML|tool_calls>"),
+        "the standalone control label must not reach the client: {body}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["type"] == "response.completed")
+            .count(),
+        1,
+        "the stream must complete exactly once: {body}"
+    );
+    assert!(
+        !body.contains("\"error\"") && !body.contains("network_error"),
+        "the client must not receive a proxy-generated error: {body}"
+    );
+    let completed = completed_response(&events);
+    let messages: Vec<Value> = completed["output"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["type"] == "message")
+        .cloned()
+        .collect();
+    assert_eq!(
+        messages.len(),
+        2,
+        "the terminal must keep the text message and the refusal message exactly once: {completed}"
+    );
+    let text = messages
+        .iter()
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter(|part| part["type"] == "output_text")
+        .filter_map(|part| part["text"].as_str())
+        .collect::<String>();
+    assert_eq!(
+        text, "hello\nworld",
+        "the terminal message must carry the governed tail: {completed}"
+    );
+    let refusal = messages
+        .iter()
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter(|part| part["type"] == "refusal")
+        .filter_map(|part| part["refusal"].as_str())
+        .collect::<String>();
+    assert_eq!(
+        refusal, "declined",
+        "the terminal refusal message must keep the refusal: {completed}"
     );
     entry.stop().await;
 }
