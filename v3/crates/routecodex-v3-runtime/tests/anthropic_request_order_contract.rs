@@ -181,6 +181,13 @@ fn host_of(url: &str) -> String {
 
 #[tokio::test]
 async fn anthropic_relay_routes_on_normalized_request_before_tool_thinking_governance() {
+    // This contract pins one request's routing decision and provider wire from a
+    // single captured response, so the bounded Chat Process continuation is
+    // pinned off; refill coverage lives in the public server entry tests.
+    static PIN: std::sync::Once = std::sync::Once::new();
+    PIN.call_once(|| {
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    });
     let scope = "anthropic_request_order";
     let payload = anthropic_payload();
 

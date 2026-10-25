@@ -34,8 +34,16 @@
     "mode": "json",
     "status": 200,
     "content_type": "application/json",
-    "body": {"candidates": [{"content": {"role": "model", "parts": [{"text": "a.txt"}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 2, "totalTokenCount": 9}}
+    "body": {"candidates": [{"content": {"role": "model", "parts": [{"text": "a.txt"}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 2, "totalTokenCount": 9}},
+    "attempts": [
+      {"protocol": "gemini", "mode": "json", "body": {"candidates": [{"content": {"role": "model", "parts": [{"text": "a.txt"}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 2, "totalTokenCount": 9}}},
+      {"protocol": "gemini", "mode": "json", "body": {"candidates": [{"content": {"role": "model", "parts": [{"text": "refill-ok"}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 14, "candidatesTokenCount": 2, "totalTokenCount": 16}}}
+    ]
   },
+  "expected_provider_by_attempt": [
+    {},
+    {"body_must": {"contents.1.parts.0.functionCall.id": "function-call-7", "contents.1.parts.0.thoughtSignature": "c2lnbmF0dXJlLW9uZQ==", "contents.2.parts.0.functionResponse.id": "function-call-7", "contents.3.role": "model", "contents.3.parts.0.text": "a.txt", "contents.4.role": "user", "contents.4.parts.0.text": "继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。"}, "body_must_not": ["contents.1.parts.0.functionCall.thoughtSignature"]}
+  ],
   "expected_client": {
     "transport": "complete",
     "status": 200,
@@ -43,7 +51,7 @@
     "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
     "semantic_terminal_required": true
   },
-  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "assertions": {"provider_attempt_count": 2, "probe_attempts_may_occur": true, "no_control_leakage": true},
   "source": {
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
     "files": ["internal/gateway/gemini_signature_test.go"],
