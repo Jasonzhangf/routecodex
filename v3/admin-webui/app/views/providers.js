@@ -40,6 +40,10 @@ const state = {
   routes: null,
   wizardStep: 0,
   patrolProvider: null,
+  // The unsaved patrol draft stays in the editor DOM. These two fields only
+  // identify which provider owns it so an inventory refresh can leave it alone.
+  patrolDirty: false,
+  patrolEditorProvider: null,
   importText: "",
   // Bulk-action selection over the provider list. Kept here so it survives the
   // auto-refresh re-render; pruned whenever a provider disappears from the list.
@@ -1103,6 +1107,10 @@ function renderPatrolProviderOptions() {
 }
 
 function selectPatrolProvider(id) {
+  if (state.patrolProvider !== id) {
+    state.patrolDirty = false;
+    state.patrolEditorProvider = null;
+  }
   state.patrolProvider = id;
   const select = document.getElementById("patrol-provider");
   if (select) select.value = id;
@@ -1110,99 +1118,133 @@ function selectPatrolProvider(id) {
   loadPatrol();
 }
 
+let patrolLoadSeq = 0;
+
 async function loadPatrol() {
   const id = state.patrolProvider;
   const planHost = document.getElementById("patrol-plan");
   const historyHost = document.getElementById("patrol-history");
   const statusHost = document.getElementById("patrol-status");
   if (!id || !planHost) return;
+  const seq = ++patrolLoadSeq;
   try {
     const [planPayload, results, status] = await Promise.all([
       api(`/api/providers/${encodeURIComponent(id)}/patrol`),
       api(`/api/providers/${encodeURIComponent(id)}/patrol/results`),
       api("/api/providers/patrol/status"),
     ]);
+    // A newer load, including the read after a save, owns the panel.
+    if (seq !== patrolLoadSeq) return;
     const plan = planPayload.plan;
-    planHost.innerHTML = "";
-    planHost.appendChild(resultRow("provider", id));
-    planHost.appendChild(resultRow("stored plan", String(planPayload.stored)));
-    planHost.appendChild(resultRow("enabled", String(plan.enabled)));
-    planHost.appendChild(resultRow("interval_secs", String(plan.interval_secs)));
-    planHost.appendChild(resultRow("stages", (plan.stages || []).join(", ")));
-    planHost.appendChild(resultRow("last run", planPayload.last_run_epoch_ms ? new Date(planPayload.last_run_epoch_ms).toLocaleString() : "never"));
-    const enabledBox = el("input");
-    enabledBox.type = "checkbox";
-    enabledBox.checked = Boolean(plan.enabled);
-    const intervalInput = el("input");
-    intervalInput.type = "number";
-    intervalInput.min = "30";
-    intervalInput.value = String(plan.interval_secs || 300);
-    const stageBoxes = PROBE_STAGES.map((stage) => {
-      const box = el("input");
-      box.type = "checkbox";
-      box.value = stage;
-      box.checked = (plan.stages || []).includes(stage);
-      return box;
-    });
-    const editor = el("div", "actions");
-    const enabledLabel = el("label", "hint");
-    enabledLabel.appendChild(enabledBox);
-    enabledLabel.appendChild(document.createTextNode(" enabled"));
-    const intervalLabel = el("label", "hint");
-    intervalLabel.appendChild(document.createTextNode("interval (s) "));
-    intervalLabel.appendChild(intervalInput);
-    editor.appendChild(enabledLabel);
-    editor.appendChild(intervalLabel);
-    PROBE_STAGES.forEach((stage, index) => {
-      const label = el("label", "hint");
-      label.appendChild(stageBoxes[index]);
-      label.appendChild(document.createTextNode(` ${stage}`));
-      editor.appendChild(label);
-    });
-    const save = el("button", "btn primary", "Save plan");
-    save.addEventListener("click", async () => {
-      save.disabled = true;
-      try {
-        await api(`/api/providers/${encodeURIComponent(id)}/patrol`, {
-          method: "PUT",
-          body: JSON.stringify({
-            enabled: enabledBox.checked,
-            interval_secs: Number(intervalInput.value || 0),
-            stages: stageBoxes.filter((box) => box.checked).map((box) => box.value),
-          }),
-        });
-        showStatus("ok", `patrol plan saved for ${id}`);
+    const renderRows = (host) => {
+      host.innerHTML = "";
+      host.appendChild(resultRow("provider", id));
+      host.appendChild(resultRow("stored plan", String(planPayload.stored)));
+      host.appendChild(resultRow("enabled", String(plan.enabled)));
+      host.appendChild(resultRow("interval_secs", String(plan.interval_secs)));
+      host.appendChild(resultRow("stages", (plan.stages || []).join(", ")));
+      host.appendChild(resultRow("last run", planPayload.last_run_epoch_ms ? new Date(planPayload.last_run_epoch_ms).toLocaleString() : "never"));
+    };
+    // While the editor is dirty, refresh only the read-only plan truth. The
+    // editor DOM keeps the draft values and the focused control untouched.
+    const readOnly = state.patrolDirty && state.patrolEditorProvider === id
+      ? planHost.querySelector(".patrol-readonly")
+      : null;
+    const existingEditor = readOnly ? planHost.querySelector(".patrol-editor") : null;
+    if (readOnly && existingEditor) {
+      renderRows(readOnly);
+    } else {
+      planHost.innerHTML = "";
+      const readOnlyHost = el("div", "patrol-readonly");
+      renderRows(readOnlyHost);
+      planHost.appendChild(readOnlyHost);
+      const enabledBox = el("input");
+      enabledBox.type = "checkbox";
+      enabledBox.checked = Boolean(plan.enabled);
+      const intervalInput = el("input");
+      intervalInput.type = "number";
+      intervalInput.min = "30";
+      intervalInput.value = String(plan.interval_secs || 300);
+      const stageBoxes = PROBE_STAGES.map((stage) => {
+        const box = el("input");
+        box.type = "checkbox";
+        box.value = stage;
+        box.checked = (plan.stages || []).includes(stage);
+        return box;
+      });
+      const editor = el("div", "actions patrol-editor");
+      const enabledLabel = el("label", "hint");
+      enabledLabel.appendChild(enabledBox);
+      enabledLabel.appendChild(document.createTextNode(" enabled"));
+      const intervalLabel = el("label", "hint");
+      intervalLabel.appendChild(document.createTextNode("interval (s) "));
+      intervalLabel.appendChild(intervalInput);
+      editor.appendChild(enabledLabel);
+      editor.appendChild(intervalLabel);
+      PROBE_STAGES.forEach((stage, index) => {
+        const label = el("label", "hint");
+        label.appendChild(stageBoxes[index]);
+        label.appendChild(document.createTextNode(` ${stage}`));
+        editor.appendChild(label);
+      });
+      const markDirty = () => {
+        state.patrolDirty = true;
+      };
+      enabledBox.addEventListener("change", markDirty);
+      intervalInput.addEventListener("input", markDirty);
+      intervalInput.addEventListener("change", markDirty);
+      for (const box of stageBoxes) box.addEventListener("change", markDirty);
+      const save = el("button", "btn primary", "Save plan");
+      save.addEventListener("click", async () => {
+        save.disabled = true;
+        try {
+          await api(`/api/providers/${encodeURIComponent(id)}/patrol`, {
+            method: "PUT",
+            body: JSON.stringify({
+              enabled: enabledBox.checked,
+              interval_secs: Number(intervalInput.value || 0),
+              stages: stageBoxes.filter((box) => box.checked).map((box) => box.value),
+            }),
+          });
+          showStatus("ok", `patrol plan saved for ${id}`);
+          state.patrolDirty = false;
+          state.patrolEditorProvider = null;
+          loadPatrol();
+        } catch (error) {
+          showStatus("err", `patrol plan rejected: ${error.message}`);
+        } finally {
+          save.disabled = false;
+        }
+      });
+      const remove = el("button", "btn", "Delete plan");
+      remove.addEventListener("click", async () => {
+        await api(`/api/providers/${encodeURIComponent(id)}/patrol`, { method: "DELETE" });
+        showStatus("ok", `patrol plan removed for ${id}`);
+        state.patrolDirty = false;
+        state.patrolEditorProvider = null;
         loadPatrol();
-      } catch (error) {
-        showStatus("err", `patrol plan rejected: ${error.message}`);
-      } finally {
-        save.disabled = false;
-      }
-    });
-    const remove = el("button", "btn", "Delete plan");
-    remove.addEventListener("click", async () => {
-      await api(`/api/providers/${encodeURIComponent(id)}/patrol`, { method: "DELETE" });
-      showStatus("ok", `patrol plan removed for ${id}`);
-      loadPatrol();
-    });
-    const runNow = el("button", "btn", "Run now");
-    runNow.addEventListener("click", async () => {
-      runNow.disabled = true;
-      try {
-        const result = await api(`/api/providers/${encodeURIComponent(id)}/patrol/run`, { method: "POST" });
-        showStatus(result.ok ? "ok" : "err", `patrol ${result.ok ? "passed" : "failed"} (${(result.result?.stages || []).length} stage(s))`);
-        loadPatrol();
-      } catch (error) {
-        showStatus("err", `patrol run failed: ${error.message}`);
-      } finally {
-        runNow.disabled = false;
-      }
-    });
-    editor.appendChild(save);
-    editor.appendChild(remove);
-    editor.appendChild(runNow);
-    planHost.appendChild(editor);
-    planHost.appendChild(el("div", "hint", "Patrol results are advisory diagnostics. They never mutate runtime provider health."));
+      });
+      const runNow = el("button", "btn", "Run now");
+      runNow.addEventListener("click", async () => {
+        runNow.disabled = true;
+        try {
+          const result = await api(`/api/providers/${encodeURIComponent(id)}/patrol/run`, { method: "POST" });
+          showStatus(result.ok ? "ok" : "err", `patrol ${result.ok ? "passed" : "failed"} (${(result.result?.stages || []).length} stage(s))`);
+          loadPatrol();
+        } catch (error) {
+          showStatus("err", `patrol run failed: ${error.message}`);
+        } finally {
+          runNow.disabled = false;
+        }
+      });
+      editor.appendChild(save);
+      editor.appendChild(remove);
+      editor.appendChild(runNow);
+      planHost.appendChild(editor);
+      planHost.appendChild(el("div", "hint", "Patrol results are advisory diagnostics. They never mutate runtime provider health."));
+      state.patrolEditorProvider = id;
+      state.patrolDirty = false;
+    }
 
     statusHost.textContent = `${status.plan_count} plan(s), ${status.enabled_count} enabled · next tick ${status.next_tick_ms} ms · history ${status.results_path}`;
 
@@ -1232,7 +1274,7 @@ async function loadPatrol() {
       historyHost.appendChild(table);
     }
   } catch (error) {
-    showStatus("err", `patrol failed: ${error.message}`);
+    if (seq === patrolLoadSeq) showStatus("err", `patrol failed: ${error.message}`);
   }
 }
 
@@ -1313,8 +1355,7 @@ wizard = buildWizard();
 document.getElementById("add-provider-btn")?.addEventListener("click", () => wizard?.open());
 document.getElementById("refresh-btn")?.addEventListener("click", load);
 document.getElementById("patrol-provider")?.addEventListener("change", (event) => {
-  state.patrolProvider = event.target.value;
-  loadPatrol();
+  selectPatrolProvider(event.target.value);
 });
 document.getElementById("import-preview-btn")?.addEventListener("click", () => runImport(true));
 document.getElementById("import-run-btn")?.addEventListener("click", () => runImport(false));
