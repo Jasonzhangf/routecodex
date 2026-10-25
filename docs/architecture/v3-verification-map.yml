@@ -1079,7 +1079,7 @@ features:
   - publish_v3_config_05_manifest_from_v3_config_04 emits the deterministic published manifest and auth handles
   - provider auth secretFile supports single-key and list authoring by expanding key names into ordered secret_file + secret_key handles without materializing values
   - provider auth secretFile rejects malformed, duplicate, empty, unreadable, or mixed explicit authoring at config compile time
-  - provider_error_action_policy and client_error_projection_policy compile into V3ErrorManifest without secrets, provider runtime hardcoding, or payload leakage
+  - provider_error_action_policy compiles into V3ErrorManifest preserving internal reason_code/public_code and recovery semantics; public Config parsing rejects retired client_error_projection_policy and Project.status/message_mode (issue2f2ab62_ in config_v3_contract)
   - Provider authoring rejects an Authorization header after trimming and case-insensitive comparison before publishing the manifest
   required_contract:
   - v3.config.compile chain owner_feature_id resolves through the V3 function map and verification map

@@ -20,9 +20,7 @@ scope = "auth_key"
 duration_ms = 5000
 [[error.provider_error_action_policy.path]]
 step = "project"
-status = 502
 reason_code = "provider_account_http_401"
-message_mode = "code_only"
 
 [[error.provider_error_action_policy]]
 policy_id = "account_http_403_two_errors"
@@ -39,9 +37,7 @@ scope = "auth_key"
 duration_ms = 5000
 [[error.provider_error_action_policy.path]]
 step = "project"
-status = 502
 reason_code = "provider_account_http_403"
-message_mode = "code_only"
 
 [servers.account_threshold]
 bind = "127.0.0.1"

@@ -3688,7 +3688,7 @@ targets = [
     .replace(
         "__ERROR_SECTION__",
         if reselect_before_same_candidate_retry {
-            "[error]\nprovider_error_default_path = [\n  { step = \"wait_retry\", retry_mode = \"reselect_before_client_projection\", max_attempts = 1, backoff_ms = 0 },\n  { step = \"cooldown\", scope = \"provider_model\", duration_ms = 900000 },\n  { step = \"project\", status = 503, reason_code = \"provider_failure\", message_mode = \"code_only\" }\n]"
+            "[error]\nprovider_error_default_path = [\n  { step = \"wait_retry\", retry_mode = \"reselect_before_client_projection\", max_attempts = 1, backoff_ms = 0 },\n  { step = \"cooldown\", scope = \"provider_model\", duration_ms = 900000 },\n  { step = \"project\", reason_code = \"provider_failure\" }\n]"
         } else {
             ""
         },

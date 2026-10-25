@@ -27,7 +27,7 @@ strip_client_response_id = true
 provider_error_default_path = [
   { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = 0 },
   { step = "cooldown", scope = "provider_model", duration_ms = 5000, provider_global_failure = false },
-  { step = "project", status = 503, reason_code = "provider_failure", message_mode = "code_only" },
+  { step = "project", reason_code = "provider_failure" },
 ]
 
 [[error.provider_error_action_policy]]
@@ -37,7 +37,7 @@ match = { http_status = 502, content_contains_any = ["error decoding response bo
 path = [
   { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = 0 },
   { step = "cooldown", scope = "provider_model", duration_ms = 5000 },
-  { step = "project", status = 503, reason_code = "cc_anthropic_response_body_decode", message_mode = "code_only" },
+  { step = "project", reason_code = "cc_anthropic_response_body_decode" },
 ]
 
 [[error.provider_error_action_policy]]
@@ -46,7 +46,7 @@ match = { http_status = 401 }
 path = [
   { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = 0 },
   { step = "cooldown", scope = "auth_key", duration_ms = 5000 },
-  { step = "project", status = 502, reason_code = "provider_account_http_401", message_mode = "code_only" },
+  { step = "project", reason_code = "provider_account_http_401" },
 ]
 
 [[error.provider_error_action_policy]]
@@ -55,7 +55,7 @@ match = { http_status = 403 }
 path = [
   { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = 0 },
   { step = "cooldown", scope = "auth_key", duration_ms = 5000 },
-  { step = "project", status = 502, reason_code = "provider_account_http_403", message_mode = "code_only" },
+  { step = "project", reason_code = "provider_account_http_403" },
 ]
 
 [[error.provider_error_action_policy]]
@@ -64,7 +64,7 @@ scope = { provider_id = "glmrelay_openai" }
 match = { http_status = 200, content_contains_any = ["system cpu overloaded"] }
 path = [
   { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 2, backoff_ms = 1000 },
-  { step = "project", status = 502, reason_code = "provider_system_cpu_overloaded", public_code = "upstream_overloaded", message_mode = "code_only" },
+  { step = "project", reason_code = "provider_system_cpu_overloaded", public_code = "upstream_overloaded" },
 ]
 
 [[error.provider_error_action_policy]]
@@ -72,7 +72,7 @@ policy_id = "glmrelay_openai_invalid_field_type_200"
 scope = { provider_id = "glmrelay_openai" }
 match = { http_status = 200, content_contains_any = ["Type invalid, should be set"] }
 path = [
-  { step = "project", status = 400, reason_code = "provider_invalid_field_type", public_code = "provider_invalid_field_type", message_mode = "code_only" },
+  { step = "project", reason_code = "provider_invalid_field_type", public_code = "provider_invalid_field_type" },
 ]
 
 [route_groups.routecodex_v3_4444]
