@@ -889,6 +889,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     let matched_policy = matched_policy_directive.or_else(|| {
         find_matching_provider_error_policy(
             context.manifest,
+            context.failure_session_scope.routing_group(),
             &selected.candidate.provider_id,
             Some(&selected.candidate.provider_type),
             Some(&selected.candidate.model_id),
@@ -1374,6 +1375,7 @@ fn terminal_projection_for(
 
 fn find_matching_provider_error_policy<'manifest>(
     manifest: &'manifest V3Config05ManifestPublished,
+    routing_group: &str,
     provider_id: &str,
     provider_type: Option<&str>,
     model_id: Option<&str>,
@@ -1388,6 +1390,7 @@ fn find_matching_provider_error_policy<'manifest>(
         .find(|policy| {
             provider_error_policy_matches_source_failure(
                 policy,
+                routing_group,
                 provider_id,
                 provider_type,
                 model_id,

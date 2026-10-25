@@ -7,6 +7,69 @@ use routecodex_v3_config::{
 };
 use std::fs;
 
+#[test]
+fn issue2f2ab62_internal_defaults_compile_with_supported_error_semantics() {
+    // The shipped base intentionally has no servers/providers. Supply the existing
+    // public consumer fixture, preserving the complete shipped Error authoring.
+    let mut authoring = parse_v3_config_02_authoring(FULL_CONFIG).unwrap();
+    authoring.error = routecodex_v3_config::internal::v3_internal_user_config_authoring().error;
+    let manifest = compile_v3_config_05_manifest(authoring).unwrap();
+    assert!(matches!(
+        &manifest.error.provider_error_default_path[..],
+        [V3ProviderDispositionStepManifest::WaitRetry {
+            retry_mode: V3ProviderErrorRetryMode::ReselectBeforeClientProjection,
+            max_attempts: 1, backoff_ms: 0, ..
+        }, V3ProviderDispositionStepManifest::Cooldown {
+            duration_ms: Some(5000), ..
+        }, V3ProviderDispositionStepManifest::Project { reason_code, public_code: None }]
+            if reason_code == "provider_failure"
+    ));
+    let policy = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| policy.policy_id == "glmrelay_openai_cpu_overloaded_200")
+        .unwrap();
+    assert_eq!(policy.action.reason_code, "provider_system_cpu_overloaded");
+    assert!(matches!(policy.path.last(),
+        Some(V3ProviderDispositionStepManifest::Project { reason_code, public_code: Some(code) })
+            if reason_code == "provider_system_cpu_overloaded" && code == "upstream_overloaded"
+    ));
+}
+
+#[test]
+fn issue2f2ab62_rejects_retired_client_error_projection_policy() {
+    for declaration in [
+        "client_error_projection_policy = []",
+        "client_error_projection_policy = [{ policy_id = 'retired', match = { reason_code = 'provider_failure' }, projection = { public_code = 'upstream_failure', message_mode = 'code_only' } }]",
+    ] {
+        let source = format!("version = 3\n[error]\n{declaration}\n");
+        let error = parse_v3_config_02_authoring(&source).expect_err("retired policy must be rejected");
+        assert!(error.to_string().contains("unknown field `client_error_projection_policy`"), "{error}");
+    }
+}
+
+#[test]
+fn issue2f2ab62_rejects_retired_project_status() {
+    let source = "version = 3\n[error]\nprovider_error_default_path = [{ step = 'project', reason_code = 'provider_failure', status = 503 }]";
+    let error = parse_v3_config_02_authoring(source).expect_err("retired status must be rejected");
+    assert!(
+        error.to_string().contains("unknown field `status`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn issue2f2ab62_rejects_retired_project_message_mode() {
+    let source = "version = 3\n[error]\nprovider_error_default_path = [{ step = 'project', reason_code = 'provider_failure', message_mode = 'code_only' }]";
+    let error =
+        parse_v3_config_02_authoring(source).expect_err("retired message_mode must be rejected");
+    assert!(
+        error.to_string().contains("unknown field `message_mode`"),
+        "{error}"
+    );
+}
+
 const FULL_CONFIG: &str = r#"
 version = 3
 
@@ -27,16 +90,6 @@ retention = { raw_requests = 10, raw_responses = 10 }
 action = "target_local_reselect"
 cooldown_ms = 1000
 max_attempts = 3
-
-[[error.client_error_projection_policy]]
-policy_id = "provider_busy_code_only"
-
-[error.client_error_projection_policy.match]
-reason_code = "provider_diagnostic_zero_usage"
-
-[error.client_error_projection_policy.projection]
-public_code = "E_PROVIDER_TEMPORARILY_UNAVAILABLE"
-message_mode = "code_only"
 
 [servers.primary]
 bind = "127.0.0.1"
@@ -348,12 +401,6 @@ fn parses_full_config_v3_without_interpreting_targets() {
         "periodic_recovery"
     );
     assert_eq!(provider_error_policy.action.cooldown_ms, Some(300000));
-    assert_eq!(
-        manifest.error.client_error_projection_policy[0]
-            .projection
-            .public_code,
-        "E_PROVIDER_TEMPORARILY_UNAVAILABLE"
-    );
 
     let route_target = &manifest.route_groups["primary"].pools["default"].targets[0];
     assert_eq!(route_target.kind, V3RouteTargetKind::Forwarder);
@@ -1111,9 +1158,7 @@ provider_global_failure = true
 
 [[error.provider_error_action_policy.path]]
 step = "project"
-status = 502
 reason_code = "subscription_invalid_without_token"
-message_mode = "code_only"
 "#
     );
     let manifest =
@@ -1141,7 +1186,7 @@ message_mode = "code_only"
 
     let invalid = path_config.replace(
         "step = \"cooldown\"\nscope = \"provider_instance\"\nduration_ms = 3600000\nprovider_global_failure = true",
-        "step = \"project\"\nstatus = 502\nreason_code = \"early_project\"\nmessage_mode = \"code_only\"",
+        "step = \"project\"\nreason_code = \"early_project\"",
     );
     let error =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
@@ -1556,7 +1601,7 @@ fn provider_response_error_policy_accepts_full_path_and_injects_provider_scope()
     )
     .replace(
         "[providers.cc.semantic_error_policy.action]\nkind = \"periodic_recovery\"\nreason_code = \"provider_diagnostic_zero_usage\"\nretry_mode = \"reselect_before_client_projection\"\ncooldown_ms = 300000\ndisable_scope = \"provider_model\"",
-        "[[providers.cc.response_error_policy.path]]\nstep = \"wait_retry\"\nretry_mode = \"retry_same\"\nmax_attempts = 3\nbackoff_ms = 1000\nbackoff_multiplier = 2\n\n[[providers.cc.response_error_policy.path]]\nstep = \"cooldown\"\nscope = \"provider_model\"\nduration_ms = 300000\n\n[[providers.cc.response_error_policy.path]]\nstep = \"project\"\nstatus = 503\nreason_code = \"provider_diagnostic_zero_usage\"\npublic_code = \"upstream_overloaded\"\nmessage_mode = \"code_only\"",
+        "[[providers.cc.response_error_policy.path]]\nstep = \"wait_retry\"\nretry_mode = \"retry_same\"\nmax_attempts = 3\nbackoff_ms = 1000\nbackoff_multiplier = 2\n\n[[providers.cc.response_error_policy.path]]\nstep = \"cooldown\"\nscope = \"provider_model\"\nduration_ms = 300000\n\n[[providers.cc.response_error_policy.path]]\nstep = \"project\"\nreason_code = \"provider_diagnostic_zero_usage\"\npublic_code = \"upstream_overloaded\"",
     );
     let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap())
         .expect("provider-local full path must compile");
@@ -1575,7 +1620,6 @@ fn provider_response_error_policy_accepts_full_path_and_injects_provider_scope()
     assert!(matches!(
         policy.path.last(),
         Some(V3ProviderDispositionStepManifest::Project {
-            status: 503,
             public_code: Some(code),
             ..
         }) if code == "upstream_overloaded"
@@ -1883,10 +1927,8 @@ match = { http_status = 429 }
 
 [[error.provider_error_action_policy.path]]
 step = "project"
-status = 429
 reason_code = "path_rate_limit"
 public_code = "E_PATH_RATE_LIMIT"
-message_mode = "code_only"
 "#
     .replace("__SCOPE__", "path_only_policy");
     let authoring = parse_v3_config_02_authoring(&source).unwrap();
@@ -1903,20 +1945,13 @@ message_mode = "code_only"
         .iter()
         .find_map(|step| match step {
             routecodex_v3_config::V3ProviderDispositionStepManifest::Project {
-                status,
+                reason_code,
                 public_code,
-                message_mode,
-                ..
-            } => Some((*status, public_code.clone(), *message_mode)),
+            } => Some((reason_code.as_str(), public_code.as_deref())),
             _ => None,
         })
         .expect("path must carry the project step");
-    assert_eq!(project.0, 429);
-    assert_eq!(project.1.as_deref(), Some("E_PATH_RATE_LIMIT"));
-    assert_eq!(
-        project.2,
-        routecodex_v3_config::V3ClientErrorProjectionMessageMode::CodeOnly
-    );
+    assert_eq!(project, ("path_rate_limit", Some("E_PATH_RATE_LIMIT")));
 }
 
 #[test]

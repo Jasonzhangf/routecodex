@@ -124,14 +124,14 @@ targets = [
 provider_error_default_path = [
   { step = "wait_retry", retry_mode = "retry_same", max_attempts = 3, backoff_ms = 0 },
   { step = "cooldown", scope = "provider_model", duration_ms = 900000, provider_global_failure = false },
-  { step = "project", status = 503, reason_code = "provider_failure", message_mode = "code_only" },
+  { step = "project", reason_code = "provider_failure" },
 ]
 [[error.provider_error_action_policy]]
 policy_id = "provider_response_event_codec_failure_reselect"
 match = { provider_code = "provider_response_event_codec_failure" }
 path = [
   { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 2, backoff_ms = 1000 },
-  { step = "project", status = 502, reason_code = "provider_response_event_codec_failure", message_mode = "code_only" },
+  { step = "project", reason_code = "provider_response_event_codec_failure" },
 ]
 "#
     .replace("__SCOPE__", scope);
@@ -1202,10 +1202,8 @@ scope = { provider_type = "responses", model_id = "gpt-test" }
 match = { http_status = 503 }
 [[error.provider_error_action_policy.path]]
 step = "project"
-status = 503
 reason_code = "path_rate_limit"
 public_code = "E_PATH_RATE_LIMIT"
-message_mode = "code_only"
 "#
     .replace("__SCOPE__", scope);
     let manifest = compile_v3_config_05_manifest(
@@ -1290,10 +1288,8 @@ backoff_ms = 7000
 backoff_multiplier = 2
 [[providers.first.response_error_policy.path]]
 step = "project"
-status = 503
 reason_code = "wrapped_provider_error"
 public_code = "E_WRAPPED_PROVIDER"
-message_mode = "code_only"
 [[providers.first.response_error_policy]]
 policy_id = "reselect_then_retry_policy"
 [providers.first.response_error_policy.match]
@@ -1305,10 +1301,8 @@ max_attempts = 3
 backoff_ms = 5000
 [[providers.first.response_error_policy.path]]
 step = "project"
-status = 503
 reason_code = "reselect_exhausted"
 public_code = "E_RESELECT_EXHAUSTED"
-message_mode = "code_only"
 [providers.first.models.gpt-test]
 wire_name = "gpt-test"
 capabilities = ["text", "tools"]
