@@ -531,6 +531,320 @@ port = 45498
     );
 }
 
+fn free_business_port() -> u16 {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    listener.local_addr().unwrap().port()
+}
+
+fn admin_isolated_listeners(
+    business_port: u16,
+    admin_port: u16,
+) -> Vec<V3ManagedListenerDeclaration> {
+    vec![
+        V3ManagedListenerDeclaration {
+            server_id: "responses_v3".to_string(),
+            bind: "127.0.0.1".to_string(),
+            port: business_port,
+        },
+        V3ManagedListenerDeclaration {
+            server_id: "admin_webui".to_string(),
+            bind: "127.0.0.1".to_string(),
+            port: admin_port,
+        },
+    ]
+}
+
+/// An admin_webui listener that cannot bind is optional. Its occupied port
+/// must not be classified as business unavailability, otherwise a managed
+/// start refuses to run even though every business listener is free.
+#[test]
+fn issue850e916_admin_only_occupancy_is_not_business_unavailability() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let business_port = free_business_port();
+    let admin_placeholder = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let admin_port = admin_placeholder.local_addr().unwrap().port();
+    let mut declaration = managed_test_declaration(
+        "admin-only-availability",
+        Path::new("/tmp/rccv3-850e916/config.v3.toml"),
+        "digest",
+        "/tmp/rccv3",
+        business_port,
+    );
+    declaration.listeners = admin_isolated_listeners(business_port, admin_port);
+
+    assert!(
+        listener_set_is_available(&declaration.listeners),
+        "an occupied admin_webui port must not make the business listener set unavailable: {:?}",
+        declaration.listeners
+    );
+    assert!(
+        occupied_listener_ports(&declaration.listeners).is_empty(),
+        "an occupied admin_webui port must not appear as an occupied business port: {:?}",
+        occupied_listener_ports(&declaration.listeners)
+    );
+}
+
+/// Residual discovery feeds the scoped signaling path. A previous instance
+/// that only overlaps on the optional admin listener must never be harvested
+/// as a business residual process. The second group covers the symmetric
+/// case: the target business port equals the port that the other instance
+/// declares only as its optional admin_webui listener.
+#[test]
+fn issue850e916_admin_only_occupancy_is_excluded_from_residual_pids() {
+    struct ChildGuard(std::process::Child);
+
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let state = root.path().join("state");
+    let business_port = free_business_port();
+    let admin_placeholder = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let admin_port = admin_placeholder.local_addr().unwrap().port();
+    let mut target = managed_test_declaration(
+        "admin-only-residual-target",
+        Path::new("/tmp/rccv3-850e916/config.v3.toml"),
+        "digest",
+        "/tmp/rccv3",
+        business_port,
+    );
+    target.listeners = admin_isolated_listeners(business_port, admin_port);
+
+    let published = V3ManagedInstanceDeclaration {
+        listeners: vec![V3ManagedListenerDeclaration {
+            server_id: "admin_webui".to_string(),
+            bind: "127.0.0.1".to_string(),
+            port: admin_port,
+        }],
+        ..managed_test_declaration(
+            "admin-only-residual-previous",
+            Path::new("/tmp/rccv3-850e916/config.v3.toml"),
+            "digest",
+            "/tmp/rccv3",
+            admin_port,
+        )
+    };
+    let instance_dir = state.join("instances").join(&published.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &published).unwrap();
+
+    let residual = std::process::Command::new("sleep")
+        .arg("300")
+        .spawn()
+        .expect("spawn residual process");
+    let residual_pid = residual.id();
+    let _residual = ChildGuard(residual);
+    write_json_atomic(
+        &instance_dir.join("pid.cache"),
+        &V3ManagedPidCache {
+            schema_version: SCHEMA_VERSION,
+            instance_id: published.instance_id.clone(),
+            pid: residual_pid,
+            start_nonce: "admin-only-residual".to_string(),
+            started_at_epoch_ms: epoch_ms(),
+            process_start_token: Some(process_start_token(residual_pid).unwrap().unwrap()),
+        },
+    )
+    .unwrap();
+
+    let discovered = instance_residual_pids_for_listener_set(&state, &target.listeners)
+        .expect("residual discovery must succeed");
+    assert!(
+        discovered.is_empty(),
+        "an admin-only overlap must not be reported as a business residual: {discovered:?}"
+    );
+
+    // Second group: the target's business port is exactly the port that the
+    // other instance declares only as its optional admin_webui listener, and
+    // that instance declares no business listener at all. Both sides must be
+    // judged by declaration semantics (server_id), never by port-number
+    // guessing.
+    {
+        let root = TempDir::new().unwrap();
+        let state = root.path().join("state");
+        // Bind the admin placeholder first so the free business port cannot
+        // collide with the already-bound admin port.
+        let admin_placeholder = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let target_admin_port = admin_placeholder.local_addr().unwrap().port();
+        let target_business_port = free_business_port();
+        assert_ne!(
+            target_admin_port, target_business_port,
+            "business and admin listeners must own distinct ports"
+        );
+        let mut target = managed_test_declaration(
+            "admin-port-overlaps-business-target",
+            Path::new("/tmp/rccv3-850e916/config.v3.toml"),
+            "digest",
+            "/tmp/rccv3",
+            target_business_port,
+        );
+        target.listeners = admin_isolated_listeners(target_business_port, target_admin_port);
+
+        let published = V3ManagedInstanceDeclaration {
+            listeners: vec![V3ManagedListenerDeclaration {
+                server_id: "admin_webui".to_string(),
+                bind: "127.0.0.1".to_string(),
+                port: target_business_port,
+            }],
+            ..managed_test_declaration(
+                "admin-port-overlaps-business-previous",
+                Path::new("/tmp/rccv3-850e916/config.v3.toml"),
+                "digest",
+                "/tmp/rccv3",
+                target_business_port,
+            )
+        };
+        let instance_dir = state.join("instances").join(&published.instance_id);
+        ensure_private_dir(&instance_dir).unwrap();
+        write_json_atomic(&instance_dir.join("instance.json"), &published).unwrap();
+
+        let residual = std::process::Command::new("sleep")
+            .arg("300")
+            .spawn()
+            .expect("spawn residual process");
+        let residual_pid = residual.id();
+        let _residual = ChildGuard(residual);
+        write_json_atomic(
+            &instance_dir.join("pid.cache"),
+            &V3ManagedPidCache {
+                schema_version: SCHEMA_VERSION,
+                instance_id: published.instance_id.clone(),
+                pid: residual_pid,
+                start_nonce: "admin-port-overlaps-business".to_string(),
+                started_at_epoch_ms: epoch_ms(),
+                process_start_token: Some(process_start_token(residual_pid).unwrap().unwrap()),
+            },
+        )
+        .unwrap();
+
+        let discovered = instance_residual_pids_for_listener_set(&state, &target.listeners)
+            .expect("residual discovery must succeed");
+        assert!(
+            discovered.is_empty(),
+            "a published admin-only listener on the target business port must not be a business residual: {discovered:?}"
+        );
+    }
+
+    // ChildGuard terminates only the processes this test spawned.
+}
+
+/// Reaping an orphan control socket only needs the business listener set to
+/// be free. An occupied optional admin listener must not block that reap.
+#[test]
+fn issue850e916_admin_only_occupancy_does_not_block_orphan_reap() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let business_port = free_business_port();
+    let admin_placeholder = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let admin_port = admin_placeholder.local_addr().unwrap().port();
+    let mut declaration = managed_test_declaration(
+        "admin-only-orphan-reap",
+        Path::new("/tmp/rccv3-850e916/config.v3.toml"),
+        "digest",
+        "/tmp/rccv3",
+        business_port,
+    );
+    declaration.listeners = admin_isolated_listeners(business_port, admin_port);
+    let instance_dir = root.path().join("instances").join(&declaration.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
+    write_status(
+        &instance_dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Starting,
+        Some("crash window: control record never written".to_string()),
+    )
+    .unwrap();
+    let socket_path = managed_control_socket_path(&declaration.instance_id);
+    fs::write(&socket_path, b"orphan control socket").unwrap();
+
+    reap_inactive_runtime_files(&instance_dir, &declaration)
+        .expect("an occupied admin_webui port must not block reaping an orphan control socket");
+
+    assert!(
+        !socket_path.exists(),
+        "the orphan control socket must be reaped despite admin-only occupancy"
+    );
+    assert!(!instance_dir.join("control.json").exists());
+    let _ = fs::remove_file(socket_path);
+}
+
+/// FM-4: the explicit-PID port guard must keep refusing a PID that owns
+/// listener ports outside the declared target set. The test drives the guard
+/// directly with the test process's own listeners, so it never signals,
+/// starts, stops, or touches a foreign PID.
+#[test]
+fn guard_explicit_listener_pids_rejects_pid_listening_outside_target_ports() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let first = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let second = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let first_port = first.local_addr().unwrap().port();
+    let second_port = second.local_addr().unwrap().port();
+    assert_ne!(
+        first_port, second_port,
+        "ephemeral listeners must own distinct ports"
+    );
+    let target_ports = std::collections::BTreeSet::from([first_port]);
+
+    let error = guard_explicit_listener_pids_are_scoped_to_target_ports(
+        &[std::process::id()],
+        &target_ports,
+    )
+    .expect_err("a PID that also listens on a non-target port must be refused");
+    assert!(matches!(error, V3LifecycleError::Validation(_)));
+    let message = error.to_string();
+    assert!(
+        message.contains("refusing to signal listener PID")
+            && message.contains("non-target listener ports"),
+        "the refusal must expose the scoped validation error, got: {message}"
+    );
+    assert!(
+        message.contains(&second_port.to_string()),
+        "the refusal must name non-target port {second_port}, got: {message}"
+    );
+
+    // The guard only reads the listener table, so both test-owned listeners
+    // must keep accepting connections after the refusal.
+    for listener in [&first, &second] {
+        let address = listener.local_addr().unwrap();
+        let client = std::net::TcpStream::connect(address)
+            .expect("guard refusal must not stop the test-owned listener");
+        let (accepted, _) = listener
+            .accept()
+            .expect("guard refusal must not close the test-owned listener");
+        drop(accepted);
+        drop(client);
+    }
+}
+
+/// Complement to the admin-only safety cases: a genuinely occupied business
+/// port must stay in `occupied_listener_ports`, while an occupied optional
+/// admin_webui port must be excluded from that same set.
+#[test]
+fn issue850e916_occupied_business_port_is_preserved_while_admin_is_excluded() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let business_occupied = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let admin_occupied = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let business_port = business_occupied.local_addr().unwrap().port();
+    let admin_port = admin_occupied.local_addr().unwrap().port();
+    assert_ne!(
+        business_port, admin_port,
+        "business and admin listeners must own distinct ports"
+    );
+    let listeners = admin_isolated_listeners(business_port, admin_port);
+
+    assert_eq!(
+        occupied_listener_ports(&listeners),
+        std::collections::BTreeSet::from([business_port]),
+        "a real business occupation must be preserved while the occupied admin_webui port is excluded"
+    );
+}
+
 fn managed_test_declaration(
     instance_id: &str,
     config_path: &Path,

@@ -132,6 +132,36 @@ Hidden `rccv3 server start` keeps the background managed-child behavior for scri
 - SSE Transport, continuation, Anthropic Relay, Provider routing, and Error policy are outside this
   owner.
 
+## Business listener discovery and optional admin isolation
+
+The instance declaration keeps the complete aggregate listener set, including the optional
+`admin_webui` entry, because `instance.json` and `PreviousReleaseRestartTransfer` compare listener
+sets exactly across releases. `admin_webui` must not be deleted from `declaration.listeners` to
+change discovery behavior.
+
+- Lifecycle availability, stale discovery, cross-instance port release, residual PID scanning,
+  orphan runtime reap, and explicit PID signal harvest all operate on business listeners only
+  (`server_id != "admin_webui"`). An external process that owns only the admin port is never
+  discovered as stale, never blocks start, and is never signaled.
+- The explicit PID port-range guard is unchanged and remains scoped to business target ports.
+- Server-side, `admin_webui` is an optional attached listener. A missing admin router config, a
+  bind-address parse failure, or a bind failure emits an explicit warning and skips admin router
+  construction, AppState/background registration, and the admin listener task. Already-bound
+  business listeners keep serving; a genuine business listener port conflict still fails startup
+  explicitly.
+- `shutdown_listener_ports` already ignores `admin_webui`, so stop/release stays aligned with the
+  business-only discovery scope.
+
+Pending issue850e916 regression tests cover this boundary with random free ports and a public
+consumer only; production listeners are never touched and no CLI start/stop gate is added for this
+fix. Server coverage lives in `v3/crates/routecodex-v3-server/tests/admin_webui_managed.rs`
+(`issue850e916_admin_port_conflict_keeps_business_listeners_serving`,
+`issue850e916_business_listener_conflict_fails_explicitly`). Lifecycle unit coverage lives in
+`v3/crates/routecodex-v3-lifecycle/src/tests.rs`
+(`issue850e916_admin_only_occupancy_is_not_business_unavailability`,
+`issue850e916_admin_only_occupancy_is_excluded_from_residual_pids`,
+`issue850e916_admin_only_occupancy_does_not_block_orphan_reap`).
+
 ## Review checklist
 
 - [x] Config loads through `V3ConfigStore::load_snapshot_with_source_identity` and publishes a deterministic Manifest plus source identity.

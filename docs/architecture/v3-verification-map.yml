@@ -284,6 +284,16 @@ features:
   - foreground start forces startup and common HTTP request console even when config log_console is false
   - Restart control handshake and replacement acknowledgement share the configured absolute operation deadline; ordinary Status retains its two-second control timeout.
   - routecodex dev shim may enable snap/debug by default while rcc/rccv3 stable shims require explicit --snap/--debug and restart.plan.json remains previous-release compatible
+  - >-
+    Lifecycle port availability, stale discovery, cross-instance release, residual PID
+    scan and orphan runtime reap exclude admin_webui, so an external admin-only port
+    occupant neither blocks start nor becomes a signal target; declaration.listeners
+    keeps the admin_webui entry and the explicit PID port-range guard stays
+    business-scoped. Pending issue850e916 unit tests in
+    v3/crates/routecodex-v3-lifecycle/src/tests.rs are
+    issue850e916_admin_only_occupancy_is_not_business_unavailability,
+    issue850e916_admin_only_occupancy_is_excluded_from_residual_pids, and
+    issue850e916_admin_only_occupancy_does_not_block_orphan_reap.
   required_integration:
   - actual CLI start/status/duplicate-start/restart/stop on temporary aggregate listeners
   - previous_release_one_step_content_change and previous_release_one_step_config_path_change execute one official restart from a real old handler, preserve PID/start-token/session, refresh nonce, retain one owner and complete provider-backed Responses before and after.
@@ -355,8 +365,24 @@ features:
   - Manifest contains declarations and typed indexes only
   - pool match Hub hooks execution modes scope provider protocol capability health and concurrency declarations fail fast
   - every enabled listener binds before any listener task starts
+  - >-
+    Optional admin_webui startup isolation. A missing admin router config, bind parse
+    failure or bind failure on admin_webui emits an explicit warning and skips admin
+    router/background/listener registration without rolling back already-bound business
+    listeners, while a genuine business listener conflict still fails startup
+    explicitly.
   - invalid method path content type JSON or body size enters Error01-06 before Runtime
   - only responses executes P6 while other business protocols return explicit not_implemented
+  required_integration:
+  - >-
+    Pending issue850e916 server public-consumer tests in
+    v3/crates/routecodex-v3-server/tests/admin_webui_managed.rs.
+    issue850e916_admin_port_conflict_keeps_business_listeners_serving proves an
+    occupied admin port still returns Ok, business listeners serve, the admin-only
+    occupant stays alive, and handle.listeners omits admin_webui.
+    issue850e916_business_listener_conflict_fails_explicitly proves a genuine business
+    port conflict still returns an explicit AddrInUse error. Both use random free ports
+    only and never touch production listeners.
   required_gates:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
