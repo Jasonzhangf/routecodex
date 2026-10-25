@@ -251,6 +251,7 @@ function classifyV3FineScopes(paths, { workflowScope }) {
         || isV3ArchitectureRootScript(path)) add('v3_architecture');
     if (/^v3\/(?:Cargo\.toml|Cargo\.lock|package(?:-lock)?\.json)$/u.test(path)
         || /^v3\/crates\//u.test(path)
+        || path === 'v3/scripts/run-v3-cargo-test.mjs'
         || /^scripts\/(?:install-v3-cli|ensure-cli-command-shim|ensure-cli-executable)\.mjs$/u.test(path)
         || /^scripts\/install-(?:global|release)\.sh$/u.test(path)) add('v3_build');
     if (isV3Path && /(?:^|[\/_-])provider(?:[\/_-]|$)/iu.test(path)) add('v3_provider');
