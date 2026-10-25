@@ -48,6 +48,7 @@ requireValue(includesAll(scope?.allowed_readers, [
   'V3ProviderFailureRuntimeHealth::session_bound_availability',
   'V3ProviderActionProviderScope::new',
   'V3ProviderSessionAvailabilityReader::availability',
+  'run_v3_relay_provider_failure_policy_with_response_source',
 ]), 'Failure session scope must bind typed Error/Runtime/action/availability consumers');
 const feature = functions.features?.find((row) => row.feature_id === 'v3.debug_error_foundation');
 requireValue(feature?.resource_bindings?.includes('v3.provider.failure_session_scope'), 'Function owner must bind failure session scope resource');

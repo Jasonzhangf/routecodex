@@ -91,10 +91,8 @@ max_attempts = 3
 backoff_ms = 5000
 [[providers.first.response_error_policy.path]]
 step = "project"
-status = 503
 reason_code = "reselect_exhausted"
 public_code = "E_RESELECT_EXHAUSTED"
-message_mode = "code_only"
 [providers.first.models.gpt-test]
 wire_name = "gpt-test"
 capabilities = ["text", "tools"]
@@ -193,10 +191,8 @@ max_attempts = 3
 backoff_ms = 7000
 [[providers.first.response_error_policy.path]]
 step = "project"
-status = 503
 reason_code = "request_local_retry_exhausted"
 public_code = "E_REQUEST_LOCAL"
-message_mode = "code_only"
 [providers.first.models.gpt-test]
 wire_name = "gpt-test"
 capabilities = ["text", "tools"]

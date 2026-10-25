@@ -330,6 +330,22 @@ features:
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
   runtime_status: source_controlled_and_live_5555_release_rollover_verified
+  notes:
+  - >-
+    Lifecycle port availability, stale discovery, cross-instance release, residual PID
+    scanning, and explicit PID signal harvest are scoped to business listeners only
+    (server_id != "admin_webui"); an admin-only foreign PID is never discovered,
+    signaled, or reaped.
+  - >-
+    declaration.listeners keeps the complete serialization including the admin_webui
+    entry so instance.json and PreviousReleaseRestartTransfer exact-match across
+    versions; the explicit PID port-range guard is preserved and remains scoped to
+    business target ports.
+  - >-
+    Pending issue850e916 lifecycle unit tests in lifecycle/src/tests.rs are
+    issue850e916_admin_only_occupancy_is_not_business_unavailability,
+    issue850e916_admin_only_occupancy_is_excluded_from_residual_pids, and
+    issue850e916_admin_only_occupancy_does_not_block_orphan_reap.
 - feature_id: v3.config_server_full_function
   owner_crates:
   - routecodex-v3-config
@@ -366,6 +382,18 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src
   - src
   - sharedmodule
+  notes:
+  - >-
+    The aggregate Server startup treats admin_webui as an optional attached listener.
+    Missing admin router config, bind parse failure, or bind failure emits an explicit
+    warning and skips admin router construction, AppState/background registration, and
+    admin listener task registration without rolling back already-bound business
+    listeners; a genuine business listener port conflict still fails startup explicitly.
+  - >-
+    Pending issue850e916 server tests in server/tests/admin_webui_managed.rs are
+    issue850e916_admin_port_conflict_keeps_business_listeners_serving and
+    issue850e916_business_listener_conflict_fails_explicitly; they use random free
+    ports and a public consumer only, production listeners are never touched.
   required_gates:
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
@@ -4474,7 +4502,9 @@ features:
   - v3/scripts/build.mjs
   - v3/scripts/install-cli.mjs
   - v3/tests/scripts/v3-cli-distribution.spec.mjs
+  - v3/tests/scripts/install-lifecycle-boundary.spec.mjs
   - scripts/ensure-cli-command-shim.mjs
+  - scripts/ensure-cli-executable.mjs
   - scripts/install-global.sh
   - v3/crates/routecodex-v3-config/Cargo.toml
   - v3/crates/routecodex-v3-config/build.rs
@@ -4492,7 +4522,9 @@ features:
   - scripts/install-v3-cli.mjs
   - v3/scripts/build.mjs
   - v3/tests/scripts/v3-cli-distribution.spec.mjs
+  - v3/tests/scripts/install-lifecycle-boundary.spec.mjs
   - scripts/ensure-cli-command-shim.mjs
+  - scripts/ensure-cli-executable.mjs
   - scripts/install-global.sh
   - tests/scripts/v3-cli-distribution.spec.mjs
   - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
@@ -4507,6 +4539,7 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/v3-build-tool-module-registry.yml
+  - scripts/ensure-cli-executable.mjs
   - .github/workflows/test.yml
   - package.json
   - package-lock.json

@@ -3219,85 +3219,125 @@ fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
 }
 
 #[test]
-fn start_force_releases_occupied_admin_webui_port_before_server_bind() {
+fn start_preserves_occupied_admin_webui_port_and_serves_business() {
+    struct TestChild {
+        child: Option<Child>,
+    }
+
+    impl TestChild {
+        fn new(child: Child) -> Self {
+            Self { child: Some(child) }
+        }
+
+        fn is_running(&mut self) -> bool {
+            self.child.as_mut().unwrap().try_wait().unwrap().is_none()
+        }
+
+        fn into_output(mut self) -> Output {
+            self.child.take().unwrap().wait_with_output().unwrap()
+        }
+    }
+
+    impl Drop for TestChild {
+        fn drop(&mut self) {
+            if let Some(mut child) = self.child.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+
     let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
     let admin_port = free_port();
-    let mut occupied = spawn_sigterm_resistant_listener(admin_port);
+    let mut occupied = TestChild::new(spawn_sigterm_resistant_listener(admin_port));
     let config = write_config(&root, ports);
     let binary = env!("CARGO_BIN_EXE_rccv3");
     let admin_bind = format!("127.0.0.1:{admin_port}");
-    let mut start = managed_test_command(binary, &state_root)
-        .args(["start", "--config"])
-        .arg(&config)
-        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
-        .env("ROUTECODEX_V3_ADMIN_BIND", &admin_bind)
-        .env("V3_MANAGED_TEST_KEY", SECRET)
-        .env("ROUTECODEX_V3_STOP_TIMEOUT_MS", "200")
-        .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "800")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline && occupied.try_wait().unwrap().is_none() {
-        sleep(Duration::from_millis(50));
-    }
-    if occupied.try_wait().unwrap().is_none() {
-        let _ = occupied.kill();
-        let _ = occupied.wait();
-        let _ = start.kill();
-        let output = start.wait_with_output().unwrap();
-        panic!(
-            "start must release the occupied admin WebUI port: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    let killed = occupied.wait().unwrap();
-    assert!(
-        !killed.success(),
-        "SIGTERM-resistant admin listener must be force-killed"
+    let start = TestChild::new(
+        managed_test_command(binary, &state_root)
+            .args(["start", "--config"])
+            .arg(&config)
+            .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+            .env("ROUTECODEX_V3_ADMIN_BIND", &admin_bind)
+            .env("V3_MANAGED_TEST_KEY", SECRET)
+            .env("ROUTECODEX_V3_STOP_TIMEOUT_MS", "200")
+            .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "800")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
     );
 
-    let deadline = Instant::now() + PORT_STATE_TIMEOUT;
-    let listener_ports = [ports[0], ports[1], admin_port];
-    while !listener_ports
-        .iter()
-        .all(|port| TcpStream::connect(("127.0.0.1", *port)).is_ok())
-    {
-        if Instant::now() >= deadline || start.try_wait().unwrap().is_some() {
-            let _ = start.kill();
-            let output = start.wait_with_output().unwrap();
-            panic!(
-                "admin lifecycle listeners {listener_ports:?} did not start: stdout={} stderr={}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        sleep(Duration::from_millis(50));
+    for port in ports {
+        wait_port(port, true);
     }
+    assert!(
+        occupied.is_running(),
+        "start must not signal the occupied admin WebUI process"
+    );
+    assert!(
+        TcpStream::connect(("127.0.0.1", admin_port)).is_ok(),
+        "occupied admin WebUI listener must remain reachable during start"
+    );
+    for port in ports {
+        assert_eq!(http_get_json(port, "/health")["status"], "ok");
+    }
+    send_responses_dry_run_request(ports[0], "occupied-admin", root.path());
 
-    let stop = managed_test_command(binary, &state_root)
-        .args(["stop", "--config"])
-        .arg(&config)
-        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
-        .env("ROUTECODEX_V3_ADMIN_BIND", &admin_bind)
-        .env("V3_MANAGED_TEST_KEY", SECRET)
-        .output()
-        .unwrap();
+    let run_with_admin = |command: &str| {
+        managed_test_command(binary, &state_root)
+            .args([command, "--config"])
+            .arg(&config)
+            .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+            .env("ROUTECODEX_V3_ADMIN_BIND", &admin_bind)
+            .env("V3_MANAGED_TEST_KEY", SECRET)
+            .env("ROUTECODEX_V3_STOP_TIMEOUT_MS", "200")
+            .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "800")
+            .output()
+            .unwrap()
+    };
+    let status = run_with_admin("status");
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    assert_eq!(last_json(&status)["state"], "running");
+    for port in ports {
+        assert_eq!(http_get_json(port, "/health")["status"], "ok");
+    }
+    assert!(
+        occupied.is_running(),
+        "status must not signal the occupied admin WebUI process"
+    );
+    assert!(
+        TcpStream::connect(("127.0.0.1", admin_port)).is_ok(),
+        "occupied admin WebUI listener must remain reachable during status"
+    );
+
+    let stop = run_with_admin("stop");
     assert!(
         stop.status.success(),
         "{}",
         String::from_utf8_lossy(&stop.stderr)
     );
+    assert_eq!(last_json(&stop)["state"], "stopped");
     for port in ports {
         wait_port(port, false);
     }
-    wait_port(admin_port, false);
-    let start_output = start.wait_with_output().unwrap();
+    assert!(
+        occupied.is_running(),
+        "standard stop must not signal the occupied admin WebUI process"
+    );
+    assert!(
+        TcpStream::connect(("127.0.0.1", admin_port)).is_ok(),
+        "occupied admin WebUI listener must remain reachable after stop"
+    );
+
+    let start_output = start.into_output();
     assert!(
         start_output.status.success(),
         "{}",

@@ -267,8 +267,6 @@ pub struct V3ErrorAuthoringConfig {
     #[serde(default)]
     pub provider_error_action_policy: Vec<V3ProviderErrorActionPolicyAuthoringConfig>,
     #[serde(default)]
-    pub client_error_projection_policy: Vec<V3ClientErrorProjectionPolicyAuthoringConfig>,
-    #[serde(default)]
     pub provider_error_default_path: Option<Vec<V3ProviderDispositionStepAuthoringConfig>>,
 }
 
@@ -345,11 +343,9 @@ pub enum V3ProviderDispositionStepAuthoringConfig {
         provider_global_failure: bool,
     },
     Project {
-        status: u16,
         reason_code: String,
         #[serde(default)]
         public_code: Option<String>,
-        message_mode: V3ClientErrorProjectionMessageMode,
     },
 }
 
@@ -466,37 +462,6 @@ pub enum V3ProviderErrorRetryMode {
     RetrySame,
     ReselectBeforeClientProjection,
     ProjectTerminal,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct V3ClientErrorProjectionPolicyAuthoringConfig {
-    pub policy_id: String,
-    #[serde(rename = "match")]
-    pub matcher: V3ClientErrorProjectionMatcherAuthoringConfig,
-    pub projection: V3ClientErrorProjectionAuthoringConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct V3ClientErrorProjectionMatcherAuthoringConfig {
-    #[serde(default)]
-    pub reason_code: Option<String>,
-    #[serde(default)]
-    pub action_class: Option<V3ProviderErrorActionClass>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct V3ClientErrorProjectionAuthoringConfig {
-    pub public_code: String,
-    pub message_mode: V3ClientErrorProjectionMessageMode,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum V3ClientErrorProjectionMessageMode {
-    CodeOnly,
 }
 
 #[derive(Debug, Clone)]
@@ -1309,7 +1274,6 @@ pub struct V3ErrorManifest {
     pub policies: BTreeMap<String, V3ErrorPolicyManifest>,
     pub provider_error_action_policy: Vec<V3ProviderErrorActionPolicyManifest>,
     pub provider_error_default_path: Vec<V3ProviderDispositionStepManifest>,
-    pub client_error_projection_policy: Vec<V3ClientErrorProjectionPolicyManifest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1350,10 +1314,8 @@ pub enum V3ProviderDispositionStepManifest {
         provider_global_failure: bool,
     },
     Project {
-        status: u16,
         reason_code: String,
         public_code: Option<String>,
-        message_mode: V3ClientErrorProjectionMessageMode,
     },
 }
 
@@ -1388,25 +1350,6 @@ pub struct V3ProviderErrorActionManifest {
     pub cooldown_ms: Option<u64>,
     pub disable_scope: V3ProviderErrorActionScope,
     pub provider_global_failure: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ClientErrorProjectionPolicyManifest {
-    pub policy_id: String,
-    pub matcher: V3ClientErrorProjectionMatcherManifest,
-    pub projection: V3ClientErrorProjectionManifest,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct V3ClientErrorProjectionMatcherManifest {
-    pub reason_code: Option<String>,
-    pub action_class: Option<V3ProviderErrorActionClass>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ClientErrorProjectionManifest {
-    pub public_code: String,
-    pub message_mode: V3ClientErrorProjectionMessageMode,
 }
 
 include!("types/route_manifest.rs");
