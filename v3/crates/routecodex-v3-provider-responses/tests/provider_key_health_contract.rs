@@ -62,6 +62,81 @@ fn ordinary_429_requires_three_consecutive_failures_of_exact_identity() {
 }
 
 #[test]
+fn declared_provider_health_threshold_governs_typed_transport_failures() {
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.kk]
+type = "responses"
+base_url = "http://kk.invalid/v1"
+default_model = "deepseek"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "KK_KEY" }] }
+health = { enabled = true, failure_threshold = 3, cooldown_ms = 900000 }
+[providers.kk.models.deepseek]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "kk", model = "deepseek", key = "key1", priority = 1 }]
+"#,
+        )
+        .expect("parse provider authoring"),
+    )
+    .expect("compile manifest");
+    let store = V3ProviderHealthStore::from_manifest_without_persistence(&manifest);
+
+    // A no-status transport failure is typed as RecoverableCounted with the
+    // shared threshold of 1 by the error model. The declared provider health
+    // policy must still govern the exact key-model identity, so kk waits for
+    // three consecutive same-fingerprint failures before entering cooldown.
+    let mut action = V3ProviderFailureAction::recoverable("provider_transport_error");
+    action.failure_threshold = 1;
+    action.failure_fingerprint = Some(
+        V3ProviderErrorFingerprint::new(
+            "provider_transport_error",
+            "provider_transport_error",
+            0,
+            "provider_transport_error",
+        )
+        .unwrap(),
+    );
+
+    for now_ms in [100, 101] {
+        let projection = store
+            .record_provider_failure_action("kk", "key1", "deepseek", &action, now_ms)
+            .expect("transport failure must record");
+        assert!(
+            !projection.cooldown,
+            "first failures must not cool kk identity"
+        );
+        assert!(projection.available);
+    }
+    let third = store
+        .record_provider_failure_action("kk", "key1", "deepseek", &action, 102)
+        .expect("third transport failure must record");
+    assert!(
+        third.cooldown,
+        "third consecutive failure must cool kk identity"
+    );
+    let entries = store.cooldown_entries(103);
+    let kk_entry = entries
+        .iter()
+        .find(|entry| {
+            entry.provider_id == "kk"
+                && entry.auth_alias.as_deref() == Some("key1")
+                && entry.model_id.as_deref() == Some("deepseek")
+        })
+        .expect("kk key-model identity must appear in cooldown pool");
+    assert_eq!(
+        kk_entry.until_ms,
+        Some(102 + 900_000),
+        "configured cooldown_ms must govern the typed key-model identity"
+    );
+}
+
+#[test]
 fn health_projection_without_history_uses_contract_default_score() {
     let store = V3ProviderKeyHealthStore::default();
     let projection = store
