@@ -22,7 +22,7 @@ wire projection, response semantics, runtime configuration, Server cutover, or l
 - Positive: new, remote, and local classifications; local restore ordering; JSON/SSE transport
   intent preservation; enabled and disabled servertool profiles.
 - Negative: scope mismatch, missing continuation binding, ambiguous local-plus-remote ownership,
-  malformed tool-result ordering, required hook failure, Req03 restore residue, Req04 bypass,
+  unrepresentable inbound input, required hook failure, Req03 restore residue, Req04 bypass,
   non-adjacent conversion, dynamic hook registry, and a second Relay lifecycle.
 
 ## Ownership budget
@@ -35,6 +35,19 @@ source scanner no longer locks private function bodies or JSON helper spellings.
 ## Verification
 
 - Focused Rust integration tests: `hub_relay_request_semantics`.
+- Req04 preserves orphan, missing-ID, duplicate-ID, cross-turn and kind-mismatched
+  tool history. Custom output association survives an intervening assistant message.
+- Public HTTP regression `issue13d6279_representable_history_roundtrip` in
+  `openai_chat_relay_controlled` checks first-attempt provider shape, invalid model
+  arguments, client tool argument parsing and the resulting error follow-up.
+  Run with `CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p
+  routecodex-v3-server --test openai_chat_relay_controlled -- --nocapture --test-threads=1`.
+- Public Responses regression `issue13d6279_responses_custom_history_roundtrip` in
+  `multi_listener_server` checks orphan output, cross-turn custom history, complete raw
+  custom input, actual client parser error receipt and its paired follow-up. The upstream
+  rejects changed shape. Each client request must use exactly one provider attempt.
+  Run with `CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p
+  routecodex-v3-server --test multi_listener_server issue13d6279_ -- --nocapture --test-threads=1`.
 - Behavioral consumers cover lossless normalization, tool/history handling, hook order and required
   hook failures. The registered static-hook and compile-fail gates retain their own boundaries.
 - Shared V3 architecture, resource, module-boundary, Rust-only, static-hook, compile-fail, fmt,

@@ -737,10 +737,13 @@ features:
   - Req01 and Req02 reject a non-empty previous_response_id instead of resolving a continuation owner
   - Req04 runs tool/history governance and never restores local context or repairs history
   - every Req01 through Req04 owner operation emits deterministic entry and exit hook evidence
-  - required hook failures and malformed tool outputs are explicit fail-fast errors
+  - required hook failures and unrepresentable inbound inputs remain typed errors; Req04 preserves representable tool outputs and associates custom output types
+  - public Chat and Responses Relay entries preserve first-attempt tool history and return model argument errors for actual client parsing and paired follow-up
   - request payload ownership moves forward once and rejects JSON round-trip or full payload clone budget violations
   required_gates:
   - npm run test:v3-relay-request-semantics
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test openai_chat_relay_controlled issue13d6279_ -- --nocapture --test-threads=1
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue13d6279_ -- --nocapture --test-threads=1
   - npm run test:v3-compile-fail
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
@@ -941,7 +944,7 @@ features:
   - docs/goals/v3-openai-chat-codec-characterization-test-design.md
   required_contract:
   - native OpenAI Chat request and response payloads remain semantically unchanged
-  - missing duplicate and orphan tool-call identities are preserved by codec normalization and fail explicitly in Chat Process governance without repair
+  - missing duplicate and orphan tool-call identities are preserved by codec normalization and Req04 without repair or admission rejection
   - SSE input is one already-framed event and is never byte-parsed or materialized
   - internal side-channel fields fail closed
   - no Hub hook Server runtime Provider transport Relay or fallback is added
@@ -990,7 +993,7 @@ features:
     without changing provider wire payload
   - Gemini generationConfig frequencyPenalty, presencePenalty, responseLogprobs, logprobs, and seed are classified by the codec owner into distinct Chat sampling/logprob/seed semantics without changing
     provider wire payload
-  - missing or orphan functionResponse identities are preserved by codec normalization and fail explicitly in Chat Process governance without repair
+  - missing or orphan functionResponse identities are preserved by codec normalization and Req04 without repair or admission rejection
   - SSE input is one already-framed candidate event and is never byte-parsed or materialized
   - internal side-channel fields fail closed
   - no Hub hook Server runtime Provider transport Relay or fallback is added
@@ -2325,7 +2328,7 @@ features:
   - V2 default config projection binds /v1/responses to the Responses Direct runtime owner while explicit Relay remains a valid controlled/manual binding
   - v3-hub-relay-closeout-01 through v3-hub-relay-closeout-14 remain adjacent and anchored to docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
   - Responses Relay provider-facing JSON blackbox preserves tools and the current-turn function_call/function_call_output pairing
-  - wrong Responses Relay call_id fails before provider send
+  - unmatched Responses Relay call_id reaches the provider unchanged without Req04 admission rejection
   - the Chat Process response hook profile is consumed by Runtime response governance
   - Responses Relay separates provider request transport intent, provider response body kind, and client response projection intent; client `stream=true` remains SSE even if provider raw body is JSON, and
     client `stream=false` remains JSON even if a controlled provider raw body is SSE
@@ -2554,8 +2557,8 @@ features:
   - OpenAI Chat request codec preserves invalid tool identity shapes without pairing in normalization
   - OpenAI Chat response codec preserves duplicate tool call identity without pairing in inbound normalization
   - Gemini request codec preserves invalid functionResponse identity without pairing in normalization
-  - Req04 Chat Process rejects OpenAI Chat missing duplicate and orphan tool identity after normalization
-  - Req04 Chat Process rejects Gemini missing and orphan functionResponse identity after normalization
+  - Req04 preserves OpenAI Chat missing duplicate orphan and cross-turn tool identities after normalization
+  - Req04 preserves Gemini missing and orphan functionResponse identity after normalization
   - Resp Chat Process rejects duplicate canonical tool call identity before client projection
   - normalization boundary gate rejects tool governance in protocol normalize and provider compat nodes while allowing Anthropic protocol mapping
   - Hub v1 fixed hook registry contains ProviderReqCompat06ProviderCompat and ProviderRespCompat02ProviderCompat entry/exit hooks

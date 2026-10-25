@@ -3560,8 +3560,8 @@ features:
   change_risk: critical
   owner_kind: rust_project_v3_protocol_boundary_and_chat_process_governance
   owner_scope: V3 protocol normalization maps protocols and validates shape only;
-    OpenAI Chat/Gemini tool identity pairing and uniqueness checks live in Req04 or
-    Resp Chat Process governance; provider compat nodes are typed runtime nodes that
+    Req04 preserves representable tool histories and associates custom output types;
+    Resp Chat Process owns response governance; provider compat nodes are typed runtime nodes that
     forbid tool governance and fallback repair.
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
@@ -3594,7 +3594,7 @@ features:
   - characterize_v3_openai_chat_client_input_to_hub_semantic
   - characterize_v3_openai_chat_provider_raw_to_hub_response_semantic
   - characterize_v3_gemini_client_input_to_hub_semantic
-  - govern_protocol_tool_identity_at_req04
+  - govern_tool_outputs_at_req04
   - govern_v3_hub_relay_response
   - build_provider_req_compat_06_from_v3_hub_req_outbound_07
   - build_provider_resp_compat_02_from_v3_provider_resp_inbound_01

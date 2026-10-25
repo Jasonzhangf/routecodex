@@ -95,6 +95,9 @@ mod issue4effed6_relay_serialized;
 #[path = "multi_listener_server/issueff1e031_chat_markup.rs"]
 mod issueff1e031_chat_markup;
 
+#[path = "multi_listener_server/issue13d6279_req04.rs"]
+mod issue13d6279_req04;
+
 async fn read_raw_content_length_response(socket: &mut TcpStream) -> Vec<u8> {
     let mut wire = Vec::new();
     while !wire.ends_with(b"\r\n\r\n") {
