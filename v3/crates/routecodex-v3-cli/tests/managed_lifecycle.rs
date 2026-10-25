@@ -863,9 +863,21 @@ fn run_with_hooks_record(
     command: &str,
     hooks_record: &Path,
 ) -> Output {
+    run_with_hooks_record_args(binary, state_root, config, command, hooks_record, &[])
+}
+
+fn run_with_hooks_record_args(
+    binary: &str,
+    state_root: &Path,
+    config: &Path,
+    command: &str,
+    hooks_record: &Path,
+    extra_args: &[&str],
+) -> Output {
     managed_test_command(binary, state_root)
         .args(["server", command, "--config"])
         .arg(config)
+        .args(extra_args)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
         .env(
             "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
@@ -885,9 +897,30 @@ fn run_with_hooks_record_tmpdir(
     hooks_record: &Path,
     tmp_dir: &Path,
 ) -> Output {
+    run_with_hooks_record_tmpdir_args(
+        binary,
+        state_root,
+        config,
+        command,
+        hooks_record,
+        tmp_dir,
+        &[],
+    )
+}
+
+fn run_with_hooks_record_tmpdir_args(
+    binary: &str,
+    state_root: &Path,
+    config: &Path,
+    command: &str,
+    hooks_record: &Path,
+    tmp_dir: &Path,
+    extra_args: &[&str],
+) -> Output {
     managed_test_command(binary, state_root)
         .args(["server", command, "--config"])
         .arg(config)
+        .args(extra_args)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
         .env(
             "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
@@ -1137,23 +1170,61 @@ fn last_json(output: &Output) -> Value {
 }
 
 fn status_json(binary: &str, state_root: &Path, config: &Path) -> Value {
-    let status = run(binary, state_root, config, "status");
+    let status = run_status_json(binary, state_root, config);
     assert!(
         status.status.success(),
         "{}",
         String::from_utf8_lossy(&status.stderr)
     );
-    last_json(&status)
+    serde_json::from_slice(&status.stdout).unwrap_or_else(|error| {
+        panic!(
+            "status --json must print one JSON record: {error}: {}",
+            String::from_utf8_lossy(&status.stdout)
+        )
+    })
 }
 
 fn top_level_status_json(binary: &str, state_root: &Path, config: &Path) -> Value {
-    let status = run_top_level(binary, state_root, config, "status");
+    let status = run_status_json_top_level(binary, state_root, config);
     assert!(
         status.status.success(),
         "{}",
         String::from_utf8_lossy(&status.stderr)
     );
-    last_json(&status)
+    serde_json::from_slice(&status.stdout).unwrap_or_else(|error| {
+        panic!(
+            "top-level status --json must print one JSON record: {error}: {}",
+            String::from_utf8_lossy(&status.stdout)
+        )
+    })
+}
+
+fn run_status_json(binary: &str, state_root: &Path, config: &Path) -> Output {
+    managed_test_command(binary, state_root)
+        .args(["server", "status", "--json", "--config"])
+        .arg(config)
+        .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .output()
+        .unwrap()
+}
+
+fn run_status_json_top_level(binary: &str, state_root: &Path, config: &Path) -> Output {
+    managed_test_command(binary, state_root)
+        .args(["status", "--json", "--config"])
+        .arg(config)
+        .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .output()
+        .unwrap()
 }
 
 fn spawn_top_level_start(binary: &str, state_root: &Path, config: &Path) -> Child {
@@ -1480,9 +1551,14 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
         serde_json::from_slice(&fs::read(instance_dir.join("pid.cache")).unwrap()).unwrap();
     let first_nonce = first_pid["start_nonce"].as_str().unwrap().to_string();
 
-    let status = run(binary, &state_root, &config, "status");
-    assert!(status.status.success());
-    assert_eq!(last_json(&status)["state"], "running");
+    let status = run_status_json(binary, &state_root, &config);
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let status_record: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status_record["state"], "running");
 
     let control_path = instance_dir.join("control.json");
     let original_control = fs::read(&control_path).unwrap();
@@ -1547,14 +1623,181 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
     for port in ports {
         wait_port(port, false);
     }
-    let stopped = run(binary, &state_root, &config, "status");
-    assert!(stopped.status.success());
-    assert_eq!(last_json(&stopped)["state"], "stopped");
+    let stopped = run_status_json(binary, &state_root, &config);
+    assert!(
+        stopped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stopped.stderr)
+    );
+    let stopped_record: Value = serde_json::from_slice(&stopped.stdout).unwrap();
+    assert_eq!(stopped_record["state"], "stopped");
     let already_stopped = run(binary, &state_root, &config, "stop");
     assert!(!already_stopped.status.success());
     assert!(String::from_utf8_lossy(&already_stopped.stderr).contains("NotRunning"));
 
     scan_instance_files_for_secret(&instance_dir);
+}
+
+#[test]
+fn status_public_entry_reports_running_stopped_failed_and_machine_json() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let start = run(binary, &state_root, &config, "start");
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    assert_start_stdout(&start, "server start");
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    let human_running = run_top_level(binary, &state_root, &config, "status");
+    assert!(
+        human_running.status.success(),
+        "{}",
+        String::from_utf8_lossy(&human_running.stderr)
+    );
+    let human_running_stdout = String::from_utf8_lossy(&human_running.stdout);
+    assert_eq!(
+        human_running_stdout
+            .matches("[RouteCodexV3] Status state=")
+            .count(),
+        1,
+        "{human_running_stdout}"
+    );
+    assert!(
+        human_running_stdout.contains("[RouteCodexV3] Status state=running instance="),
+        "{human_running_stdout}"
+    );
+    assert!(
+        human_running_stdout.contains(&format!("a enabled=true address=127.0.0.1:{}", ports[0])),
+        "{human_running_stdout}"
+    );
+    assert!(
+        human_running_stdout
+            .lines()
+            .all(|line| !line.trim_start().starts_with('{')),
+        "default status must not print a machine record:\n{human_running_stdout}"
+    );
+
+    let machine_running_output = run_status_json_top_level(binary, &state_root, &config);
+    assert!(
+        machine_running_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&machine_running_output.stderr)
+    );
+    let machine_running_stdout = String::from_utf8_lossy(&machine_running_output.stdout);
+    assert!(
+        !machine_running_stdout.contains("enabled="),
+        "{machine_running_stdout}"
+    );
+    let machine_running: Value = serde_json::from_slice(&machine_running_output.stdout).unwrap();
+    for field in [
+        "schema_version",
+        "instance_id",
+        "state",
+        "updated_at_epoch_ms",
+        "detail",
+    ] {
+        assert!(
+            machine_running.get(field).is_some(),
+            "machine status dropped {field}: {machine_running}"
+        );
+    }
+    assert_eq!(machine_running["state"], "running");
+
+    let stop = run(binary, &state_root, &config, "stop");
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert_stop_stdout(&stop, "server stop");
+    for port in ports {
+        wait_port(port, false);
+    }
+
+    let human_stopped = run_top_level(binary, &state_root, &config, "status");
+    assert!(
+        human_stopped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&human_stopped.stderr)
+    );
+    let human_stopped_stdout = String::from_utf8_lossy(&human_stopped.stdout);
+    assert_eq!(
+        human_stopped_stdout
+            .matches("[RouteCodexV3] Status state=")
+            .count(),
+        1,
+        "{human_stopped_stdout}"
+    );
+    assert!(
+        human_stopped_stdout.contains("[RouteCodexV3] Status state=stopped instance=")
+            && human_stopped_stdout.contains(
+                "impact=enabled listeners refuse client requests until the service is started"
+            ),
+        "{human_stopped_stdout}"
+    );
+
+    let machine_stopped_output = run_status_json_top_level(binary, &state_root, &config);
+    assert!(
+        machine_stopped_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&machine_stopped_output.stderr)
+    );
+    let machine_stopped: Value = serde_json::from_slice(&machine_stopped_output.stdout).unwrap();
+    assert_eq!(machine_stopped["state"], "stopped");
+
+    let instance_dir = single_instance_dir(&state_root);
+    let stopped_record = wait_status_file_state(&instance_dir, "stopped");
+    let failed_record = serde_json::json!({
+        "schema_version": stopped_record["schema_version"].clone(),
+        "instance_id": stopped_record["instance_id"].clone(),
+        "state": "failed",
+        "updated_at_epoch_ms": stopped_record["updated_at_epoch_ms"].clone(),
+        "detail": "isolated public-entry failed state",
+    });
+    fs::write(
+        instance_dir.join("status.json"),
+        serde_json::to_vec(&failed_record).unwrap(),
+    )
+    .unwrap();
+
+    let human_failed = run_top_level(binary, &state_root, &config, "status");
+    assert!(
+        human_failed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&human_failed.stderr)
+    );
+    let human_failed_stdout = String::from_utf8_lossy(&human_failed.stdout);
+    assert!(
+        human_failed_stdout.contains("[RouteCodexV3] Status state=failed instance=")
+            && human_failed_stdout.contains(
+                "impact=enabled listeners refuse client requests because the service failed"
+            )
+            && human_failed_stdout.contains(" detail=isolated public-entry failed state"),
+        "{human_failed_stdout}"
+    );
+
+    let machine_failed_output = run_status_json_top_level(binary, &state_root, &config);
+    assert!(
+        machine_failed_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&machine_failed_output.stderr)
+    );
+    let machine_failed: Value = serde_json::from_slice(&machine_failed_output.stdout).unwrap();
+    assert_eq!(machine_failed["state"], "failed");
+    assert_eq!(
+        machine_failed["detail"],
+        "isolated public-entry failed state"
+    );
 }
 
 #[test]
@@ -1691,9 +1934,16 @@ fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
         "{}",
         String::from_utf8_lossy(&start.stderr)
     );
-    let status = run_with_hooks_record(binary, &state_root, &config, "status", &record_path);
+    let status = run_with_hooks_record_args(
+        binary,
+        &state_root,
+        &config,
+        "status",
+        &record_path,
+        &["--json"],
+    );
     assert!(status.status.success());
-    let status_json = last_json(&status);
+    let status_json: Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(status_json["state"], "running");
     let instance_dir = single_instance_dir(&state_root);
     // Startup can report Running while the optional 15-second readiness
@@ -1790,9 +2040,17 @@ fn default_install_record_uses_internal_hooksd_from_cli_lifecycle() {
         wait_port(port, true);
         assert_eq!(http_get_json(port, "/health")["status"], "ok");
     }
-    let status = run_with_hooks_record(binary, &state_root, &config, "status", &record_path);
+    let status = run_with_hooks_record_args(
+        binary,
+        &state_root,
+        &config,
+        "status",
+        &record_path,
+        &["--json"],
+    );
     assert!(status.status.success());
-    assert_eq!(last_json(&status)["state"], "running");
+    let status_json: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status_json["state"], "running");
     let instance_dir = single_instance_dir(&state_root);
     wait_for_hooksd_marker(
         &instance_dir,
@@ -1873,9 +2131,16 @@ fn invalid_hooks_runtime_type_keeps_managed_cli_running_without_sidecar() {
         wait_port(port, true);
         assert_eq!(http_get_json(port, "/health")["status"], "ok");
     }
-    let status = run_with_hooks_record(binary, &state_root, &config, "status", &record_path);
+    let status = run_with_hooks_record_args(
+        binary,
+        &state_root,
+        &config,
+        "status",
+        &record_path,
+        &["--json"],
+    );
     assert!(status.status.success());
-    let status_json = last_json(&status);
+    let status_json: Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(status_json["state"], "running");
     assert!(status_json["detail"]
         .as_str()
@@ -2225,16 +2490,18 @@ fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup(
         .unwrap()
         .contains("invalid control request JSON"));
 
-    let status = run_with_hooks_record_tmpdir(
+    let status = run_with_hooks_record_tmpdir_args(
         binary,
         &state_root,
         &config,
         "status",
         &record_path,
         managed_tmp.path(),
+        &["--json"],
     );
     assert!(status.status.success());
-    assert_eq!(last_json(&status)["state"], "running");
+    let status_record: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status_record["state"], "running");
     assert!(hooksd_started.exists());
     for port in ports {
         wait_port(port, true);
@@ -2290,13 +2557,14 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
     send_invalid_json_request(ports[0]);
     send_path_not_found_request(ports[0]);
 
-    let status = run_top_level(binary, &state_root, &config, "status");
+    let status = run_status_json_top_level(binary, &state_root, &config);
     assert!(
         status.status.success(),
         "{}",
         String::from_utf8_lossy(&status.stderr)
     );
-    assert_eq!(last_json(&status)["state"], "running");
+    let status_record: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status_record["state"], "running");
 
     let restart = run_top_level(binary, &state_root, &config, "restart");
     assert!(
@@ -2855,13 +3123,15 @@ fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes(
             .to_string();
     assert_ne!(managed_child_pid, u64::from(start_cli_pid));
 
-    let status_from_new_cli = run(binary, &state_root, &config, "status");
+    let status_from_new_cli = run_status_json(binary, &state_root, &config);
     assert!(
         status_from_new_cli.status.success(),
         "{}",
         String::from_utf8_lossy(&status_from_new_cli.stderr)
     );
-    assert_eq!(last_json(&status_from_new_cli)["state"], "running");
+    let status_from_new_cli_record: Value =
+        serde_json::from_slice(&status_from_new_cli.stdout).unwrap();
+    assert_eq!(status_from_new_cli_record["state"], "running");
 
     let restart_from_new_cli = run_with_timeout(binary, &state_root, &config, "restart", 15_000);
     assert!(
@@ -3287,9 +3557,11 @@ fn start_preserves_occupied_admin_webui_port_and_serves_business() {
     }
     send_responses_dry_run_request(ports[0], "occupied-admin", root.path());
 
-    let run_with_admin = |command: &str| {
+    let run_with_admin = |command: &str, extra_args: &[&str]| {
         managed_test_command(binary, &state_root)
-            .args([command, "--config"])
+            .args([command])
+            .args(extra_args)
+            .args(["--config"])
             .arg(&config)
             .env("ROUTECODEX_V3_STATE_DIR", &state_root)
             .env("ROUTECODEX_V3_ADMIN_BIND", &admin_bind)
@@ -3299,13 +3571,14 @@ fn start_preserves_occupied_admin_webui_port_and_serves_business() {
             .output()
             .unwrap()
     };
-    let status = run_with_admin("status");
+    let status = run_with_admin("status", &["--json"]);
     assert!(
         status.status.success(),
         "{}",
         String::from_utf8_lossy(&status.stderr)
     );
-    assert_eq!(last_json(&status)["state"], "running");
+    let status_json: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status_json["state"], "running");
     for port in ports {
         assert_eq!(http_get_json(port, "/health")["status"], "ok");
     }
@@ -3318,7 +3591,7 @@ fn start_preserves_occupied_admin_webui_port_and_serves_business() {
         "occupied admin WebUI listener must remain reachable during status"
     );
 
-    let stop = run_with_admin("stop");
+    let stop = run_with_admin("stop", &[]);
     assert!(
         stop.status.success(),
         "{}",
@@ -3422,9 +3695,10 @@ fn start_releases_only_overlapping_port_from_foreign_managed_instance() {
     let single_start_success = single_start.status.success();
     let shared_port_open = TcpStream::connect(("127.0.0.1", shared_port)).is_ok();
     let sibling_still_open = TcpStream::connect(("127.0.0.1", sibling_port)).is_ok();
-    let aggregate_status_after_release = run(binary, &state_root, &aggregate_config, "status");
+    let aggregate_status_after_release = run_status_json(binary, &state_root, &aggregate_config);
     let aggregate_still_running = aggregate_status_after_release.status.success()
-        && last_json(&aggregate_status_after_release)["state"] == "running";
+        && serde_json::from_slice::<Value>(&aggregate_status_after_release.stdout)
+            .is_ok_and(|status| status["state"] == "running");
 
     let _ = run(binary, &state_root, &single_port_config, "stop");
     let _ = run(binary, &state_root, &aggregate_config, "stop");
@@ -3509,9 +3783,11 @@ fn foreign_background_start_releasing_all_ports_disconnects_foreground_owner() {
         "{}",
         String::from_utf8_lossy(&foreground_output.stderr)
     );
-    let foreground_status = run_top_level(binary, &state_root, &foreground_config, "status");
+    let foreground_status = run_status_json_top_level(binary, &state_root, &foreground_config);
     assert!(foreground_status.status.success());
-    assert_eq!(last_json(&foreground_status)["state"], "stopped");
+    let foreground_status_record: Value =
+        serde_json::from_slice(&foreground_status.stdout).unwrap();
+    assert_eq!(foreground_status_record["state"], "stopped");
 
     let background_status = status_json(binary, &state_root, &background_config);
     assert_eq!(background_status["state"], "running");
