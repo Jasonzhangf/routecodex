@@ -6,6 +6,7 @@ use routecodex_v3_config::V3ProviderErrorActionPolicyManifest;
 /// boundary; runtime failure policy uses the same matcher for source errors.
 pub(crate) fn provider_error_policy_matches_failure(
     policy: &V3ProviderErrorActionPolicyManifest,
+    routing_group: &str,
     provider_id: &str,
     provider_type: Option<&str>,
     model: Option<&str>,
@@ -14,9 +15,14 @@ pub(crate) fn provider_error_policy_matches_failure(
 ) -> bool {
     policy
         .scope
-        .provider_id
+        .routing_group
         .as_deref()
-        .is_none_or(|expected| expected == provider_id)
+        .is_none_or(|expected| expected == routing_group)
+        && policy
+            .scope
+            .provider_id
+            .as_deref()
+            .is_none_or(|expected| expected == provider_id)
         && policy
             .scope
             .provider_type
@@ -40,6 +46,7 @@ pub(crate) fn provider_error_policy_matches_failure(
 
 pub(crate) fn provider_error_policy_matches_source_failure(
     policy: &V3ProviderErrorActionPolicyManifest,
+    routing_group: &str,
     provider_id: &str,
     provider_type: Option<&str>,
     model: Option<&str>,
@@ -56,6 +63,7 @@ pub(crate) fn provider_error_policy_matches_source_failure(
         && policy.matcher.has_valid_model_output.is_none()
         && provider_error_policy_matches_failure(
             policy,
+            routing_group,
             provider_id,
             provider_type,
             model,
