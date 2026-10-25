@@ -27,6 +27,8 @@ pub struct V3TargetCandidate {
     pub wire_model: String,
     pub visible_model_ids: Vec<String>,
     pub model_capabilities: Vec<String>,
+    pub model_availability:
+        Option<routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig>,
     pub web_search_execution_mode: V3WebSearchExecutionMode,
     pub max_context_tokens: Option<u64>,
     pub max_tokens: Option<u64>,
@@ -402,6 +404,19 @@ impl V3TargetInterpreter {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
                     "{}:{}:{}:capability_mismatch",
+                    candidate.provider_id, candidate.auth_alias, candidate.model_id
+                ));
+                continue;
+            }
+            // Availability is declared on the provider model and is not a
+            // fallback tier: outside its windows the candidate is not eligible.
+            if candidate
+                .model_availability
+                .as_ref()
+                .is_some_and(|availability| !availability.is_available_at(now_ms))
+            {
+                unavailable.push(format!(
+                    "{}:{}:{}:availability_inactive",
                     candidate.provider_id, candidate.auth_alias, candidate.model_id
                 ));
                 continue;
@@ -867,6 +882,7 @@ impl V3TargetInterpreter {
                     wire_model: model.wire_name.clone(),
                     visible_model_ids: visible_model_ids.clone(),
                     model_capabilities: model.capabilities.clone(),
+                    model_availability: model.availability.clone(),
                     web_search_execution_mode: model.web_search_execution_mode,
                     max_context_tokens: model.max_context_tokens,
                     max_tokens: model.max_tokens,

@@ -388,6 +388,103 @@ fn provider_priority_schedule_excludes_synthetic_implicit_pools() {
     );
 }
 
+fn provider_model_availability_manifest(
+    availability: Option<routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig>,
+) -> V3Config05ManifestPublished {
+    let mut manifest = provider_priority_schedule_manifest();
+    manifest
+        .servers
+        .get_mut("s")
+        .unwrap()
+        .provider_priority_schedule
+        .providers
+        .clear();
+    manifest
+        .providers
+        .get_mut("a")
+        .unwrap()
+        .models
+        .get_mut("m")
+        .unwrap()
+        .availability = availability;
+    manifest
+}
+
+fn free_window_availability(
+    guard_minutes: u16,
+) -> routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+    routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+        timezone: "Asia/Shanghai".into(),
+        guard_minutes,
+        periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
+            start: "00:00".into(),
+            end: "08:00".into(),
+        }],
+    }
+}
+
+#[test]
+fn provider_model_availability_excludes_candidate_outside_window() {
+    let manifest = provider_model_availability_manifest(Some(free_window_availability(0)));
+    let target = V3TargetInterpreter::default();
+    let available = Availability {
+        blocked: BTreeSet::new(),
+    };
+    // 10:00 Asia/Shanghai is outside 00:00-08:00, so provider a must not win.
+    let selected = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_232_800_000,
+        )
+        .unwrap();
+    assert_eq!(selected.candidate.provider_id, "b");
+}
+
+#[test]
+fn provider_model_availability_guard_expands_window_edges() {
+    let manifest = provider_model_availability_manifest(Some(free_window_availability(10)));
+    let target = V3TargetInterpreter::default();
+    let available = Availability {
+        blocked: BTreeSet::new(),
+    };
+    // 08:05 Asia/Shanghai sits five minutes past the window end, inside guard.
+    let guarded = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_225_900_000,
+        )
+        .unwrap();
+    assert_eq!(guarded.candidate.provider_id, "a");
+    // 08:15 Asia/Shanghai is past the guarded edge.
+    let expired = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_226_500_000,
+        )
+        .unwrap();
+    assert_eq!(expired.candidate.provider_id, "b");
+}
+
+#[test]
+fn provider_model_availability_omitted_keeps_model_available_any_time() {
+    let manifest = provider_model_availability_manifest(None);
+    let target = V3TargetInterpreter::default();
+    let available = Availability {
+        blocked: BTreeSet::new(),
+    };
+    let selected = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_232_800_000,
+        )
+        .unwrap();
+    assert_eq!(selected.candidate.provider_id, "a");
+}
+
 #[test]
 fn weighted_forwarder_advances_to_lower_priority_only_after_higher_tier_exhausts() {
     let manifest = weighted_priority_forwarder_manifest();

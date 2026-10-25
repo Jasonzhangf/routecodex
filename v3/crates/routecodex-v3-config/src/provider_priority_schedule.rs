@@ -45,6 +45,85 @@ pub struct V3ProviderPriorityScheduleEntryAuthoringConfig {
     pub off_peak_tier: usize,
 }
 
+/// Provider-model availability declaration.
+///
+/// Owned by the provider model config. When `periods` is empty the model is
+/// available at any time. `guard_minutes` expands every period on both edges
+/// so routing never starts a billable request at a boundary.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V3ProviderModelAvailabilityAuthoringConfig {
+    #[serde(default = "default_provider_priority_timezone")]
+    pub timezone: String,
+    #[serde(default)]
+    pub guard_minutes: u16,
+    #[serde(default)]
+    pub periods: Vec<V3DailyTimeWindowAuthoringConfig>,
+}
+
+impl V3ProviderModelAvailabilityAuthoringConfig {
+    pub fn validate(&self, context: &str) -> Result<(), String> {
+        self.timezone.parse::<Tz>().map_err(|_| {
+            format!(
+                "{context} availability timezone must be a valid IANA timezone, got {:?}",
+                self.timezone
+            )
+        })?;
+        if self.guard_minutes > 720 {
+            return Err(format!(
+                "{context} availability guard_minutes must be between 0 and 720"
+            ));
+        }
+        for (index, period) in self.periods.iter().enumerate() {
+            let start = parse_priority_schedule_minutes(&period.start).ok_or_else(|| {
+                format!("{context} availability periods[{index}].start must use HH:MM")
+            })?;
+            let end = parse_priority_schedule_minutes(&period.end).ok_or_else(|| {
+                format!("{context} availability periods[{index}].end must use HH:MM")
+            })?;
+            if start == end {
+                return Err(format!(
+                    "{context} availability periods[{index}] start and end must differ"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn is_available_at(&self, now_ms: u64) -> bool {
+        if self.periods.is_empty() {
+            return true;
+        }
+        let Ok(timezone) = self.timezone.parse::<Tz>() else {
+            return false;
+        };
+        let Ok(timestamp_ms) = i64::try_from(now_ms) else {
+            return false;
+        };
+        let Some(utc) = DateTime::<Utc>::from_timestamp_millis(timestamp_ms) else {
+            return false;
+        };
+        let local = utc.with_timezone(&timezone);
+        let minute = local.hour() * 60 + local.minute();
+        self.periods.iter().any(|period| {
+            let Some(start) = parse_priority_schedule_minutes(&period.start) else {
+                return false;
+            };
+            let Some(end) = parse_priority_schedule_minutes(&period.end) else {
+                return false;
+            };
+            let guard = u32::from(self.guard_minutes);
+            let expanded_start = (u32::from(start) + 1440 - guard) % 1440;
+            let expanded_end = (u32::from(end) + guard) % 1440;
+            if expanded_start < expanded_end {
+                minute >= expanded_start && minute < expanded_end
+            } else {
+                minute >= expanded_start || minute < expanded_end
+            }
+        })
+    }
+}
+
 impl V3ProviderPriorityScheduleAuthoringConfig {
     pub fn is_default(&self) -> bool {
         self == &Self::default()
