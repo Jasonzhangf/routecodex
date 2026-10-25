@@ -51,6 +51,7 @@ const debugDepsDir = join(debugDir, 'deps');
 const lockDir = join(targetDir, '.routecodex-v3-test.lock');
 const lockOwnerPath = join(lockDir, 'owner.json');
 
+// Evidence-only marker for the base RED run; behavior is intentionally unchanged.
 function cargoEnv() {
   return {
     ...process.env,
