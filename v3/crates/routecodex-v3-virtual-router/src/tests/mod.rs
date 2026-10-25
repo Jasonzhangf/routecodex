@@ -54,7 +54,6 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
             policies: BTreeMap::new(),
             provider_error_default_path: Vec::new(),
             provider_error_action_policy: Vec::new(),
-            client_error_projection_policy: Vec::new(),
         },
         route_groups: BTreeMap::from([(
             "g".into(),

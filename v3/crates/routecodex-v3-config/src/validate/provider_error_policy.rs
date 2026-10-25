@@ -31,13 +31,10 @@ fn compile_error(
         .unwrap_or_else(default_provider_error_path);
     let provider_error_action_policy =
         compile_provider_error_action_policies(authoring.provider_error_action_policy)?;
-    let client_error_projection_policy =
-        compile_client_error_projection_policies(authoring.client_error_projection_policy)?;
     Ok(V3ErrorManifest {
         policies,
         provider_error_action_policy,
         provider_error_default_path,
-        client_error_projection_policy,
     })
 }
 
@@ -157,10 +154,8 @@ fn legacy_provider_error_path(
         });
     }
     path.push(V3ProviderDispositionStepManifest::Project {
-        status: 503,
         reason_code: action.reason_code.clone(),
         public_code: None,
-        message_mode: V3ClientErrorProjectionMessageMode::CodeOnly,
     });
     validate_provider_error_path(policy_id, &path)?;
     Ok(path)
@@ -196,15 +191,11 @@ fn compile_provider_error_path(
                 provider_global_failure,
             },
             V3ProviderDispositionStepAuthoringConfig::Project {
-                status,
                 reason_code,
                 public_code,
-                message_mode,
             } => V3ProviderDispositionStepManifest::Project {
-                status,
                 reason_code,
                 public_code,
-                message_mode,
             },
         })
         .collect::<Vec<_>>();
@@ -262,15 +253,11 @@ fn validate_provider_error_path(
                     )));
                 }
             }
-            V3ProviderDispositionStepManifest::Project {
-                status,
-                reason_code,
-                ..
-            } => {
+            V3ProviderDispositionStepManifest::Project { reason_code, .. } => {
                 project_count += 1;
-                if *status < 400 || reason_code.trim().is_empty() {
+                if reason_code.trim().is_empty() {
                     return Err(validation(format!(
-                        "provider error policy {policy_id} project requires status >= 400 and non-empty reason_code"
+                        "provider error policy {policy_id} project requires non-empty reason_code"
                     )));
                 }
                 if index + 1 != path.len() {
@@ -292,7 +279,7 @@ fn validate_provider_error_path(
 fn default_provider_error_path() -> Vec<V3ProviderDispositionStepManifest> {
     vec![
         // aedeac2/a6a1985 不变量：候选仍在时，typed provider 失败默认
-        // WaitThenReselect，而不是 RetrySame；客户端错误仅在池枯竭后投射。
+        // WaitThenReselect，而不是 RetrySame；池枯竭后仅终止请求 transport。
         V3ProviderDispositionStepManifest::WaitRetry {
             retry_mode: V3ProviderErrorRetryMode::ReselectBeforeClientProjection,
             max_attempts: 3,
@@ -306,10 +293,8 @@ fn default_provider_error_path() -> Vec<V3ProviderDispositionStepManifest> {
             provider_global_failure: false,
         },
         V3ProviderDispositionStepManifest::Project {
-            status: 503,
             reason_code: "provider_failure".to_string(),
             public_code: None,
-            message_mode: V3ClientErrorProjectionMessageMode::CodeOnly,
         },
     ]
 }
@@ -444,59 +429,6 @@ fn compile_provider_error_action(
         disable_scope: action.disable_scope,
         provider_global_failure: action.provider_global_failure,
     })
-}
-
-fn compile_client_error_projection_policies(
-    policies: Vec<V3ClientErrorProjectionPolicyAuthoringConfig>,
-) -> Result<Vec<V3ClientErrorProjectionPolicyManifest>, V3ConfigError> {
-    let mut seen = BTreeSet::new();
-    let mut compiled = Vec::with_capacity(policies.len());
-    for policy in policies {
-        require_id("client error projection policy", &policy.policy_id)?;
-        if !seen.insert(policy.policy_id.clone()) {
-            return Err(validation(format!(
-                "duplicate client error projection policy {}",
-                policy.policy_id
-            )));
-        }
-        if policy.matcher.reason_code.is_none() && policy.matcher.action_class.is_none() {
-            return Err(validation(format!(
-                "client error projection policy {} matcher is empty",
-                policy.policy_id
-            )));
-        }
-        if let Some(reason_code) = policy.matcher.reason_code.as_deref() {
-            require_id("client error projection reason_code", reason_code)?;
-            if looks_like_secret_literal(reason_code) {
-                return Err(validation(format!(
-                    "client error projection policy {} reason_code must be secret-free",
-                    policy.policy_id
-                )));
-            }
-        }
-        require_id(
-            "client error projection public_code",
-            &policy.projection.public_code,
-        )?;
-        if looks_like_secret_literal(&policy.projection.public_code) {
-            return Err(validation(format!(
-                "client error projection policy {} public_code must be secret-free",
-                policy.policy_id
-            )));
-        }
-        compiled.push(V3ClientErrorProjectionPolicyManifest {
-            policy_id: policy.policy_id,
-            matcher: V3ClientErrorProjectionMatcherManifest {
-                reason_code: policy.matcher.reason_code,
-                action_class: policy.matcher.action_class,
-            },
-            projection: V3ClientErrorProjectionManifest {
-                public_code: policy.projection.public_code,
-                message_mode: policy.projection.message_mode,
-            },
-        });
-    }
-    Ok(compiled)
 }
 
 fn validate_optional_policy_id(

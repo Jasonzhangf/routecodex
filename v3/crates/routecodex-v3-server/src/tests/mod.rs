@@ -235,7 +235,6 @@ fn test_v3_listener_state_with_debug(
             policies: BTreeMap::new(),
             provider_error_default_path: Vec::new(),
             provider_error_action_policy: Vec::new(),
-            client_error_projection_policy: Vec::new(),
         },
     });
     let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
@@ -4732,7 +4731,6 @@ fn error_projection_appends_human_console_failure_line() {
             policies: BTreeMap::new(),
             provider_error_default_path: Vec::new(),
             provider_error_action_policy: Vec::new(),
-            client_error_projection_policy: Vec::new(),
         },
     });
     let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();

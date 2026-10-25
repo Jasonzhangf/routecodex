@@ -1079,7 +1079,7 @@ features:
   - publish_v3_config_05_manifest_from_v3_config_04 emits the deterministic published manifest and auth handles
   - provider auth secretFile supports single-key and list authoring by expanding key names into ordered secret_file + secret_key handles without materializing values
   - provider auth secretFile rejects malformed, duplicate, empty, unreadable, or mixed explicit authoring at config compile time
-  - provider_error_action_policy and client_error_projection_policy compile into V3ErrorManifest without secrets, provider runtime hardcoding, or payload leakage
+  - provider_error_action_policy compiles into V3ErrorManifest preserving internal reason_code/public_code and recovery semantics; public Config parsing rejects retired client_error_projection_policy and Project.status/message_mode (issue2f2ab62_ in config_v3_contract)
   - Provider authoring rejects an Authorization header after trimming and case-insensitive comparison before publishing the manifest
   required_contract:
   - v3.config.compile chain owner_feature_id resolves through the V3 function map and verification map
@@ -3423,6 +3423,7 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/manifests/v3.provider_action_gate.mainline.yml
   required_positive:
+  - issue720eb7f_source_policy_group_isolation and issue720eb7f_response_failure_policy_group_isolation exercise the public runtime consumer with actual HTTP and response-stream failures; typed failure-session routing_group selects group A policy only for A, while unscoped policy remains global, configured retry delay is consumed, and provider.model.key cooldown remains isolated.
   - issue4aeb668_compat_failure_reselects_later_tier exercises public HTTP request-side compat failure followed by a healthy later-tier provider; run node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue4aeb668_ -- --nocapture --test-threads=1
   - issue4aeb668_actual_exhaustion_has_no_client_error_payload verifies JSON and SSE transport exhaustion without client errors or empty completions through the same command
   - issue4aeb668_local599_recovers_through_public_runtime_consumer preserves actual upstream HTTP 200 and internal 599 while recovering through another provider; run node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test local599_consumer_blackbox -- --nocapture
@@ -3455,6 +3456,7 @@ features:
   - Genuine provider HTTP or native SSE errors cannot reach the client as HTTP errors, protocol error events or fabricated successful completion.
   - The internal empty-attempt 502 keeps its real upstream HTTP status separate from the internal classification, never enters client payload or MetadataCenter, and never fabricates a client HTTP error or empty completion.
   required_gates:
+  - CARGO_BUILD_JOBS=2 cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_runtime_closeout issue720eb7f_ -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issuee63d2f2_ -- --nocapture --test-threads=1
 
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox issue0ff6700_ -- --nocapture --test-threads=1
