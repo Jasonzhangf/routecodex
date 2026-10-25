@@ -24,6 +24,7 @@ pub(crate) fn instance_residual_pids_for_listener_set(
 ) -> Result<Vec<u32>, V3LifecycleError> {
     let target_ports = listeners
         .iter()
+        .filter(|listener| is_business_listener_declaration(listener))
         .map(|listener| listener.port)
         .collect::<BTreeSet<_>>();
     let instances_root = state_root.join("instances");
@@ -56,6 +57,7 @@ pub(crate) fn instance_residual_pids_for_listener_set(
         let overlaps = published
             .listeners
             .iter()
+            .filter(|listener| is_business_listener_declaration(listener))
             .any(|listener| target_ports.contains(&listener.port));
         if !overlaps {
             continue;
