@@ -5661,6 +5661,10 @@ async fn responses_client_anthropic_malformed_reasoning_breaks_transport_without
 #[tokio::test]
 async fn anthropic_client_anthropic_cache_usage_keeps_native_wire_shape() {
     let _test_guard = TEST_LOCK.lock().await;
+    // This case asserts the exact single-round cache usage on the native wire,
+    // so the Chat Process continuation is pinned off; a real refill sums every
+    // round's usage into the delivered response.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     std::env::set_var("V3_P6_TEST_KEY", "usage-controlled-key");
     let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
         StatusCode::OK,
@@ -7060,6 +7064,9 @@ fn spawn_concurrency_client(
 #[tokio::test]
 async fn responses_provider_concurrency_full_switches_without_queueing() {
     let _test_guard = TEST_LOCK.lock().await;
+    // This case counts upstream provider attempts, so the Chat Process
+    // continuation must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let (first_url, mut first_captures, first_release, first_shutdown) =
         start_controlled_held_upstream().await;
     let (second_url, mut second_captures, second_release, second_shutdown) =
@@ -7121,6 +7128,9 @@ async fn responses_provider_concurrency_full_switches_without_queueing() {
 #[tokio::test]
 async fn responses_provider_concurrency_all_full_exhausts_without_queueing() {
     let _test_guard = TEST_LOCK.lock().await;
+    // This case counts upstream provider attempts, so the Chat Process
+    // continuation must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let (first_url, mut first_captures, first_release, first_shutdown) =
         start_controlled_held_upstream().await;
     let (second_url, mut second_captures, second_release, second_shutdown) =
