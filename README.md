@@ -46,7 +46,7 @@ curl http://127.0.0.1:5555/v1/messages \
 
 V3 的唯一 authoring 文件是 `~/.rcc/config.toml`。Provider、模型、路由池、监听器和认证句柄必须在该配置及其声明的 V3 provider 文件中定义，并由 `rccv3 config check` 编译为 manifest。
 
-`scripts/install-global.sh` 与 `scripts/install-release.sh` 当前仍默认 `~/.rcc/config.v3.toml`；该安装脚本路径缺陷由 `a9af206` 跟踪，尚未修复。安装和重启时显式传入 `-c ~/.rcc/config.toml`，不要把配置复制成旧文件名。
+`scripts/install-global.sh` 与 `scripts/install-release.sh` 当前仍默认 `~/.rcc/config.v3.toml`；该安装脚本路径缺陷由 `a9af206` 跟踪，尚未修复。
 
 API key 通过 V3 配置引用的认证句柄或环境变量提供，例如：
 
