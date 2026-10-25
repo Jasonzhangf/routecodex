@@ -27,6 +27,63 @@ fn client_custom_tool_call(
     call
 }
 
+/// Request-local resolver for one OpenAI Chat `tool_call` -> Responses item.
+///
+/// The buffered response builder and the incremental Relay client projector
+/// both call this owner, so tool kind (`function_call` vs `custom_tool_call`),
+/// namespace, client leaf name, call id and custom input never diverge between
+/// the JSON path and the first-frame SSE path.
+#[derive(Clone)]
+pub(crate) struct V3OpenAiChatToolCallProjection {
+    custom_tool_names: BTreeMap<String, V3ClientCustomToolName>,
+    mcp_tool_identities: std::collections::HashMap<String, (String, String)>,
+    native_tool_search: bool,
+}
+
+impl V3OpenAiChatToolCallProjection {
+    pub(crate) fn from_request(request: &Value) -> Result<Self, V3ResponsesRelayRuntimeError> {
+        let registry =
+            provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+                request,
+                "openai-chat",
+            )
+            .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+        let custom_tool_names = registry
+            .identities()
+            .filter(|identity| {
+                identity.kind == provider_compat_core::namespace_tools::ToolKind::Custom
+            })
+            .map(|identity| {
+                (
+                    identity.actual_wire_name.clone(),
+                    V3ClientCustomToolName {
+                        name: identity.leaf_name.clone(),
+                        namespace: identity
+                            .is_namespaced()
+                            .then(|| identity.client_namespace()),
+                    },
+                )
+            })
+            .collect();
+        let mcp_tool_identities = registry.restore_identities();
+        let native_tool_search = registry.declares_native_tool_search();
+        Ok(Self {
+            custom_tool_names,
+            mcp_tool_identities,
+            native_tool_search,
+        })
+    }
+
+    pub(crate) fn project(&self, call: &Value) -> Result<Value, V3ResponsesRelayRuntimeError> {
+        build_v3_responses_function_call_from_openai_chat_tool_call(
+            call,
+            &self.custom_tool_names,
+            &self.mcp_tool_identities,
+            self.native_tool_search,
+        )
+    }
+}
+
 pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
     payload: &Value,
     provider_semantic_body: &Value,
@@ -43,37 +100,11 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
     let mut output = Vec::new();
     let mut output_text_parts = Vec::new();
     let mut finish_reason = None;
-    let aliases = super::request_outbound_mcp_names::openai_chat_namespace_wire_aliases(
-        provider_semantic_body,
-    )
-    .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-    let registry =
-        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
-            provider_semantic_body,
-            "openai-chat",
-        )
-        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-    let custom_tool_names = registry
-        .identities()
-        .filter(|identity| identity.kind == provider_compat_core::namespace_tools::ToolKind::Custom)
-        .map(|identity| {
-            (
-                identity.actual_wire_name.clone(),
-                V3ClientCustomToolName {
-                    name: identity.leaf_name.clone(),
-                    namespace: identity
-                        .is_namespaced()
-                        .then(|| identity.client_namespace()),
-                },
-            )
-        })
-        .collect();
-    let mcp_tool_identities = registry.restore_identities();
-    // One shared owner decides the native discovery kind from the same
-    // request-local declaration registry that owns namespace identity. This
-    // replaces the earlier scope-local inference that re-walked tools,
-    // additional_tools and discovered tool_search_output separately.
-    let native_tool_search = registry.declares_native_tool_search();
+    // One shared owner decides tool kind, namespace, client name, call id and
+    // custom input from the request-local declaration registry. The incremental
+    // Relay projector uses this same resolver.
+    let tool_call_projection =
+        V3OpenAiChatToolCallProjection::from_request(provider_semantic_body)?;
     for choice in choices {
         if finish_reason.is_none() {
             finish_reason = choice
@@ -95,12 +126,7 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
             }
             if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
                 for call in tool_calls {
-                    output.push(build_v3_responses_function_call_from_openai_chat_tool_call(
-                        call,
-                        &custom_tool_names,
-                        &mcp_tool_identities,
-                        native_tool_search,
-                    )?);
+                    output.push(tool_call_projection.project(call)?);
                 }
             }
             if let Some(refusal) = message.get("refusal").and_then(Value::as_str) {
