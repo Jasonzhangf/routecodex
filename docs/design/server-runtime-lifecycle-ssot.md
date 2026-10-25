@@ -1,5 +1,7 @@
 # Server Runtime Lifecycle SSOT（无 pid 文件真源设计）
 
+适用边界：本文保留早期生命周期设计与事故依据。下文的 TypeScript 路径、V2 配置布局和迁移清单不是当前操作指令。当前 V3 owner、受管重启与验收以 [项目合同](../../AGENTS.md)、[V3 lifecycle 审阅面](../architecture/wiki/v3-managed-server-lifecycle.md) 和 [运行证据 Skill](../../.agents/skills/rcc-dev-skills/references/50-rcc-config-ssot.md) 为准。文中的 stop/start 示例不授予执行权限，也不得作为 restart 的替代。
+
 本文定义 RouteCodex 本地 server runtime 的生命周期真源设计与落地。审计起点：`~/.rcc` 根目录散落 16 个 `server-<port>.pid`、5 个 `daemon-stop-<port>.json`、12 个 `token-stats.json.tmp-*`、3 个 `config.toml.bak-*`、2 个 `config.<provider>.toml`，且 13/16 pid 对应进程已死；`daemon-stop` 全部超过 60s TTL 但未被消费或清理。结论：pid 文件是“辅助索引”而非真源，daemon-stop 缺独立 reaper。修复目标是把运行时真相从“文件系统散落”改成“控制面 + 实例 registry + port/identity 探测”，让 pid 不再是必需输入。
 
 ## 1. 原则
