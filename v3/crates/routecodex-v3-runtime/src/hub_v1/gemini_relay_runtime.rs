@@ -211,49 +211,50 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
     transport: &T,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
-    mut initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
+    initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
 ) -> Result<V3GeminiRelayRuntimeOutput, V3GeminiRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
-    // 协议差异收敛在 V3GeminiRelayCodec。
+    // 协议差异收敛在 V3GeminiRelayCodec；Chat Process 有界续杯循环在骨架之上的
+    // 共享入口，策略仍只有 decide_v3_chat_process_refill 一处实现。
     let routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?
         .to_string();
-    let mut failure_events = initial_handoff
-        .as_mut()
-        .map(|handoff| std::mem::take(&mut handoff.provider_failure_events))
-        .unwrap_or_default();
-    execute_v3_relay_runtime_core::<V3GeminiRelayCodec, T>(
-        manifest,
-        &input.server_id,
-        input.failure_session_scope.clone(),
-        &input.request_id,
-        &input.endpoint_path,
-        V3HubExecutionMode::Relay,
-        input.payload,
-        transport,
-        provider_health,
-        retry_policy,
-        Vec::new(),
-        true,
-        initial_handoff,
-        &mut failure_events,
-    )
-    .await
-    .map_err(|error| match error {
-        V3RelayCoreError::EndpointPath(message) => V3GeminiRelayRuntimeError::EndpointPath(message),
-        V3RelayCoreError::ResponseGovernance(error) => {
-            V3GeminiRelayRuntimeError::Target(error.to_string())
-        }
-        V3RelayCoreError::ProviderPoolExhausted {
-            attempted_candidates,
-        } => V3GeminiRelayRuntimeError::ProviderPoolExhausted {
-            attempted_candidates,
-        },
-        // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
-        V3RelayCoreError::Target(message) | V3RelayCoreError::StaticRegistry(message) => {
-            V3GeminiRelayRuntimeError::Target(message)
-        }
-    })
+    let (output, _failure_events) =
+        super::relay_runtime_core::execute_v3_relay_runtime_with_chat_process_refill::<
+            V3GeminiRelayCodec,
+            T,
+        >(
+            manifest,
+            &input.server_id,
+            input.failure_session_scope.clone(),
+            &input.request_id,
+            &input.endpoint_path,
+            V3HubExecutionMode::Relay,
+            input.payload,
+            transport,
+            provider_health,
+            retry_policy,
+            initial_handoff,
+        )
+        .await
+        .map_err(|(error, _)| match error {
+            V3RelayCoreError::EndpointPath(message) => {
+                V3GeminiRelayRuntimeError::EndpointPath(message)
+            }
+            V3RelayCoreError::ResponseGovernance(error) => {
+                V3GeminiRelayRuntimeError::Target(error.to_string())
+            }
+            V3RelayCoreError::ProviderPoolExhausted {
+                attempted_candidates,
+            } => V3GeminiRelayRuntimeError::ProviderPoolExhausted {
+                attempted_candidates,
+            },
+            // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
+            V3RelayCoreError::Target(message) | V3RelayCoreError::StaticRegistry(message) => {
+                V3GeminiRelayRuntimeError::Target(message)
+            }
+        })?;
+    Ok(output)
 }
 
 /// Gemini relay 协议 codec：协议差异的唯一收敛面（骨架驱动）。
@@ -318,6 +319,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         tool_thinking_enabled: bool,
         _expected_model_id: &str,
         _namespace_registry: &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
+        refill: &mut super::relay_runtime_core::V3RelayRefillCarrier,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response_with_source(
             provider_value,
@@ -330,6 +332,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             retain_response_cipher,
             tool_thinking_enabled,
             true,
+            Some(refill),
         )
         .map_err(|error| match error {
             V3GeminiRelayRuntimeError::Response(error) => {
@@ -386,6 +389,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
                         value, Some(&request_id), provider_wire_protocol, &Value::Null,
                         V3HubTransportIntent::Sse, &mut Vec::new(),
                         compatibility_profile.as_deref(), _retain_response_cipher, tool_thinking_enabled, true,
+                        None,
                     );
                     if let Err(V3GeminiRelayRuntimeError::Response(error)) = &projection {
                         outcome.response_control.record_response_governance_failure(error.clone())?;
@@ -631,6 +635,7 @@ fn project_json_response(
         retain_response_cipher,
         tool_thinking_enabled,
         false,
+        None,
     )
 }
 
@@ -645,6 +650,7 @@ fn project_json_response_with_source(
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
     complete_provider_attempt: bool,
+    refill: Option<&mut super::relay_runtime_core::V3RelayRefillCarrier>,
 ) -> Result<Value, V3GeminiRelayRuntimeError> {
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         provider_value,
@@ -660,6 +666,12 @@ fn project_json_response_with_source(
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
     let mut resp02 = hooks.normalize_with_context(resp01, None, request_id)?;
+    // 续杯只看源显式 summary：必须在 Chat->Responses 转换与治理可能合成 summary
+    // 之前取自归一化后的原生 payload，否则转换写出的 summary 会被误判成源显式。
+    let source_has_summary = refill.is_some()
+        && super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
+            resp02.provider_payload(),
+        );
     match provider_protocol {
         V3HubProviderWireProtocol::OpenAiChat => {
             let canonical = super::responses_relay_runtime::build_v3_responses_provider_response_from_openai_chat_payload(
@@ -680,10 +692,32 @@ fn project_json_response_with_source(
     )?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp03 = resp03.into_governed();
+    let (accumulated_items, accumulated_usage) = match refill {
+        Some(refill) => {
+            super::relay_runtime_core::publish_v3_relay_chat_process_round(
+                &resp03,
+                source_has_summary,
+                resp03.previous.source_terminal_completed,
+                refill,
+            );
+            (
+                Some(refill.accumulated_items.clone()),
+                refill.accumulated_usage.clone(),
+            )
+        }
+        None => (None, None),
+    };
     let resp05 = if request_id.is_some() {
         try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
             resp03,
-            move |payload| {
+            move |mut payload| {
+                if let Some(accumulated_items) = accumulated_items.as_deref() {
+                    super::resp_chat_process_03_governed::apply_v3_chat_process_refill_accumulation(
+                        &mut payload,
+                        accumulated_items,
+                        accumulated_usage.as_ref(),
+                    );
+                }
                 super::gemini_responses_codec::project_responses_to_gemini_client(
                     &payload,
                     provider_protocol,

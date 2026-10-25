@@ -21,6 +21,50 @@ pub struct V3HubReqInbound02Normalized {
     pub(crate) memory_raw_capture_guidance_injected: bool,
 }
 
+/// Which request field carries the conversation history this stage will read.
+///
+/// Inbound canonicalization is the sole owner of that decision, because it
+/// chooses the canonicalizer by entry protocol but also handles a Responses
+/// request that carries the Chat shape. The refill continuation builder reads
+/// this same answer, so a continuation always extends the field the next
+/// execution will actually read instead of guessing from field names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3HubInboundHistoryField {
+    /// The request carries both `input` and a derived Chat `messages` twin.
+    /// `input` is the complete history, so the refill continuation keeps it and
+    /// drops the twin instead of maintaining two competing representations.
+    ResponsesDual,
+    Messages,
+    Input,
+    Contents,
+}
+
+/// The single decision that maps a request to the field inbound will read as
+/// the conversation history. Owned here so the canonicalizer and the refill
+/// continuation construction cannot diverge.
+pub(crate) fn v3_hub_inbound_history_field(
+    entry_protocol: V3HubEntryProtocol,
+    payload: &Value,
+) -> V3HubInboundHistoryField {
+    match entry_protocol {
+        V3HubEntryProtocol::Gemini => V3HubInboundHistoryField::Contents,
+        V3HubEntryProtocol::Anthropic | V3HubEntryProtocol::OpenAiChat => {
+            V3HubInboundHistoryField::Messages
+        }
+        V3HubEntryProtocol::Responses => {
+            let has_input = payload.get("input").is_some();
+            let has_messages = payload.get("messages").and_then(Value::as_array).is_some();
+            if has_input && has_messages {
+                V3HubInboundHistoryField::ResponsesDual
+            } else if has_input || !has_messages {
+                V3HubInboundHistoryField::Input
+            } else {
+                V3HubInboundHistoryField::Messages
+            }
+        }
+    }
+}
+
 pub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(
     input: V3HubReqInbound01ClientRaw,
 ) -> V3HubReqInbound02Normalized {
@@ -146,18 +190,7 @@ fn normalize_v3_hub_req_inbound_02_payload(
                 .is_none())
     {
         let raw = Arc::make_mut(&mut input.payload.0);
-        let mut canonical =
-            super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(raw)
-                .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
-        if let Some(source) = raw.get("messages").filter(|value| !value.is_null()) {
-            let source = source.as_array().ok_or_else(|| {
-                "Responses inbound canonicalization failed: messages must be an array".to_string()
-            })?;
-            let decoded = canonical["messages"]
-                .as_array()
-                .expect("codec Chat messages");
-            canonical["messages"] = Value::Array(merge_responses_chat_histories(source, decoded)?);
-        }
+        let canonical = responses_merged_chat_canonical(raw)?;
         input.payload.0 = Arc::new(canonical);
         return Ok(V3HubReqInbound02Normalized {
             previous: input,
@@ -377,6 +410,94 @@ fn comparable_chat_content(content: &Value) -> &Value {
         }
     }
     content
+}
+
+fn responses_merged_chat_canonical(raw: &Value) -> Result<Value, String> {
+    let mut canonical =
+        super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(raw)
+            .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
+    if let Some(source) = raw.get("messages").filter(|value| !value.is_null()) {
+        let source = source.as_array().ok_or_else(|| {
+            "Responses inbound canonicalization failed: messages must be an array".to_string()
+        })?;
+        let decoded = canonical["messages"]
+            .as_array()
+            .expect("codec Chat messages");
+        canonical["messages"] = Value::Array(merge_responses_chat_histories(source, decoded)?);
+    }
+    Ok(canonical)
+}
+
+/// The complete business contribution inbound accepts for a Responses payload.
+///
+/// A Responses request may carry both `input` and a `messages` twin. Which side
+/// owns the history is not decidable from field presence: the merge in
+/// [`merge_responses_chat_histories`] contributes business extensions from
+/// either side, accepts a Chat history plus decoded tool results, and rejects
+/// twins that are not equivalent. The decoded `input` also lifts declarations
+/// that live only in its items, such as `additional_tools`, into the effective
+/// tool set. Collapsing the dual representation into one must therefore carry
+/// this whole contribution, not a single raw field.
+pub(crate) struct V3HubResponsesAcceptedChatContribution {
+    /// The merged Chat history ReqInbound02 accepts.
+    pub(crate) messages: Vec<Value>,
+    /// The effective tool declarations, including those lifted out of `input`
+    /// items. `None` means the request declares no tools at all.
+    pub(crate) tools: Option<Value>,
+}
+
+pub(crate) fn v3_hub_responses_accepted_chat_contribution(
+    payload: &Value,
+) -> Result<V3HubResponsesAcceptedChatContribution, String> {
+    let canonical = responses_merged_chat_canonical(payload)?;
+    let messages = canonical
+        .get("messages")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| "Responses accepted history must be an array".to_string())?;
+    let tools = v3_hub_responses_effective_tool_declarations(payload, &canonical)?;
+    Ok(V3HubResponsesAcceptedChatContribution { messages, tools })
+}
+
+/// The effective tool declarations a collapsed dual Responses request must keep.
+///
+/// Two things have to hold at once. Hosted and MCP declarations carry no tool
+/// identity, so they must be copied from every accepted declaration source;
+/// the canonical Chat request already lifts them out of `additional_tools`
+/// items and standalone `web_search` items, which is why they are read from
+/// there. Declarations that do carry an identity must be emitted once with the
+/// final refresh winning, because the next execution feeds the whole root
+/// `tools` array in as a single source and rejects two schemas for one
+/// identity. Resolving through the identity registry satisfies both, and the
+/// result is re-entrant for the next round.
+fn v3_hub_responses_effective_tool_declarations(
+    payload: &Value,
+    canonical: &Value,
+) -> Result<Option<Value>, String> {
+    let mut hosted: Vec<Value> = Vec::new();
+    for tool in canonical
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if matches!(
+            tool.get("type").and_then(Value::as_str),
+            Some("namespace" | "function" | "custom")
+        ) {
+            continue;
+        }
+        if !hosted.iter().any(|seen| seen == tool) {
+            hosted.push(tool.clone());
+        }
+    }
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            payload,
+            "openai-responses",
+        )?;
+    let declarations = registry.source_tools(&hosted);
+    Ok((!declarations.is_empty()).then(|| Value::Array(declarations)))
 }
 
 pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01(

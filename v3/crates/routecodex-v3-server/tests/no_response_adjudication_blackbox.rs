@@ -198,6 +198,12 @@ async fn issuee63d2f2_review_orphan_without_tools_recovers_or_exhausts() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// The explicit continuation instruction is the user-facing refill contract, so
+/// the public entry tests pin it by value instead of reading the runtime's
+/// internal constant.
+const REFILL_INSTRUCTION: &str =
+    "继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。";
+
 /// One complete governed refill round. SSE ends at the terminal seal.
 fn refill_round_wire(stream: bool, text: &str) -> String {
     let response = text_response(text);
@@ -699,6 +705,320 @@ async fn refill_direct_relay_content_parity_public() {
     std::env::remove_var(KEY_ENV);
 }
 
+/// Stable public ID: the `/v1/chat/completions` entry runs its Relay path
+/// through the same bounded-refill policy as the Responses entry. A chat client
+/// therefore receives both rounds of a prematurely-finished task in one
+/// response, and a source-explicit summary still stops the chain.
+#[tokio::test]
+async fn refill_chat_relay_entry_bounded_refill_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "CHAT_RELAY_SECOND"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "CHAT_RELAY_FIRST")],
+            // `EntryOptions::default()` pins `Some(0)`; this test runs the
+            // compiled policy, which is the real production default.
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(endpoint.replace("/v1/responses", "/v1/chat/completions"))
+            .json(&json!({
+                "model": "test.test",
+                "messages": [{"role": "user", "content": "unfinished chat task"}],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "chat relay entry must run exactly one refill: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "chat relay entry must deliver normally: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("CHAT_RELAY_FIRST") && consumed.body.contains("CHAT_RELAY_SECOND"),
+        "both rounds must reach the chat client: {consumed:?}"
+    );
+    // The second provider request is the refill continuation, not a replay of
+    // the first one: it must carry the earlier answer and the instruction.
+    assert!(
+        captured[1].to_string().contains("CHAT_RELAY_FIRST")
+            && captured[1].to_string().contains(REFILL_INSTRUCTION),
+        "chat continuation must carry the history and the instruction: {}",
+        captured[1]
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: the `/v1beta/models/:model:generateContent` entry runs its
+/// Relay path through the same bounded-refill policy. A source-explicit
+/// summary stops the chain, and premature content triggers exactly one refill.
+#[tokio::test]
+async fn refill_gemini_relay_entry_bounded_refill_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "GEMINI_RELAY_SECOND"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "GEMINI_RELAY_FIRST")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(endpoint.replace("/v1/responses", "/v1beta/models/test.test:generateContent"))
+            .json(&json!({
+                "contents": [{"role": "user", "parts": [{"text": "unfinished gemini task"}]}],
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let attempts = std::iter::from_fn(|| captures.try_recv().ok()).count();
+    stop_entry(handle, shutdown).await;
+    assert!(
+        consumed.transport_error.is_none(),
+        "gemini relay entry must deliver normally: {consumed:?}"
+    );
+    assert_eq!(
+        attempts, 2,
+        "gemini relay entry must run exactly one refill: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("GEMINI_RELAY_FIRST")
+            && consumed.body.contains("GEMINI_RELAY_SECOND"),
+        "both rounds must reach the gemini client: {consumed:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: a native Gemini provider round trips through the same
+/// Gemini Relay entry, so the provider wire is `contents` on both sides.
+///
+/// This locks two facts the Responses-provider case cannot see:
+/// - the continuation must extend the client's `contents` history. Writing a
+///   Responses `input` array would leave the second provider request identical
+///   to the first one, without the earlier answer and without the instruction;
+/// - after earlier rounds join `output`, the candidate association
+///   (`gemini_candidate_outcomes[].output_indices`) must stay valid, or the
+///   native Gemini projection follows a stale index and emits the wrong round.
+#[tokio::test]
+async fn refill_gemini_native_provider_entry_bounded_refill_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    // The first round delivers text, an empty text Part and a native image
+    // Part: the continuation must keep the representable parts and must not
+    // turn the empty Part into a model turn of its own.
+    let first_round = json!({"candidates":[{
+        "index": 0,
+        "finishReason": "STOP",
+        "content": {"role": "model", "parts": [
+            {"text": "GEMINI_NATIVE_FIRST"},
+            {"text": ""},
+            {"inlineData": {"mimeType": "image/png", "data": "R0VNSU5J"}}
+        ]}
+    }]});
+    // The final round is either a plain answer or a real tool call: the second
+    // shape proves the delivered call stays associated with its candidate.
+    for (final_round, expected_final) in [
+        (
+            json!({"candidates":[{
+                "index": 0,
+                "finishReason": "STOP",
+                "content": {"role": "model", "parts": [{"text": "GEMINI_NATIVE_SECOND"}]}
+            }]}),
+            "GEMINI_NATIVE_SECOND",
+        ),
+        (
+            json!({"candidates":[{
+                "index": 0,
+                "finishReason": "STOP",
+                "content": {"role": "model", "parts": [
+                    {"functionCall": {"name": "lookup", "args": {"city": "Paris"}}}
+                ]}
+            }]}),
+            "lookup",
+        ),
+    ] {
+        let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+            "gemini",
+            "chat",
+            StatusCode::OK,
+            "application/json",
+            final_round.to_string(),
+            EntryOptions {
+                attempt_bodies: vec![first_round.to_string()],
+                refill_max: None,
+                ..EntryOptions::default()
+            },
+        )
+        .await;
+        let consumed = consume_response(
+            client()
+                .post(endpoint.replace("/v1/responses", "/v1beta/models/test.test:generateContent"))
+                .json(&json!({
+                    "contents": [{"role": "user", "parts": [{"text": "unfinished gemini native task"}]}],
+                }))
+                .send()
+                .await,
+        )
+        .await;
+        let mut captured = Vec::new();
+        while let Ok(body) = captures.try_recv() {
+            captured.push(body);
+        }
+        stop_entry(handle, shutdown).await;
+        assert!(
+            consumed.transport_error.is_none(),
+            "gemini native relay entry must deliver normally: {consumed:?}"
+        );
+        assert_eq!(
+            captured.len(),
+            2,
+            "gemini native relay entry must run exactly one refill (final={expected_final}): {consumed:?}"
+        );
+        assert!(
+            consumed.body.contains("GEMINI_NATIVE_FIRST") && consumed.body.contains(expected_final),
+            "both rounds must reach the gemini native client (final={expected_final}): {consumed:?}"
+        );
+        assert_no_error_payload(&consumed.body);
+        let contents = captured[1]["contents"].as_array().unwrap_or_else(|| {
+            panic!(
+                "second provider request must carry gemini contents: {}",
+                captured[1]
+            )
+        });
+        assert!(
+            captured[1].get("input").is_none() && captured[1].get("messages").is_none(),
+            "continuation must keep the provider's own request representation: {}",
+            captured[1]
+        );
+        assert!(
+            contents
+                .iter()
+                .any(|content| content["parts"].to_string().contains("GEMINI_NATIVE_FIRST")),
+            "continuation must replay the first round answer to the provider: {}",
+            captured[1]
+        );
+        // Native multimodal parts and text siblings are real business content
+        // and must not be narrowed to plain text by the continuation.
+        assert!(
+            contents
+                .iter()
+                .any(|content| content["parts"].to_string().contains("inlineData")),
+            "continuation must preserve native gemini parts: {}",
+            captured[1]
+        );
+        let model_turns = contents
+            .iter()
+            .filter(|content| content["role"] == "model")
+            .count();
+        assert_eq!(
+            model_turns, 1,
+            "one model turn for the first round, no turn for its empty text part: {}",
+            captured[1]
+        );
+        assert!(
+            contents
+                .iter()
+                .any(|content| content["parts"].to_string().contains(REFILL_INSTRUCTION)),
+            "continuation must carry the bounded refill instruction: {}",
+            captured[1]
+        );
+    }
+    std::env::remove_var(KEY_ENV);
+}
+
+/// same bounded-refill policy. A premature finish triggers exactly one refill
+/// and both rounds reach the Anthropic client in one buffered response.
+#[tokio::test]
+async fn refill_anthropic_relay_entry_bounded_refill_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "chat",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "ANTHROPIC_RELAY_SECOND"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "ANTHROPIC_RELAY_FIRST")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(endpoint.replace("/v1/responses", "/v1/messages"))
+            .json(&json!({
+                "model": "test.test",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "unfinished anthropic task"}],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
+    stop_entry(handle, shutdown).await;
+    assert!(
+        consumed.transport_error.is_none(),
+        "anthropic relay entry must deliver normally: {consumed:?}"
+    );
+    assert_eq!(
+        captured.len(),
+        2,
+        "anthropic relay entry must run exactly one refill: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("ANTHROPIC_RELAY_FIRST")
+            && consumed.body.contains("ANTHROPIC_RELAY_SECOND"),
+        "both rounds must reach the anthropic client: {consumed:?}"
+    );
+    // The second provider request is the refill continuation, not a replay of
+    // the first one: it must carry the earlier answer and the instruction.
+    assert!(
+        captured[1].to_string().contains("ANTHROPIC_RELAY_FIRST")
+            && captured[1].to_string().contains(REFILL_INSTRUCTION),
+        "anthropic continuation must carry the history and the instruction: {}",
+        captured[1]
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
 #[tokio::test]
 async fn refill_direct_sse_summary_after_diagnostic_cap_public() {
     let _guard = TEST_LOCK.lock().await;
@@ -1149,9 +1469,11 @@ async fn refill_continuation_captures_provider_reasoning_public() {
 /// projection must not fabricate an empty assistant message.
 ///
 /// The messages branch of the refill continuation is owned by the Responses
-/// relay runtime. `/v1/chat/completions` in this build enters the Chat runtime,
-/// which has no bounded-refill loop, so the reachable public entry that carries
-/// a `messages` payload through bounded refill is `/v1/responses`.
+/// relay runtime. The chat and gemini Relay entries now reuse the same
+/// bounded-refill executor, but their continuation stays chat-native and does
+/// not exercise this Responses `messages` shape, so the reachable public entry
+/// that carries a `messages` payload through bounded refill remains
+/// `/v1/responses`.
 #[tokio::test]
 async fn refill_continuation_messages_shape_keeps_reasoning_association_public() {
     let _guard = TEST_LOCK.lock().await;
@@ -1261,6 +1583,543 @@ async fn refill_continuation_messages_shape_keeps_reasoning_association_public()
         assistant_index,
         reasoning[2].0 + 1,
         "reasoning items must stay adjacent to their assistant content: {input:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: a Responses request may carry the Chat history next to
+/// `input` (equivalent representations that inbound merges). The refill
+/// continuation must keep that request acceptable to the next execution:
+/// extending only `input` while the old `messages` stays behind makes inbound
+/// fail on conflicting input and messages representations.
+#[tokio::test]
+async fn refill_responses_dual_history_continuation_stays_acceptable_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "DUAL_HISTORY_ROUND_TWO"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "DUAL_HISTORY_ROUND_ONE")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model": "test.test",
+                "instructions": "answer exactly once",
+                // Dual equivalent history: `input` additionally carries a
+                // provider-origin reasoning item whose id and opaque cipher are
+                // only preserved by the inbound merge, not by the raw twin.
+                "input": [
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "original dual history task"}]},
+                    {"type": "reasoning", "id": "rsn_dual", "encrypted_content": "cipher-dual"},
+                    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "prior dual answer"}]}
+                ],
+                "messages": [
+                    {"role": "user", "content": "original dual history task"},
+                    {"role": "assistant", "content": "prior dual answer", "reasoning_content": ""}
+                ],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "dual-history entry must run exactly one refill: {consumed:?}"
+    );
+    assert!(
+        consumed.transport_error.is_none(),
+        "dual-history entry must deliver normally: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("DUAL_HISTORY_ROUND_ONE")
+            && consumed.body.contains("DUAL_HISTORY_ROUND_TWO"),
+        "both rounds must reach the responses client: {consumed:?}"
+    );
+    // The second provider request must keep the merged history in one
+    // representation; the stale `messages` twin must not compete with `input`.
+    let second = &captured[1];
+    assert!(
+        second.get("messages").is_none(),
+        "continuation must drop the stale messages twin: {}",
+        second
+    );
+    let input = second["input"]
+        .as_array()
+        .unwrap_or_else(|| panic!("second provider request must carry Responses input: {second}"));
+    assert!(
+        input
+            .iter()
+            .any(|item| item.to_string().contains("original dual history task")),
+        "continuation must replay the original task: {input:?}"
+    );
+    assert!(
+        input
+            .iter()
+            .any(|item| item.to_string().contains("DUAL_HISTORY_ROUND_ONE")),
+        "continuation must replay the first round answer: {input:?}"
+    );
+    assert!(
+        input
+            .iter()
+            .any(|item| item.to_string().contains(REFILL_INSTRUCTION)),
+        "continuation must carry the bounded refill instruction: {input:?}"
+    );
+    // The input-side reasoning item must survive as the same reasoning turn.
+    // The outbound projection replaces the opaque cipher with its declared
+    // placeholder, but the item id stays and proves the association survived.
+    let reasoning: Vec<&Value> = input
+        .iter()
+        .filter(|item| item["type"] == "reasoning" && item["id"] == "rsn_dual")
+        .collect();
+    assert_eq!(
+        reasoning.len(),
+        1,
+        "the input-side reasoning item must survive the refill: {input:?}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: the `messages` twin of a dual Responses history can carry
+/// a business extension that `input` does not. The refill continuation must
+/// extend the merged history inbound accepted, so the association survives the
+/// second provider request.
+#[tokio::test]
+async fn refill_responses_dual_twin_extension_survives_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "TWIN_EXTENSION_ROUND_TWO"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "TWIN_EXTENSION_ROUND_ONE")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model": "test.test",
+                // Equivalent turns, but only the `messages` twin carries the
+                // provider-origin reasoning association.
+                "input": [
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "twin extension task"}]},
+                    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "twin prior answer"}]}
+                ],
+                "messages": [
+                    {"role": "user", "content": "twin extension task"},
+                    {
+                        "role": "assistant",
+                        "content": "twin prior answer",
+                        "routecodex_chat_extension": {
+                            "responses_reasoning_item_id": "rsn_twin",
+                            "responses_reasoning_encrypted_content": "cipher-twin"
+                        }
+                    }
+                ],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "twin-extension entry must run exactly one refill: {consumed:?}"
+    );
+    assert!(
+        consumed.body.contains("TWIN_EXTENSION_ROUND_ONE")
+            && consumed.body.contains("TWIN_EXTENSION_ROUND_TWO"),
+        "both rounds must reach the client: {consumed:?}"
+    );
+    let second = &captured[1];
+    let merged = second
+        .get("messages")
+        .or_else(|| second.get("input"))
+        .unwrap_or_else(|| panic!("second provider request must carry a history: {second}"));
+    assert!(
+        merged.to_string().contains("rsn_twin"),
+        "the messages-side reasoning association must survive: {second}"
+    );
+    assert!(
+        merged.to_string().contains("twin extension task"),
+        "the original task must survive: {second}"
+    );
+    assert!(
+        merged.to_string().contains(REFILL_INSTRUCTION),
+        "the continuation must carry the instruction: {second}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: inbound also accepts a Chat history plus decoded tool
+/// results. The refill continuation must keep the paired call and its matched
+/// result together with the original task.
+#[tokio::test]
+async fn refill_responses_dual_tool_result_history_survives_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "TOOL_RESULT_ROUND_TWO"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "TOOL_RESULT_ROUND_ONE")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model": "test.test",
+                "input": [
+                    {"type": "function_call_output", "call_id": "call_dual", "output": "value-42"}
+                ],
+                "messages": [
+                    {"role": "user", "content": "read the dual value"},
+                    {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_dual",
+                            "type": "function",
+                            "function": {"name": "read_value", "arguments": "{}"}
+                        }]
+                    }
+                ],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "tool-result history entry must run exactly one refill: {consumed:?}"
+    );
+    let second = &captured[1];
+    let rendered = second.to_string();
+    assert!(
+        rendered.contains("read the dual value"),
+        "the original task must survive: {second}"
+    );
+    assert!(
+        rendered.contains("call_dual"),
+        "the paired tool call and result must survive: {second}"
+    );
+    assert!(
+        rendered.contains("value-42"),
+        "the matched tool result must survive: {second}"
+    );
+    assert!(
+        rendered.contains(REFILL_INSTRUCTION),
+        "the continuation must carry the instruction: {second}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Stable public ID: a dual Responses request can declare tools that only its
+/// `input` items carry (for example `additional_tools`). Collapsing the dual
+/// representation must keep those declarations reachable on the provider wire
+/// in the refill round.
+#[tokio::test]
+async fn refill_responses_dual_additional_tools_survive_public() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "ADDITIONAL_TOOLS_ROUND_TWO"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "ADDITIONAL_TOOLS_ROUND_ONE")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model": "test.test",
+                // Two successive input declarations refresh the same tool
+                // identity. The collapse must keep only the final effective
+                // schema; a superseded copy under the same identity would make
+                // the refill round fail as a same-source declaration conflict.
+                "input": [
+                    {"type": "additional_tools", "tools": [{
+                        "type": "function",
+                        "name": "read_declared_value",
+                        "description": "stale declaration",
+                        "parameters": {"type": "object", "properties": {"stale": {"type": "string"}}}
+                    }]},
+                    {"type": "additional_tools", "tools": [
+                        {
+                            "type": "function",
+                            "name": "read_declared_value",
+                            "description": "refreshed declaration",
+                            "parameters": {"type": "object", "properties": {"key": {"type": "string"}}}
+                        },
+                        {"type": "code_interpreter", "container": {"type": "auto"}}
+                    ]},
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "declared tools task"}]}
+                ],
+                "messages": [
+                    {"role": "user", "content": "declared tools task"}
+                ],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "additional-tools entry must run exactly one refill: {consumed:?}"
+    );
+    let second = &captured[1];
+    let tools = second["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("second provider request must carry tools: {second}"));
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool["name"] == json!("read_declared_value")),
+        "the input-declared tool must survive the refill: {tools:?}"
+    );
+    // The refreshing declaration must still win: otherwise the refill round
+    // silently reverts to the stale root schema.
+    let declared: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["name"] == json!("read_declared_value"))
+        .collect();
+    assert_eq!(
+        declared.len(),
+        1,
+        "consecutive refreshes must collapse to one effective declaration: {declared:?}"
+    );
+    assert!(
+        declared[0]["parameters"]["properties"]["key"].is_object(),
+        "the final refreshing declaration must remain effective: {declared:?}"
+    );
+    assert!(
+        second.to_string().contains("declared tools task"),
+        "the original task must survive: {second}"
+    );
+    let hosted: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["type"] == json!("code_interpreter"))
+        .collect();
+    assert_eq!(
+        hosted.len(),
+        1,
+        "the hosted declaration must survive the collapse: {tools:?}"
+    );
+    assert!(
+        second.to_string().contains(REFILL_INSTRUCTION),
+        "the continuation must carry the instruction: {second}"
+    );
+    assert_no_error_payload(&consumed.body);
+    std::env::remove_var(KEY_ENV);
+}
+
+/// Public ID: a `tool_search_output` history record declares the tools a past
+/// search discovered. A later `additional_tools` item refreshes the same tool
+/// identity, and the dual-history collapse keeps the record as a Chat tool
+/// message. The refill round must still declare the refreshed schema; letting
+/// the history record win would silently revert the tool the provider sees.
+#[tokio::test]
+async fn refill_responses_history_record_does_not_revert_refreshed_declaration() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+        "responses",
+        "direct",
+        StatusCode::OK,
+        "application/json",
+        source_summary_wire(false, "HISTORY_RECORD_ROUND_TWO"),
+        EntryOptions {
+            attempt_bodies: vec![refill_round_wire(false, "HISTORY_RECORD_ROUND_ONE")],
+            refill_max: None,
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let stale = json!([
+        {
+            "type": "function",
+            "name": "read_declared_value",
+            "description": "stale discovery",
+            "parameters": {"type": "object", "properties": {"stale": {"type": "string"}}}
+        },
+        {
+            "type": "namespace",
+            "name": "workspace",
+            "tools": [{
+                "type": "function",
+                "name": "read",
+                "description": "stale namespace discovery",
+                "parameters": {"type": "object", "properties": {"stale": {"type": "string"}}}
+            }]
+        },
+        {
+            "type": "custom",
+            "name": "shell_command",
+            "description": "stale custom discovery",
+            "format": {"type": "grammar", "syntax": "lark", "definition": "start: /.+/"}
+        }
+    ]);
+    let consumed = consume_response(
+        client()
+            .post(&endpoint)
+            .json(&json!({
+                "model": "test.test",
+                "input": [
+                    {"type": "tool_search_call", "call_id": "call_search", "arguments": {"query": "values"}},
+                    {"type": "tool_search_output", "call_id": "call_search", "tools": stale},
+                    {"type": "additional_tools", "tools": [
+                        {
+                            "type": "function",
+                            "name": "read_declared_value",
+                            "description": "refreshed declaration",
+                            "parameters": {"type": "object", "properties": {"key": {"type": "string"}}}
+                        },
+                        {
+                            "type": "namespace",
+                            "name": "workspace",
+                            "tools": [{
+                                "type": "function",
+                                "name": "read",
+                                "description": "refreshed namespace declaration",
+                                "parameters": {"type": "object", "properties": {"key": {"type": "string"}}}
+                            }]
+                        },
+                        {
+                            "type": "custom",
+                            "name": "shell_command",
+                            "description": "refreshed custom declaration",
+                            "format": {"type": "grammar", "syntax": "lark", "definition": "start: /key.+/"}
+                        },
+                        {"type": "code_interpreter", "container": {"type": "auto"}}
+                    ]},
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "history record task"}]}
+                ],
+                "messages": [
+                    {"role": "assistant", "content": null, "tool_calls": [{
+                        "id": "call_search",
+                        "type": "function",
+                        "function": {"name": "tool_search", "arguments": "{\"query\":\"values\"}"}
+                    }]},
+                    {"role": "tool", "tool_call_id": "call_search", "content": stale.to_string()},
+                    {"role": "user", "content": "history record task"}
+                ],
+                "stream": false
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    let mut captured = Vec::new();
+    while let Ok(body) = captures.try_recv() {
+        captured.push(body);
+    }
+    stop_entry(handle, shutdown).await;
+    assert_eq!(
+        captured.len(),
+        2,
+        "history-record entry must run exactly one refill: {consumed:?}"
+    );
+    let second = &captured[1];
+    let tools = second["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("second provider request must carry tools: {second}"));
+    let declared: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["name"] == json!("read_declared_value"))
+        .collect();
+    assert_eq!(
+        declared.len(),
+        1,
+        "the refreshed identity must stay single: {declared:?}"
+    );
+    assert!(
+        declared[0]["parameters"]["properties"]["key"].is_object(),
+        "the refreshed schema must win over the history record: {declared:?}"
+    );
+    let rendered = second.to_string();
+    assert!(
+        rendered.contains("refreshed namespace declaration")
+            && !rendered.contains("stale namespace discovery"),
+        "the refreshed namespaced declaration must win over the history record: {second}"
+    );
+    assert!(
+        rendered.contains("refreshed custom declaration")
+            && !rendered.contains("stale custom discovery"),
+        "the refreshed custom declaration must win over the history record: {second}"
+    );
+    assert!(
+        rendered.contains("history record task"),
+        "the original task must survive: {second}"
+    );
+    let hosted: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["type"] == json!("code_interpreter"))
+        .collect();
+    assert_eq!(
+        hosted.len(),
+        1,
+        "the hosted declaration must survive: {tools:?}"
     );
     assert_no_error_payload(&consumed.body);
     std::env::remove_var(KEY_ENV);
@@ -5399,7 +6258,9 @@ health = {{ enabled = {health_enabled}, failure_threshold = 2, cooldown_ms = 500
 responses = {{ process = "{process}", streaming = "always" }}
         [providers.test.models."{model_key}"]
 wire_name = "{wire_model}"
-capabilities = ["text", "tools"]
+# The mock target declares vision so a refill continuation may replay a native
+# image part the provider itself produced in the earlier round.
+capabilities = ["text", "tools", "vision"]
 supports_streaming = true
 max_tokens = 4096
 max_context_tokens = 128000

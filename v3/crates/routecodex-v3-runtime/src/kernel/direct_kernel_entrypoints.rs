@@ -211,7 +211,9 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             if let Some(finalized) = finalized_response.as_ref() {
                 if let Ok(next_payload) =
                     crate::hub_v1::build_v3_chat_process_refill_continuation_request(
-                        &payload, finalized,
+                        crate::hub_v1::V3HubEntryProtocol::Responses,
+                        &payload,
+                        finalized,
                     )
                 {
                     if control.deadline_unix_ms().is_ok() && control.try_admit_refill(max_refills) {

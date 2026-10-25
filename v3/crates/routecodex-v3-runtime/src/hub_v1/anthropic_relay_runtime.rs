@@ -157,7 +157,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_default_transport_client_he
     handoff: crate::V3ResponsesProtocolRelayHandoff,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
     let route_policy_pending = handoff.route_policy_pending.clone();
-    let output = execute_v3_anthropic_relay_runtime_inner(
+    let output = execute_v3_anthropic_relay_runtime_inner_with_refill(
         manifest,
         input,
         crate::default_responses_transport(),
@@ -206,6 +206,7 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
         }),
         Arc::clone(&captured_provider_request),
     );
+    // dry-run 只做一次主线执行：续杯会再发一次请求，超出该入口的声明范围。
     let mut output = match execute_v3_anthropic_relay_runtime_inner(
         manifest,
         input,
@@ -215,6 +216,7 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         false,
+        None,
         None,
     )
     .await
@@ -295,6 +297,7 @@ pub async fn execute_v3_anthropic_relay_response_dry_run_runtime(
         response_payload,
         Arc::clone(&captured_provider_request),
     );
+    // dry-run 只做一次主线执行：续杯会再发一次请求，超出该入口的声明范围。
     let mut output = match execute_v3_anthropic_relay_runtime_inner(
         manifest,
         input,
@@ -304,6 +307,7 @@ pub async fn execute_v3_anthropic_relay_response_dry_run_runtime(
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         false,
+        None,
         None,
     )
     .await
@@ -406,7 +410,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_client_headers_provider_hea
     client_headers: Vec<V3AnthropicRelayClientHeader>,
     provider_health: V3ProviderFailureRuntimeHealth,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
-    execute_v3_anthropic_relay_runtime_inner(
+    execute_v3_anthropic_relay_runtime_inner_with_refill(
         manifest,
         input,
         transport,
@@ -420,12 +424,20 @@ pub async fn execute_v3_anthropic_relay_runtime_with_client_headers_provider_hea
     .await
 }
 
-async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
+/// anthropic relay 的请求主循环：一个客户端请求内串联"完整治理 → 共享决策 →
+/// 需要时重新执行请求主线"，连续续杯额度由同一份执行控制承载。
+///
+/// 与 relay 骨架的差别只在结构：这个运行时不使用共享 relay codec 骨架，
+/// 因此循环落在入口层；决策仍是唯一实现 `decide_v3_chat_process_refill`，
+/// 续请求构造、内容累积与 usage 合计也复用同一组 Chat Process 原语。
+/// 单次执行的 round 由响应 closeout 在投影前发布，失败与空业务出口不发布。
+#[allow(clippy::too_many_arguments)]
+async fn execute_v3_anthropic_relay_runtime_inner_with_refill<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3AnthropicRelayRuntimeInput,
     transport: &T,
     client_headers: Vec<V3AnthropicRelayClientHeader>,
-    mut response_hook_profile: V3HubRelayResponseHookProfile,
+    response_hook_profile: V3HubRelayResponseHookProfile,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     allow_exhaustion_rescue_probe: bool,
@@ -437,6 +449,117 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             .map_err(|error| {
                 V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
             })?,
+    };
+    let max_refills =
+        super::resp_chat_process_03_governed::v3_chat_process_refill_max_consecutive();
+    let mut carrier = super::relay_runtime_core::V3RelayRefillCarrier {
+        request_execution_control,
+        accumulated_items: Vec::new(),
+        accumulated_usage: None,
+        round: None,
+    };
+    let mut payload = input.payload.clone();
+    let mut handoff = initial_handoff;
+    loop {
+        carrier.round = None;
+        let mut execution_input = input.clone();
+        execution_input.payload = payload.clone();
+        let output = execute_v3_anthropic_relay_runtime_inner(
+            manifest,
+            execution_input,
+            transport,
+            client_headers.clone(),
+            response_hook_profile.clone(),
+            provider_health.clone(),
+            retry_policy,
+            allow_exhaustion_rescue_probe,
+            // handoff 只服务原始执行；续杯执行按正常主线重新解析目标。
+            handoff.take(),
+            Some(&mut carrier),
+        )
+        .await?;
+        let Some(round) = carrier.round.take() else {
+            // 没有发布 round：失败出口或没有可交付业务内容。当前结果就是最终结果。
+            return Ok(output);
+        };
+        let disposition = super::resp_chat_process_03_governed::decide_v3_chat_process_refill(
+            &round.facts.tool_calls,
+            round.facts.has_source_summary,
+            round.response_completed,
+            carrier.request_execution_control.refill_used(),
+            max_refills,
+        );
+        let mut continued = false;
+        if disposition == super::common::V3ChatProcessRefillDisposition::RequestRefill {
+            if let Ok(next_payload) =
+                super::resp_chat_process_03_governed::
+                    build_v3_chat_process_refill_continuation_request(
+                        super::common::V3HubEntryProtocol::Anthropic,
+                        &payload,
+                        &round.finalized_response,
+                    )
+            {
+                // 请求作用域的取消见证只有驻留截止时间；已过期就交付当前真实结果，
+                // 不再发起新执行。
+                if carrier.request_execution_control.deadline_unix_ms().is_ok()
+                    && carrier
+                        .request_execution_control
+                        .try_admit_refill(max_refills)
+                {
+                    carrier.request_execution_control.begin_refill_execution();
+                    carrier.accumulated_items.extend(
+                        super::resp_chat_process_03_governed::
+                            collect_v3_chat_process_business_output_items(
+                                &round.finalized_response,
+                            ),
+                    );
+                    super::resp_chat_process_03_governed::
+                        accumulate_v3_chat_process_refill_usage(
+                            &mut carrier.accumulated_usage,
+                            super::responses_relay_runtime::extract_v3_runtime_usage_summary(
+                                &round.finalized_response,
+                            ),
+                        );
+                    payload = next_payload;
+                    continued = true;
+                }
+            }
+        }
+        if !continued {
+            return Ok(output);
+        }
+    }
+}
+
+/// 单次 anthropic relay 主线执行：完整请求/响应治理、provider action gate 与
+/// 客户端投影都在这里。
+///
+/// `refill` 是续杯载体：有值时复用同一份执行控制，并在响应 closeout 投影前
+/// 发布本轮 round、并入前几轮业务项；dry-run 入口传 `None`，只做一次执行。
+#[allow(clippy::too_many_arguments)]
+async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
+    manifest: &V3Config05ManifestPublished,
+    input: V3AnthropicRelayRuntimeInput,
+    transport: &T,
+    client_headers: Vec<V3AnthropicRelayClientHeader>,
+    mut response_hook_profile: V3HubRelayResponseHookProfile,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    retry_policy: V3RelayProviderFailureRetryPolicy,
+    allow_exhaustion_rescue_probe: bool,
+    initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
+    mut refill: Option<&mut super::relay_runtime_core::V3RelayRefillCarrier>,
+) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
+    let request_execution_control = match refill.as_ref() {
+        Some(carrier) => carrier.request_execution_control.clone(),
+        None => match initial_handoff.as_ref() {
+            Some(handoff) => handoff.request_execution_control.clone(),
+            None => {
+                crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
+                    .map_err(|error| {
+                    V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
+                })?
+            }
+        },
     };
     let attempt_budget = request_execution_control.attempt_budget();
     response_hook_profile =
@@ -1172,6 +1295,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         &input.request_id,
                         &response_hook_profile,
                         trace.as_mut(),
+                        // anthropic 整流缓冲：两种客户端传输都由这一份完整
+                        // client_response 派生，因此 SSE 出口同样可以发布 round。
+                        refill.as_mut().map(|carrier| &mut **carrier),
                         move |finalized| {
                             project_v3_anthropic_client_response_for_provider(
                                 finalized,
@@ -1425,6 +1551,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     &input.request_id,
                     &response_hook_profile,
                     trace.as_mut(),
+                    refill.as_mut().map(|carrier| &mut **carrier),
                     move |finalized| {
                         if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
                             project_v3_anthropic_client_response_for_provider(

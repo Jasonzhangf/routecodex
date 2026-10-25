@@ -3168,6 +3168,13 @@ fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
 }
 
 fn manifest_for_scope(scope: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
+    // Every case here pins one captured provider response as the whole client
+    // answer, so the bounded Chat Process continuation is pinned off; refill
+    // coverage lives in the public server entry tests.
+    static PIN: std::sync::Once = std::sync::Once::new();
+    PIN.call_once(|| {
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    });
     let source = r#"
 version = 3
 [servers.__SCOPE__]
