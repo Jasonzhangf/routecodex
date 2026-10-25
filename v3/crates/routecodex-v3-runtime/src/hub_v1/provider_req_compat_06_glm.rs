@@ -1,13 +1,14 @@
 //! Provider-wire-scoped provider-compat helpers for GLM targets on the OpenAI Chat wire.
 //!
 //! A provider such as `nvidia` can host both GLM and non-GLM models, and paid
-//! or unrelated GLM hosts can accept `prompt_cache_key` and `verbosity`. The
-//! rule therefore keys on the selected wire model inside the known free GLM
-//! Chat provider/interface scope and never overrides an explicit profile.
+//! or unrelated GLM hosts can accept `prompt_cache_key`, `verbosity`, and the
+//! Responses-only `include` field. The rule therefore keys on the selected wire
+//! model inside the known free GLM Chat provider/interface scope and never
+//! overrides an explicit profile.
 
 use serde_json::Value;
 
-/// Affected free GLM Chat interfaces reject these OpenAI Chat fields.
+/// Affected free GLM Chat interfaces reject these fields.
 /// The rule stays a mechanical field removal and never rejects the request.
 pub(super) fn drop_glm_unsupported_chat_fields(
     payload: &mut Value,
@@ -24,6 +25,7 @@ pub(super) fn drop_glm_unsupported_chat_fields(
     if let Some(root) = payload.as_object_mut() {
         root.remove("prompt_cache_key");
         root.remove("verbosity");
+        root.remove("include");
     }
 }
 
