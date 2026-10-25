@@ -10,7 +10,7 @@ Use for provider 4xx/5xx, wrong endpoint/model, malformed wire body, provider sw
 2. B: exact captured provider-bound body to same provider; add transport auth/header only.
 3. C: exact client request through same RouteCodex entry/runtime/config.
 
-Do not change model, provider, key, protocol, history, or body between B and captured artifact.
+Do not change model, provider, key, protocol, history, or body between B and captured artifact. Reuse an existing bound result; run only the missing comparisons needed to distinguish the current hypothesis. The table gives diagnosis directions, not root-cause proof. A successful switch or a failing minimal request does not replace investigation of the original failure.
 
 | Result | Owner direction |
 | --- | --- |
@@ -30,15 +30,15 @@ For every attempt record:
 
 ```text
 request id -> candidate -> provider request -> raw status/body/event
--> typed Error source/class/action/decision -> next candidate or client projection
+-> typed Error source/class/action/decision -> next candidate or exhausted transport termination
 ```
 
-Do not merge errors from different attempts. A transport-local 499 does not replace an earlier provider 4xx/5xx.
+Do not merge errors from different attempts. A transport-local 499 does not replace an earlier provider 4xx/5xx. Only business content enters client projection; the Error chain does not project a client error payload.
 
 ## Closeout
 
 1. Red exact failing shape and one control shape.
 2. Patch first-divergence owner only.
 3. Run mapped tests/gates.
-4. Run `50-rcc-config-ssot.md` for install, config check, managed restart, and health proof.
-5. Replay A/B/C and exact old sample. Report any upstream shape no longer reproducible as a remaining live gap.
+4. Reuse the main skill's applicable config/install/restart/health evidence; details are in `50-rcc-config-ssot.md`.
+5. Replay the exact failing sample through the real entry. Repeat only A/B/C comparisons whose inputs changed or whose evidence remains missing. Report an upstream shape that is no longer reproducible as a remaining live gap, not a confirmed fix.

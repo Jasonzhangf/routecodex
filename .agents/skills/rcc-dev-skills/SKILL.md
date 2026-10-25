@@ -1,87 +1,58 @@
 ---
 name: rcc-dev-skills
-description: "RouteCodex V3 transparent-proxy development/debug: maximize cross-protocol passage; never block a passable request or response with extra validation. For 502/598/599, routing, provider, protocol/SSE, or tool failures, read the DAGPipe graph first, find the first divergence, and replay the installed entry. Active config: ~/.rcc/config.toml; samples: ~/.rcc/codex-samples."
+description: "RouteCodex V3 开发与排障：定位首次偏离和唯一 owner，保持透明代理语义，完成真实入口验收。"
 ---
 
-# RouteCodex V3 Development
+# RouteCodex V3 开发与排障
 
-This skill owns V3 command and gate sequencing. Inherit general methods from `coding-principals` and boundaries from project `AGENTS.md`; do not also run a generic development phase workflow. Pure instruction/document edits validate affected references and contracts; runtime build/install/restart/replay applies only when runtime behavior or its delivery changes.
+项目语义以 [AGENTS.md](../../../AGENTS.md) 为准；通用方法沿 `coding-principals`，角色、模型与并发沿当前宿主编排入口。本 Skill 只维护项目流程和按需路由。
+
+纯文档/规则修改只检查受影响内容与引用。代码任务先检查受影响 DAG；不为文档编辑运行构建、安装、重启或全量 gate。
 
 ## Command-First Flow
 
-1. Read `AGENTS.md`.
-   For a module under DAGPipe governance, first read `docs/architecture/dagpipe/README.md` and its business graph. Compare the affected path with the proxy contract, owner and same-entry evidence. Validate a changed graph once; reuse unchanged graph results. CLI validation does not prove SDK compile or runtime execution.
-2. Query maps before source:
+1. 读受影响 DAG 和当前任务笔记。DAGPipe 模块从[图入口](../../../docs/architecture/dagpipe/README.md)定位；复用未变图的有效校验。独立设计审查仅在用户或项目明确要求时启动。
+2. 按 feature 查询四张 map，确定唯一 owner、允许/禁止路径、调用边和 required gates，再读对应源码。绑定缺失只阻止依赖它的修改，不扩大排查范围。
 
-```bash
-rcc_task_feature='<feature_id>'
-rg -n "feature_id: ${rcc_task_feature}" \
-  docs/architecture/v3-resource-operation-map.yml \
-  docs/architecture/v3-function-map.yml \
-  docs/architecture/v3-mainline-call-map.yml \
-  docs/architecture/v3-verification-map.yml
-```
+   ```bash
+   rcc_task_feature='<feature_id>'
+   rg -n "feature_id: ${rcc_task_feature}" \
+     docs/architecture/v3-resource-operation-map.yml \
+     docs/architecture/v3-function-map.yml \
+     docs/architecture/v3-mainline-call-map.yml \
+     docs/architecture/v3-verification-map.yml
+   ```
 
-3. Lock resource edge, owner, allowed/forbidden paths, caller/callee, and gates. Missing or ambiguous binding blocks edits. Binding must agree with `AGENTS.md`; conflicts require remediation.
-4. Read mapped source, generated review surface, current run notes, project `MEMORY.md`, and relevant history.
-5. For defects, capture one request id and find first semantic divergence. Keep one active hypothesis.
-6. Record red evidence: focused failing test, saved failing shape, or controlled replay.
-7. Keep the two response categories separate. A Provider HTTP/error response is control-plane failure: do not return it to the client; let the Error chain recover/reselect, then terminate only the affected transport if candidates are exhausted. A Provider's business/model response, including model-generated invalid tool arguments, is data-plane content: do not semantically judge it; preserve and forward it when representable so the client can correct the next turn. Add public-entry regressions for both categories.
-8. Patch only mapped owner. For feature development or bug repair, add or update real public-entry black-box behavior tests. A controlled external peer or upstream is acceptable as long as the test enters through a real public entry (HTTP, WebSocket, or CLI); source-string checks, private unit-only tests, or mocks that do not reach the public entry do not satisfy this step. Each such test carries a stable test ID and records the exact command that executes it.
-9. Run the affected positive, negative and side-effect checks through their recorded public commands. Retain checks with a concrete behavior, security or data-correctness guarantee; remove redundant source-text, identity and historical-output locks at their owner and callers. Do not automatically run a full architecture umbrella for every local edit. Reuse unchanged results. Before external release preparation, do not add SHA/checksum, frozen snapshots, candidate identity or packaging checks. Actual release checks cover distribution needs only.
-
-For runtime changes, applicable local behavior verification precedes steps 10–11. Run applicable PR CI in parallel; pending remote CI does not delay authorized local runtime acceptance. Pure rule, tooling and test changes do not trigger a runtime install or restart.
-
-10. Runtime-impacting change: load `references/50-rcc-config-ssot.md`; prove build, install, config check, managed restart, all-listener health, and same-entry replay. `rccv3 restart` controls an existing instance and exits non-zero with `NotRunning` when none is live, leaving the service down; a non-zero restart exit or a status that is not `running` is an incomplete step. Stop this lifecycle path and record the blocker. Do not substitute `start` or another lifecycle action unless that action is explicitly authorized by the applicable project contract or user.
-11. If a failing runtime sample exists, include its exact replay or same-entry semantic equivalent in step 10 evidence. For tool/function-call flows, verify the full client round trip: tool identity/namespace, complete arguments, actual client execution receipt/output, and any follow-up request; HTTP 200 or `requires_action` alone is not tool success. Review only after verification; do not repeat an unchanged replay solely for this step.
+3. Debug 用同一请求的原始证据定位首次偏离，再按已接受计划补正图/gate、取得红测、修改 owner、完成黑盒回归。每个 non-2xx 除已确认传输失败外，仍须查根因和请求形状；切换 Provider 成功不关闭原错。
+4. 功能/修复使用真实 HTTP、WebSocket、CLI 或公开 consumer 验收，记录稳定测试 ID 与实际命令。受控上游可以使用，但源码字符串检查和未经过公开入口的 mock 不能替代行为证据。Provider 错误与业务响应的回归要求沿项目合同。
+5. 按映射运行受影响测试和 `npm run verify:v3-architecture-ci`。umbrella 已覆盖的子 gate 不再单跑；未覆盖的必需项仍执行，新输入只使受影响证据失效。
+6. 运行时变更在本地 gate 通过后沿[运行验收](references/50-rcc-config-ssot.md)完成 build、install、配置检查、正式 restart、各 listener health 和同入口回放；PR CI 可并行，不以其等待阻止候选验收。原失败样本必须覆盖；真实客户端工具须证明完整身份、参数、执行结果及后续配对，200 或 `requires_action` 不算工具成功。
 
 ## Defect Lifecycle
 
-Every execution-bound defect uses the canonical issue intake and close contract
-in the installed `~/.agents/skills/appsdk-project-governance/SKILL.md`. For the issue DAG,
-per-restart Codex sample audit, and master residual-resource closeout, read
-[`references/60-defect-lifecycle.md`](references/60-defect-lifecycle.md).
-Repeated regressions require a regression test in the mapped required gate.
-
-For any corresponding AppSDK bug record to close, including a functional work
-item with such a record, the stable public-entry black-box test IDs and their
-execution commands must be written into that record with
-`appsdk bug comment <id> -m <test IDs and commands>`. Use the command receipt;
-do not add a routine read-back gate. Close with `appsdk bug close` only after
-all applicable delivery conditions pass. A failed or uncertain record write
-requires checking that specific failure.
+缺陷 intake、issue 独占工作树、每次 managed restart 后样本审计、测试 ID 写回确认及资源收口，统一见[缺陷合同](references/60-defect-lifecycle.md)。重复回归须进入映射的回归测试。已有 issue 和有效证据直接复用。
 
 ## Review Gate
 
-The global host orchestrator owns review roles, timing and delivery order.
-After author verification and applicable runtime acceptance, obtain one
-effective independent overall review before commit/integration. Fix blocking
-findings and revalidate their affected behavior. Report source, runtime and
-delivery results separately without identity packaging; preserve Git
-protection and the defect close conditions in `references/60-defect-lifecycle.md`.
+作者完成适用验收后，沿全局宿主合同取得一次有效独立整体 Review，再提交/集成。finding 修复只补受影响验证。候选、安装运行与 main 交付分开记录，不增加 SHA、冻结快照或身份包装；未交付部分如实保留。
 
 ## Routes
 
-| Need | Reference |
-| --- | --- |
-| owner and gates | `references/40-owner-registry.md` |
-| first-divergence pipe debug | `references/10-pipedebug-flow.md` |
-| protocol/SSE/continuation | `references/25-protocol-sse-continuation-boundary.md` |
-| config/install/runtime replay | `references/50-rcc-config-ssot.md` |
-| servertool | V3 maps + `docs/agent-routing/30-servertool-lifecycle-routing.md` |
-| error chain | `references/96-unified-error-path-audit.md` |
-| selected provider model | `references/96-v3-selected-provider-model-binding-sop.md` |
-| continuation cache | `references/97-continuation-cache-compliance.md` |
-| provider request/error | `references/98-provider-request-dryrun-and-request-error-debug.md` |
-| defect issue/sample/resource lifecycle | `references/60-defect-lifecycle.md` |
+只读取本次问题对应的行。配置、样本位置与当前运行状态沿项目真源，不在入口复制。
 
-For an explicit provider/model pin, set the client request `model` to
-`<provider_id>.<model_id>` (for example `kdns.deepseek-v4.1-flash`); this is
-`provider.model` direct-pin syntax, not route-config `provider/model`. A known
-`provider_id` with a known model selects that exact provider+model directly,
-skipping route classification and pool selection; an unknown provider prefix
-falls back to normal routing.
+| 当前问题 | 读取 |
+|---|---|
+| owner、路径或 gate 变化 | [绑定迁移](references/40-owner-registry.md) |
+| 首次偏离与请求/响应 dry-run | [Pipe debug](references/10-pipedebug-flow.md) |
+| 协议、SSE、continuation | [协议边界](references/25-protocol-sse-continuation-boundary.md) |
+| 普通工具、原生搜索、有界 refill 或旧 servertool 残留 | [工具合同与退役边界](../../../docs/agent-routing/30-servertool-lifecycle-routing.md) |
+| ToolThinking / Toolreason 投影 | [专项差异](references/26-toolreason-dryrun-diagnostic.md) |
+| 配置、安装、重启、live replay | [运行验收](references/50-rcc-config-ssot.md) |
+| typed Error 链 | [错误路径](references/96-unified-error-path-audit.md) |
+| provider/model 指定或选错模型 | [模型绑定](references/96-v3-selected-provider-model-binding-sop.md) |
+| continuation 前缀漂移 | [前缀对照](references/97-continuation-cache-compliance.md) |
+| Provider 请求失败、切换或耗尽 | [请求与错误诊断](references/98-provider-request-dryrun-and-request-error-debug.md) |
 
 ## Report
 
-Report goal, owner, first divergence, changed paths, red/green evidence, mapped gates, installed runtime evidence, review result, remaining gap, and next transition. For defects, include issue ID/state, merge receipt, post-restart sample classifications, and resource-cleanup evidence. State why edited owner is unique and which adjacent layers were ruled out.
+按[反馈合同](../../../docs/agent-routing/05-foundation-contract.md)报告交付、位置、验收和剩余项。详细命令、原错和阶段结果留在原证据记录中，不为汇报重验或复制整份清单。登记或派发缺陷不代表修复完成。
