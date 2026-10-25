@@ -32,6 +32,8 @@ const cases = [
   { relative: 'scripts/install-global.sh', contents: '#!/bin/sh\ntrue\n', v3: true, v4: false },
   { relative: 'scripts/install-release.sh', contents: '#!/bin/sh\ntrue\n', v3: true, v4: false },
   { relative: 'scripts/run-v3-cargo-test.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'v3/scripts/run-v3-cargo-test.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_build: true }, v3: true, v4: false },
+  { relative: 'v3/scripts/unrelated-test-helper.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_build: false }, v3: true, v4: false },
   { relative: 'scripts/tests/v3-scope-fixture.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: '.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md', v3: true, v4: false },
   { relative: 'sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json', contents: '{}\n', v3: true, v4: false },
