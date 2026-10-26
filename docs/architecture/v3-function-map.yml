@@ -3246,7 +3246,7 @@ features:
   - responses_relay_runtime::anthropic_provider_sse_message_stop_closes_open_thinking_block_without_502
   - responses_relay_runtime::anthropic_provider_sse_message_stop_does_not_close_open_tool_block
   - responses_relay_runtime::responses_provider_sse_reasoning_summary_events_materialize_without_provider_failure
-  - responses_relay_runtime::responses_provider_sse_unknown_response_event_fails_instead_of_discarding
+  - responses_relay_runtime::responses_provider_sse_unknown_response_event_without_terminal_fails_as_eof
   - verify-v3-hub-relay-runtime-closeout
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
@@ -3258,6 +3258,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
   - v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tail_tests.rs
   - v3/crates/routecodex-v3-config/src/provider_config.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
