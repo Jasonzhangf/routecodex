@@ -410,6 +410,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             entry_protocol: "responses".to_string(),
                             routing_group_id: Some(error.route.routing_group_id.clone()),
                             pool_id: Some(error.route.pool_id.clone()),
+                            attempts: Some(total_attempts(&accumulator, send_attempts)),
+                            provider_failure_events: provider_failure_events.clone(),
+                            timing: match runtime_timing.finish_runtime() {
+                                Ok(timing) => Some(timing),
+                                Err(error) => return direct_runtime_helpers_stream::source_failure_output(
+                                    runtime_source("V3RuntimeTimingTerminal", error),
+                                    last_external_http,
+                                    trace,
+                                    &hook_registry,
+                                ),
+                            },
                             response_status: Some("error".to_string()),
                             unavailable_candidates: error.attempted_candidates.clone(),
                             ..V3RuntimeObservability::default()

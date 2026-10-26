@@ -139,19 +139,26 @@ pub(crate) enum V3SynchronousTargetAdmissionStep {
     OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct V3CooldownRescueProbeOutcome {
+    pub(crate) completed_all: bool,
+    pub(crate) did_work: bool,
+}
+
 pub(crate) async fn initiate_v3_target_pre_exhaustion_rescue_probes(
     provider_health: &V3ProviderFailureRuntimeHealth,
     manifest: &V3Config05ManifestPublished,
     candidates: &[V3TargetCandidate],
     now_ms: u64,
 ) -> Result<
-    (),
+    bool,
     Result<
         routecodex_v3_error::V3Error01SourceRaised,
         crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
     >,
 > {
     let mut identities = BTreeSet::new();
+    let mut did_work = false;
     for candidate in candidates {
         if !identities.insert(v3_relay_provider_candidate_key(candidate)) {
             continue;
@@ -168,11 +175,12 @@ pub(crate) async fn initiate_v3_target_pre_exhaustion_rescue_probes(
             .initiate_cooldown_rescue_probe(manifest, candidate, now_ms)
             .await
         {
-            Ok(V3ProbeInitiation::Completed(completion)) => {
-                let _ = completion;
+            Ok(V3ProbeInitiation::Completed(V3ProbeCompletion::Recovered | V3ProbeCompletion::ProviderFailed)
+                | V3ProbeInitiation::Initiated) => {
+                did_work = true;
             }
             Ok(
-                V3ProbeInitiation::Initiated
+                V3ProbeInitiation::Completed(V3ProbeCompletion::Superseded | V3ProbeCompletion::CapacityUnavailable)
                 | V3ProbeInitiation::AlreadyOwned
                 | V3ProbeInitiation::CapacityUnavailable
                 | V3ProbeInitiation::OwnerUnavailable,
@@ -186,7 +194,7 @@ pub(crate) async fn initiate_v3_target_pre_exhaustion_rescue_probes(
             }
         }
     }
-    Ok(())
+    Ok(did_work)
 }
 
 pub(crate) struct V3SynchronousTargetPlanningInput<'a> {
@@ -381,7 +389,11 @@ pub(crate) fn step_v3_target_planning_sync(
     } = input;
     let target = V3TargetInterpreter::default();
 
-    if let Some(preferred) = preferred_selected {
+    if let Some(preferred) = preferred_selected.filter(|preferred| {
+        let key = v3_relay_provider_candidate_key(&preferred.candidate);
+        !request_local_excluded_candidates.contains(&key)
+            && !request_local_busy_candidates.contains(&key)
+    }) {
         return V3SynchronousTargetPlanningStep::Selected(preferred);
     }
 
@@ -515,6 +527,7 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
                                 Err(fault) => V3SynchronousTargetAdmissionStep::OperatorFault(fault),
                             },
                         }
+                        busy.remove(&v3_relay_provider_candidate_key(&selected.candidate));
                         return V3SynchronousTargetAdmissionStep::Selected {
                             selected: V3AdmittedTargetSelection {
                                 selected,
@@ -633,7 +646,7 @@ impl V3ProviderFailureRuntimeHealth {
         manifest: &V3Config05ManifestPublished,
         candidates: &[V3TargetCandidate],
         now_ms: u64,
-    ) -> Result<bool, String> {
+    ) -> Result<V3CooldownRescueProbeOutcome, String> {
         let mut identities = BTreeSet::new();
         let mut probes = Vec::new();
         for candidate in candidates {
@@ -695,13 +708,14 @@ impl V3ProviderFailureRuntimeHealth {
                 let Some(permit) = permit else {
                     // Keep the candidate cooled while another request owns its
                     // probe, then let target selection use a later tier.
-                    return Ok(true);
+                    return Ok(V3CooldownRescueProbeOutcome { completed_all: true, did_work: false });
                 };
                 let permit_interface_id = permit.interface_id().to_string();
                 let cancellation = V3ProviderProbeCancellationGuard {
                     store: health.store.clone(),
                     permit,
                 };
+                let did_work = matches!(&target, Ok(Some(_)));
                 let result = match target {
                     Ok(Some(target)) => probe_v3_provider_global_target(target).await,
                     Ok(None) => Err(V3ProviderHealthProbeFailure::Internal(format!(
@@ -720,7 +734,7 @@ impl V3ProviderFailureRuntimeHealth {
                         .map_err(|error| error.to_string()),
                     Err(V3ProviderHealthProbeFailure::ConcurrencyBusy) => {
                         drop(cancellation);
-                        return Ok(false);
+                        return Ok(V3CooldownRescueProbeOutcome { completed_all: false, did_work: false });
                     }
                     Err(_error) => {
                         health
@@ -734,14 +748,16 @@ impl V3ProviderFailureRuntimeHealth {
                     }
                 };
                 drop(cancellation);
-                completion
+                completion.map(|completed_all| V3CooldownRescueProbeOutcome { completed_all, did_work })
             });
         }
-        let mut completed_all = true;
+        let mut outcome = V3CooldownRescueProbeOutcome { completed_all: true, did_work: false };
         for result in futures_util::future::join_all(probes).await {
-            completed_all &= result?;
+            let result = result?;
+            outcome.completed_all &= result.completed_all;
+            outcome.did_work |= result.did_work;
         }
-        Ok(completed_all)
+        Ok(outcome)
     }
 
     pub(crate) async fn run_exhaustion_rescue_probes(
@@ -749,7 +765,7 @@ impl V3ProviderFailureRuntimeHealth {
         manifest: &V3Config05ManifestPublished,
         expanded: &V3Target09CandidateSetExpanded,
         now_ms: u64,
-    ) -> Result<bool, String> {
+    ) -> Result<V3CooldownRescueProbeOutcome, String> {
         self.run_cooldown_rescue_probes_for_candidates(manifest, &expanded.candidates, now_ms)
             .await
     }

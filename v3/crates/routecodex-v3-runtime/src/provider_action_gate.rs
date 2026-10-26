@@ -1070,7 +1070,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_success_wakes_same_session_sibling_recovery_waiter() {
+    async fn active_identity_does_not_block_same_session_sibling_recovery() {
         let session = V3ProviderFailureSessionScope::new("server", "routing", "session")
             .expect("valid provider failure scope");
         let gate = V3ProviderActionGate::default();
@@ -1127,25 +1127,32 @@ mod tests {
                 .wait_for_recovery_witness(&recovery, selected_provider_scope)
                 .await
         });
-        tokio::task::yield_now().await;
-        assert!(
-            !waiter.is_finished(),
-            "sibling admission must block the recovery waiter"
-        );
-
-        gate.record_provider_success(&active_key.provider_scope)
-            .expect("sibling provider success is recorded");
         let transition = tokio::time::timeout(Duration::from_secs(1), &mut waiter).await;
         if transition.is_err() {
             waiter.abort();
         }
         let transition = transition
-            .expect("provider success must wake a recovery waiter blocked by its sibling lane")
+            .expect("an active sibling identity must not block this independent recovery")
             .expect("recovery waiter task must complete")
             .expect("recovery wait must not fail");
-        assert!(
-            matches!(transition, V3ProviderActionRecoveryTransition::Admitted(_)),
-            "recovery lane must admit after the sibling provider succeeds"
+        let V3ProviderActionRecoveryTransition::Admitted(mut independent) = transition else {
+            panic!(
+                "independent identity must admit while the first identity still owns its permit"
+            );
+        };
+        let permit = independent
+            .take_permit()
+            .expect("independent admission permit");
+        gate.record_provider_success(&active_key.provider_scope)
+            .expect("the other identity may complete independently");
+        assert_eq!(
+            gate.lock_states()
+                .unwrap()
+                .get(&waiting_key)
+                .unwrap()
+                .admitted_generation,
+            Some(permit.generation),
+            "another identity's success cannot consume this permit"
         );
     }
 }

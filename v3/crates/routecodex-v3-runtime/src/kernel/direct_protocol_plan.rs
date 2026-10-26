@@ -72,7 +72,7 @@ async fn plan_v3_responses_protocol_execution_recovery_inner(
             health.run_exhaustion_rescue_probes(manifest, &expanded, now_epoch_ms),
         )
         .await
-        .unwrap_or(Ok(false))
+        .unwrap_or(Ok(crate::provider_failure_runtime_policy::V3CooldownRescueProbeOutcome::default()))
         .map_err(|error| {
             protocol_plan_source_failure(
                 runtime_source("V3ProviderCooldownRescueProbe", error),

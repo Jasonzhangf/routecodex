@@ -20,6 +20,9 @@ fn target_recovery_ladder_and_notification_wakes_keep_original_due_time() {
     limits.residence_timeout = Duration::from_secs(600);
     let budget = V3AttemptBudget::new_isolated(limits, Arc::new(AtomicUsize::new(0)));
     let mut now = Instant::now();
+    let sibling = V3AttemptBudget::new_isolated(limits, Arc::new(AtomicUsize::new(0)));
+    let sibling_started = now;
+    let sibling_due = sibling.current_target_recovery_deadline(sibling_started);
     for seconds in [1, 3, 15, 35, 90, 1, 1] {
         let due_at = now + Duration::from_secs(seconds);
         assert_eq!(budget.current_target_recovery_deadline(now), Some(due_at));
@@ -31,6 +34,12 @@ fn target_recovery_ladder_and_notification_wakes_keep_original_due_time() {
             Some(due_at)
         );
         budget.advance_target_recovery_step_if_due(due_at);
+        budget.advance_target_recovery_step_if_due(due_at);
+        assert_eq!(
+            sibling.current_target_recovery_deadline(sibling_started),
+            sibling_due,
+            "advancing one request must not advance another request's recovery cursor"
+        );
         now = due_at;
     }
     let fresh = V3AttemptBudget::new_isolated(limits, Arc::new(AtomicUsize::new(0)));

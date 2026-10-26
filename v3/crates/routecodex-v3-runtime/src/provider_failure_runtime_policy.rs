@@ -1779,7 +1779,7 @@ include!("provider_failure_runtime_policy_configured.rs");
 /// 共 3 次尝试）；第 3 次尝试仍失败才回报一次并切 provider。语义属于
 /// provider 内部失败重试，与入口（direct/relay/chat）无关。
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 #[path = "provider_failure_runtime_policy/req03_opaque_owner_tests.rs"]

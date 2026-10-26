@@ -2837,6 +2837,7 @@ features:
   - Relay/Direct JSON timing remains Runtime-owned and Server read-only.
   - Direct and Relay handoffs move one typed Runtime-owned timing and attempt accumulator; Server does not restart, merge, or infer it.
   - Final attempts and external timing cover every provider transport leg across Direct-to-Relay, Relay-to-Direct, and nested handoffs without duplication.
+  - Direct pool exhaustion retains accumulated transport attempts, typed provider failure events and Runtime timing even when no final provider is selected; direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_wait and direct_sse_no_continuation_stream_error_is_not_silent_eof use explicit test-only residence budgets.
   required_negative:
   - Duplicate or premature external timing closeout fails instead of silently succeeding.
   - Direct SSE malformed tail or [DONE] without response.completed does not publish successful Runtime timing.
@@ -3380,6 +3381,8 @@ features:
   - Concurrency exclusions are request-local and health-neutral; reselect stays inside the captured Target09 candidate set without Router reentry
   - Mixed prior-failure and temporary-busy exhaustion carries both exact typed sets and waits within the acquisition budget; a source label never reconstructs busy identities
   - Successful admission removes scan-local busy exclusions before callers adopt the returned exclusion state; a busy candidate freed while its selected peer fails remains eligible for Direct and Relay recovery
+  - An exhausted scan retains transport-busy identities until the original request recovery due; level-triggered capacity availability or unrelated health notifications cannot clear them early. Healthy non-busy alternatives remain immediately eligible, and waits own no business lease.
+  - Actual probe work permits a fresh admission check only for busy identities discovered within the current planning call. Inherited transport-busy and permanent failures remain masked; metadata-only or no-permit probe rounds cannot reopen them, and failed admission rechecks retain busy provenance without repeating the probe phase.
   - A received HTTP429 constrains only its exact identity; current and fresh requests immediately use healthy alternatives without joining that identity's wait lane, and unrelated keys/models retain their configured parallelism
   - Post-attempt failure with only cooled peers remaining uses typed Error04 target_recovery_pending and Error05 ReevaluateTarget before bounded captured-target planning; the eight failed_attempt public cases cover Direct/Relay recovery, acquisition-budget exhaustion, whole-request residence deadline and client cancellation without retrying excluded A or forwarding its error payload
   - issue44cc3af_all_tried_transport_failure_waits_for_recovered_peer and its native Direct counterpart prove real pre-header transport failures on every candidate do not immediately close the client; matching successful probe restores only the earlier failed peer, the last failed candidate is not cooled or retried, and the original business request completes through the recovered peer without an error payload

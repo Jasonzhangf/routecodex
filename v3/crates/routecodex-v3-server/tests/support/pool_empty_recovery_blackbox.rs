@@ -1361,19 +1361,31 @@ async fn assert_mixed_capacity_recovery(direct: bool, initially_busy_first: bool
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let failure_release = Arc::new(Semaphore::new(usize::from(!initially_busy_first)));
-    let failure_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let failure_payloads = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let expected_probe = json!({
+        "model":"wire-test", "stream":false,
+        "input":[{"role":"user","content":[{"type":"input_text","text":"ping; reply pong"}]}],
+    });
+    let (probe_tx, mut probe_arrivals) = mpsc::unbounded_channel();
     let (failure_tx, mut failures) = mpsc::unbounded_channel();
     let app = Router::new().route(
         "/v1/responses",
         post({
             let failure_release = failure_release.clone();
-            let failure_calls = failure_calls.clone();
-            move || {
+            let failure_payloads = failure_payloads.clone();
+            let probe_shape = expected_probe.clone();
+            move |axum::Json(payload): axum::Json<Value>| {
                 let failure_release = failure_release.clone();
-                let failure_calls = failure_calls.clone();
+                let failure_payloads = failure_payloads.clone();
+                let probe_shape = probe_shape.clone();
+                let probe_tx = probe_tx.clone();
                 let failure_tx = failure_tx.clone();
                 async move {
-                    failure_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let is_probe = payload == probe_shape;
+                    failure_payloads.lock().unwrap().push(payload);
+                    if is_probe {
+                        let _ = probe_tx.send(());
+                    }
                     let _ = failure_tx.send(());
                     failure_release.acquire().await.unwrap().forget();
                     (
@@ -1441,8 +1453,10 @@ async fn assert_mixed_capacity_recovery(direct: bool, initially_busy_first: bool
         .unwrap()
         .unwrap();
     if !initially_busy_first {
-        // Keep the alternative busy beyond the first Error05 admission delay.
-        tokio::time::sleep(Duration::from_millis(1500)).await;
+        timeout(Duration::from_secs(3), probe_arrivals.recv())
+            .await
+            .expect("held capacity must remain occupied until a real precool probe arrives")
+            .expect("physical probe arrival receipt");
     }
     let closed_while_busy = !initially_busy_first && request.is_finished();
     healthy_release.add_permits(1);
@@ -1456,7 +1470,7 @@ async fn assert_mixed_capacity_recovery(direct: bool, initially_busy_first: bool
     let recovered_dispatch = timeout(Duration::from_secs(4), healthy_captures.recv()).await;
     healthy_release.add_permits(1);
     let result = timeout(Duration::from_secs(4), request).await;
-    let failures_count = failure_calls.load(std::sync::atomic::Ordering::SeqCst);
+    let physical_calls = failure_payloads.lock().unwrap().clone();
     handle.shutdown().await;
     let _ = healthy_shutdown.send(());
     failing_upstream.abort();
@@ -1470,9 +1484,32 @@ async fn assert_mixed_capacity_recovery(direct: bool, initially_busy_first: bool
         recovered_dispatch.is_ok_and(|capture| capture.is_some()),
         "a formerly busy candidate must remain eligible after the peer fails"
     );
+    let business_input = if direct {
+        json!("mixed recovery")
+    } else {
+        json!([{"role":"user","type":"message","content":[{"type":"input_text","text":"mixed recovery"}]}])
+    };
+    let expected_business = json!({
+        "model":"wire-test", "input":business_input, "stream":true, "max_output_tokens":4096,
+    });
+    let business_calls = physical_calls
+        .iter()
+        .filter(|body| **body == expected_business)
+        .count();
+    let probe_calls = physical_calls
+        .iter()
+        .filter(|body| **body == expected_probe)
+        .count();
     assert_eq!(
-        failures_count, 1,
-        "a failed candidate stays permanently excluded"
+        business_calls, 1,
+        "a failed business request must not be retried: {physical_calls:?}"
+    );
+    assert_eq!(probe_calls, usize::from(!initially_busy_first),
+        "only the actual delayed precool observation may probe this failed identity: {physical_calls:?}");
+    assert_eq!(
+        physical_calls.len(),
+        business_calls + probe_calls,
+        "no unclassified physical attempt is allowed: {physical_calls:?}"
     );
     let body = result
         .expect("bounded mixed recovery")

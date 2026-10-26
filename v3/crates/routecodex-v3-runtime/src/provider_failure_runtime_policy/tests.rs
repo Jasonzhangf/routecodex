@@ -12,7 +12,7 @@ use tokio::sync::Notify;
 // Test the post-observation policy separately from the public hold tests.
 // Await the real declared action gate, then finish a qualified physical
 // observation. No sleep, forced due time or synthetic cooldown is used.
-pub(super) async fn complete_due_precool_failures(
+pub(crate) async fn complete_due_precool_failures(
     health: &V3ProviderFailureRuntimeHealth,
     now_ms: u64,
 ) {
