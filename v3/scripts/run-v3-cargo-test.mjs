@@ -454,16 +454,31 @@ export function lockOwnerMatchesProcess(owner, liveIdentity) {
     && owner.processStartedAt === liveIdentity?.processStartedAt;
 }
 
-export function executeCargo(cargoArgs, executables, { timeoutMs = CARGO_TEST_TIMEOUT_MS } = {}) {
+export function executeCargo(cargoArgs, executables, {
+  timeoutMs = CARGO_TEST_TIMEOUT_MS,
+  killGraceMs = CARGO_TEST_KILL_GRACE_MS,
+  command = 'cargo',
+} = {}) {
   return new Promise((resolveExit, reject) => {
-    const child = spawn('cargo', cargoArgs, {
+    const child = spawn(command, cargoArgs, {
       cwd: v3Root,
       env: cargoEnv(),
       stdio: ['inherit', 'pipe', 'inherit'],
+      detached: true,
     });
-    let buffered = '', parseError = null, timedOut = false, settled = false, killTimer;
-    const settleReject = (error) => { if (!settled) { settled = true; reject(error); } };
-    const settleResolve = (code) => { if (!settled) { settled = true; resolveExit(code); } };
+    let buffered = '', parseError = null, timedOut = false, settled = false, finishing = false, killTimer, timeoutTimer;
+    const settleReject = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      reject(error);
+    };
+    const settleResolve = (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      resolveExit(code);
+    };
     const handleLine = (line) => {
       if (!line || parseError) return;
       try {
@@ -474,29 +489,34 @@ export function executeCargo(cargoArgs, executables, { timeoutMs = CARGO_TEST_TI
     };
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
+      if (settled) return;
       buffered += chunk;
       while (buffered.includes('\n')) { const newline = buffered.indexOf('\n'); handleLine(buffered.slice(0, newline)); buffered = buffered.slice(newline + 1); }
     });
     child.on('error', settleReject);
-    child.on('close', (code, signal) => {
-      if (killTimer) clearTimeout(killTimer);
+    const finish = (code, signal) => {
+      if (settled || finishing) return;
+      finishing = true;
       handleLine(buffered);
+      if (timedOut && !child.stdout.destroyed) child.stdout.destroy();
       if (parseError) return settleReject(parseError);
       if (signal) process.stderr.write(`[v3-cargo-test] cargo terminated by ${signal}\n`);
       if (timedOut) return settleReject(new Error(`cargo test timed out after ${timeoutMs}ms and was terminated`));
       settleResolve(code ?? 1);
-    });
-    const timeoutTimer = setTimeout(() => {
+    };
+    // Settle on exit so a descendant that keeps the inherited stdout pipe open
+    // cannot hold the promise; close stays the normal completion signal.
+    child.on('exit', finish);
+    child.on('close', finish);
+    timeoutTimer = setTimeout(() => {
       timedOut = true;
-      process.stderr.write(`[v3-cargo-test] cargo timeout ${timeoutMs}ms; sending SIGTERM to pid ${child.pid}\n`);
-      try { process.kill(child.pid, 'SIGTERM'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
+      process.stderr.write(`[v3-cargo-test] cargo timeout ${timeoutMs}ms; sending SIGTERM to process group ${child.pid}\n`);
+      try { process.kill(-child.pid, 'SIGTERM'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
       killTimer = setTimeout(() => {
-        if (settled) return;
-        process.stderr.write(`[v3-cargo-test] cargo timeout grace expired; sending SIGKILL to pid ${child.pid}\n`);
-        try { process.kill(child.pid, 'SIGKILL'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
-      }, CARGO_TEST_KILL_GRACE_MS);
+        process.stderr.write(`[v3-cargo-test] cargo timeout grace expired; sending SIGKILL to process group ${child.pid}\n`);
+        try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
+      }, killGraceMs);
     }, timeoutMs);
-    child.once('close', () => clearTimeout(timeoutTimer));
   });
 }
 
