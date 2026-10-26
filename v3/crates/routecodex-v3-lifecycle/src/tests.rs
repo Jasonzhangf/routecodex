@@ -204,6 +204,7 @@ async fn native_exec_failure_retains_aggregate_and_hooks_owner() {
 #[tokio::test]
 #[cfg(unix)]
 async fn live_persisted_hooks_group_does_not_block_reaping_running_runtime_control() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
@@ -232,7 +233,7 @@ async fn live_persisted_hooks_group_does_not_block_reaping_running_runtime_contr
         &root.path().join("config.v3.toml"),
         "digest",
         "/tmp/rccv3",
-        45_499,
+        45_557,
     );
     write_json_atomic(&instance_dir.join("instance.json"), &expected).unwrap();
     write_status(
@@ -330,6 +331,7 @@ async fn live_hooks_group_does_not_block_forced_stop() {
 #[tokio::test]
 #[cfg(unix)]
 async fn stale_identity_mismatch_hooks_group_does_not_block_runtime_reap() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
@@ -355,7 +357,7 @@ async fn stale_identity_mismatch_hooks_group_does_not_block_runtime_reap() {
         &root.path().join("config.v3.toml"),
         "digest",
         "/tmp/rccv3",
-        45_496,
+        45_558,
     );
     write_json_atomic(&instance_dir.join("instance.json"), &expected).unwrap();
     write_status(
