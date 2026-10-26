@@ -2494,6 +2494,7 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
         failure_threshold: 3,
         cooldown_ms: 900_000,
         probe_interval_ms: Some(5_000),
+        advisory_probe: false,
     });
     std::env::set_var("ROUTECODEX_V3_POOL_PROBE_TEST_KEY", "routecodex-test-key");
     std::env::set_var("V3_OPENAI_CHAT_SECONDARY_KEY", "secondary-test-key");
