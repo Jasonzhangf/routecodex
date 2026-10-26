@@ -63,7 +63,7 @@ use axum::http::{
 };
 use axum::routing::{get, post};
 use axum::Router;
-use client_sse_transport::accept_v3_client_sse_transport;
+use client_sse_transport::{accept_v3_client_sse_transport, V3ClientDisconnectSlot};
 use debug_runtime_degradation::build_v3_debug_runtime_degrading_optional_log_sink;
 use futures_util::{stream, StreamExt};
 use libc::EINTR;
@@ -1282,6 +1282,9 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
         }
         None => (None, None),
     };
+    let client_disconnect_slot = client_sse_channel
+        .is_some()
+        .then(V3ClientDisconnectSlot::new);
     let runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>> =
         Box::pin(pending_endpoint_after_responses_admission(
             Arc::clone(&state),
@@ -1296,6 +1299,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
             request_purpose,
             client_frame_sink,
             payload,
+            client_disconnect_slot.clone(),
         ));
     let response = match client_sse_channel {
         Some(keepalive_interval) => {
@@ -1317,6 +1321,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                 }),
                 keepalive_interval,
                 client_wire_capture,
+                client_disconnect_slot,
             )
             .await
         }

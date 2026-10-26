@@ -361,7 +361,10 @@ async fn issue7517a07_client_cancel_not_provider_502() {
                 break;
             }
             delivered.extend_from_slice(&buf[..n]);
-            if delivered.windows(17).any(|w| w == b"committed-business") {
+            if delivered
+                .windows(b"committed-business".len())
+                .any(|window| window == b"committed-business")
+            {
                 break;
             }
         }
@@ -381,6 +384,27 @@ async fn issue7517a07_client_cancel_not_provider_502() {
         !terminals.is_empty(),
         "client cancel must leave a terminal ledger row: {}",
         path.display()
+    );
+    assert!(
+        read.is_ok(),
+        "the client must observe committed business content before closing"
+    );
+    assert!(
+        delivered
+            .windows(b"committed-business".len())
+            .any(|window| window == b"committed-business"),
+        "the client must receive committed business content before closing: {}",
+        String::from_utf8_lossy(&delivered)
+    );
+    let cancelled = terminals
+        .iter()
+        .find(|terminal| terminal["event_type"] == json!("request.cancelled"));
+    let cancelled = cancelled.expect(
+        "a delivered-then-cancelled Responses stream must record request.cancelled",
+    );
+    assert!(
+        cancelled["meta"]["provider_status"].is_null(),
+        "client cancellation must not fabricate a provider status: {cancelled}"
     );
     for terminal in &terminals {
         assert_ne!(

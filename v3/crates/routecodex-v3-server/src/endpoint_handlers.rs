@@ -5,6 +5,48 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Record the terminal row for a client that disconnected after the committed
+/// client SSE channel already delivered business bytes but before the runtime
+/// outcome existed.
+///
+/// The transport owns this disconnect fact: only it sees the committed channel
+/// drop, and its pending runtime task is aborted before the runtime closeout can
+/// record anything. The typed `ClientDisconnect` source keeps the row a
+/// `request.cancelled` with no upstream provider status, instead of a fabricated
+/// provider 502.
+fn record_v3_transport_disconnect_cancelled(
+    state: &V3ListenerState,
+    endpoint: &str,
+    request_id: &str,
+    entry_protocol: &str,
+    console_context: &V3ConsoleEmissionContext,
+) {
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ClientDisconnect,
+        "V3ServerRespOutbound06ClientFrame",
+        "client_disconnect",
+        "client disconnected after the committed prefix was delivered",
+    );
+    if let Err(error) = crate::webui_observability::record_v3_webui_error_projection(
+        &state.webui_observability,
+        state.server.port,
+        request_id,
+        endpoint,
+        entry_protocol,
+        console_context.identity.project_path.as_deref(),
+        Some(&console_context.identity.session_id),
+        499,
+        None,
+        crate::webui_observability::V3ObsErrorProjection {
+            exposed: true,
+            diagnostic_source: Some(&source),
+            ..Default::default()
+        },
+    ) {
+        emit_v3_webui_projection_failure(console_context, &error);
+    }
+}
+
 fn persist_responses_direct_frame_error_evidence(
     state: &V3ListenerState,
     entry_protocol: &str,
@@ -93,6 +135,7 @@ pub(crate) fn pending_endpoint_after_responses_admission(
     request_purpose: V3RequestPurpose,
     client_frame_sink: Option<routecodex_v3_runtime::V3CommittedClientFrameSink>,
     payload: Value,
+    client_disconnect_slot: Option<crate::V3ClientDisconnectSlot>,
 ) -> std::pin::Pin<Box<impl std::future::Future<Output = Response<Body>> + Send>> {
     // Avoid a second poll frame for the large protocol-dispatch future.
     Box::pin(pending_endpoint_after_responses_admission_inner(
@@ -108,6 +151,7 @@ pub(crate) fn pending_endpoint_after_responses_admission(
         request_purpose,
         client_frame_sink,
         payload,
+        client_disconnect_slot,
     ))
 }
 
@@ -124,6 +168,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     request_purpose: V3RequestPurpose,
     client_frame_sink: Option<routecodex_v3_runtime::V3CommittedClientFrameSink>,
     payload: Value,
+    client_disconnect_slot: Option<crate::V3ClientDisconnectSlot>,
 ) -> Response<Body> {
     let client_keepalive_interval = Some(Duration::from_millis(state.server.http_sse_keepalive_ms));
     let request_identity = match allocate_v3_console_request_identity(&state, &path, Some(&payload))
@@ -717,6 +762,22 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             &request_headers,
             &console_payload,
         );
+        if let Some(client_disconnect_slot) = client_disconnect_slot {
+            let recorder_state = Arc::clone(&state);
+            let recorder_request_id = request_id.clone();
+            let recorder_endpoint = path.clone();
+            let recorder_entry_protocol = entry_protocol.clone();
+            let client_disconnect_console_context = console_context.clone();
+            client_disconnect_slot.set(Box::new(move || {
+                record_v3_transport_disconnect_cancelled(
+                    &recorder_state,
+                    &recorder_endpoint,
+                    &recorder_request_id,
+                    &recorder_entry_protocol,
+                    &client_disconnect_console_context,
+                );
+            }));
+        }
         let provider_failure_event_sink = build_v3_provider_failure_event_sink(&console_context);
         let route_selection_event_sink = build_v3_route_selection_event_sink(&console_context);
         let outcome = execute_responses_direct_server_outcome(
