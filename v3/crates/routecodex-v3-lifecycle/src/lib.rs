@@ -775,6 +775,12 @@ impl V3ManagedLifecycle {
                             V3ManagedRunState::Stopped | V3ManagedRunState::Failed
                         ) && listener_set_is_available(&declaration.listeners)
                         {
+                            if tokio::time::Instant::now() >= deadline {
+                                return Err(V3LifecycleError::Timeout(format!(
+                                    "restart {}",
+                                    declaration.instance_id
+                                )));
+                            }
                             validate_auth_handles(&manifest)?;
                             reap_inactive_runtime_files(&instance_dir, &declaration)?;
                             write_json_atomic(&instance_dir.join("instance.json"), &declaration)?;
