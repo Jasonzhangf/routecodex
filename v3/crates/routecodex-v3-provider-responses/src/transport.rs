@@ -814,7 +814,21 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 }
                 Some(attempt_control)
             }
-            None => self.begin_attempt_for_request(&request)?,
+            None => {
+                let attempt_control = self.begin_attempt_for_request(&request)?;
+                if let Some(attempt_control) = &attempt_control {
+                    if !attempt_control.claim_for_send() {
+                        return Err(V3ProviderError::InternalTransport {
+                            request_id: request_id.clone(),
+                            provider_id: provider_id.clone(),
+                            lane: V3ProviderInternalTransportLane::Request,
+                            reason:
+                                "provider transport attempt was already claimed".to_string(),
+                        });
+                    }
+                }
+                attempt_control
+            }
         };
         let attempt_key = attempt_control
             .as_ref()
