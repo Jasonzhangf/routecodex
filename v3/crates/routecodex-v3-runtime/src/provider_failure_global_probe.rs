@@ -24,6 +24,24 @@ pub fn build_v3_provider_global_probe_target(
     auth_alias: Option<&str>,
     model_id: Option<&str>,
 ) -> Result<V3ResponsesProviderTarget, String> {
+    build_v3_provider_global_probe_target_at(
+        manifest,
+        provider_id,
+        interface_id,
+        auth_alias,
+        model_id,
+        v3_relay_provider_policy_now_epoch_ms()?,
+    )
+}
+
+fn build_v3_provider_global_probe_target_at(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+    interface_id: &str,
+    auth_alias: Option<&str>,
+    model_id: Option<&str>,
+    now_ms: u64,
+) -> Result<V3ResponsesProviderTarget, String> {
     let provider = manifest
         .providers
         .get(provider_id)
@@ -53,6 +71,19 @@ pub fn build_v3_provider_global_probe_target(
             .next()
             .ok_or_else(|| format!("probe provider {provider_id} has no routed model"))?,
     };
+    // Global recovery probes and the periodic sweep are real provider requests.
+    // Outside a model's declared availability window they must never be sent,
+    // or a billable minute would be touched by a probe.
+    if model
+        .availability
+        .as_ref()
+        .is_some_and(|availability| !availability.is_available_at(now_ms))
+    {
+        return Err(format!(
+            "probe provider {provider_id} model {} is outside its availability window",
+            model.id
+        ));
+    }
     let responses = interface.responses.as_ref();
     Ok(V3ResponsesProviderTarget {
         provider_id: provider.id.clone(),
@@ -182,9 +213,96 @@ fn provider_probe_error(error: V3ProviderError) -> V3ProviderHealthProbeFailure 
 
 #[cfg(test)]
 mod tests {
-    use super::provider_probe_error;
+    use super::{build_v3_provider_global_probe_target_at, provider_probe_error};
     use crate::provider_failure_runtime_policy::V3ProviderHealthProbeFailure;
+    use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use routecodex_v3_provider_responses::{V3ProviderError, V3ProviderInternalTransportLane};
+
+    fn probe_manifest(
+        availability: Option<&str>,
+    ) -> routecodex_v3_config::V3Config05ManifestPublished {
+        let availability_line = availability
+            .map(|value| format!("availability = {value}\n"))
+            .unwrap_or_default();
+        let source = format!(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://p.invalid/v1"
+default_model = "m"
+auth = {{ type = "api_key", entries = [{{ alias = "kp", env = "PROBE_KEY" }}] }}
+[providers.p.models.m]
+capabilities = ["text"]
+{availability_line}
+[route_groups.g.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "kp", priority = 1 }}]
+"#
+        );
+        std::env::set_var("PROBE_KEY", "test-secret");
+        compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(&source).expect("probe authoring"),
+        )
+        .expect("probe manifest")
+    }
+
+    #[test]
+    fn probe_target_is_refused_outside_the_declared_availability_window() {
+        let manifest = probe_manifest(Some(
+            r#"{ timezone = "Asia/Shanghai", guard_minutes = 0, periods = [{ start = "22:00", end = "08:00" }] }"#,
+        ));
+        // 10:00 Asia/Shanghai is outside the free window: no probe may be sent.
+        let error = build_v3_provider_global_probe_target_at(
+            &manifest,
+            "p",
+            "default",
+            Some("kp"),
+            Some("m"),
+            1_767_232_800_000,
+        )
+        .expect_err("a probe must not be built outside the availability window");
+        assert!(
+            error.contains("outside its availability window"),
+            "unexpected probe rejection reason: {error}"
+        );
+    }
+
+    #[test]
+    fn probe_target_is_built_inside_the_declared_availability_window() {
+        let manifest = probe_manifest(Some(
+            r#"{ timezone = "Asia/Shanghai", guard_minutes = 0, periods = [{ start = "22:00", end = "08:00" }] }"#,
+        ));
+        // 23:00 Asia/Shanghai is inside the free window.
+        let target = build_v3_provider_global_probe_target_at(
+            &manifest,
+            "p",
+            "default",
+            Some("kp"),
+            Some("m"),
+            1_767_279_600_000,
+        )
+        .expect("a probe is allowed inside the availability window");
+        assert_eq!(target.canonical_model_id, "m");
+    }
+
+    #[test]
+    fn probe_target_without_availability_is_always_buildable() {
+        let manifest = probe_manifest(None);
+        build_v3_provider_global_probe_target_at(
+            &manifest,
+            "p",
+            "default",
+            Some("kp"),
+            Some("m"),
+            1_767_232_800_000,
+        )
+        .expect("an undeclared window keeps the probe buildable at any time");
+    }
 
     #[test]
     fn internal_transport_errors_remain_internal_probe_failures() {
