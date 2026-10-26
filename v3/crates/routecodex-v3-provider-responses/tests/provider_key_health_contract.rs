@@ -1353,3 +1353,110 @@ fn a_429_hold_does_not_relabel_a_later_non_rate_limit_cooldown() {
         "a probe success restores the identity after the 5xx cooldown"
     );
 }
+
+#[test]
+fn an_expired_429_hold_reports_available_in_every_projection() {
+    // Selection and diagnostics must agree. A bounded hold expires on its own,
+    // so once the window closes the health projection may not keep reporting a
+    // cooldown whose deadline is the probe cadence: the identity is selectable.
+    let store = V3ProviderKeyHealthStore::default();
+    let mut rate_limit = V3ProviderFailureAction::recoverable("rate_limit_error");
+    rate_limit.recovery = V3ProviderRecoveryKind::RecoverableCounted;
+    rate_limit.failure_threshold = 1;
+    rate_limit.cooldown_ms = 60_000;
+    rate_limit.failure_fingerprint = build_v3_provider_global_error_fingerprint(429).unwrap();
+    let held = store
+        .record_provider_failure_action("p", "a", "m", &rate_limit, 1_000)
+        .unwrap();
+    assert!(!held.available, "the hold must exclude the identity");
+    assert_eq!(
+        held.cooldown_until_ms,
+        Some(61_000),
+        "the reported deadline must be the real hold window, not the probe cadence"
+    );
+
+    let after_window = store
+        .scheduling_projection("p", "a", "m", 1, 1, 61_001)
+        .expect("projection after the hold window");
+    assert!(
+        after_window.available,
+        "an expired bounded hold must not block selection"
+    );
+    // The health projection the failure record carries must agree with
+    // selection: no leftover cooldown flag and no deadline in the future.
+    let record = store
+        .record_provider_failure_action(
+            "p",
+            "a",
+            "m",
+            &V3ProviderFailureAction::recoverable("rate_limit_error"),
+            61_001,
+        )
+        .expect("a repeated 429 after the first window");
+    assert!(
+        record
+            .cooldown_until_ms
+            .is_none_or(|deadline| deadline > 61_001),
+        "a live hold must report a future deadline, never a stale one: {record:?}"
+    );
+}
+
+#[test]
+fn a_429_during_an_outstanding_cooldown_releases_at_its_own_window() {
+    // Latest confirmed failure owns the identity state. A 429 that lands while
+    // an older 5xx cooldown is outstanding re-stamps the bounded rate-limit
+    // window, so the identity is retried once that window closes even though
+    // the older cooldown never saw a probe. This errs toward one extra attempt
+    // instead of a longer hold; a repeated 5xx then re-arms the shared ladder
+    // from the retained history streak. Locking the documented choice here
+    // keeps the behavior from drifting silently in either direction.
+    let store = V3ProviderKeyHealthStore::default();
+    let mut upstream = V3ProviderFailureAction::recoverable("recoverable_upstream");
+    upstream.recovery = V3ProviderRecoveryKind::RecoverableCounted;
+    upstream.failure_threshold = 1;
+    upstream.cooldown_ms = 5_000;
+    upstream.failure_fingerprint = build_v3_provider_global_error_fingerprint(500).unwrap();
+    store
+        .record_provider_failure_action("p", "a", "m", &upstream, 1_000)
+        .expect("5xx cooldown");
+
+    let mut rate_limit = V3ProviderFailureAction::recoverable("rate_limit_error");
+    rate_limit.recovery = V3ProviderRecoveryKind::RecoverableCounted;
+    rate_limit.failure_threshold = 1;
+    rate_limit.cooldown_ms = 60_000;
+    rate_limit.failure_fingerprint = build_v3_provider_global_error_fingerprint(429).unwrap();
+    store
+        .record_provider_failure_action("p", "a", "m", &rate_limit, 2_000)
+        .expect("429 during the 5xx cooldown");
+
+    // Still held inside the bounded window.
+    assert!(
+        !store
+            .scheduling_projection("p", "a", "m", 1, 1, 2_000 + 59_999)
+            .expect("projection inside the rate-limit window")
+            .available,
+        "the bounded window must hold the identity"
+    );
+    // The documented choice: the 429 window ends the exclusion on its own.
+    let after_window = 2_000 + 60_001;
+    assert!(
+        store
+            .scheduling_projection("p", "a", "m", 1, 1, after_window)
+            .expect("projection after the rate-limit window")
+            .available,
+        "the latest failure owns the state, so its own window ends the exclusion"
+    );
+    // And the older 5xx evidence is not lost: the next 5xx re-arms the ladder.
+    let mut next_upstream = V3ProviderFailureAction::recoverable("recoverable_upstream");
+    next_upstream.recovery = V3ProviderRecoveryKind::RecoverableCounted;
+    next_upstream.failure_threshold = 1;
+    next_upstream.cooldown_ms = 5_000;
+    next_upstream.failure_fingerprint = build_v3_provider_global_error_fingerprint(500).unwrap();
+    let rearmed = store
+        .record_provider_failure_action("p", "a", "m", &next_upstream, after_window)
+        .expect("a repeated 5xx after the rate-limit window");
+    assert!(
+        rearmed.cooldown,
+        "a repeated 5xx must cool the identity again"
+    );
+}

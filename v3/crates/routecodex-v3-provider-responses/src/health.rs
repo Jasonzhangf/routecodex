@@ -1536,6 +1536,7 @@ impl V3ProviderHealthStore {
                     .failure_fingerprint
                     .as_ref()
                     .is_some_and(|fingerprint| fingerprint.http_status == 429);
+
                 let blocked_until_ms = if is_rate_limit {
                     now_ms.saturating_add(action.cooldown_ms.max(1))
                 } else {
@@ -1558,6 +1559,13 @@ impl V3ProviderHealthStore {
                     advisory_probe,
                 );
                 if is_rate_limit {
+                    // The latest confirmed failure owns the identity state: a
+                    // 429 that lands while an older cooldown is outstanding
+                    // replaces the cause with this bounded rate-limit window,
+                    // so the identity is retried once the window closes. This
+                    // errs toward an extra attempt instead of a longer hold,
+                    // and the history streak keeps the older ladder rung for
+                    // the next non-429 failure.
                     if let Some(probe) = state.provider_cooldown_probes.get_mut(&key) {
                         probe.cooldown_cause = Some(V3ProviderCooldownFailureClass::RateLimit);
                     }

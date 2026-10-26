@@ -74,14 +74,21 @@ fn key_health_projection(
     now_ms: u64,
 ) -> V3ProviderKeyHealthProjection {
     let history = state.adaptive_history.get(key);
-    let cooldown_until_ms = state
-        .provider_cooldown_probes
-        .get(key)
-        .and_then(|probe| probe.next_probe_at_ms);
-    let cooldown = state
-        .provider_cooldown_probes
-        .get(key)
-        .is_some_and(|probe| probe.active_probe.is_some() || probe.blocked_until_ms.is_some());
+    let probe = state.provider_cooldown_probes.get(key);
+    // Diagnostics must agree with selection: both read the same helper. The
+    // reported deadline is the real hold window for a rate-limit hold or an
+    // advisory probe, otherwise the probe cadence.
+    let cooldown = probe.is_some_and(|probe| probe_state_blocks_availability(probe, now_ms));
+    let cooldown_until_ms = probe.and_then(|probe| {
+        if probe.cooldown_cause
+            == Some(crate::global_cooldown::V3ProviderCooldownFailureClass::RateLimit)
+            || probe.advisory_probe
+        {
+            probe.blocked_until_ms
+        } else {
+            probe.next_probe_at_ms.or(probe.blocked_until_ms)
+        }
+    });
     V3ProviderKeyHealthProjection {
         provider_id: key.provider_id.clone(),
         interface_id: key.interface_id.clone(),
