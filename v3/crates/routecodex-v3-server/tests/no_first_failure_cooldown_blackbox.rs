@@ -88,7 +88,7 @@ version = 3
 provider_error_default_path = [
   {{ step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = 0 }},
   {{ step = "cooldown", scope = "provider_model", duration_ms = 5000, provider_global_failure = false }},
-  {{ step = "project", status = 503, reason_code = "provider_failure", message_mode = "code_only" }},
+  {{ step = "project", reason_code = "provider_failure" }},
 ]
 [servers.health]
 bind = "127.0.0.1"
