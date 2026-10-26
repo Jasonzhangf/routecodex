@@ -307,7 +307,11 @@ async function assertUnusableProbeIsAControlledFailure({ probeCommand, expectedD
   }
 }
 
-function startCargoTestDriver(probeExpression, { targetRoot: sharedTargetRoot = null, prepareArtifacts = true } = {}) {
+function startCargoTestDriver(probeExpression, {
+  targetRoot: sharedTargetRoot = null,
+  prepareArtifacts = true,
+  executePrelude = null,
+} = {}) {
   const targetRoot = sharedTargetRoot ?? join(
     root,
     'target',
@@ -324,16 +328,20 @@ function startCargoTestDriver(probeExpression, { targetRoot: sharedTargetRoot = 
   const { fixtureDir, cargoPath, pidsPath } = writeTimeoutFixture({ artifactPath: fakeExecutable });
   const driverPath = join(fixtureDir, 'driver.mjs');
   writeFileSync(driverPath, [
+    `import { chmodSync } from 'node:fs';`,
     `import { executeCargo, runV3CargoTest } from ${JSON.stringify(join(root, 'scripts', 'run-v3-cargo-test.mjs'))};`,
     'const unhandled = [];',
     "process.on('unhandledRejection', (reason) => unhandled.push(reason));",
     `const probeCommand = ${probeExpression};`,
-    `const execute = (args, executables) => executeCargo([${JSON.stringify(cargoPath)}, 'test'], executables, {`,
-    '  command: process.execPath,',
-    '  timeoutMs: 300,',
-    '  killGraceMs: 200,',
-    '  probeCommand,',
-    '});',
+    'const execute = async (args, executables) => {',
+    ...(executePrelude ? [`  ${executePrelude}`] : []),
+    `  return executeCargo([${JSON.stringify(cargoPath)}, 'test'], executables, {`,
+    '    command: process.execPath,',
+    '    timeoutMs: 300,',
+    '    killGraceMs: 200,',
+    '    probeCommand,',
+    '  });',
+    '};',
     'const code = await runV3CargoTest([], { execute, probeCommand });',
     'await new Promise((resolve) => setTimeout(resolve, 100));',
     "if (unhandled.length > 0) { console.error('[driver] unhandled rejections: ' + unhandled.length); process.exit(97); }",
@@ -510,6 +518,91 @@ async function assertUnreapedLockSurvivesDeadWrapperPid() {
   }
 }
 
+// The unreaped-group terminal state must survive an owner write failure. The
+// lock execution marker is created before the owner was ever written, so a
+// subsequent wrapper call can neither parse a stale owner nor let the stale
+// grace timeout authorize reuse: it must keep returning 86, keep the lock and
+// old artifacts, and never run Cargo.
+async function assertOwnerWriteFailureStillBlocksNextCall() {
+  const targetRoot = join(
+    root,
+    'target',
+    `timeout-retention-owner-failure-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+  );
+  const state = startCargoTestDriver("() => ({ status: 0, stdout: '', stderr: '' })", {
+    targetRoot,
+    prepareArtifacts: true,
+    executePrelude: `chmodSync(${JSON.stringify(join(
+      targetRoot,
+      '.routecodex-v3-test.lock',
+      'owner.json',
+    ))}, 0o444);`,
+  });
+  try {
+    assert.equal(state.driver.error, undefined, `first driver must not hang: ${state.driver.error?.message ?? ''}`);
+    assert.equal(
+      state.driver.status,
+      CLEANUP_FAILURE_EXIT,
+      `owner-write-failure first call must fail closed; stderr:\n${state.driver.stderr}`,
+    );
+    assert.match(
+      state.driver.stderr,
+      /unable to persist unreaped process group identity; retaining test lock and artifacts/u,
+      'the first call must report that the unreaped identity could not be persisted',
+    );
+    assert.equal(existsSync(state.lockDir), true, 'owner-write-failure must retain the lock directory');
+    assert.equal(existsSync(state.fakeExecutable), true, 'owner-write-failure must retain the old executable');
+    assert.equal(existsSync(state.fakeObject), true, 'owner-write-failure must retain the old object');
+
+    const second = startCargoTestDriver("() => ({ status: 0, stdout: '', stderr: '' })", {
+      targetRoot: state.targetRoot,
+      prepareArtifacts: false,
+    });
+    try {
+      assert.equal(second.driver.error, undefined, `second driver must not hang: ${second.driver.error?.message ?? ''}`);
+      assert.equal(
+        second.driver.status,
+        CLEANUP_FAILURE_EXIT,
+        `second call must remain blocked after an owner write failure; stderr:\n${second.driver.stderr}`,
+      );
+      assert.match(
+        second.driver.stderr,
+        /execution marker/u,
+        'second call must cite the retained execution/unreaped state',
+      );
+      assert.equal(
+        existsSync(second.pidsPath),
+        false,
+        'blocked second call must never start Cargo on the retained target',
+      );
+      assert.equal(existsSync(second.fakeExecutable), true, 'blocked second call must not delete the old executable');
+      assert.equal(existsSync(second.fakeObject), true, 'blocked second call must not delete the old object');
+      assert.equal(existsSync(second.lockDir), true, 'blocked second call must not release the lock');
+    } finally {
+      closeCargoTestDriver(second, { keepTarget: true });
+    }
+  } finally {
+    closeCargoTestDriver(state, { keepTarget: true });
+  }
+
+  // After the retained marker is understood to require the persisted owner,
+  // the only safe recovery is the same strict unreaped-group probe against an
+  // owner that was never written: it cannot recover here.
+  const finalProbe = startCargoTestDriver("() => ({ status: 1, stdout: '', stderr: '' })", {
+    targetRoot: state.targetRoot,
+    prepareArtifacts: false,
+  });
+  try {
+    assert.equal(
+      finalProbe.driver.status,
+      CLEANUP_FAILURE_EXIT,
+      `no recovery may bypass an unpersisted owner; stderr:\n${finalProbe.driver.stderr}`,
+    );
+  } finally {
+    closeCargoTestDriver(finalProbe);
+  }
+}
+
 await assertDescendantHoldingStdoutIsBounded();
 await assertEarlyCargoExitStillReapsGroupAndSettles();
 await assertCargoExitOnSigtermWaitsForGroupKillBeforeSettling();
@@ -525,6 +618,7 @@ await assertUnusableProbeIsAControlledFailure({
 });
 await assertCleanupOnlyRunsAfterConfirmedReap();
 await assertUnreapedLockSurvivesDeadWrapperPid();
+await assertOwnerWriteFailureStillBlocksNextCall();
 
 assert.match(source, /CARGO_TEST_TIMEOUT_MS\s*=\s*40\s*\*\s*60\s*\*\s*1000/u);
 assert.match(source, /detached:\s*true/u);

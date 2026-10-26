@@ -52,6 +52,7 @@ const debugDir = join(targetDir, 'debug');
 const debugDepsDir = join(debugDir, 'deps');
 const lockDir = join(targetDir, '.routecodex-v3-test.lock');
 const lockOwnerPath = join(lockDir, 'owner.json');
+const lockExecutionPath = join(lockDir, 'execution-in-progress');
 
 function cargoEnv() {
   return {
@@ -355,6 +356,7 @@ function acquireLock(probeCommand) {
 function createOwnedLock() {
   mkdirSync(lockDir);
   try {
+    writeFileSync(lockExecutionPath, 'canonical V3 Cargo test execution in progress\n');
     writeLockOwner();
   } catch (error) {
     removePath(lockDir);
@@ -419,8 +421,25 @@ function reclaimStaleLock(probeCommand) {
     if (error && error.code === 'ENOENT') return { reclaimed: true };
     throw error;
   }
+  let executionInProgress;
+  try {
+    executionInProgress = existsSync(lockExecutionPath);
+  } catch (error) {
+    return {
+      reclaimed: false,
+      reason: `lock execution marker is unreadable: ${error?.message ?? String(error)}; refusing to reuse the target`,
+    };
+  }
   if (!existsSync(lockOwnerPath)) {
-    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_GRACE_MS) return { reclaimed: false };
+    if (executionInProgress) {
+      return {
+        reclaimed: false,
+        reason: 'lock execution marker has no persisted unreaped group; refusing to reuse the target',
+      };
+    }
+    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_GRACE_MS) {
+      return { reclaimed: false, reason: 'lock grace has not elapsed' };
+    }
     removePath(lockDir);
     return { reclaimed: true };
   }
@@ -428,22 +447,38 @@ function reclaimStaleLock(probeCommand) {
   try {
     owner = JSON.parse(readFileSync(lockOwnerPath, 'utf8'));
   } catch {
-    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_GRACE_MS) return { reclaimed: false };
+    if (executionInProgress) {
+      return {
+        reclaimed: false,
+        reason: 'lock owner is incomplete while an execution marker is retained; refusing to reuse the target',
+      };
+    }
+    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_GRACE_MS) {
+      return { reclaimed: false, reason: 'lock grace has not elapsed' };
+    }
     removePath(lockDir);
     return { reclaimed: true };
   }
   if (owner?.unreapedProcessGroup) {
     return reclaimUnreapedLock(owner, probeCommand);
   }
+  if (executionInProgress) {
+    return {
+      reclaimed: false,
+      reason: 'lock execution marker has no unreaped group identity; refusing to reuse the target',
+    };
+  }
   const pid = Number(owner?.pid);
   const liveIdentity = Number.isInteger(pid) && pid > 0 ? currentProcessIdentity(pid) : null;
-  if (liveIdentity && lockOwnerMatchesProcess(owner, liveIdentity)) return { reclaimed: false };
+  if (liveIdentity && lockOwnerMatchesProcess(owner, liveIdentity)) {
+    return { reclaimed: false, reason: 'lock owner process is still alive' };
+  }
   if (
     liveIdentity
     && liveIdentity.processStartedAt === null
     && Date.now() - lockStat.mtimeMs <= UNVERIFIABLE_LIVE_LOCK_MAX_AGE_MS
   ) {
-    return { reclaimed: false };
+    return { reclaimed: false, reason: 'lock owner process identity is unverifiable' };
   }
   removePath(lockDir);
   return { reclaimed: true };

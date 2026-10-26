@@ -28,6 +28,8 @@ export function collectV3BuildTestArtifactBudgetFailures(sources) {
   requireMatch(sources.wrapper, /owner\?\.unreapedProcessGroup[\s\S]*probeProcessGroup/u, 'V3 test lock recovery must probe a persisted unreaped process group before reusing the target');
   requireMatch(sources.wrapper, /owner\.unreapedProcessGroup\s*=\s*unreapedProcessGroup;/u, 'V3 test wrapper must persist the unreaped process group identity with the lock owner');
   requireMatch(sources.wrapper, /writeLockOwner\(\{\s*processGroupId:\s*terminalError\.processGroupId/u, 'V3 test wrapper must write the unreaped group identity into the lock owner before retaining the lock');
+  requireMatch(sources.wrapper, /writeFileSync\(lockExecutionPath/u, 'V3 test lock must persist an execution marker before any owner write');
+  requireMatch(sources.wrapper, /executionInProgress[\s\S]*lockExecutionPath/u, 'V3 test lock recovery must refuse to reclaim a target while an execution marker is retained');
   requireMatch(sources.wrapper, /spawnSync\('ps',[\s\S]*LC_ALL:\s*'C'/u, 'V3 test lock inspection must use locale-stable process-start output');
   requireMatch(sources.wrapper, /function currentProcessIdentity\(pid\)\s*\{[\s\S]*if \(!processExists\(pid\)\) return null;[\s\S]*if \(result\.error\) return \{ pid, processStartedAt: null \};[\s\S]*if \(result\.status !== 0\) return \{ pid, processStartedAt: null \};/u, 'V3 test lock inspection must not require ps access when the PID is still alive');
   requireMatch(sources.wrapper, /processStartedAt:\s*identity\.processStartedAt[\s\S]*owner\.processStartedAt\s*===\s*liveIdentity\?\.processStartedAt/u, 'V3 test lock owner must record and compare the process-start identity');
