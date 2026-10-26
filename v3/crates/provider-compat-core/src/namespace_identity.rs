@@ -426,13 +426,13 @@ impl NamespaceToolIdentityRegistry {
         self.project_retained_declaration_surface(body, "tool_search_output", protocol)
     }
 
-    /// A provider flattens a nested `additional_tools` namespace itself. Once
-    /// the same identity is already flat in root `tools`, leaving the nested
-    /// form behind collides. Project the nested surface onto the same bound
-    /// flat names the root promotion already used, so the provider receives one
-    /// consistent declaration and the request-scoped reverse map keeps the
-    /// exact original client identity. Additional-only declarations that the
-    /// root promotion never reached stay as opaque history.
+    /// A provider can flatten a nested `additional_tools` namespace itself.
+    /// That stays safe while the request binding keeps every leaf at its natural
+    /// flattened name. Only a root declaration that reserves a leaf's wire name
+    /// makes `bind_wire_names` rename the namespace identity; then the
+    /// provider's own flattening would emit a conflicting declaration. Project
+    /// exactly that namespace surface onto the bound names, and keep the
+    /// client's `additional_tools` history unchanged otherwise.
     fn project_additional_tools_declarations(
         &self,
         body: &mut Value,
@@ -454,15 +454,21 @@ impl NamespaceToolIdentityRegistry {
             let mut projected = Vec::with_capacity(tools.len());
             for tool in tools {
                 let mut surface = Self::from_tools(std::slice::from_ref(tool))?;
-                let duplicated_root_identity = !surface.by_identity.is_empty()
+                surface.bind_wire_names(protocol);
+                let collides_with_root_binding = !surface.by_identity.is_empty()
                     && surface.by_identity.keys().all(|key| {
                         root_identities.contains(key)
                             && self
                                 .by_identity
                                 .get(key)
                                 .is_some_and(NamespaceToolIdentity::is_namespaced)
+                    })
+                    && surface.by_identity.iter().any(|(key, identity)| {
+                        self.by_identity.get(key).is_some_and(|bound| {
+                            bound.actual_wire_name != identity.actual_wire_name
+                        })
                     });
-                if !duplicated_root_identity {
+                if !collides_with_root_binding {
                     projected.push(tool.clone());
                     continue;
                 }
@@ -1507,6 +1513,59 @@ mod tests {
             registry.identity_for_wire_name("functions__wait"),
             None,
             "the colliding plain declaration must not inherit the namespace inverse"
+        );
+    }
+
+    #[test]
+    fn additional_tools_namespace_without_root_collision_stays_unchanged() {
+        // Direct provider promotion copies these declarations into root `tools`
+        // without renaming any leaf. The provider itself can flatten the nested
+        // `additional_tools` surface to the same names, so client history must
+        // keep its original shape.
+        let declarations = json!([
+            {"type":"namespace","name":"functions","tools":[
+                {"type":"custom","name":"exec","format":{"type":"text"}},
+                {"type":"function","name":"wait","parameters":{"type":"object","required":["cell_id"]}},
+                {"type":"function","name":"request_user_input","parameters":{"type":"object"}}
+            ]},
+            {"type":"namespace","name":"mcp__cua_repl","tools":[
+                {"type":"function","name":"js","parameters":{"type":"object"}},
+                {"type":"function","name":"js_reset","parameters":{"type":"object"}}
+            ]}
+        ]);
+        let additional = json!({
+            "type":"additional_tools",
+            "role":"developer",
+            "tools": declarations.clone()
+        });
+        let mut request = json!({
+            "tools": declarations,
+            "input":[
+                additional.clone(),
+                {"role":"user","content":"exercise independent provider account pool"}
+            ]
+        });
+        let registry =
+            NamespaceToolIdentityRegistry::from_request(&request, "openai-responses").unwrap();
+        assert!(
+            registry.identities().all(|identity| {
+                identity.actual_wire_name
+                    == if identity.is_namespaced() {
+                        namespace_wire_name(&identity.namespace_segments, &identity.leaf_name)
+                    } else {
+                        identity.leaf_name.clone()
+                    }
+            }),
+            "no root declaration reserves a namespace leaf name here"
+        );
+
+        registry
+            .project_request(&mut request, "openai-responses")
+            .unwrap();
+
+        assert_eq!(
+            request["input"][0], additional,
+            "Direct client input must stay verbatim when no provider-side name collision needs rebinding"
         );
     }
 
