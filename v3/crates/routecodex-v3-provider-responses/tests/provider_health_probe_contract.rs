@@ -1,4 +1,4 @@
-use routecodex_v3_provider_responses::V3ProviderHealthStore;
+use routecodex_v3_provider_responses::{V3ProviderHealthStore, V3ProviderInterfaceIdentity};
 
 #[test]
 fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b() {
@@ -65,7 +65,14 @@ fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b()
             .is_none());
         assert_eq!(
             store
-                .scheduling_projection_for_key_with_interface("p", "alternate", "k", "m", 1, 1, due)
+                .scheduling_projection_for_key_with_interface(
+                    V3ProviderInterfaceIdentity::new("p", "alternate"),
+                    "k",
+                    "m",
+                    1,
+                    1,
+                    due,
+                )
                 .unwrap()
                 .score_generation,
             newer.score_generation
@@ -107,8 +114,7 @@ fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b()
         assert!(
             store
                 .scheduling_projection_for_key_with_interface(
-                    "p",
-                    "alternate",
+                    V3ProviderInterfaceIdentity::new("p", "alternate"),
                     "k",
                     "m",
                     1,

@@ -868,13 +868,13 @@ async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06
         "protocol plan failed before dispatch",
     );
     let fault = routecodex_v3_runtime::V3RelayErrorOperatorFault {
-        policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+        policy_failure: Box::new(routecodex_v3_error::build_v3_error_01_source_raised(
             routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
             "V3Error06ClientProjected",
             "relay_error_operator_sdk_failure",
             "Error06 SDK rejected the source projection",
-        ),
-        original_source: Some(original_source.clone()),
+        )),
+        original_source: Some(Box::new(original_source.clone())),
     };
     let response = crate::endpoint_handlers::finish_v3_protocol_execution_plan_failure(
         &state,

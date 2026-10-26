@@ -343,18 +343,16 @@ mod tests {
         assert_eq!(quota.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(quota.failure_threshold, 3);
 
-        for (code, status) in [("account_disabled", 403)] {
-            let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
-                "V3ProviderReqOutbound09TransportRequest",
-                code,
-                status,
-            ));
-            assert_eq!(
-                action.recovery,
-                V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
-            );
-            assert_eq!(action.failure_threshold, 0);
-        }
+        let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "account_disabled",
+            403,
+        ));
+        assert_eq!(
+            action.recovery,
+            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
+        );
+        assert_eq!(action.failure_threshold, 0);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderRespInbound01Raw",

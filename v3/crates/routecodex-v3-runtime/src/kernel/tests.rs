@@ -288,8 +288,8 @@ fn direct_source_fault_preserves_http_witness_observability_and_snapshots() {
         Ok(None),
     )
     .expect_err("missing terminal Error06 is a typed SDK fault");
-    let diagnostic_source = fault.policy_failure.clone();
-    let diagnostic_cause = fault
+    let diagnostic_source = *fault.policy_failure.clone();
+    let diagnostic_cause = *fault
         .original_source
         .clone()
         .expect("the SDK fault keeps its original source");
@@ -356,7 +356,7 @@ fn protocol_plan_operator_fault_keeps_original_cause_without_running_error_proje
     let returned = project_v3_protocol_execution_plan_failure(failure)
         .expect_err("an operator fault must not become a successful Error06 projection");
     assert_eq!(returned, fault);
-    assert_eq!(returned.original_source, Some(original));
+    assert_eq!(returned.original_source.as_deref(), Some(&original));
 }
 
 #[test]

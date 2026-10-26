@@ -593,8 +593,8 @@ fn gemini_error_output_from_projection(
                 error_chain: None,
                 observability: None,
                 provider_failure_attempts: Vec::new(),
-                diagnostic_source: Some(fault.policy_failure),
-                diagnostic_cause: fault.original_source,
+                diagnostic_source: Some(*fault.policy_failure),
+                diagnostic_cause: fault.original_source.map(|source| *source),
                 stream_observation: None,
                 provider_snapshots: None,
             }
@@ -980,8 +980,8 @@ fn provider_failure_output(
             error_chain: None,
             observability: None,
             provider_failure_attempts,
-            diagnostic_source: Some(fault.policy_failure),
-            diagnostic_cause: fault.original_source,
+            diagnostic_source: Some(*fault.policy_failure),
+            diagnostic_cause: fault.original_source.map(|source| *source),
             stream_observation: None,
             provider_snapshots: None,
         };
@@ -1103,8 +1103,14 @@ mod tests {
             ));
             assert!(output.error_chain.is_none());
             assert!(!output.node_trace.contains(&"V3Error06ClientProjected"));
-            assert_eq!(output.diagnostic_source, Some(fault.policy_failure.clone()));
-            assert_eq!(output.diagnostic_cause, fault.original_source.clone());
+            assert_eq!(
+                output.diagnostic_source,
+                Some(*fault.policy_failure.clone())
+            );
+            assert_eq!(
+                output.diagnostic_cause,
+                fault.original_source.clone().map(|source| *source)
+            );
             assert_eq!(
                 fault.policy_failure.source_kind,
                 routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
@@ -1113,7 +1119,7 @@ mod tests {
                 fault.policy_failure.code,
                 "relay_error_projection_nonterminal"
             );
-            assert_eq!(fault.original_source, Some(source.clone()));
+            assert_eq!(fault.original_source.as_deref(), Some(&source));
             assert_eq!(output.provider_failure_attempts, attempts);
         }
     }
@@ -1141,8 +1147,8 @@ mod tests {
             Err(error),
         )
         .expect_err("the real Error operator SDK failure must remain a typed fault");
-        let policy_failure = fault.policy_failure.clone();
-        let original_source = fault
+        let policy_failure = *fault.policy_failure.clone();
+        let original_source = *fault
             .original_source
             .clone()
             .expect("the real original source must remain attached to the fault");
@@ -1195,8 +1201,8 @@ mod tests {
             Ok(None),
         )
         .expect_err("missing terminal Error06 is a typed SDK fault");
-        let diagnostic_source = fault.policy_failure.clone();
-        let diagnostic_cause = fault
+        let diagnostic_source = *fault.policy_failure.clone();
+        let diagnostic_cause = *fault
             .original_source
             .clone()
             .expect("the SDK fault keeps its original compat source");
@@ -1267,8 +1273,8 @@ mod tests {
             Ok(None),
         )
         .expect_err("missing terminal Error06 must produce a typed SDK fault");
-        let diagnostic_source = fault.policy_failure.clone();
-        let diagnostic_cause = fault
+        let diagnostic_source = *fault.policy_failure.clone();
+        let diagnostic_cause = *fault
             .original_source
             .clone()
             .expect("the source fault preserves the canonical plain source");

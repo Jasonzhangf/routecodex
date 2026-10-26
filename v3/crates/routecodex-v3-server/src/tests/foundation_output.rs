@@ -196,8 +196,8 @@ async fn http_boundary_sdk_fault_preserves_typed_source_cause_and_model_transpor
 
     let (policy_source, original_source) = foundation_fault_sources();
     let fault = routecodex_v3_runtime::V3RelayErrorOperatorFault {
-        policy_failure: policy_source.clone(),
-        original_source: Some(original_source.clone()),
+        policy_failure: Box::new(policy_source.clone()),
+        original_source: Some(Box::new(original_source.clone())),
     };
 
     let log = std::env::temp_dir().join(format!(

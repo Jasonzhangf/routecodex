@@ -85,9 +85,11 @@ async fn post_commit_sse_sdk_fault_preserves_policy_and_original_source() {
         source_stage: "V3ProviderRespInbound01Raw",
         code: "upstream_midstream_reset".to_string(),
         message: "upstream stream reset after commit".to_string(),
-        internal_error: Some(routecodex_v3_error::build_v3_internal_error_envelope(
-            routecodex_v3_error::V3InternalErrorCode::V3Server16HttpFrame,
-            "V3ProviderRespInbound01Raw",
+        internal_error: Some(Box::new(
+            routecodex_v3_error::build_v3_internal_error_envelope(
+                routecodex_v3_error::V3InternalErrorCode::V3Server16HttpFrame,
+                "V3ProviderRespInbound01Raw",
+            ),
         )),
         external_error: None,
     };
@@ -114,7 +116,10 @@ async fn post_commit_sse_sdk_fault_preserves_policy_and_original_source() {
                 observed.policy_failure.code,
                 "relay_error_operator_sdk_failure"
             );
-            assert_eq!(observed.original_source, Some(original_source.clone()));
+            assert_eq!(
+                observed.original_source,
+                Some(Box::new(original_source.clone()))
+            );
         }
         V3PostCommitSseTransportError::Projected(projected) => {
             panic!("an SDK fault must not become a client projection: {projected:?}")

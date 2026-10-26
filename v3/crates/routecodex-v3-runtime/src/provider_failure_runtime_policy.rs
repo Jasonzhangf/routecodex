@@ -18,8 +18,9 @@ use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
     V3ProviderFailureRecord, V3ProviderHealthListenerScope, V3ProviderHealthStore,
-    V3ProviderKeyHealthProjection, V3ProviderRecoveryKind, V3ProviderSchedulingProjection,
-    V3ProviderSchedulingReader, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
+    V3ProviderInterfaceIdentity, V3ProviderKeyHealthProjection, V3ProviderRecoveryKind,
+    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
+    V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
 use routecodex_v3_target::{
     V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
@@ -176,8 +177,8 @@ pub(crate) fn is_health_neutral_request_compat_failure(
 /// available as evidence when it already existed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3RelayErrorOperatorFault {
-    pub policy_failure: V3Error01SourceRaised,
-    pub original_source: Option<V3Error01SourceRaised>,
+    pub policy_failure: Box<V3Error01SourceRaised>,
+    pub original_source: Option<Box<V3Error01SourceRaised>>,
 }
 
 /// Run the canonical Source01 SDK once and preserve its two successful side
@@ -231,13 +232,13 @@ fn relay_error_operator_fault(
     original_source: Option<V3Error01SourceRaised>,
 ) -> V3RelayErrorOperatorFault {
     V3RelayErrorOperatorFault {
-        policy_failure: build_v3_error_01_source_raised(
+        policy_failure: Box::new(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Error06ClientProjected",
             code,
             message,
-        ),
-        original_source,
+        )),
+        original_source: original_source.map(Box::new),
     }
 }
 
@@ -247,7 +248,7 @@ pub(crate) fn relay_error_operator_fault_from_err01_source(
     runner_error: crate::operation_runner::OperationRunnerError,
 ) -> V3RelayErrorOperatorFault {
     V3RelayErrorOperatorFault {
-        policy_failure: build_v3_error_01_source_raised(
+        policy_failure: Box::new(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Error01SourceRaised",
             "err01_source_operator_sdk_failure",
@@ -255,8 +256,8 @@ pub(crate) fn relay_error_operator_fault_from_err01_source(
                 "Err01 operator failed ({}) while raising {source_stage}:{}",
                 runner_error.message, original_source.code
             ),
-        ),
-        original_source: Some(original_source),
+        )),
+        original_source: Some(Box::new(original_source)),
     }
 }
 
@@ -513,17 +514,19 @@ struct V3SessionGlobalSchedulingReader<'health> {
 impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
-        interface_id: &str,
+        identity: V3ProviderInterfaceIdentity<'_>,
         auth_alias: &str,
         model_id: &str,
         priority: i32,
         base_weight: u32,
         now_ms: u64,
     ) -> V3ProviderSchedulingProjection {
-        let mut projection = self.global.scheduling_projection_for_interface(
+        let V3ProviderInterfaceIdentity {
             provider_id,
             interface_id,
+        } = identity;
+        let mut projection = self.global.scheduling_projection_for_interface(
+            identity,
             auth_alias,
             model_id,
             priority,
@@ -609,17 +612,19 @@ pub struct V3ProviderFailureRuntimeHealth {
 impl V3ProviderSchedulingReader for V3ProviderFailureRuntimeHealth {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
-        interface_id: &str,
+        identity: V3ProviderInterfaceIdentity<'_>,
         auth_alias: &str,
         model_id: &str,
         priority: i32,
         base_weight: u32,
         now_ms: u64,
     ) -> V3ProviderSchedulingProjection {
-        let mut projection = self.store.scheduling_projection_for_interface(
+        let V3ProviderInterfaceIdentity {
             provider_id,
             interface_id,
+        } = identity;
+        let mut projection = self.store.scheduling_projection_for_interface(
+            identity,
             auth_alias,
             model_id,
             priority,

@@ -131,18 +131,18 @@ fn responses_direct_static_hooks_are_registered() {
 #[test]
 fn direct_source_boundary_preserves_err01_operator_fault() {
     let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-        policy_failure: build_v3_error_01_source_raised(
+        policy_failure: Box::new(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Error01SourceRaised",
             "err01_source_operator_sdk_failure",
             "seeded Err01 failure",
-        ),
-        original_source: Some(build_v3_error_01_source_raised(
+        )),
+        original_source: Some(Box::new(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Provider12ResponsesWirePayload",
             "seeded_original_source",
             "seeded original source",
-        )),
+        ))),
     };
     let result: V3DirectSourceResult<()> = Err(Err(fault.clone()));
 

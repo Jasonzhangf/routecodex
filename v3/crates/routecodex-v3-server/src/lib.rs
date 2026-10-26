@@ -1182,7 +1182,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                         &request_id,
                         &[],
                         Some(&fault.policy_failure),
-                        fault.original_source.as_ref(),
+                        fault.original_source.as_deref(),
                     );
                     return foundation_output_response(foundation_output_from_error_sdk_result(
                         "V3Server03HttpRequestRaw",

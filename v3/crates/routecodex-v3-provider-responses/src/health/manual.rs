@@ -9,6 +9,7 @@ use super::{
     V3ProviderCooldown, V3ProviderCooldownProbeState, V3ProviderHealthError, V3ProviderHealthState,
     V3ProviderHealthStore,
 };
+use crate::key_health::V3ProviderInterfaceIdentity;
 use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key_for_interface, resolve_provider_cooldown_probe_key_for_interface,
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
@@ -111,14 +112,17 @@ impl V3ProviderHealthStore {
     /// 实际读取的键，也是唯一被持久化的那一半。
     pub fn add_cooldown_entry_for_interface(
         &self,
-        provider_id: &str,
-        interface_id: &str,
+        identity: V3ProviderInterfaceIdentity<'_>,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         kind: &str,
         duration_ms: u64,
         now_ms: u64,
     ) -> Result<u64, V3ProviderHealthError> {
+        let V3ProviderInterfaceIdentity {
+            provider_id,
+            interface_id,
+        } = identity;
         let provider_id = provider_id.trim();
         if provider_id.is_empty() {
             return Err(invalid_manual_cooldown("provider_id must not be empty"));
@@ -231,8 +235,7 @@ impl V3ProviderHealthStore {
         now_ms: u64,
     ) -> Result<u64, V3ProviderHealthError> {
         self.add_cooldown_entry_for_interface(
-            provider_id,
-            "default",
+            V3ProviderInterfaceIdentity::new(provider_id, "default"),
             auth_alias,
             model_id,
             kind,

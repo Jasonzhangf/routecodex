@@ -359,14 +359,28 @@ async fn witness(startup: bool) {
         assert_eq!(
             health
                 .store
-                .scheduling_projection_for_interface(id, "default", "key", "recovery", 1, 1, now_ms)
+                .scheduling_projection_for_interface(
+                    V3ProviderInterfaceIdentity::new(id, "default"),
+                    "key",
+                    "recovery",
+                    1,
+                    1,
+                    now_ms,
+                )
                 .available,
             startup
         );
         assert!(
             health
                 .store
-                .scheduling_projection_for_interface(id, "default", "key", "sibling", 1, 1, now_ms)
+                .scheduling_projection_for_interface(
+                    V3ProviderInterfaceIdentity::new(id, "default"),
+                    "key",
+                    "sibling",
+                    1,
+                    1,
+                    now_ms,
+                )
                 .available
         );
         assert_eq!(

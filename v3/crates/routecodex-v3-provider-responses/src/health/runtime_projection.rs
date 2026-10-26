@@ -1,8 +1,7 @@
 impl V3ProviderSchedulingReader for V3ProviderHealthStore {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
-        interface_id: &str,
+        identity: V3ProviderInterfaceIdentity<'_>,
         auth_alias: &str,
         model_id: &str,
         priority: i32,
@@ -10,8 +9,7 @@ impl V3ProviderSchedulingReader for V3ProviderHealthStore {
         now_ms: u64,
     ) -> V3ProviderSchedulingProjection {
         self.scheduling_projection_for_key_with_interface(
-            provider_id,
-            interface_id,
+            identity,
             auth_alias,
             model_id,
             priority,
@@ -19,8 +17,8 @@ impl V3ProviderSchedulingReader for V3ProviderHealthStore {
             now_ms,
         )
         .unwrap_or_else(|_| V3ProviderSchedulingProjection {
-            provider_id: provider_id.to_string(),
-            interface_id: interface_id.to_string(),
+            provider_id: identity.provider_id.to_string(),
+            interface_id: identity.interface_id.to_string(),
             auth_alias: auth_alias.to_string(),
             model_id: model_id.to_string(),
             priority,
@@ -258,21 +256,6 @@ fn upsert_provider_cooldown_probe(
         V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
         false,
     );
-}
-
-fn record_adaptive_failure(
-    state: &mut V3ProviderHealthState,
-    key: &V3ProviderCooldownProbeKey,
-) -> u64 {
-    let history = state.adaptive_history.entry(key.clone()).or_default();
-    history.attempts = history.attempts.saturating_add(1);
-    history.failures = history.failures.saturating_add(1);
-    adaptive_probe_interval_ms(
-        history.attempts,
-        history.failures,
-        history.recovery_ewma_ms,
-        history.probe_failure_count,
-    )
 }
 
 fn record_adaptive_success(

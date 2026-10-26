@@ -6,6 +6,7 @@ use crate::V3ListenerState;
 use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
+use routecodex_v3_provider_responses::V3ProviderInterfaceIdentity;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -157,8 +158,7 @@ pub(crate) async fn add_cooldown(
         .provider_health
         .store()
         .add_cooldown_entry_for_interface(
-            &provider_id,
-            request.interface_id.trim(),
+            V3ProviderInterfaceIdentity::new(&provider_id, request.interface_id.trim()),
             request.auth_alias.as_deref(),
             request.model_id.as_deref(),
             &request.kind,

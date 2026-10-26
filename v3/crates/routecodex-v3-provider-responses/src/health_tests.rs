@@ -125,7 +125,14 @@ fn late_probe_outcomes_cannot_release_replacement_or_sibling_owners() {
             ("sibling", "alternate", "k", "m"),
         ] {
             store
-                .add_cooldown_entry_for_interface(p, i, Some(k), Some(m), "probe", 60_000, 100)
+                .add_cooldown_entry_for_interface(
+                    V3ProviderInterfaceIdentity::new(p, i),
+                    Some(k),
+                    Some(m),
+                    "probe",
+                    60_000,
+                    100,
+                )
                 .unwrap();
             siblings.push(
                 store
@@ -172,8 +179,7 @@ fn probe_acquisition_exhaustion_is_explicit_without_owning_or_reusing() {
     let store = V3ProviderHealthStore::default();
     store
         .add_cooldown_entry_for_interface(
-            "p",
-            "default",
+            V3ProviderInterfaceIdentity::new("p", "default"),
             Some("k"),
             Some("m"),
             "probe",
@@ -194,8 +200,7 @@ fn probe_acquisition_is_not_reused_after_cooldown_removal() {
     let store = V3ProviderHealthStore::default();
     store
         .add_cooldown_entry_for_interface(
-            "p",
-            "default",
+            V3ProviderInterfaceIdentity::new("p", "default"),
             Some("k"),
             Some("m"),
             "probe",
@@ -214,8 +219,7 @@ fn probe_acquisition_is_not_reused_after_cooldown_removal() {
         .unwrap();
     store
         .add_cooldown_entry_for_interface(
-            "p",
-            "default",
+            V3ProviderInterfaceIdentity::new("p", "default"),
             Some("k"),
             Some("m"),
             "probe",
@@ -948,10 +952,10 @@ fn cooldown_reupsert_preserves_in_flight_probe_single_flight() {
         "in-flight probe must not be re-enqueued by re-upsert"
     );
     assert!(
-        !store
+        store
             .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
             .unwrap()
-            .is_some(),
+            .is_none(),
         "second concurrent probe acquisition must be denied"
     );
 }

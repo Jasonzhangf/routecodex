@@ -1774,8 +1774,8 @@ pub(crate) fn operator_fault_output_with_observability_and_snapshots(
     V3ResponsesDirectRuntimeOutput {
         observability,
         terminal_disposition: Some(V3ProviderTerminalDisposition::NoResponse),
-        diagnostic_source: Some(fault.policy_failure),
-        diagnostic_cause: fault.original_source,
+        diagnostic_source: Some(*fault.policy_failure),
+        diagnostic_cause: fault.original_source.map(|source| *source),
         stream_observation: None,
         provider_request_snapshot,
         provider_response_snapshot,
@@ -1882,8 +1882,8 @@ pub(crate) fn policy_failure_output_with_observability(
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
     sdk_runtime_fault_output_with_observability_and_snapshots(
-        failure.original_source,
-        failure.policy_failure,
+        *failure.original_source,
+        *failure.policy_failure,
         last_external_http,
         node_trace,
         observability,
@@ -2187,8 +2187,8 @@ mod target_exhaustion_disposition_tests {
         let output = source_failure_output(
             Err(
                 crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-                    policy_failure: policy_failure.clone(),
-                    original_source: Some(original.clone()),
+                    policy_failure: Box::new(policy_failure.clone()),
+                    original_source: Some(Box::new(original.clone())),
                 },
             ),
             Some(witness.clone()),
@@ -2269,8 +2269,8 @@ mod target_exhaustion_disposition_tests {
             "Error01 operator failed",
         );
         let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-            policy_failure: policy_failure.clone(),
-            original_source: Some(original.clone()),
+            policy_failure: Box::new(policy_failure.clone()),
+            original_source: Some(Box::new(original.clone())),
         };
         let witness = V3ExternalHttpWitness::new(
             429,

@@ -101,6 +101,47 @@ pub(crate) fn provider_admission_error(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+    request_id: impl Into<String>,
+    provider_id: impl Into<String>,
+    url_text: impl AsRef<str>,
+    auth: V3ProviderAuthHandle,
+    stream_intent: V3ResponsesStreamIntent,
+    body: Value,
+    provider_headers: Vec<V3ProviderRequestHeader>,
+    timeout: Option<Duration>,
+    concurrency_acquire_timeout_ms: u64,
+    sse_first_frame_timeout_ms: Option<u64>,
+) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
+    let request_id = request_id.into();
+    let provider_id = provider_id.into();
+    let url = reqwest::Url::parse(url_text.as_ref()).map_err(|error| {
+        V3ProviderError::InvalidBaseUrl {
+            request_id: request_id.clone(),
+            provider_id: provider_id.clone(),
+            reason: error.to_string(),
+        }
+    })?;
+    Ok(v3_transport_13_request(
+        V3Transport13ResponsesRequestKind::Http {
+            request_id,
+            provider_id,
+            url,
+            auth,
+            stream_intent,
+            body,
+            provider_headers,
+            timeout,
+            initial_concurrency_budget: 8,
+            concurrency_acquire_timeout_ms,
+            sse_first_frame_timeout_ms,
+            cancellation: None,
+            compatibility_profile: None,
+        },
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{take_or_acquire_provider_admission, V3ProviderAdmissionError};
@@ -171,45 +212,4 @@ mod tests {
         assert_eq!(owner.snapshot("provider:key").unwrap().in_flight, 0);
         assert_eq!(transport.snapshot("provider:key").unwrap().in_flight, 0);
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
-    request_id: impl Into<String>,
-    provider_id: impl Into<String>,
-    url_text: impl AsRef<str>,
-    auth: V3ProviderAuthHandle,
-    stream_intent: V3ResponsesStreamIntent,
-    body: Value,
-    provider_headers: Vec<V3ProviderRequestHeader>,
-    timeout: Option<Duration>,
-    concurrency_acquire_timeout_ms: u64,
-    sse_first_frame_timeout_ms: Option<u64>,
-) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
-    let request_id = request_id.into();
-    let provider_id = provider_id.into();
-    let url = reqwest::Url::parse(url_text.as_ref()).map_err(|error| {
-        V3ProviderError::InvalidBaseUrl {
-            request_id: request_id.clone(),
-            provider_id: provider_id.clone(),
-            reason: error.to_string(),
-        }
-    })?;
-    Ok(v3_transport_13_request(
-        V3Transport13ResponsesRequestKind::Http {
-            request_id,
-            provider_id,
-            url,
-            auth,
-            stream_intent,
-            body,
-            provider_headers,
-            timeout,
-            initial_concurrency_budget: 8,
-            concurrency_acquire_timeout_ms,
-            sse_first_frame_timeout_ms,
-            cancellation: None,
-            compatibility_profile: None,
-        },
-    ))
 }

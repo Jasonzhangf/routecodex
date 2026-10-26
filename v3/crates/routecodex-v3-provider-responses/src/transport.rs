@@ -1015,11 +1015,11 @@ impl ProviderResponsesTransport {
         sse_first_frame_timeout_ms: Option<u64>,
         cancellation: Option<V3ProviderCancellation>,
     ) -> Result<reqwest::Response, V3ProviderError> {
-        ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
+        ensure_not_cancelled(request_id, provider_id, cancellation.as_ref())?;
         let deadline = timeout.map(|timeout| Instant::now() + timeout);
         let secret = resolve_secret(
-            &request_id,
-            &provider_id,
+            request_id,
+            provider_id,
             &auth,
             timeout,
             cancellation.clone(),
@@ -1039,7 +1039,7 @@ impl ProviderResponsesTransport {
             V3ProviderHttpAuthCarrier::GeminiApiKey => request.header("x-goog-api-key", &secret),
         };
         if let Some(deadline) = deadline {
-            request = request.timeout(remaining_timeout(deadline, &request_id, &provider_id)?);
+            request = request.timeout(remaining_timeout(deadline, request_id, provider_id)?);
         }
         if anthropic_messages {
             request = apply_anthropic_messages_compat_headers(request, &secret, &provider_headers);

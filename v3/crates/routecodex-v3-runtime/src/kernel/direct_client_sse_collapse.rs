@@ -220,13 +220,13 @@ mod tests {
             "seeded original collapse failure",
         );
         let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-            policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+            policy_failure: Box::new(routecodex_v3_error::build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3Error01SourceRaised",
                 "err01_source_operator_sdk_failure",
                 "seeded Err01 operator failure",
-            ),
-            original_source: Some(original.clone()),
+            )),
+            original_source: Some(Box::new(original.clone())),
         };
         let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
             502,
@@ -243,7 +243,7 @@ mod tests {
 
         assert_eq!(
             output.diagnostic_source,
-            Some(fault.policy_failure),
+            Some(*fault.policy_failure.clone()),
             "collapse caller must preserve the Err01 SDK fault"
         );
         assert_eq!(

@@ -151,8 +151,7 @@ fn put_all_candidates_in_provider_cooldown(
         health
             .store
             .record_provider_cooldown_failure_for_interface(
-                &candidate.provider_id,
-                &candidate.interface_id,
+                V3ProviderInterfaceIdentity::new(&candidate.provider_id, &candidate.interface_id),
                 Some(&candidate.auth_alias),
                 Some(&candidate.model_id),
                 "controlled cooldown-only exhaustion",

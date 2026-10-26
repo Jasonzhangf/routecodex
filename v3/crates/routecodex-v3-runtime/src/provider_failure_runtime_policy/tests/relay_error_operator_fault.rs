@@ -74,8 +74,8 @@ fn source_helper_preserves_real_sdk_output_for_plain_internal_and_external() {
         serde_json::to_value(&internal_source).unwrap()
     );
     assert_eq!(
-        internal_source.internal_error,
-        Some(build_v3_internal_error_envelope(
+        internal_source.internal_error.as_deref(),
+        Some(&build_v3_internal_error_envelope(
             internal_code,
             internal_stage
         ))
@@ -102,7 +102,10 @@ fn source_helper_preserves_real_sdk_output_for_plain_internal_and_external() {
         external_projection,
         serde_json::to_value(&external_source).unwrap()
     );
-    assert_eq!(external_source.external_error, Some(external_error));
+    assert_eq!(
+        external_source.external_error.as_deref(),
+        Some(&external_error)
+    );
     assert!(external_source.internal_error.is_none());
 }
 
@@ -153,7 +156,7 @@ fn source_fault_converter_preserves_complete_typed_origins() {
             runner_error.clone(),
         );
 
-        assert_eq!(fault.original_source, Some(original_source.clone()));
+        assert_eq!(fault.original_source.as_deref(), Some(&original_source));
         assert_eq!(
             fault.policy_failure.source_kind,
             V3ErrorSourceKind::RuntimeFailure
@@ -225,7 +228,7 @@ fn project_v3_relay_error_source_keeps_real_sdk_rejection_as_fault() {
         fault.policy_failure.code,
         "relay_error_operator_sdk_failure"
     );
-    assert_eq!(fault.original_source, Some(source));
+    assert_eq!(fault.original_source.as_deref(), Some(&source));
     assert_eq!(fault.policy_failure.message, runner_error.message);
 }
 
@@ -302,7 +305,7 @@ fn sdk_error_keeps_original_source_and_runner_message() {
         "relay_error_operator_sdk_failure"
     );
     assert!(fault.policy_failure.message.contains(&runner_error.message));
-    assert_eq!(fault.original_source, Some(source));
+    assert_eq!(fault.original_source.as_deref(), Some(&source));
 }
 #[test]
 fn omitted_terminal_projection_is_a_typed_contract_fault() {
@@ -318,7 +321,7 @@ fn omitted_terminal_projection_is_a_typed_contract_fault() {
         fault.policy_failure.code,
         "relay_error_projection_nonterminal"
     );
-    assert_eq!(fault.original_source, Some(source));
+    assert_eq!(fault.original_source.as_deref(), Some(&source));
 }
 
 #[test]
@@ -331,7 +334,7 @@ fn health_error02_sdk_rejection_preserves_external_source_witness() {
         fault.policy_failure.code,
         "relay_error_operator_sdk_failure"
     );
-    assert_eq!(fault.original_source, Some(source.clone()));
+    assert_eq!(fault.original_source.as_deref(), Some(&source));
     assert_eq!(
         fault
             .original_source
@@ -367,7 +370,7 @@ fn policy_error02_to_05_sdk_rejection_preserves_original_source() {
         fault.policy_failure.code,
         "relay_error_operator_sdk_failure"
     );
-    assert_eq!(fault.original_source, Some(source));
+    assert_eq!(fault.original_source.as_deref(), Some(&source));
 }
 
 #[test]
@@ -423,5 +426,5 @@ fn terminal_error06_rejection_preserves_decision_source_and_nonterminal_stays_no
         fault.policy_failure.code,
         "relay_error_operator_sdk_failure"
     );
-    assert_eq!(fault.original_source, Some(source));
+    assert_eq!(fault.original_source.as_deref(), Some(&source));
 }

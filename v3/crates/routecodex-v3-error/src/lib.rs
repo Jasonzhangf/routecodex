@@ -312,9 +312,9 @@ pub struct V3Error01SourceRaised {
     pub code: String,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub internal_error: Option<V3InternalErrorEnvelope>,
+    pub internal_error: Option<Box<V3InternalErrorEnvelope>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub external_error: Option<V3ExternalErrorLink>,
+    pub external_error: Option<Box<V3ExternalErrorLink>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -800,10 +800,10 @@ pub fn build_v3_error_01_source_raised_internal(
         source_stage,
         code: code.into(),
         message: message.into(),
-        internal_error: Some(build_v3_internal_error_envelope(
+        internal_error: Some(Box::new(build_v3_internal_error_envelope(
             internal_code,
             source_stage,
-        )),
+        ))),
         external_error: None,
     }
 }
@@ -822,7 +822,7 @@ pub fn build_v3_error_01_source_raised_external(
         code: code.into(),
         message: message.into(),
         internal_error: None,
-        external_error: Some(external_error),
+        external_error: Some(Box::new(external_error)),
     }
 }
 

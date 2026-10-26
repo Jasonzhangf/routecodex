@@ -66,7 +66,7 @@ pub(crate) fn finish_v3_protocol_execution_plan_failure(
                 request_id,
                 &[],
                 Some(&fault.policy_failure),
-                fault.original_source.as_ref(),
+                fault.original_source.as_deref(),
             );
             return Err(provider_terminal_response(
                 state,
