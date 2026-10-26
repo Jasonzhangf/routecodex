@@ -50,6 +50,27 @@ function writeCargoExitsEarlyFixture() {
   return { fixtureDir, cargoPath, pidsPath: join(fixtureDir, 'pids.json') };
 }
 
+function writeCargoExitsOnSigtermFixture() {
+  const fixtureDir = mkdtempSync(join(tmpdir(), 'routecodex-v3-cargo-sigterm-exit-'));
+  const cargoPath = join(fixtureDir, 'cargo.cjs');
+  writeFileSync(join(fixtureDir, 'descendant.cjs'), [
+    "process.on('SIGTERM', () => {});",
+    'setInterval(() => {}, 1000);',
+    '',
+  ].join('\n'));
+  writeFileSync(cargoPath, [
+    "const { spawn } = require('node:child_process');",
+    "const { writeFileSync } = require('node:fs');",
+    "const { join } = require('node:path');",
+    "const descendant = spawn(process.execPath, [join(__dirname, 'descendant.cjs')], { stdio: ['ignore', 'inherit', 'inherit'] });",
+    "writeFileSync(join(__dirname, 'pids.json'), JSON.stringify({ cargoPid: process.pid, descendantPid: descendant.pid }));",
+    "process.on('SIGTERM', () => process.exit(0));",
+    'setInterval(() => {}, 1000);',
+    '',
+  ].join('\n'));
+  return { fixtureDir, cargoPath, pidsPath: join(fixtureDir, 'pids.json') };
+}
+
 function killFixtureProcesses(pidsPath) {
   let record;
   try {
@@ -64,6 +85,16 @@ function killFixtureProcesses(pidsPath) {
     } catch (error) {
       if (error?.code !== 'ESRCH') throw error;
     }
+  }
+}
+
+function processGone(pid) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    if (error?.code === 'ESRCH') return true;
+    throw error;
   }
 }
 
@@ -162,8 +193,60 @@ async function assertEarlyCargoExitStillReapsGroupAndSettles() {
   }
 }
 
+async function assertCargoExitOnSigtermWaitsForGroupKillBeforeSettling() {
+  const { fixtureDir, cargoPath, pidsPath } = writeCargoExitsOnSigtermFixture();
+  const hardBoundMs = 5000;
+  let hardBoundTimer;
+  try {
+    const outcome = await Promise.race([
+      executeCargo([cargoPath, 'test'], new Set(), {
+        command: process.execPath,
+        timeoutMs: 300,
+        killGraceMs: 150,
+      }).then(
+        (code) => ({ type: 'resolved', code }),
+        (error) => ({ type: 'rejected', error }),
+      ),
+      new Promise((resolve) => {
+        hardBoundTimer = setTimeout(() => resolve({ type: 'hung' }), hardBoundMs);
+      }),
+    ]);
+    assert.equal(
+      outcome.type,
+      'rejected',
+      `cargo exiting on SIGTERM while a descendant ignores SIGTERM must still time out; observed ${outcome.type}`,
+    );
+    assert.match(
+      outcome.error.message,
+      /cargo test timed out after 300ms and was terminated/u,
+      'SIGTERM cargo exit must not bypass the timeout rejection',
+    );
+    const record = JSON.parse(readFileSync(pidsPath, 'utf8'));
+    assert.equal(
+      Number.isInteger(record.descendantPid) && record.descendantPid > 0,
+      true,
+      'fixture must record the descendant pid',
+    );
+    assert.equal(
+      processGone(record.cargoPid),
+      true,
+      'cargo must already be reaped when executeCargo settles',
+    );
+    assert.equal(
+      processGone(record.descendantPid),
+      true,
+      'executeCargo must not settle before the process-group SIGKILL reaps the descendant',
+    );
+  } finally {
+    if (hardBoundTimer) clearTimeout(hardBoundTimer);
+    killFixtureProcesses(pidsPath);
+    rmSync(fixtureDir, { recursive: true, force: true });
+  }
+}
+
 await assertDescendantHoldingStdoutIsBounded();
 await assertEarlyCargoExitStillReapsGroupAndSettles();
+await assertCargoExitOnSigtermWaitsForGroupKillBeforeSettling();
 
 assert.match(source, /CARGO_TEST_TIMEOUT_MS\s*=\s*40\s*\*\s*60\s*\*\s*1000/u);
 assert.match(source, /detached:\s*true/u);

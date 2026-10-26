@@ -466,7 +466,8 @@ export function executeCargo(cargoArgs, executables, {
       stdio: ['inherit', 'pipe', 'inherit'],
       detached: true,
     });
-    let buffered = '', parseError = null, timedOut = false, settled = false, finishing = false, killTimer, timeoutTimer;
+    let buffered = '', parseError = null, timedOut = false, settled = false, finishing = false;
+    let groupKilled = false, pendingClose = null, killTimer, timeoutTimer;
     const settleReject = (error) => {
       if (settled) return;
       settled = true;
@@ -496,6 +497,14 @@ export function executeCargo(cargoArgs, executables, {
     child.on('error', settleReject);
     const finish = (code, signal) => {
       if (settled || finishing) return;
+      // A timeout must stay pending until the kill-grace group SIGKILL has
+      // actually removed the process group. `exit` fires as soon as cargo
+      // itself dies from SIGTERM, but the group may still own descendants
+      // that ignore SIGTERM and hold the inherited stdout pipe.
+      if (timedOut && !groupKilled) {
+        pendingClose = { code, signal };
+        return;
+      }
       finishing = true;
       handleLine(buffered);
       if (parseError) return settleReject(parseError);
@@ -507,21 +516,39 @@ export function executeCargo(cargoArgs, executables, {
     // bounded escape hatch for a descendant that keeps the pipe open.
     child.on('close', finish);
     child.on('exit', (code, signal) => {
-      if (timedOut) finish(code, signal);
+      if (timedOut && groupKilled) finish(code, signal);
     });
     const destroyStdoutSoon = () => {
       if (!child.stdout.destroyed) child.stdout.destroy();
+    };
+    const waitForProcessGroupGone = async (pid) => {
+      const deadline = Date.now() + killGraceMs;
+      while (Date.now() < deadline) {
+        const probe = spawnSync('pgrep', ['-g', String(pid)], { encoding: 'utf8' });
+        if (probe.error) throw probe.error;
+        if (probe.status === 1) return true;
+        if (probe.status !== 0) {
+          throw new Error(`pgrep -g ${pid} failed with status ${probe.status}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return false;
     };
     timeoutTimer = setTimeout(() => {
       timedOut = true;
       process.stderr.write(`[v3-cargo-test] cargo timeout ${timeoutMs}ms; sending SIGTERM to process group ${child.pid}\n`);
       try { process.kill(-child.pid, 'SIGTERM'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
-      killTimer = setTimeout(() => {
+      killTimer = setTimeout(async () => {
         process.stderr.write(`[v3-cargo-test] cargo timeout grace expired; sending SIGKILL to process group ${child.pid}\n`);
         try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
-        // After the group is killed, closing the read end makes finish settle
-        // even if an orphan somehow still holds the pipe.
+        // Wait until the SIGKILLed group has no live member before settling,
+        // so the caller's lock and artifact cleanup follow the group cleanup.
+        await waitForProcessGroupGone(child.pid);
+        groupKilled = true;
+        // Closing the read end makes finish settle even if an orphan somehow
+        // still holds the pipe; pendingClose covers a close that already fired.
         destroyStdoutSoon();
+        if (pendingClose) finish(pendingClose.code, pendingClose.signal);
       }, killGraceMs);
     }, timeoutMs);
   });
