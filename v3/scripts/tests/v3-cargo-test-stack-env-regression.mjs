@@ -32,6 +32,10 @@ function writeExecutable(path, body) {
 }
 
 function stubCargo() {
+  // The fixture may be created under v3/ when TMPDIR points at build-control/temp,
+  // where the nearest package.json is v3's "type": "module". Pin the stub's own
+  // module type so the extensionless cargo shim always runs as CommonJS.
+  writeFileSync(join(fixtureBin, 'package.json'), '{"type":"commonjs"}\n');
   writeExecutable(join(fixtureBin, 'cargo'), `#!/usr/bin/env node
 const fs = require('node:fs');
 fs.appendFileSync(${JSON.stringify(childEnvLogPath)}, JSON.stringify({
