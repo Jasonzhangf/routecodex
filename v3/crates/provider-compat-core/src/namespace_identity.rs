@@ -399,11 +399,19 @@ impl NamespaceToolIdentityRegistry {
 
     /// Apply standard declaration and reference projection before private compat.
     pub fn project_request(&self, body: &mut Value, protocol: &str) -> Result<(), String> {
+        let root_identities: BTreeSet<IdentityKey> = body
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(|tools| Self::from_tools(tools))
+            .transpose()?
+            .map(|registry| registry.by_identity.into_keys().collect())
+            .unwrap_or_default();
         if let Some(tools) = body.get("tools").and_then(Value::as_array) {
             body["tools"] = Value::Array(self.project_tools(protocol, tools)?);
         }
         self.project_references(body);
         self.project_discovered_tool_declarations(body, protocol)?;
+        self.project_additional_tools_declarations(body, protocol, &root_identities)?;
         Ok(())
     }
 
@@ -415,13 +423,77 @@ impl NamespaceToolIdentityRegistry {
         body: &mut Value,
         protocol: &str,
     ) -> Result<(), String> {
+        self.project_retained_declaration_surface(body, "tool_search_output", protocol)
+    }
+
+    /// A provider flattens a nested `additional_tools` namespace itself. Once
+    /// the same identity is already flat in root `tools`, leaving the nested
+    /// form behind collides. Project the nested surface onto the same bound
+    /// flat names the root promotion already used, so the provider receives one
+    /// consistent declaration and the request-scoped reverse map keeps the
+    /// exact original client identity. Additional-only declarations that the
+    /// root promotion never reached stay as opaque history.
+    fn project_additional_tools_declarations(
+        &self,
+        body: &mut Value,
+        protocol: &str,
+        root_identities: &BTreeSet<IdentityKey>,
+    ) -> Result<(), String> {
         for item in body
             .get_mut("input")
             .and_then(Value::as_array_mut)
             .into_iter()
             .flatten()
         {
-            if item.get("type").and_then(Value::as_str) != Some("tool_search_output") {
+            if item.get("type").and_then(Value::as_str) != Some("additional_tools") {
+                continue;
+            }
+            let Some(tools) = item.get("tools").and_then(Value::as_array) else {
+                continue;
+            };
+            let mut projected = Vec::with_capacity(tools.len());
+            for tool in tools {
+                let mut surface = Self::from_tools(std::slice::from_ref(tool))?;
+                let duplicated_root_identity = !surface.by_identity.is_empty()
+                    && surface.by_identity.keys().all(|key| {
+                        root_identities.contains(key)
+                            && self
+                                .by_identity
+                                .get(key)
+                                .is_some_and(NamespaceToolIdentity::is_namespaced)
+                    });
+                if !duplicated_root_identity {
+                    projected.push(tool.clone());
+                    continue;
+                }
+                for (key, identity) in &mut surface.by_identity {
+                    if let Some(bound) = self.by_identity.get(key) {
+                        *identity = bound.clone();
+                    }
+                }
+                projected.extend(surface.project_tools(protocol, std::slice::from_ref(tool))?);
+            }
+            item["tools"] = Value::Array(projected);
+        }
+        Ok(())
+    }
+
+    /// Project each retained discovery surface with the complete request's
+    /// binding. A discovered declaration and its promoted top-level declaration
+    /// must use the same wire name, kind and schema.
+    fn project_retained_declaration_surface(
+        &self,
+        body: &mut Value,
+        item_type: &str,
+        protocol: &str,
+    ) -> Result<(), String> {
+        for item in body
+            .get_mut("input")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            if item.get("type").and_then(Value::as_str) != Some(item_type) {
                 continue;
             }
             let Some(tools) = item.get("tools").and_then(Value::as_array) else {
@@ -1352,6 +1424,90 @@ mod tests {
             .project_discovered_tool_declarations(&mut request, "openai-responses")
             .unwrap();
         assert_eq!(request, once);
+    }
+
+    #[test]
+    fn additional_tools_namespace_uses_root_declaration_collision_binding() {
+        let mut request = json!({
+            "tools":[
+                {"type":"namespace","name":"functions","tools":[
+                    {"type":"custom","name":"exec","format":{"type":"text"}},
+                    {"type":"function","name":"wait","parameters":{"type":"object","required":["cell_id"]}}
+                ]},
+                {"type":"function","name":"functions__wait","parameters":{"type":"object"}}
+            ],
+            "input":[
+                {"type":"additional_tools","role":"developer","opaque":{"keep":true},"tools":[
+                    {"type":"namespace","name":"functions","tools":[
+                        {"type":"custom","name":"exec","format":{"type":"text"}},
+                        {"type":"function","name":"wait","parameters":{"type":"object","required":["cell_id"]}}
+                    ]}
+                ]}
+            ]
+        });
+        let registry =
+            NamespaceToolIdentityRegistry::from_request(&request, "openai-responses").unwrap();
+        let namespaced_name = registry
+            .wire_name_for_client(Some("functions"), "wait", ToolKind::Function)
+            .unwrap()
+            .to_string();
+        let namespaced_exec = registry
+            .wire_name_for_client(Some("functions"), "exec", ToolKind::Custom)
+            .unwrap()
+            .to_string();
+        assert_ne!(
+            namespaced_name, "functions__wait",
+            "the plain declaration reserves its wire name"
+        );
+        registry
+            .project_request(&mut request, "openai-responses")
+            .unwrap();
+
+        let root_names: Vec<_> = request["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_string())
+            .collect();
+        assert!(root_names.contains(&"functions__wait".to_string()));
+        assert!(root_names.contains(&namespaced_name));
+        assert!(root_names.contains(&namespaced_exec));
+
+        let additional = &request["input"][0]["tools"];
+        let additional_tools = additional.as_array().unwrap();
+        assert_eq!(additional_tools.len(), 2);
+        assert_ne!(
+            additional_tools[0].get("type").and_then(Value::as_str),
+            Some("namespace"),
+            "the provider-bound additional_tools surface must not leave a nested namespace: {additional}"
+        );
+        assert_eq!(
+            additional_tools[0]["name"], namespaced_exec,
+            "the custom declaration must use the bound root wire name"
+        );
+        assert_eq!(additional_tools[0]["type"], "custom");
+        assert_eq!(additional_tools[1]["name"], namespaced_name);
+        assert_eq!(additional_tools[1]["type"], "function");
+        assert_eq!(
+            additional_tools[1]["parameters"]["required"],
+            json!(["cell_id"])
+        );
+        assert_eq!(request["input"][0]["role"], "developer");
+        assert_eq!(request["input"][0]["opaque"], json!({"keep":true}));
+
+        let restored_exec = registry.identity_for_wire_name(&namespaced_exec).unwrap();
+        assert_eq!(restored_exec.client_namespace(), "functions");
+        assert_eq!(restored_exec.leaf_name, "exec");
+        assert_eq!(restored_exec.kind, ToolKind::Custom);
+        let restored_wait = registry.identity_for_wire_name(&namespaced_name).unwrap();
+        assert_eq!(restored_wait.client_namespace(), "functions");
+        assert_eq!(restored_wait.leaf_name, "wait");
+        assert_eq!(restored_wait.kind, ToolKind::Function);
+        assert_eq!(
+            registry.identity_for_wire_name("functions__wait"),
+            None,
+            "the colliding plain declaration must not inherit the namespace inverse"
+        );
     }
 
     #[test]
