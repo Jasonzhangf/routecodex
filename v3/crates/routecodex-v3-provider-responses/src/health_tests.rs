@@ -383,6 +383,7 @@ fn session_cooldown_projection_preserves_interface_identity() {
         max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
+        advisory_probe: false,
         cooldown_scope: V3ProviderFailureCooldownScope::Session,
     };
     store
@@ -463,6 +464,7 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
         max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
+        advisory_probe: false,
         cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     };
     let first = store

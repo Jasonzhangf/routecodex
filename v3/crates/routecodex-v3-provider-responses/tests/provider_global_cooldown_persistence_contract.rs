@@ -450,7 +450,10 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
 }
 
 #[test]
-fn persisted_429_cause_recovers_on_business_success_and_stays_removed() {
+fn rate_limit_hold_persists_and_releases_on_business_success() {
+    // HTTP 429 latches a bounded hold. A persisted RateLimit entry from an older
+    // build must restore as a hold that blocks during its window but auto-
+    // releases on expiry, and a business success clears it early.
     let mut manifest = health_disabled_manifest();
     manifest
         .providers
@@ -462,42 +465,61 @@ fn persisted_429_cause_recovers_on_business_success_and_stays_removed() {
         .enabled = true;
     let path =
         std::env::temp_dir().join(format!("routecodex-429-cause-{}.json", std::process::id()));
-    let store = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
-    let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("429");
-    action.failure_threshold = 3;
-    action.failure_fingerprint =
-        routecodex_v3_error::build_v3_provider_global_error_fingerprint(429).unwrap();
-    for time in 100..103 {
-        store
-            .record_provider_failure_action("p", "k", "m", &action, time)
-            .unwrap();
-    }
-    store.flush_persistence().unwrap();
-    drop(store);
+    let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone());
+    coordinator
+        .replace_entries(vec![(
+            V3ProviderCooldownKey {
+                provider_id: "p".into(),
+                interface_id: "default".into(),
+                auth_alias: Some("k".into()),
+                model_id: Some("m".into()),
+                failure_class: V3ProviderCooldownFailureClass::RateLimit,
+            },
+            30 * 60_000,
+            30 * 60_000,
+        )])
+        .unwrap();
+
     let restored =
         V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
     assert!(
         !restored
-            .scheduling_projection("p", "k", "m", 1, 1, 104)
+            .scheduling_projection("p", "k", "m", 1, 1, 100)
             .unwrap()
-            .available
+            .available,
+        "a persisted 429 hold must block during its window"
     );
     assert!(
         restored
-            .record_provider_key_success("p", "k", "m", 105)
+            .scheduling_projection("p", "k", "m", 1, 1, 30 * 60_001)
             .unwrap()
-            .available
+            .available,
+        "a persisted 429 hold must auto-release after the held window"
+    );
+
+    // Real 429 through the store holds the identity, then a business success
+    // releases it early.
+    let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("429");
+    action.recovery = routecodex_v3_provider_responses::V3ProviderRecoveryKind::RecoverableCounted;
+    action.failure_threshold = 1;
+    action.cooldown_ms = 60_000;
+    action.failure_fingerprint =
+        routecodex_v3_error::build_v3_provider_global_error_fingerprint(429).unwrap();
+    assert!(
+        !restored
+            .record_provider_failure_action("p", "k", "m", &action, 100)
+            .unwrap()
+            .available,
+        "a 429 hold must exclude the exact identity"
+    );
+    assert!(
+        restored
+            .record_provider_key_success("p", "k", "m", 200)
+            .unwrap()
+            .available,
+        "business success must release the 429 hold"
     );
     restored.flush_persistence().unwrap();
-    drop(restored);
-    let restored =
-        V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
-    assert!(
-        restored
-            .scheduling_projection("p", "k", "m", 1, 1, 106)
-            .unwrap()
-            .available
-    );
     drop(restored);
     std::fs::remove_file(path).unwrap();
 }
