@@ -589,7 +589,8 @@ mod tests {
     #[test]
     fn invalid_internal_assets_fail_fast() {
         fn parse(raw: &str) -> InternalConfig {
-            toml::from_str(raw).expect("syntactically valid")
+            let required_control_tables = "\n[target_recovery]\nbackoff_wait_ms = [1000, 3000, 15000, 35000, 90000]\nsteady_wait_ms = 1000\n[rate_limit_recovery]\nobservation_window_ms = 120000\ncooldown_ms = 1800000\nprobe_required_after_ms = 3600000\n";
+            toml::from_str(&format!("{raw}{required_control_tables}")).expect("syntactically valid")
         }
         let missing_family = parse("[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");
         let missing_builtin_defaults = parse("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");
