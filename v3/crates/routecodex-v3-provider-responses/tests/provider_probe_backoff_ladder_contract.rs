@@ -268,6 +268,7 @@ fn model_success_resets_exact_identity_consecutive_failures() {
         max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
+        advisory_probe: false,
         cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     };
     for now_ms in [1, 2] {
@@ -365,6 +366,7 @@ fn long_policy_probe_is_capped_at_thirty_minutes() {
         failure_threshold: 1,
         cooldown_ms: 60 * 60_000,
         long_probe_backoff: true,
+        advisory_probe: false,
     };
     store
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 1)

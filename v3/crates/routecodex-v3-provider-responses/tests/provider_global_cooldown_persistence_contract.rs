@@ -469,6 +469,15 @@ fn assert_persisted_429_recovery(hour: bool) {
         .as_mut()
         .unwrap()
         .enabled = true;
+    // Advisory probe scheduling cannot bypass a persisted mandatory hour lock.
+    manifest
+        .providers
+        .get_mut("p")
+        .unwrap()
+        .health
+        .as_mut()
+        .unwrap()
+        .advisory_probe = hour;
     let path = std::env::temp_dir().join(format!(
         "routecodex-429-window-{}-{hour}.json",
         std::process::id()
@@ -516,7 +525,8 @@ fn assert_persisted_429_recovery(hour: bool) {
         !restored
             .scheduling_projection("p", "k", "m", 1, 1, 120101)
             .unwrap()
-            .available
+            .available,
+        "a persisted 429 hold must block during its window"
     );
     let now = if hour { 3600101 } else { 120101 };
     assert!(

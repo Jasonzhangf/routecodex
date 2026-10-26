@@ -1,4 +1,5 @@
-//! Public regression: 429 is health-neutral; real 500/401 cool exact identities.
+//! Public regression: early429 is capacity-only; failed non429 observation
+//! cools only the attempted identity. Healthy fallback stays usable.
 //! Command: CARGO_NET_OFFLINE=true cargo test --locked --manifest-path v3/Cargo.toml
 //! -p routecodex-v3-server --test no_first_failure_cooldown_blackbox -- --nocapture
 //! Run with an isolated test HOME, as server error sampling uses HOME/.rcc.
@@ -22,6 +23,26 @@ mod hub_v1_fixture;
 struct Upstream {
     receipts: Mutex<BTreeMap<String, usize>>,
     fallback_receipts: Mutex<BTreeMap<String, usize>>,
+    /// Attempts keyed by `<input>@<requested model>`. Reselection may reach a
+    /// different identity for the same request, so per-identity counting keeps
+    /// "never retried the failed identity" provable.
+    identity_receipts: Mutex<BTreeMap<String, usize>>,
+}
+
+/// The independent provider mirrors the primary upstream contract on its own
+/// path, so its attempts are attributable without a shared receipt counter.
+async fn independent_provider(
+    State(state): State<Arc<Upstream>>,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    let input = body["input"].as_str().unwrap_or("");
+    *state
+        .receipts
+        .lock()
+        .await
+        .entry(format!("independent:{input}"))
+        .or_default() += 1;
+    upstream_response(input)
 }
 
 async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
@@ -31,13 +52,26 @@ async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -
     }
     // Startup/recovery probes are distinct from business receipts.
     if input.starts_with("health-test:") {
+        let model = body["model"].as_str().unwrap_or("").to_string();
         *state
             .receipts
             .lock()
             .await
             .entry(input.to_string())
             .or_default() += 1;
+        *state
+            .identity_receipts
+            .lock()
+            .await
+            .entry(format!("{input}@{model}"))
+            .or_default() += 1;
     }
+    upstream_response(input)
+}
+
+/// Shared upstream contract: auth/server/fail inputs are controlled failures,
+/// everything else is a real successful business response.
+fn upstream_response(input: &str) -> Response<Body> {
     if input.starts_with("health-test:fail")
         || input.starts_with("health-test:auth")
         || input.starts_with("health-test:server")
@@ -114,7 +148,7 @@ wire_name = "other"
 supports_streaming = true
 [providers.independent]
 type = "responses"
-base_url = "{upstream}/v1"
+base_url = "{upstream}/independent/v1"
 default_model = "main"
 auth = {{ type = "api_key", entries = [{{ alias = "independent", env = "V3_NO_FIRST_FAILURE_TEST_KEY" }}] }}
 [providers.independent.models.main]
@@ -261,6 +295,16 @@ async fn fallback(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -
     successful_response(input)
 }
 
+/// Asserts an exact requested model reached upstream exactly once.
+async fn receipt_at(state: &Upstream, input: &str, model: &str) {
+    let key = format!("{input}@{model}");
+    assert_eq!(
+        state.identity_receipts.lock().await.get(&key),
+        Some(&1),
+        "{key}: must reach upstream exactly once for that identity"
+    );
+}
+
 #[tokio::test]
 async fn no_first_failure_cooldown_public_http() {
     std::env::set_var("V3_NO_FIRST_FAILURE_TEST_KEY", "controlled-test-key");
@@ -273,6 +317,7 @@ async fn no_first_failure_cooldown_public_http() {
     let app = Router::new()
         .route("/v1/responses", post(provider))
         .route("/fallback/v1/responses", post(fallback))
+        .route("/independent/v1/responses", post(independent_provider))
         .with_state(state.clone());
     let upstream = tokio::spawn(async move {
         axum::serve(listener, app)
@@ -319,11 +364,18 @@ async fn no_first_failure_cooldown_public_http() {
     request(&client, &base, "independent", "health-test:independent").await;
     receipt(&state, "health-test:other-model").await;
     receipt(&state, "health-test:other-key").await;
-    receipt(&state, "health-test:independent").await;
+    assert_eq!(
+        state
+            .receipts
+            .lock()
+            .await
+            .get("independent:health-test:independent"),
+        Some(&1)
+    );
     assert_identities(pool(&client, &base).await, &[]);
 
     request(&client, &base, "other", "health-test:server-terminal").await;
-    receipt(&state, "health-test:server-terminal").await;
+    receipt_at(&state, "health-test:server-terminal", "other").await;
     fallback_receipt(&state, "health-test:server-terminal").await;
     assert_identities(pool(&client, &base).await, &[]);
     assert_identities(
@@ -344,7 +396,14 @@ async fn no_first_failure_cooldown_public_http() {
     );
 
     request(&client, &base, "independent", "health-test:auth-terminal").await;
-    receipt(&state, "health-test:auth-terminal").await;
+    assert_eq!(
+        state
+            .receipts
+            .lock()
+            .await
+            .get("independent:health-test:auth-terminal"),
+        Some(&1)
+    );
     fallback_receipt(&state, "health-test:auth-terminal").await;
     assert_identities(
         pool(&client, &base).await,
@@ -357,6 +416,7 @@ async fn no_first_failure_cooldown_public_http() {
             ("independent", "default", "independent", "main"),
         ],
     );
+
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     upstream.await.unwrap();

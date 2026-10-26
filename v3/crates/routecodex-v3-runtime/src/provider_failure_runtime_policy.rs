@@ -102,8 +102,9 @@ pub async fn probe_v3_provider_global_target(
     probe_v3_provider_global_target_impl(target).await
 }
 
-/// Error owns typed thresholds: ordinary 429 requires three consecutive failures
-/// of the exact provider+interface+auth_alias+model identity; typed classification wins.
+/// Error owns typed thresholds for the exact provider+interface+auth_alias+model
+/// identity; typed classification wins. Early429 is capacity backpressure;
+/// sustained429 escalation belongs to the health Store episode owner.
 pub(crate) fn apply_v3_internal_provider_failure_policy(
     mut action: V3ProviderFailureAction,
     source_stage: &str,
@@ -1501,6 +1502,7 @@ fn provider_failure_policy_from_error_policy_directive(
         max_probe_interval_ms: None,
         long_probe_backoff: matches!(status, 401 | 402 | 403 | 503),
         until_restart: until_restart.unwrap_or(false),
+        advisory_probe: false,
         cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     }))
 }

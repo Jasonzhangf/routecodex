@@ -580,6 +580,15 @@ pub struct V3ProviderHealthAuthoringConfig {
     /// bounded ladder, but never wait longer than this configured interval.
     #[serde(default)]
     pub probe_interval_ms: Option<u64>,
+    /// When true the recovery probe is advisory: probe success or failure only
+    /// updates the probe's own cadence. A scheduled, in-flight or failed probe
+    /// never removes the identity from formal candidate selection and never
+    /// advances the health ladder, so a probe failure cannot keep a provider
+    /// locked out while the upstream is down. Availability stays decided by the
+    /// real business failure hold window and by real business results. Defaults
+    /// to false, preserving cooling behavior.
+    #[serde(default)]
+    pub advisory_probe: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -203,6 +203,14 @@ fn consecutive_429_codes_share_window_and_post_minimum_success_invalidates_old_p
             "429 does not penalize transport health"
         );
         assert_eq!(projection.cooldown, time == 120100);
+        for (key, model) in [("a", "other-model"), ("sibling", "m")] {
+            assert!(
+                store
+                    .scheduling_projection("p", key, model, 1, 1, time)
+                    .unwrap()
+                    .available
+            );
+        }
     }
     let permit = store
         .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))

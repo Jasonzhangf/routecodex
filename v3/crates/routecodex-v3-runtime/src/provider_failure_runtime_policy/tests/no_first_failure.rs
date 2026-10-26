@@ -28,7 +28,7 @@ fn source(kind: V3ErrorSourceKind, code: &str, status: u16) -> V3Error01SourceRa
 }
 
 #[test]
-fn no_first_failure_429_retains_diagnostics_without_health_cooldown() {
+fn early_429_retains_diagnostics_without_health_cooldown() {
     let mut manifest = global_pool_alive_manifest("no_first_failure_counted");
     normalize_global_pool_priorities(&mut manifest);
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
@@ -115,7 +115,7 @@ fn no_first_failure_429_retains_diagnostics_without_health_cooldown() {
     assert!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(5_104)
+            .provider_cooldown_probe_keys_due(u64::MAX)
             .unwrap()
             .is_empty(),
         "429 backpressure must not create a cooldown probe"
@@ -245,7 +245,7 @@ fn no_first_failure_irrecoverable_quota_and_auth_keep_immediate_boundary() {
 }
 
 #[test]
-fn quota_429_stays_health_neutral_before_and_after_business_success() {
+fn early_quota_429_stays_health_neutral_before_and_after_business_success() {
     let store = V3ProviderHealthStore::default();
     let failure = source(
         V3ErrorSourceKind::ProviderFailure,
@@ -275,7 +275,7 @@ fn quota_429_stays_health_neutral_before_and_after_business_success() {
     }
     assert!(
         store
-            .record_provider_key_success("p", "k", "m", 103)
+            .record_provider_key_success("p", "k", "m", 106)
             .unwrap()
             .available
     );

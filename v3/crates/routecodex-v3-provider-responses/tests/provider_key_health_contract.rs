@@ -36,7 +36,7 @@ fn real_http_429_action() -> V3ProviderFailureAction {
 }
 
 #[test]
-fn ordinary_429_is_health_neutral_for_exact_identity() {
+fn early_429_is_health_neutral_for_exact_identity() {
     let store = V3ProviderKeyHealthStore::default();
     assert!(build_v3_provider_global_failure_policy(429).is_none());
     let action = real_http_429_action();
@@ -59,9 +59,10 @@ fn ordinary_429_is_health_neutral_for_exact_identity() {
             100
         );
     }
+    // A repeated 429 on the same identity never blocks a sibling identity.
     for (provider, key, model) in [("p", "b", "m"), ("p", "a", "n"), ("q", "a", "m")] {
         let state = store
-            .record_provider_failure_action(provider, key, model, &action, 102)
+            .scheduling_projection(provider, key, model, 1, 1, 110)
             .unwrap();
         assert!(state.available, "sibling {provider}.{model}.{key}");
     }
@@ -581,6 +582,7 @@ fn hs03_zero_score_cools_exact_key_and_valid_probe_restores_100() {
         failure_threshold: 100,
         cooldown_ms: 5_000,
         long_probe_backoff: false,
+        advisory_probe: false,
         class_code: "transport".to_string(),
         failure_fingerprint: None,
     };
@@ -743,6 +745,7 @@ fn dynamic_probe_ladder_starts_at_5s_after_the_first_cooldown() {
         max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
+        advisory_probe: false,
         cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     };
     for now_ms in 100..=100 {
@@ -791,6 +794,7 @@ fn mixed_recoverable_fingerprints_do_not_share_an_identity() {
         max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
+        advisory_probe: false,
         cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     };
     let fingerprint = |status: u16| {
@@ -1308,6 +1312,7 @@ fn recoverable_key_probe_is_single_flight_and_global_probe_is_not_duplicated() {
         failure_threshold: 0,
         cooldown_ms: 60_000,
         long_probe_backoff: false,
+        advisory_probe: false,
         class_code: "invalid_api_key".to_string(),
         failure_fingerprint: None,
     };
@@ -1414,6 +1419,7 @@ fn account_error_reaches_cooldown_at_zero() {
         failure_threshold: 0,
         cooldown_ms: 60_000,
         long_probe_backoff: false,
+        advisory_probe: false,
         class_code: "invalid_api_key".to_string(),
         failure_fingerprint: None,
     };
@@ -1812,4 +1818,292 @@ fn precool_observation_replacement_cannot_be_released_by_older_permit() {
         store.complete_provider_cooldown_probe_success_with_permit(&b, 300),
         Err(routecodex_v3_provider_responses::V3ProviderHealthError::ProbePurposeMismatch)
     ));
+}
+
+#[test]
+fn configured_advisory_probe_never_blocks_availability_or_advances_the_ladder() {
+    // A provider that declares `health.advisory_probe = true` keeps the recovery
+    // probe advisory for every business failure of that provider: a pending,
+    // in-flight or failed probe never removes the exact identity from formal
+    // selection, and probe failures never advance the health ladder. The hold
+    // window is the only exclusion; it releases by expiry or real success.
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://provider.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "k", env = "KEY" }] }
+health = { enabled = true, failure_threshold = 1, cooldown_ms = 5000, advisory_probe = true }
+[providers.p.models.m]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", priority = 1 }]
+"#,
+        )
+        .expect("parse manifest authoring"),
+    )
+    .expect("compile manifest");
+    let store = V3ProviderHealthStore::from_manifest_without_persistence(&manifest);
+    assert!(
+        store
+            .configured_failure_policy("p")
+            .expect("configured policy")
+            .advisory_probe,
+        "health.advisory_probe must reach the runtime failure policy"
+    );
+    // The store stamps the configured advisory flag onto the business-failure
+    // action even though the classified action itself carries no such flag.
+    let mut action = V3ProviderFailureAction::recoverable("provider_failure");
+    action.failure_threshold = 1;
+    action.cooldown_ms = 5_000;
+
+    let failed = store
+        .record_provider_failure_action("p", "k", "m", &action, 100)
+        .expect("business failure");
+    assert!(failed.cooldown);
+    assert!(!failed.available, "the bounded hold window still excludes");
+
+    // The hold window expires without a probe, so the identity comes back on its
+    // own; an advisory probe is never the availability owner.
+    let after_window = store
+        .scheduling_projection("p", "k", "m", 1, 1, 101 + 5_000)
+        .expect("post-window projection");
+    assert!(
+        after_window.available,
+        "an expired advisory hold must release the exact identity"
+    );
+
+    // Repeated advisory probe failures must not escalate the ladder: the probe
+    // keeps the base 5s cadence instead of stepping toward the 30m ceiling.
+    for now_ms in [6_000, 11_000, 16_000, 21_000] {
+        store
+            .complete_probe_failure("p", "k", "m", now_ms, 5_000)
+            .expect("advisory probe failure");
+        assert!(
+            store
+                .provider_cooldown_probe_keys_due(now_ms + 5_000 - 1)
+                .expect("advisory probe not yet due")
+                .iter()
+                .all(|(provider, _, _)| provider != "p"),
+            "an advisory probe must keep the base 5s cadence after {now_ms}"
+        );
+        assert!(
+            store
+                .provider_cooldown_probe_keys_due(now_ms + 5_000)
+                .expect("advisory probe due")
+                .iter()
+                .any(|(provider, alias, model)| provider == "p"
+                    && alias.as_deref() == Some("k")
+                    && model.as_deref() == Some("m")),
+            "an advisory probe must stay due at the base cadence after {now_ms}"
+        );
+    }
+    let still_available = store
+        .scheduling_projection("p", "k", "m", 1, 1, 30_000)
+        .expect("advisory projection after probe failures");
+    assert!(
+        still_available.available,
+        "advisory probe failures must never lock the provider out"
+    );
+    let rate_limit = real_http_429_action();
+    store
+        .record_provider_failure_action("p", "k", "m", &rate_limit, 40_000)
+        .unwrap();
+    let minimum = store
+        .record_provider_failure_action("p", "k", "m", &rate_limit, 160_000)
+        .unwrap();
+    assert!(
+        !minimum.available,
+        "advisory cannot bypass a mandatory429 minimum"
+    );
+    assert_eq!(minimum.cooldown_until_ms, Some(1_960_000));
+    store
+        .record_provider_failure_action("p", "k", "m", &rate_limit, 3_640_000)
+        .unwrap();
+    assert!(
+        !store
+            .record_provider_key_success("p", "k", "m", 3_640_001)
+            .unwrap()
+            .available,
+        "advisory cannot replace the mandatory current non429 probe"
+    );
+    assert!(
+        !store
+            .scheduling_projection("p", "k", "m", 1, 1, 9_000_000)
+            .unwrap()
+            .available
+    );
+}
+
+#[test]
+fn a_429_hold_does_not_relabel_a_later_non_rate_limit_cooldown() {
+    // A committed429 minimum and a later503 retain their independent limits.
+    let store = V3ProviderKeyHealthStore::default();
+    let rate_limit = real_http_429_action();
+    store
+        .record_provider_failure_action("p", "a", "m", &rate_limit, 1_000)
+        .unwrap();
+    let held = store
+        .record_provider_failure_action("p", "a", "m", &rate_limit, 121_000)
+        .unwrap();
+    assert!(!held.available, "the 429 must hold the identity");
+
+    // A later 5xx on the same identity keeps the probe-owned cooldown.
+    let mut upstream = V3ProviderFailureAction::recoverable("recoverable_upstream");
+    upstream.recovery = V3ProviderRecoveryKind::RecoverableCounted;
+    upstream.failure_threshold = 1;
+    upstream.cooldown_ms = 5_000;
+    upstream.failure_fingerprint = build_v3_provider_global_error_fingerprint(500).unwrap();
+    store
+        .record_provider_failure_action("p", "a", "m", &upstream, 122_000)
+        .unwrap();
+
+    // The 5xx cooldown must not expire by window: only a probe success restores
+    // the identity. Well past both windows it must still be unavailable.
+    let far_future = 122_000 + 3_600_000;
+    let still_cooled = store
+        .scheduling_projection("p", "a", "m", 1, 1, far_future)
+        .unwrap();
+    assert!(
+        !still_cooled.available,
+        "a probe-owned 5xx cooldown must not auto-expire one hour later"
+    );
+    // A successful probe is the path that restores it.
+    let permit = store
+        .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
+        .unwrap()
+        .unwrap();
+    assert!(store
+        .complete_provider_cooldown_probe_success_if_current_with_permit(&permit, far_future + 1)
+        .unwrap());
+    assert!(
+        store
+            .scheduling_projection("p", "a", "m", 1, 1, far_future + 1)
+            .unwrap()
+            .available,
+        "a probe success restores the identity after the 5xx cooldown"
+    );
+}
+
+#[test]
+fn mandatory_429_episode_agrees_in_every_projection() {
+    let store = V3ProviderKeyHealthStore::default();
+    let rate_limit = real_http_429_action();
+    assert!(
+        store
+            .record_provider_failure_action("p", "a", "m", &rate_limit, 1_000)
+            .unwrap()
+            .available
+    );
+    let held = store
+        .record_provider_failure_action("p", "a", "m", &rate_limit, 121_000)
+        .unwrap();
+    assert!(!held.available, "the hold must exclude the identity");
+    assert_eq!(
+        held.cooldown_until_ms,
+        Some(1_921_000),
+        "the reported deadline must be the real hold window, not the probe cadence"
+    );
+
+    store
+        .record_provider_failure_action("p", "a", "m", &rate_limit, 3_601_000)
+        .unwrap();
+    let scope = V3ProviderFailureSessionScope::new("s", "g", "session").unwrap();
+    for time in [3_601_001, 9_000_000] {
+        assert!(
+            !store
+                .scheduling_projection("p", "a", "m", 1, 1, time)
+                .unwrap()
+                .available
+        );
+        assert!(
+            !store
+                .availability_for_interface("p", "default", Some("a"), Some("m"), time)
+                .available
+        );
+        assert!(
+            !store
+                .availability_for_session(&scope, "p", Some("a"), Some("m"), time)
+                .available
+        );
+        assert!(
+            !store
+                .record_provider_key_success("p", "a", "m", time)
+                .unwrap()
+                .available
+        );
+    }
+    let permit = store
+        .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
+        .unwrap()
+        .unwrap();
+    assert!(store
+        .complete_provider_cooldown_probe_success_if_current_with_permit(&permit, 9_000_001)
+        .unwrap());
+    assert!(
+        store
+            .scheduling_projection("p", "a", "m", 1, 1, 9_000_001)
+            .unwrap()
+            .available
+    );
+    assert!(
+        store
+            .availability_for_session(&scope, "p", Some("a"), Some("m"), 9_000_001)
+            .available
+    );
+}
+
+#[test]
+fn a_429_during_an_outstanding_cooldown_preserves_the_non429_restriction() {
+    let store = V3ProviderKeyHealthStore::default();
+    let mut upstream = V3ProviderFailureAction::recoverable("recoverable_upstream");
+    upstream.recovery = V3ProviderRecoveryKind::RecoverableCounted;
+    upstream.failure_threshold = 1;
+    upstream.cooldown_ms = 5_000;
+    upstream.failure_fingerprint = build_v3_provider_global_error_fingerprint(500).unwrap();
+    store
+        .record_provider_failure_action("p", "a", "m", &upstream, 1_000)
+        .expect("5xx cooldown");
+
+    let rate_limit = real_http_429_action();
+    store
+        .record_provider_failure_action("p", "a", "m", &rate_limit, 2_000)
+        .expect("429 during the 5xx cooldown");
+
+    // Early429 cannot remove a preceding503 exclusion.
+    assert!(
+        !store
+            .scheduling_projection("p", "a", "m", 1, 1, 2_000 + 59_999)
+            .expect("projection inside the rate-limit window")
+            .available,
+        "the existing non429 restriction still owns availability"
+    );
+    // Elapsed429 observation time cannot silently clear that restriction.
+    let after_window = 2_000 + 60_001;
+    assert!(
+        !store
+            .scheduling_projection("p", "a", "m", 1, 1, after_window)
+            .expect("projection after the rate-limit window")
+            .available,
+        "early429 must not replace a probe-owned503 restriction"
+    );
+    // And the older 5xx evidence is not lost: the next 5xx re-arms the ladder.
+    let mut next_upstream = V3ProviderFailureAction::recoverable("recoverable_upstream");
+    next_upstream.recovery = V3ProviderRecoveryKind::RecoverableCounted;
+    next_upstream.failure_threshold = 1;
+    next_upstream.cooldown_ms = 5_000;
+    next_upstream.failure_fingerprint = build_v3_provider_global_error_fingerprint(500).unwrap();
+    let rearmed = store
+        .record_provider_failure_action("p", "a", "m", &next_upstream, after_window)
+        .expect("a repeated 5xx after the rate-limit window");
+    assert!(
+        rearmed.cooldown,
+        "a repeated 5xx must cool the identity again"
+    );
 }

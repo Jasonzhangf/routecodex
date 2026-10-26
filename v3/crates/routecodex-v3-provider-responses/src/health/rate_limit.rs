@@ -101,6 +101,10 @@ pub(super) fn observe_rate_limit(
         }
     };
     if let Some(until) = new_minimum {
+        let advisory_probe = state
+            .failure_policies
+            .get(&key.provider_id)
+            .is_some_and(|policy| policy.advisory_probe);
         upsert_provider_cooldown_probe_with_interval(
             state,
             &key.provider_id,
@@ -111,6 +115,7 @@ pub(super) fn observe_rate_limit(
             until,
             V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
             false,
+            advisory_probe,
         );
         if let Some(probe) = state.provider_cooldown_probes.get_mut(key) {
             probe.cooldown_cause = Some(V3ProviderCooldownFailureClass::RateLimit);

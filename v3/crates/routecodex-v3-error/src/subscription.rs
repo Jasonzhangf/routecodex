@@ -36,6 +36,9 @@ pub struct V3ProviderFailureAction {
     /// Retained as a typed compatibility field; all provider classes now use
     /// the shared aggressive cooldown/probe ladder.
     pub long_probe_backoff: bool,
+    /// Advisory recovery probe. A scheduled or in-flight probe is not an
+    /// availability decision and a probe failure never advances the ladder.
+    pub advisory_probe: bool,
 }
 
 impl V3ProviderFailureAction {
@@ -49,6 +52,7 @@ impl V3ProviderFailureAction {
             failure_threshold: crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
             cooldown_ms: 5_000,
             long_probe_backoff: false,
+            advisory_probe: false,
         }
     }
 
@@ -72,6 +76,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             failure_threshold: 0,
             cooldown_ms: 0,
             long_probe_backoff: false,
+            advisory_probe: false,
         };
     }
     let status = classified
@@ -90,6 +95,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             failure_threshold: 0,
             cooldown_ms: 0,
             long_probe_backoff: false,
+            advisory_probe: false,
         };
     }
     // Real recoverable failures count toward the shared repeat threshold.
@@ -108,6 +114,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             failure_threshold: 0,
             cooldown_ms,
             long_probe_backoff: matches!(status, Some(401..=403)),
+            advisory_probe: false,
         };
     }
     let mut action = V3ProviderFailureAction::recoverable(&classified.source.code);
@@ -193,9 +200,9 @@ pub fn build_v3_provider_global_error_fingerprint(
 /// Provider health policy per upstream status.
 ///
 /// Account/billing classes (`401..=403`) are the typed irrecoverable group and
-/// still cool on their first occurrence. HTTP 429 is capacity backpressure and
-/// has no health cooldown policy. Other recoverable classes use the shared threshold. Every streak
-/// and cooldown belongs to the exact provider + auth_alias + model identity.
+/// still cool on their first occurrence. Classification alone does not cool
+/// HTTP 429: the health Store owns its sustained rate-limit episode. Other
+/// recoverable classes use the shared threshold for the exact identity.
 pub fn build_v3_provider_global_failure_policy(
     status: u16,
 ) -> Option<V3ProviderGlobalFailurePolicy> {
@@ -342,16 +349,23 @@ mod tests {
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
         assert_eq!(action.failure_threshold, 0);
 
-        let quota = build_v3_provider_failure_action_from_v3_error_02(&classified(
-            "V3ProviderReqOutbound09TransportRequest",
-            "insufficient_quota",
-            429,
-        ));
-        assert_eq!(
-            quota.recovery,
-            V3ProviderRecoveryKind::HealthNeutralTransient
-        );
-        assert_eq!(quota.failure_threshold, 0);
+        for code in ["insufficient_quota", "rate_limit_error"] {
+            let rate_limited = build_v3_provider_failure_action_from_v3_error_02(&classified(
+                "V3ProviderReqOutbound09TransportRequest",
+                code,
+                429,
+            ));
+            assert_eq!(
+                rate_limited.recovery,
+                V3ProviderRecoveryKind::HealthNeutralTransient,
+                "{code}: early 429 is capacity backpressure"
+            );
+            assert_eq!(rate_limited.scope, V3ProviderHealthScope::None);
+            assert_eq!(rate_limited.failure_threshold, 0);
+            assert_eq!(rate_limited.cooldown_ms, 0);
+            assert_eq!(rate_limited.score_delta_milli, 0);
+        }
+        assert!(build_v3_provider_global_failure_policy(429).is_none());
 
         for (code, status) in [("account_disabled", 403)] {
             let action = build_v3_provider_failure_action_from_v3_error_02(&classified(

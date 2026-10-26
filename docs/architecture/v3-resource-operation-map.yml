@@ -1364,7 +1364,7 @@ resources:
       score_contract: clamp(score + delta, 0, 150) with no hidden credit above the cap
       zero_cooldown_trigger: a globally scored identity reaching score 0 enters cooldown for the exact providerId+interfaceId+authAlias+modelId
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
-      cooldown_condition: HTTP 429 is health-neutral capacity backpressure and uses global recovery admission; other typed failures retain declared thresholds; real success preserves provider health
+      cooldown_condition: Early HTTP429 is exact-identity capacity backpressure; a new real429 across the two-minute episode commits a30-minute minimum and a new429 across one hour requires a current matching non429 HTTP probe; other typed failures retain declared thresholds and observations
       revival_rule: only a successful provider transport probe may remove cooldown state
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
       exhaustion_disposition: after rescue, wait with increasing backoff for due recovery inside the declared acquisition budget; perform a final health and eligibility check before internal exhaustion

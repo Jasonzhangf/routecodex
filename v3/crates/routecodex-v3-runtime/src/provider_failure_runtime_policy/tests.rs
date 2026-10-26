@@ -619,6 +619,49 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
         }
     }
 
+    // Early429 stays capacity-only, including through the Runtime source path.
+    let rate_limited = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let rate_limited_scope = test_provider_failure_scope(
+        "global_status_policy",
+        "global_status_policy",
+        "runtime-policy-429",
+    )
+    .expect("failure session scope");
+    for attempt in 0..6 {
+        let now_ms = 10_000 + attempt as u64;
+        let record = rate_limited
+            .record_provider_failure_record_with_policy(
+                None,
+                &manifest,
+                &rate_limited_scope,
+                "first",
+                Some("responses"),
+                Some("key1"),
+                Some("gpt-test"),
+                Some("provider status failure"),
+                "V3ProviderRespInbound01Raw",
+                429,
+                Some("provider_http_error"),
+                "upstream status",
+                now_ms,
+            )
+            .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
+        assert_eq!(record.state, "rate_limit_capacity_wait");
+        assert_eq!(record.failure_count, 0);
+        assert!(
+            rate_limited
+                .availability("first", Some("key1"), Some("gpt-test"), now_ms)
+                .available,
+            "early429 must remain health-neutral; attempt={attempt}"
+        );
+    }
+    assert!(
+        rate_limited
+            .availability("first", Some("key1"), Some("gpt-test"), 10_000 + 5 + 60_001)
+            .available,
+        "time alone cannot create a health restriction"
+    );
+
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let scope = test_provider_failure_scope(
         "global_status_policy",
@@ -968,6 +1011,7 @@ fn incomplete_key_identity_fails_before_provider_cooldown_write() {
         failure_threshold: 1,
         cooldown_ms: 60 * 60_000,
         long_probe_backoff: false,
+        advisory_probe: false,
     };
     let scope = test_provider_failure_scope(
         "incomplete_key_identity",

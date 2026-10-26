@@ -25,6 +25,9 @@ struct Peer {
     /// 业务请求同时到达上游（水位=held+3=4），平滑预算才保留 held 与探针
     /// 同时在途的余量。仅在 in_flight_success 变体设置。
     rate_limit_barrier: Option<Arc<Barrier>>,
+    /// How many business attempts are refused before the upstream starts
+    /// answering normally.
+    refuse_limit: u32,
 }
 
 async fn upstream(
@@ -77,7 +80,9 @@ async fn upstream(
         }
         let refused = {
             let mut failures = peer.failures.lock().await;
-            if peer.refusal_phase.load(std::sync::atomic::Ordering::SeqCst) && *failures < 3 {
+            if peer.refusal_phase.load(std::sync::atomic::Ordering::SeqCst)
+                && *failures < peer.refuse_limit
+            {
                 *failures += 1;
                 true
             } else {
@@ -158,7 +163,12 @@ async fn late_inflight_failure_cannot_shadow_existing_cooldown_recovery_public_h
 
 #[tokio::test]
 async fn zen_non_2xx_unfinished_probe_body_preserves_cooldown_and_allows_fallback() {
-    automatic_recovery(false, true).await;
+    recovery_with_refusal_status(false, true, 503).await;
+}
+
+#[tokio::test]
+async fn business_5xx_observation_automatically_probes_and_restores_exact_key() {
+    recovery_with_refusal_status(false, false, 503).await;
 }
 
 async fn automatic_recovery(in_flight_success: bool, fail_streaming_probe: bool) {
@@ -189,12 +199,14 @@ async fn recovery_with_observation_race(
 ) {
     let _guard = TEST_LOCK.lock().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let release = Arc::new(Semaphore::new(if fail_streaming_probe { 100 } else { 0 }));
+    let release = Arc::new(Semaphore::new(0));
     let failures = Arc::new(Mutex::new(0));
     let refusal_phase = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let success_release = Arc::new(Semaphore::new(0));
     let probe_failure = Arc::new(std::sync::atomic::AtomicBool::new(
-        late_probe_failure || late_business_failure,
+        late_probe_failure
+            || late_business_failure
+            || (!in_flight_success && refusal_status != 429),
     ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_port = listener.local_addr().unwrap().port();
@@ -225,6 +237,7 @@ async fn recovery_with_observation_race(
         } else {
             None
         },
+        refuse_limit: if in_flight_success { 3 } else { 1 },
     };
     let task = tokio::spawn(async move {
         axum::serve(
@@ -480,16 +493,40 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         env::remove_var("V3_COOLDOWN_BINARY_SPARE_KEY");
         return;
     }
-    let (status, body) = post_json(
-        &client,
-        managed.add_url(),
-        json!({
-            "provider_id":provider_id, "interface_id":"default", "auth_alias":"key",
-            "model_id":"test", "kind":"probe", "duration_ms":1100
-        }),
-    )
-    .await;
-    assert_eq!(status, 200, "manual health probe seed: {body}");
+    if refusal_status != 429 {
+        // A real failed observation, rather than a manual seed, must admit
+        // ordinary503 cooldown before its independent recovery probe.
+        wait_receipt(&mut rx, ("Bearer controlled-secret", true)).await;
+        release.add_permits(1);
+        timeout(Duration::from_secs(4), async {
+            loop {
+                if pool_entries(&client, managed.pool_url())
+                    .await
+                    .iter()
+                    .any(|entry| {
+                        entry["provider_id"] == provider_id && entry["auth_alias"] == "key"
+                    })
+                {
+                    break;
+                }
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("failed physical observation commits exact503 cooldown");
+        probe_failure.store(false, std::sync::atomic::Ordering::SeqCst);
+    } else {
+        let (status, body) = post_json(
+            &client,
+            managed.add_url(),
+            json!({
+                "provider_id":provider_id, "interface_id":"default", "auth_alias":"key",
+                "model_id":"test", "kind":"probe", "duration_ms":1100
+            }),
+        )
+        .await;
+        assert_eq!(status, 200, "manual health probe seed: {body}");
+    }
     wait_receipt(&mut rx, ("Bearer controlled-secret", true)).await;
     let entries = pool_entries(&client, managed.pool_url()).await;
     assert!(
@@ -503,17 +540,15 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
     wait_receipt(&mut rx, ("Bearer spare-secret", false)).await;
     if fail_streaming_probe {
         release.add_permits(100);
-        let probe_result = timeout(Duration::from_secs(8), async {
+        let mut last = Vec::new();
+        let retained = timeout(Duration::from_secs(8), async {
             loop {
-                if pool_entries(&client, managed.pool_url())
-                    .await
-                    .iter()
-                    .any(|entry| {
-                        entry["auth_alias"] == "key"
-                            && entry["state"] == "waiting"
-                            && entry["failure_count"].as_u64().unwrap_or(0) >= 1
-                    })
-                {
+                last = pool_entries(&client, managed.pool_url()).await;
+                if last.iter().any(|entry| {
+                    entry["auth_alias"] == "key"
+                        && entry["failure_count"].as_u64().unwrap_or(0) >= 1
+                        && (entry["state"] == "blocked" || entry["state"] == "waiting")
+                }) {
                     break;
                 }
                 sleep(Duration::from_millis(20)).await;
@@ -521,9 +556,8 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         })
         .await;
         assert!(
-            probe_result.is_ok(),
-            "unfinished503 probe body must complete as failure and retain cooldown: {:?}",
-            pool_entries(&client, managed.pool_url()).await
+            retained.is_ok(),
+            "an unfinished probe body must complete as a failure and retain the cooldown: {last:?}"
         );
         assert!(timeout(Duration::from_secs(2), business(&client, &managed))
             .await
@@ -549,7 +583,7 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         }
     })
     .await
-    .expect("HTTP 2xx probe removes exact manual cooldown");
+    .expect("a matching 2xx probe removes the exact cooldown");
     assert!(business(&client, &managed)
         .await
         .contains("controlled-secret"));
@@ -588,6 +622,7 @@ async fn business_success_restores_budget_for_a_later_business_request() {
         late_probe_failure: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         late_business_failure: false,
         rate_limit_barrier: None,
+        refuse_limit: 3,
     };
     let task = tokio::spawn(async move {
         axum::serve(
