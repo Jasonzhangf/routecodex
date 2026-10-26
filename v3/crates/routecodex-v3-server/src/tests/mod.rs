@@ -896,7 +896,8 @@ async fn client_cancelled_direct_terminal_is_cancelled_not_provider_502() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let _home = TestHomeGuard::set(&root);
-    let state = test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
 
     let source = routecodex_v3_error::build_v3_error_01_source_raised(
         routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
@@ -943,7 +944,8 @@ async fn delivered_then_cancelled_no_response_is_not_provider_502() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let _home = TestHomeGuard::set(&root);
-    let state = test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
 
     let source = routecodex_v3_error::build_v3_error_01_source_raised(
         routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
@@ -960,7 +962,10 @@ async fn delivered_then_cancelled_no_response_is_not_provider_502() {
 
     let rows = state.webui_observability.rows().unwrap();
     let row = rows
-        .get(&build_v3_obs_request_key(5555, "req-delivered-cancel-ledger"))
+        .get(&build_v3_obs_request_key(
+            5555,
+            "req-delivered-cancel-ledger",
+        ))
         .expect("delivered-then-cancelled terminal must record a ledger row");
     assert_eq!(
         row.meta.provider_status, None,
@@ -989,7 +994,8 @@ async fn provider_response_body_timeout_is_typed_transport_terminal_not_502() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let _home = TestHomeGuard::set(&root);
-    let state = test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
 
     let source = routecodex_v3_error::build_v3_error_01_source_raised(
         routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
@@ -1034,7 +1040,8 @@ async fn genuine_provider_http_502_terminal_still_records_502() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let _home = TestHomeGuard::set(&root);
-    let state = test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
 
     let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
         routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
