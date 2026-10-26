@@ -405,9 +405,9 @@ impl V3ManagedLifecycle {
                 port: admin.port,
             });
         }
-        if listeners.is_empty() {
+        if !listeners.iter().any(is_business_listener_declaration) {
             return Err(V3LifecycleError::Validation(
-                "managed instance has no enabled listeners".to_string(),
+                "managed instance has no enabled business listeners".to_string(),
             ));
         }
         if (self.force_console || self.force_snapshots || self.force_snapshot_stages.is_some())
@@ -1224,9 +1224,8 @@ fn control_release_ports(
     if ports.is_empty() {
         return Err("release-ports control request has an empty port set".to_string());
     }
-    let declared_ports = current
-        .listeners
-        .iter()
+    let declared_ports = business_listener_declarations(&current.listeners)
+        .into_iter()
         .map(|listener| listener.port)
         .collect::<BTreeSet<_>>();
     let release_ports = ports.iter().copied().collect::<BTreeSet<_>>();
@@ -1456,9 +1455,8 @@ async fn release_foreign_managed_listener_ports_for_start(
         if published.instance_id == current_instance_id {
             continue;
         }
-        let release_ports = published
-            .listeners
-            .iter()
+        let release_ports = business_listener_declarations(&published.listeners)
+            .into_iter()
             .map(|listener| listener.port)
             .filter(|port| target_ports.contains(port))
             .collect::<BTreeSet<_>>();

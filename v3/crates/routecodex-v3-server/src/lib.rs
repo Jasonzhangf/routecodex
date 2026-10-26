@@ -516,6 +516,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             .enforce_listener_retention(server.port)
             .map_err(std::io::Error::other)?;
     }
+    let admin_config_path_for_router = admin_config_path.clone();
     let mut bound = Vec::with_capacity(preflight.listeners.len());
     for server in preflight.listeners {
         let addr: SocketAddr = format!("{}:{}", server.bind, server.port)
@@ -526,28 +527,49 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
         bound.push((server, listener, bound_addr));
     }
     if let Some(admin) = admin_webui.filter(|admin| admin.enabled) {
-        let addr: SocketAddr = format!("{}:{}", admin.bind, admin.port)
-            .parse()
-            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
-        let listener = bind_v3_tcp_listener_retry_eintr(|| TcpListener::bind(addr)).await?;
-        let bound_addr = listener.local_addr()?;
-        bound.push((
-            V3ServerManifest {
-                id: "admin_webui".to_string(),
-                enabled: true,
-                bind: admin.bind,
-                port: admin.port,
-                routing_group: String::new(),
-                endpoints: Vec::new(),
-                features: BTreeMap::new(),
-                execution: None,
-                http_sse_keepalive_ms: 0,
-                expose_models: Vec::new(),
-                provider_priority_schedule: Default::default(),
-            },
-            listener,
-            bound_addr,
-        ));
+        // The admin listener is optional. Its failure must not discard business
+        // listeners that already bound, so it is isolated from the `?` path.
+        let bound_admin = if admin_config_path_for_router.is_none() {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "admin_webui requires a canonical config path",
+            ))
+        } else {
+            match format!("{}:{}", admin.bind, admin.port).parse::<SocketAddr>() {
+                Ok(addr) => {
+                    match bind_v3_tcp_listener_retry_eintr(|| TcpListener::bind(addr)).await {
+                        Ok(listener) => listener
+                            .local_addr()
+                            .map(|bound_addr| (listener, bound_addr)),
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(error) => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, error)),
+            }
+        };
+        match bound_admin {
+            Ok((listener, bound_addr)) => bound.push((
+                V3ServerManifest {
+                    id: "admin_webui".to_string(),
+                    enabled: true,
+                    bind: admin.bind,
+                    port: admin.port,
+                    routing_group: String::new(),
+                    endpoints: Vec::new(),
+                    features: BTreeMap::new(),
+                    execution: None,
+                    http_sse_keepalive_ms: 0,
+                    expose_models: Vec::new(),
+                    provider_priority_schedule: Default::default(),
+                },
+                listener,
+                bound_addr,
+            )),
+            Err(error) => eprintln!(
+                "V3 optional admin_webui listener {}:{} unavailable: {error}; continuing with business listeners",
+                admin.bind, admin.port
+            ),
+        }
     }
 
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
@@ -557,7 +579,6 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     // broker must already carry a valid positive runtime generation.
     let front_transport_broker =
         V3FrontTransportBroker::new(1).with_client_observation(debug.clone());
-    let admin_config_path_for_router = admin_config_path.clone();
     let canonical_admin_config_path = admin_config_path.clone().or_else(|| {
         std::env::var_os("HOME")
             .map(std::path::PathBuf::from)

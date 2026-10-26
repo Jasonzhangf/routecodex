@@ -179,17 +179,19 @@ fn p0_restart_pending_hooks_cleanup_survives_declaration_changes() {
             eprintln!("P0 owned unexpected hooks group={process_group_id}");
             OwnedHooksGroup { process_group_id }
         });
-        let status = run_with_hooks_record(
+        let status = run_with_hooks_record_args(
             env!("CARGO_BIN_EXE_rccv3"),
             &state,
             config,
             "status",
             &install,
+            &["--json"],
         );
         eprintln!(
             "restart status: {}",
             String::from_utf8_lossy(&status.stdout)
         );
+        let status_record: Value = serde_json::from_slice(&status.stdout).unwrap();
         let mut connection = TcpStream::connect(("127.0.0.1", ports[0])).unwrap();
         p0_responses_on_connection(&mut connection, ports[0], root.path());
         assert_eq!(unsafe { libc::kill(-group.process_group_id, 0) }, 0);
@@ -199,7 +201,7 @@ fn p0_restart_pending_hooks_cleanup_survives_declaration_changes() {
             1,
             "replacement hooks started while old cleanup unresolved"
         );
-        assert!(last_json(&status)["detail"]
+        assert!(status_record["detail"]
             .as_str()
             .unwrap_or_default()
             .contains("cleanup"));

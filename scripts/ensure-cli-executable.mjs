@@ -7,6 +7,14 @@ if (process.platform === 'win32') {
   process.exit(0);
 }
 
+if (
+  process.env.npm_lifecycle_event === 'postinstall'
+  && (process.env.npm_command === 'install' || process.env.npm_command === 'ci')
+) {
+  console.log('[cli-executable] skip: dependency-install lifecycle does not touch installed CLI commands');
+  process.exit(0);
+}
+
 function ensureExecutable(filePath) {
   if (!filePath || !fs.existsSync(filePath)) {
     return;

@@ -171,7 +171,11 @@ pub(crate) fn owned_unreachable_runtime_state_is_reapable(
         }
     }
 
-    for listener in &expected.listeners {
+    for listener in expected
+        .listeners
+        .iter()
+        .filter(|listener| is_business_listener_declaration(listener))
+    {
         if !listener_address_is_available(&listener.bind, listener.port) {
             return Ok(false);
         }
