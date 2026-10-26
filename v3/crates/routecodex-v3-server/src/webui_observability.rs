@@ -56,10 +56,61 @@ pub(crate) fn record_v3_webui_error_projection(
     body: Option<&Value>,
     typed: V3ObsErrorProjection<'_>,
 ) -> Result<u64, String> {
-    let (error_category, error_detail) = body
-        .map(crate::v3_error_body_code_message)
-        .map(|(code, message)| (code, message))
-        .unwrap_or_else(|| (format!("http_{status}"), format!("HTTP status {status}")));
+    // `provider_status` and `error_category` come from the typed terminal facts,
+    // never from the client-facing projected status. A NoResponse terminal
+    // (body decode/operation timeout, transport break, client cancel) has no
+    // upstream HTTP status; only a real upstream witness (or a typed external
+    // error status) may set `provider_status`.
+    let terminal_provider_status = typed.terminal_disposition.and_then(|disposition| {
+        match disposition {
+            routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => {
+                Some(witness.status())
+            }
+            routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => None,
+        }
+    });
+    let external_error_status = typed
+        .diagnostic_source
+        .and_then(|source| source.external_error.as_ref())
+        .and_then(|external| external.status);
+    // Lanes that expose no typed terminal facts keep the legacy projection:
+    // the already-projected client status stands in for `provider_status`. Only
+    // a lane that carries a typed provider terminal may report `None`.
+    let provider_status = if typed.terminal_disposition.is_some() || typed.diagnostic_source.is_some()
+    {
+        terminal_provider_status.or(external_error_status)
+    } else {
+        Some(status)
+    };
+    let (error_category, error_detail) = match body {
+        Some(body) => crate::v3_error_body_code_message(body),
+        None => match (typed.diagnostic_source, typed.terminal_disposition) {
+            // A real upstream error HTTP status (including a genuine 502) is the
+            // honest category, so the provider-error HTTP family keeps its
+            // current `http_<status>` semantics.
+            (
+                _,
+                Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
+            ) if witness.status() >= 400 => (
+                format!("http_{}", witness.status()),
+                format!("HTTP status {}", witness.status()),
+            ),
+            // NoResponse (timeout, transport break, client cancel) or a 2xx
+            // provider head that failed later: the typed source names the cause.
+            (Some(source), _) => (source.code.clone(), source.message.clone()),
+            (
+                None,
+                Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
+            ) => (
+                format!("http_{}", witness.status()),
+                format!("HTTP status {}", witness.status()),
+            ),
+            (None, _) => (format!("http_{status}"), format!("HTTP status {status}")),
+        },
+    };
+    let client_disconnect = typed.diagnostic_source.is_some_and(|source| {
+        source.source_kind == routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect
+    });
     let request_key = build_v3_obs_request_key(port, request_id);
     let scope = V3ObsScope {
         port,
@@ -75,7 +126,28 @@ pub(crate) fn record_v3_webui_error_projection(
         .to_string(),
         error_class: typed.error_class.map(str::to_string),
         chain: build_v3_obs_error_chain(typed.error_chain, typed.error_class, status),
-        upstream_request_id: typed.upstream_request_id.map(str::to_string),
+        internal_code: typed
+            .diagnostic_source
+            .and_then(|source| source.internal_error.as_ref())
+            .map(|internal| internal.internal_code.to_string()),
+        external_error_kind: typed
+            .diagnostic_source
+            .and_then(|source| source.external_error.as_ref())
+            .map(|external| format!("{:?}", external.kind).to_ascii_lowercase()),
+        external_error_code: typed
+            .diagnostic_source
+            .and_then(|source| source.external_error.as_ref())
+            .and_then(|external| external.code.clone()),
+        external_error_status,
+        upstream_request_id: typed
+            .upstream_request_id
+            .map(str::to_string)
+            .or_else(|| {
+                typed
+                    .diagnostic_source
+                    .and_then(|source| source.external_error.as_ref())
+                    .and_then(|external| external.upstream_request_id.clone())
+            }),
         health_action: match typed.health_action {
             Some(plan) => Some(v3_obs_health_action_from_plan(plan)?),
             None => None,
@@ -87,7 +159,7 @@ pub(crate) fn record_v3_webui_error_projection(
         endpoint: endpoint.to_string(),
         entry_protocol: Some(entry_protocol.to_string()),
         execution_mode: typed.execution_mode.map(str::to_string),
-        provider_status: Some(status),
+        provider_status,
         response_status: Some("error".to_string()),
         finish_reason: Some("error".to_string()),
         route: Some("-".to_string()),
@@ -98,7 +170,11 @@ pub(crate) fn record_v3_webui_error_projection(
     };
     record_v3_observability_event(
         observability,
-        V3ObsEventType::Failed,
+        if client_disconnect {
+            V3ObsEventType::Cancelled
+        } else {
+            V3ObsEventType::Failed
+        },
         &request_key,
         scope,
         meta,
@@ -341,6 +417,11 @@ pub(crate) struct V3ObsErrorProjection<'a> {
     pub error_chain: &'a [&'static str],
     pub health_action: Option<&'a routecodex_v3_error::V3ErrorActionPlan>,
     pub upstream_request_id: Option<&'a str>,
+    /// Typed Error01 source raised at the terminal, when the lane exposes it.
+    pub diagnostic_source: Option<&'a routecodex_v3_error::V3Error01SourceRaised>,
+    /// Typed provider terminal disposition, when the lane exposes it.
+    pub terminal_disposition:
+        Option<&'a routecodex_v3_error::V3ProviderTerminalDisposition>,
 }
 
 /// Canonical typed state per Error chain node. Keyed by node id so the chain the

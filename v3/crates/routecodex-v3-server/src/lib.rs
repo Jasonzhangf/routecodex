@@ -1471,6 +1471,7 @@ fn record_and_emit_v3_error_projection(
             error_chain: input.error_chain,
             health_action: input.health_action,
             upstream_request_id: input.upstream_request_id,
+            ..Default::default()
         },
     ) {
         let line = format_v3_console_timed_content(
