@@ -19,7 +19,7 @@ const source = readFileSync(join(root, 'scripts', 'run-v3-cargo-test.mjs'), 'utf
 const { executeCargo, isUnreapedProcessGroupError } = await import('../run-v3-cargo-test.mjs');
 const CLEANUP_FAILURE_EXIT = 86;
 
-function writeTimeoutFixture({ artifactPath = null } = {}) {
+function writeTimeoutFixture({ artifactPath = null, descendantStdio = ['ignore', 'inherit', 'inherit'] } = {}) {
   const fixtureDir = mkdtempSync(join(tmpdir(), 'routecodex-v3-cargo-timeout-'));
   const cargoPath = join(fixtureDir, 'cargo.cjs');
   writeFileSync(join(fixtureDir, 'descendant.cjs'), [
@@ -30,13 +30,14 @@ function writeTimeoutFixture({ artifactPath = null } = {}) {
   const artifactJson = artifactPath
     ? JSON.stringify({ reason: 'compiler-artifact', profile: { test: true }, executable: artifactPath })
     : null;
+  const descendantIo = String(JSON.stringify(descendantStdio));
   writeFileSync(cargoPath, [
     '#!/usr/bin/env node',
     "const { spawn } = require('node:child_process');",
     "const { writeFileSync } = require('node:fs');",
     "const { join } = require('node:path');",
     ...(artifactJson ? [`process.stdout.write(${JSON.stringify(`${artifactJson}\n`)});`] : []),
-    "const descendant = spawn(process.execPath, [join(__dirname, 'descendant.cjs')], { stdio: ['ignore', 'inherit', 'inherit'] });",
+    `const descendant = spawn(process.execPath, [join(__dirname, 'descendant.cjs')], { stdio: ${descendantIo} });`,
     "writeFileSync(join(__dirname, 'pids.json'), JSON.stringify({ cargoPid: process.pid, descendantPid: descendant.pid }));",
     "process.on('SIGTERM', () => {});",
     'setInterval(() => {}, 1000);',
@@ -311,6 +312,8 @@ function startCargoTestDriver(probeExpression, {
   targetRoot: sharedTargetRoot = null,
   prepareArtifacts = true,
   executePrelude = null,
+  descendantStdio = ['ignore', 'inherit', 'inherit'],
+  driverExitCleanup = null,
 } = {}) {
   const targetRoot = sharedTargetRoot ?? join(
     root,
@@ -325,11 +328,15 @@ function startCargoTestDriver(probeExpression, {
     writeFileSync(fakeExecutable, 'fake executable\n');
     writeFileSync(fakeObject, 'fake object\n');
   }
-  const { fixtureDir, cargoPath, pidsPath } = writeTimeoutFixture({ artifactPath: fakeExecutable });
+  const { fixtureDir, cargoPath, pidsPath } = writeTimeoutFixture({
+    artifactPath: fakeExecutable,
+    descendantStdio,
+  });
   const driverPath = join(fixtureDir, 'driver.mjs');
   writeFileSync(driverPath, [
     `import { chmodSync } from 'node:fs';`,
     `import { executeCargo, runV3CargoTest } from ${JSON.stringify(join(root, 'scripts', 'run-v3-cargo-test.mjs'))};`,
+    `const fixturePidsPath = ${JSON.stringify(pidsPath)};`,
     'const unhandled = [];',
     "process.on('unhandledRejection', (reason) => unhandled.push(reason));",
     `const probeCommand = ${probeExpression};`,
@@ -344,6 +351,7 @@ function startCargoTestDriver(probeExpression, {
     '};',
     'const code = await runV3CargoTest([], { execute, probeCommand });',
     'await new Promise((resolve) => setTimeout(resolve, 100));',
+    ...(driverExitCleanup ? [driverExitCleanup] : []),
     "if (unhandled.length > 0) { console.error('[driver] unhandled rejections: ' + unhandled.length); process.exit(97); }",
     'process.exit(code);',
     '',
@@ -603,6 +611,73 @@ async function assertOwnerWriteFailureStillBlocksNextCall() {
   }
 }
 
+// A non-ESRCH group signal-delivery failure does not prove the group is gone.
+// When a follow-up probe reports a live member, the wrapper must fail closed
+// with the typed unreaped-group outcome, retain the lock and artifacts, and keep
+// the original signal error in the diagnostic detail.
+async function assertSignalDeliveryFailureRetainsLockAndArtifacts() {
+  const signalErrorPrelude = [
+    // Simulate EPERM from the process-group kill while leaving the probe intact.
+    '  const realKill = process.kill.bind(process);',
+    '  process.kill = (pid, signal) => {',
+    "    if (typeof pid === 'number' && pid < 0) {",
+    "      throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });",
+    '    }',
+    '    return realKill(pid, signal);',
+    '  };',
+  ].join('\n');
+  const state = startCargoTestDriver(
+    "() => ({ status: 0, stdout: '', stderr: '' })",
+    {
+      executePrelude: signalErrorPrelude,
+      // The descendant keeps the group alive but must not hold the driver's
+      // stdout pipe, so the parent harness can return and run its cleanup.
+      descendantStdio: ['ignore', 'ignore', 'ignore'],
+      // The simulated EPERM suppresses the real group kill, so this test-owned
+      // driver reaps its own fixture processes before exit. Wrapper behavior
+      // (retain lock/artifacts) is what the assertions below check.
+      driverExitCleanup: [
+        "try {",
+        "  const { readFileSync } = await import('node:fs');",
+        '  const rec = JSON.parse(readFileSync(fixturePidsPath, \'utf8\'));',
+        "  const realKill2 = process.kill;",
+        '  for (const pid of [rec.cargoPid, rec.descendantPid]) {',
+        "    if (Number.isInteger(pid) && pid > 0) { try { realKill2(pid, 'SIGKILL'); } catch {} }",
+        '  }',
+        '} catch {}',
+      ].join('\n'),
+    },
+  );
+  try {
+    assert.equal(state.driver.error, undefined, `driver must not hang: ${state.driver.error?.message ?? ''}`);
+    assert.equal(
+      state.driver.status,
+      CLEANUP_FAILURE_EXIT,
+      `an unconfirmed signal-delivery failure must fail the wrapper; stderr:\n${state.driver.stderr}`,
+    );
+    assert.match(
+      state.driver.stderr,
+      /signal delivery failed with EPERM/u,
+      'the original signal error must remain in the diagnostic detail',
+    );
+    assert.match(
+      state.driver.stderr,
+      /process group not confirmed stopped; retaining test lock and artifacts/u,
+      'an unconfirmed group must retain the lock and artifacts',
+    );
+    assert.doesNotMatch(
+      state.driver.stdout,
+      /debug allocation after cleanup/u,
+      'artifact cleanup must not run when the group is not confirmed stopped',
+    );
+    assert.equal(existsSync(state.fakeExecutable), true, 'test executables must be retained');
+    assert.equal(existsSync(state.fakeObject), true, 'compiled test objects must be retained');
+    assert.equal(existsSync(state.lockDir), true, 'the canonical test lock must be retained');
+  } finally {
+    closeCargoTestDriver(state);
+  }
+}
+
 await assertDescendantHoldingStdoutIsBounded();
 await assertEarlyCargoExitStillReapsGroupAndSettles();
 await assertCargoExitOnSigtermWaitsForGroupKillBeforeSettling();
@@ -619,6 +694,7 @@ await assertUnusableProbeIsAControlledFailure({
 await assertCleanupOnlyRunsAfterConfirmedReap();
 await assertUnreapedLockSurvivesDeadWrapperPid();
 await assertOwnerWriteFailureStillBlocksNextCall();
+await assertSignalDeliveryFailureRetainsLockAndArtifacts();
 
 assert.match(source, /CARGO_TEST_TIMEOUT_MS\s*=\s*40\s*\*\s*60\s*\*\s*1000/u);
 assert.match(source, /detached:\s*true/u);
