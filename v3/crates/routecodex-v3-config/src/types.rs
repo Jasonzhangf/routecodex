@@ -613,6 +613,8 @@ pub struct V3ProviderModelAuthoringConfig {
     pub context_token_estimate_scale_bps: u64,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+    #[serde(default)]
+    pub availability: Option<crate::V3ProviderModelAvailabilityAuthoringConfig>,
 }
 
 fn default_context_token_estimate_scale_bps() -> u64 {
@@ -1223,6 +1225,7 @@ pub struct V3ProviderModelManifest {
     pub max_context_tokens: Option<u64>,
     pub context_token_estimate_scale_bps: u64,
     pub features: BTreeMap<String, bool>,
+    pub availability: Option<crate::V3ProviderModelAvailabilityAuthoringConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

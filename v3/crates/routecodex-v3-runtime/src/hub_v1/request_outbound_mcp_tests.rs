@@ -1069,6 +1069,7 @@ fn project_namespace_history(
         visible_model_ids: vec!["model".into()],
         model_capabilities: vec!["text".into(), "tools".into()],
         web_search_execution_mode: V3WebSearchExecutionMode::None,
+        model_availability: None,
         max_context_tokens: None,
         max_tokens: None,
         context_token_estimate_scale_bps: 10_000,

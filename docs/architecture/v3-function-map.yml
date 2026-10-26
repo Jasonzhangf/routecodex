@@ -1110,6 +1110,8 @@ features:
   - V3TargetInterpreter::provider_priority_schedule_priority
   - V3ProviderPriorityScheduleAuthoringConfig::validate
   - V3ProviderPriorityScheduleAuthoringConfig::priority_for_provider
+  - V3ProviderModelAvailabilityAuthoringConfig::validate
+  - V3ProviderModelAvailabilityAuthoringConfig::is_available_at
   - candidate_context_admission
   - select_v3_target_with_session_then_global
   - select_v3_preplanned_direct_target
