@@ -111,7 +111,7 @@ function classifyWorkflowScope(entries) {
     const touchesV4 = changedLines.some((line) => v4Marker.test(line));
     if (touchesV3 && !touchesV4) {
       v3Build ||= changedLines.some((line) =>
-        /needs\.scope\.outputs\.v3_build\b|npm run (?:build:min|install:v3|fix:cli-shim)\b|v3\/scripts\/(?:tests\/v3-protocol-live-mock-matrix|run-v3-cargo-test)\.mjs/u.test(line));
+        /needs\.scope\.outputs\.v3_build\b|npm run (?:build:min|install:v3|fix:cli-shim)\b|v3\/scripts\/(?:tests\/v3-protocol-live-mock-matrix|run-v3-cargo-test)\.mjs|test:v3-cargo-test-stack-env-regression\b/u.test(line));
     }
     if (touchesV3 && !touchesV4) v3 = true;
     else if (touchesV4 && !touchesV3) v4 = true;
@@ -248,10 +248,12 @@ function classifyV3FineScopes(paths, { workflowScope }) {
   for (const path of paths) {
     const isV3Path = path.startsWith('v3/') || isV3RootScript(path);
     if (/^docs\/(?:architecture|design|goals|schemas)\//u.test(path)
-        || isV3ArchitectureRootScript(path)) add('v3_architecture');
+        || isV3ArchitectureRootScript(path)
+        || path === 'v3/scripts/verify-ci.mjs') add('v3_architecture');
     if (/^v3\/(?:Cargo\.toml|Cargo\.lock|package(?:-lock)?\.json)$/u.test(path)
         || /^v3\/crates\//u.test(path)
         || path === 'v3/scripts/run-v3-cargo-test.mjs'
+        || path === 'v3/scripts/tests/v3-cargo-test-stack-env-regression.mjs'
         || /^scripts\/(?:install-v3-cli|ensure-cli-command-shim|ensure-cli-executable)\.mjs$/u.test(path)
         || /^scripts\/install-(?:global|release)\.sh$/u.test(path)) add('v3_build');
     if (isV3Path && /(?:^|[\/_-])provider(?:[\/_-]|$)/iu.test(path)) add('v3_provider');

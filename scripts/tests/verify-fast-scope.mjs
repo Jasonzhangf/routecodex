@@ -33,6 +33,8 @@ const cases = [
   { relative: 'scripts/install-release.sh', contents: '#!/bin/sh\ntrue\n', v3: true, v4: false },
   { relative: 'scripts/run-v3-cargo-test.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'v3/scripts/run-v3-cargo-test.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_build: true }, v3: true, v4: false },
+  { relative: 'v3/scripts/tests/v3-cargo-test-stack-env-regression.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_build: true }, v3: true, v4: false },
+  { relative: 'v3/scripts/verify-ci.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: true }, v3: true, v4: false },
   { relative: 'v3/scripts/unrelated-test-helper.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_build: false }, v3: true, v4: false },
   { relative: 'scripts/tests/v3-scope-fixture.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: '.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md', v3: true, v4: false },
@@ -92,6 +94,13 @@ const cases = [
     relative: '.github/workflows/test.yml',
     contents: '  - name: V3 host tests\n    run: node v3/scripts/run-v3-cargo-test.mjs --workspace -- --nocapture\n',
     diffMode: 'new-ref',
+    fine: { v3_architecture: true, v3_build: true },
+    v3: true,
+    v4: false,
+  },
+  {
+    relative: '.github/workflows/test.yml',
+    contents: '  - name: V3 cargo test stack environment regression\n    run: npm --prefix v3 run --silent test:v3-cargo-test-stack-env-regression\n',
     fine: { v3_architecture: true, v3_build: true },
     v3: true,
     v4: false,
@@ -257,6 +266,15 @@ for (const name of ['Build (release)', 'Install direct V3 CLI binary', 'Install 
   const block = start >= 0 ? workflow.slice(start, end >= 0 ? end : undefined) : '';
   if (block.includes('!cancelled()')) {
     failures.push(`dependent step must retain success dependency: ${name}`);
+  }
+}
+for (const name of ['V3 cargo test stack environment regression']) {
+  const start = workflow.indexOf(`      - name: ${name}\n`);
+  const end = workflow.indexOf('\n      - ', start + 1);
+  const block = start >= 0 ? workflow.slice(start, end >= 0 ? end : undefined) : '';
+  if (!block.includes("needs.scope.outputs.v3_build == 'true'")
+      || !block.includes('test:v3-cargo-test-stack-env-regression')) {
+    failures.push(`managed wrapper stack regression is not wired into the v3_build lane: ${name}`);
   }
 }
 
