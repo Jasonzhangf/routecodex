@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 export const MAX_DEBUG_BYTES = 2147483648;
 const CLEANUP_FAILURE_EXIT = 86;
 export const CARGO_TEST_TIMEOUT_MS = 40 * 60 * 1000;
+const PROCESS_GROUP_UNREAPED = 'V3_CARGO_TEST_PROCESS_GROUP_UNREAPED';
 const CARGO_TEST_KILL_GRACE_MS = 5_000;
 const STALE_LOCK_GRACE_MS = 60_000;
 const UNVERIFIABLE_LIVE_LOCK_MAX_AGE_MS = 12 * 60 * 60 * 1000;
@@ -454,10 +455,36 @@ export function lockOwnerMatchesProcess(owner, liveIdentity) {
     && owner.processStartedAt === liveIdentity?.processStartedAt;
 }
 
+function defaultProbeCommand(command, args) {
+  return spawnSync(command, args, { encoding: 'utf8' });
+}
+
+// `pgrep -g` exit 0 means the group still has a live member and exit 1 means it
+// has none. Any other outcome is an unusable probe, never evidence of reaping.
+function probeProcessGroup(pid, probeCommand) {
+  const probe = probeCommand('pgrep', ['-g', String(pid)]);
+  if (probe?.error) throw probe.error;
+  if (probe?.status === 1) return 'gone';
+  if (probe?.status === 0) return 'alive';
+  throw new Error(`pgrep -g ${pid} failed with status ${probe?.status}`);
+}
+
+export function isUnreapedProcessGroupError(error) {
+  return Boolean(error) && typeof error === 'object' && error.code === PROCESS_GROUP_UNREAPED;
+}
+
+function unreapedProcessGroupError(pid, detail) {
+  return Object.assign(
+    new Error(`cargo test timed out and process group ${pid} was not confirmed stopped (${detail})`),
+    { code: PROCESS_GROUP_UNREAPED },
+  );
+}
+
 export function executeCargo(cargoArgs, executables, {
   timeoutMs = CARGO_TEST_TIMEOUT_MS,
   killGraceMs = CARGO_TEST_KILL_GRACE_MS,
   command = 'cargo',
+  probeCommand = defaultProbeCommand,
 } = {}) {
   return new Promise((resolveExit, reject) => {
     const child = spawn(command, cargoArgs, {
@@ -472,12 +499,14 @@ export function executeCargo(cargoArgs, executables, {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutTimer);
+      clearTimeout(killTimer);
       reject(error);
     };
     const settleResolve = (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutTimer);
+      clearTimeout(killTimer);
       resolveExit(code);
     };
     const handleLine = (line) => {
@@ -521,40 +550,58 @@ export function executeCargo(cargoArgs, executables, {
     const destroyStdoutSoon = () => {
       if (!child.stdout.destroyed) child.stdout.destroy();
     };
+    // Bounded by killGraceMs: a probe that throws and a probe that keeps
+    // reporting a live member both produce a controlled `stopped: false`
+    // result instead of an unhandled rejection or a lost timeout signal.
     const waitForProcessGroupGone = async (pid) => {
       const deadline = Date.now() + killGraceMs;
-      while (Date.now() < deadline) {
-        const probe = spawnSync('pgrep', ['-g', String(pid)], { encoding: 'utf8' });
-        if (probe.error) throw probe.error;
-        if (probe.status === 1) return true;
-        if (probe.status !== 0) {
-          throw new Error(`pgrep -g ${pid} failed with status ${probe.status}`);
+      for (;;) {
+        let state;
+        try {
+          state = probeProcessGroup(pid, probeCommand);
+        } catch (error) {
+          return { stopped: false, detail: `process-group probe failed: ${error?.message ?? String(error)}` };
+        }
+        if (state === 'gone') return { stopped: true };
+        if (Date.now() >= deadline) {
+          return { stopped: false, detail: `process group still has live members after the ${killGraceMs}ms kill grace` };
         }
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      return false;
     };
     timeoutTimer = setTimeout(() => {
       timedOut = true;
       process.stderr.write(`[v3-cargo-test] cargo timeout ${timeoutMs}ms; sending SIGTERM to process group ${child.pid}\n`);
       try { process.kill(-child.pid, 'SIGTERM'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
       killTimer = setTimeout(async () => {
-        process.stderr.write(`[v3-cargo-test] cargo timeout grace expired; sending SIGKILL to process group ${child.pid}\n`);
-        try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
-        // Wait until the SIGKILLed group has no live member before settling,
-        // so the caller's lock and artifact cleanup follow the group cleanup.
-        await waitForProcessGroupGone(child.pid);
-        groupKilled = true;
-        // Closing the read end makes finish settle even if an orphan somehow
-        // still holds the pipe; pendingClose covers a close that already fired.
-        destroyStdoutSoon();
-        if (pendingClose) finish(pendingClose.code, pendingClose.signal);
+        try {
+          process.stderr.write(`[v3-cargo-test] cargo timeout grace expired; sending SIGKILL to process group ${child.pid}\n`);
+          try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
+          // Wait until the SIGKILLed group has no live member before settling,
+          // so the caller's lock and artifact cleanup follow the group cleanup.
+          const reaped = await waitForProcessGroupGone(child.pid);
+          if (!reaped.stopped) {
+            settleReject(unreapedProcessGroupError(child.pid, reaped.detail));
+            destroyStdoutSoon();
+            return;
+          }
+          groupKilled = true;
+          // Closing the read end makes finish settle even if an orphan somehow
+          // still holds the pipe; pendingClose covers a close that already fired.
+          destroyStdoutSoon();
+          if (pendingClose) finish(pendingClose.code, pendingClose.signal);
+        } catch (error) {
+          // No async rejection may escape this timer callback: it would bypass
+          // the caller's controlled cleanup decision.
+          settleReject(unreapedProcessGroupError(child.pid, `cleanup callback failed: ${error?.message ?? String(error)}`));
+          destroyStdoutSoon();
+        }
       }, killGraceMs);
     }, timeoutMs);
   });
 }
 
-export async function runV3CargoTest(args) {
+export async function runV3CargoTest(args, { execute = executeCargo } = {}) {
   let cargoArgs;
   try {
     cargoArgs = buildCargoArgs(args);
@@ -567,20 +614,26 @@ export async function runV3CargoTest(args) {
   let cargoExit = 1;
   let terminalError = null;
   try {
-    cargoExit = await executeCargo(cargoArgs, executables);
+    cargoExit = await execute(cargoArgs, executables);
   } catch (error) {
     terminalError = error;
   } finally {
-    try {
-      await releaseOwnedTestArtifacts({ executables });
-      const bytes = await enforceV3DebugBudget();
-      if (bytes !== null) {
-        process.stdout.write(`[v3-cargo-test] debug allocation after cleanup: ${bytes} bytes\n`);
+    if (isUnreapedProcessGroupError(terminalError)) {
+      // The group may still own this target directory, so artifacts and the
+      // lock stay in place until a later run reclaims them.
+      process.stderr.write('[v3-cargo-test] process group not confirmed stopped; retaining test lock and artifacts\n');
+    } else {
+      try {
+        await releaseOwnedTestArtifacts({ executables });
+        const bytes = await enforceV3DebugBudget();
+        if (bytes !== null) {
+          process.stdout.write(`[v3-cargo-test] debug allocation after cleanup: ${bytes} bytes\n`);
+        }
+      } catch (error) {
+        terminalError = terminalError ?? error;
       }
-    } catch (error) {
-      terminalError = terminalError ?? error;
+      releaseLock();
     }
-    releaseLock();
   }
   if (terminalError) {
     process.stderr.write(`[v3-cargo-test] ${terminalError instanceof Error ? terminalError.message : String(terminalError)}\n`);
