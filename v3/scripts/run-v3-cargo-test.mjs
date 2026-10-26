@@ -498,16 +498,20 @@ export function executeCargo(cargoArgs, executables, {
       if (settled || finishing) return;
       finishing = true;
       handleLine(buffered);
-      if (timedOut && !child.stdout.destroyed) child.stdout.destroy();
       if (parseError) return settleReject(parseError);
       if (signal) process.stderr.write(`[v3-cargo-test] cargo terminated by ${signal}\n`);
       if (timedOut) return settleReject(new Error(`cargo test timed out after ${timeoutMs}ms and was terminated`));
       settleResolve(code ?? 1);
     };
-    // Settle on exit so a descendant that keeps the inherited stdout pipe open
-    // cannot hold the promise; close stays the normal completion signal.
-    child.on('exit', finish);
+    // Normal completion settles only after stdout closes; a timeout is the
+    // bounded escape hatch for a descendant that keeps the pipe open.
     child.on('close', finish);
+    child.on('exit', (code, signal) => {
+      if (timedOut) finish(code, signal);
+    });
+    const destroyStdoutSoon = () => {
+      if (!child.stdout.destroyed) child.stdout.destroy();
+    };
     timeoutTimer = setTimeout(() => {
       timedOut = true;
       process.stderr.write(`[v3-cargo-test] cargo timeout ${timeoutMs}ms; sending SIGTERM to process group ${child.pid}\n`);
@@ -515,6 +519,9 @@ export function executeCargo(cargoArgs, executables, {
       killTimer = setTimeout(() => {
         process.stderr.write(`[v3-cargo-test] cargo timeout grace expired; sending SIGKILL to process group ${child.pid}\n`);
         try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
+        // After the group is killed, closing the read end makes finish settle
+        // even if an orphan somehow still holds the pipe.
+        destroyStdoutSoon();
       }, killGraceMs);
     }, timeoutMs);
   });
