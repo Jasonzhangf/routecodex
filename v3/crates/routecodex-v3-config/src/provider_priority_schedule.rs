@@ -80,9 +80,13 @@ impl V3ProviderModelAvailabilityAuthoringConfig {
                 self.timezone
             )
         })?;
-        if self.guard_minutes > 720 {
+        // A guard of 720 minutes can never leave a usable window: the longest
+        // representable period is 1439 minutes, which is already not longer
+        // than twice 720. Reject it at the boundary instead of accepting a
+        // value that no period can satisfy.
+        if self.guard_minutes > 719 {
             return Err(format!(
-                "{context} availability guard_minutes must be between 0 and 720"
+                "{context} availability guard_minutes must be between 0 and 719"
             ));
         }
         for (index, period) in self.periods.iter().enumerate() {
@@ -463,6 +467,16 @@ mod provider_model_availability_tests {
 
         let mut availability = night_window(721);
         assert!(availability.validate("provider p model m").is_err());
+
+        // 720 is the largest value that still passes the range check but can
+        // never leave a usable window, so it is rejected as well. 719 stays
+        // reachable with the longest representable period.
+        let mut availability = night_window(720);
+        assert!(availability.validate("provider p model m").is_err());
+        let mut availability = night_window(719);
+        availability.periods[0].start = "00:00".into();
+        availability.periods[0].end = "23:59".into();
+        assert!(availability.validate("provider p model m").is_ok());
 
         let mut availability = night_window(0);
         availability.periods[0].start = "24:00".into();

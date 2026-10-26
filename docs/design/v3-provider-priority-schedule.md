@@ -55,7 +55,7 @@ schedule changes an eligible candidate's priority, while an availability
 window decides whether the candidate is admitted at all.
 
 ```toml
-[provider.models.deepseek-v4.1-flash-1017]
+[provider.models."deepseek-v4.1-flash-1017"]
 availability = { timezone = "Asia/Shanghai", guard_minutes = 10, periods = [
   { start = "22:00", end = "08:00" },
 ] }
@@ -65,8 +65,13 @@ availability = { timezone = "Asia/Shanghai", guard_minutes = 10, periods = [
   available at any time.
 - Periods use `[start, end)` local-time semantics and may cross midnight.
 - `guard_minutes` shrinks each period on both edges, so routing never starts a
-  request in the minutes adjacent to a billable boundary. A period whose length
-  is not longer than twice `guard_minutes` is rejected during validation.
+  request in the minutes adjacent to a billable boundary. It must be between 0
+  and 719, and a period whose length is not longer than twice `guard_minutes` is
+  rejected during validation.
 - Outside the window the candidate is excluded from selection and recorded as
   `<provider>:<interface>:<auth>:<model>:availability_inactive` in target
   diagnostics. It is not a fallback tier and never mutates provider health.
+- The same window gates every real provider request, including recovery probes
+  and the periodic probe sweep. A probe is never sent outside the window.
+- A pool whose every candidate is outside its window reaches the declared
+  exhaustion path immediately; it does not wait for the window to open.

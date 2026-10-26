@@ -391,6 +391,42 @@ impl V3TargetInterpreter {
             })
     }
 
+    /// Whether `now_ms` falls inside the candidate's declared availability
+    /// window. A candidate without a declared window is always inside it. This
+    /// predicate is shared by admission, the direct send gate and real provider
+    /// probes, so a probe cannot touch a minute that routing itself would
+    /// refuse.
+    pub fn candidate_in_availability_window(candidate: &V3TargetCandidate, now_ms: u64) -> bool {
+        candidate
+            .model_availability
+            .as_ref()
+            .is_none_or(|availability| availability.is_available_at(now_ms))
+    }
+
+    /// A candidate is admitted when its declared capabilities match the
+    /// request and its provider-model availability window contains `now_ms`.
+    /// This is the single admission basis shared by Target10 selection, the
+    /// direct send gate, remaining-candidate accounting and recovery probes:
+    /// every consumer must agree on which candidates the route can actually
+    /// reach, or a candidate admitted by one stage is refused by another and a
+    /// provider that was never contacted receives a health failure.
+    pub fn candidate_admitted(candidate: &V3TargetCandidate, now_ms: u64) -> bool {
+        candidate_satisfies_required_capabilities(candidate)
+            && Self::candidate_in_availability_window(candidate, now_ms)
+    }
+
+    /// Number of candidates admitted by capability and declared availability.
+    pub fn admitted_candidate_count(
+        expanded: &V3Target09CandidateSetExpanded,
+        now_ms: u64,
+    ) -> usize {
+        expanded
+            .candidates
+            .iter()
+            .filter(|candidate| Self::candidate_admitted(candidate, now_ms))
+            .count()
+    }
+
     pub fn select_available_with_health<R: V3ProviderSchedulingReader>(
         &self,
         expanded: V3Target09CandidateSetExpanded,
@@ -403,17 +439,7 @@ impl V3TargetInterpreter {
         // Automatic-cooldown exemption counts only candidates still admitted by
         // capability and declared availability, so a window-inactive or
         // capability-mismatched sibling cannot inflate the pool size.
-        let admitted_candidate_count = expanded
-            .candidates
-            .iter()
-            .filter(|candidate| {
-                candidate_satisfies_required_capabilities(candidate)
-                    && candidate
-                        .model_availability
-                        .as_ref()
-                        .is_none_or(|availability| availability.is_available_at(now_ms))
-            })
-            .count();
+        let admitted_candidate_count = Self::admitted_candidate_count(&expanded, now_ms);
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
@@ -424,11 +450,7 @@ impl V3TargetInterpreter {
             }
             // Availability is declared on the provider model and is not a
             // fallback tier: outside its windows the candidate is not eligible.
-            if candidate
-                .model_availability
-                .as_ref()
-                .is_some_and(|availability| !availability.is_available_at(now_ms))
-            {
+            if !Self::candidate_admitted(candidate, now_ms) {
                 unavailable.push(format!(
                     "{}:{}:{}:{}:availability_inactive",
                     candidate.provider_id,

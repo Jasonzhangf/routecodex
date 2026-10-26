@@ -1519,6 +1519,8 @@ features:
   - Server-scoped provider schedules default to Asia/Shanghai, accept a configured IANA timezone and cross-midnight daily windows, and use one-based tiers where one is highest priority
   - Schedule adjustments apply only within the selected route pool and never bypass provider health/cooldown or enter request, provider, client, metadata, or debug control payloads
   - A provider model may declare a timezone-aligned availability window with guarded edges; outside it the candidate is excluded from Target10 selection as a hard admission input with an availability_inactive diagnostic, never as a fallback tier, and the exclusion never mutates provider health
+  - One shared admission basis decides selection, the direct send gate, remaining-candidate accounting and recovery probes, so a candidate that Target10 admitted is never refused at send and a window-inactive sibling never counts as an alternative or inflates the single-candidate automatic-cooldown exemption
+  - A recovery or periodic probe is never sent outside the target model's declared availability window, and a pool whose every candidate is outside its window reaches exhaustion without waiting for the window
   required_gates:
   - npm run test:v3-p5-router-target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
