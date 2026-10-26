@@ -660,3 +660,88 @@ targets = [{ kind = "forwarder", id = "fwd.primary", priority = 1 }]
         "unexpected error: {error}"
     );
 }
+
+/// Minimal valid V3 authoring config whose provider model block is supplied by
+/// the caller, so the retired web_search arms can be exercised through the
+/// same public compile entry the real config loader uses.
+fn v3_config_with_model_block(model_block: &str) -> String {
+    let head = r#"
+version = 3
+
+[pipelines.hub_v1]
+skeleton = "hub_v1"
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "primary"
+endpoints = ["responses"]
+
+[providers.test]
+type = "openai_chat"
+base_url = "https://provider.example/v1"
+default_model = "model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "TEST_KEY" }] }
+
+[providers.test.models.model]
+wire_name = "wire-model"
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = false
+"#;
+    let tail = r#"
+
+[forwarders."fwd.primary"]
+model = "model"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "test", model = "model", key = "key", priority = 1 }]
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "fwd.primary", priority = 1 }]
+"#;
+    format!("{head}{model_block}\n{tail}")
+}
+
+#[test]
+fn retired_metadata_center_local_search_mode_is_rejected_at_compile() {
+    // Regression lock: RouteCodex has no local search backend, so the retired
+    // mode must fail compile-time validation instead of silently reaching a
+    // runtime that cannot execute it.
+    let source =
+        v3_config_with_model_block("web_search_execution_mode = \"metadata_center_local_search\"");
+    let authoring = crate::parse_v3_config_02_authoring(&source).expect("config parses");
+    let error = crate::compile_v3_config_05_manifest(authoring)
+        .expect_err("metadata_center_local_search must be rejected at compile time");
+    let text = error.to_string();
+    assert!(
+        text.contains("metadata_center_local_search") && text.contains("no longer supported"),
+        "unexpected error: {text}"
+    );
+}
+
+#[test]
+fn retired_web_search_backend_binding_is_rejected_at_compile() {
+    // Regression lock: a non-empty web_search_backend implies the retired
+    // local-search path and must be rejected rather than ignored.
+    let source = v3_config_with_model_block("web_search_backend = \"MiniMax-M3\"");
+    let authoring = crate::parse_v3_config_02_authoring(&source).expect("config parses");
+    let error = crate::compile_v3_config_05_manifest(authoring)
+        .expect_err("web_search_backend must be rejected at compile time");
+    let text = error.to_string();
+    assert!(
+        text.contains("web_search_backend") && text.contains("no longer supported"),
+        "unexpected error: {text}"
+    );
+}
+
+#[test]
+fn provider_owned_hosted_web_search_still_compiles() {
+    // The rejection must stay narrow: provider-owned hosted web_search is the
+    // supported path and must keep compiling.
+    let source =
+        v3_config_with_model_block("web_search_execution_mode = \"native_remote_search_tool_mix\"");
+    let authoring = crate::parse_v3_config_02_authoring(&source).expect("config parses");
+    crate::compile_v3_config_05_manifest(authoring)
+        .expect("provider-owned hosted web_search must compile");
+}
