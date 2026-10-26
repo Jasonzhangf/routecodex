@@ -568,6 +568,7 @@ export function executeCargo(cargoArgs, executables, {
     });
     let buffered = '', parseError = null, timedOut = false, settled = false, finishing = false;
     let groupKilled = false, pendingClose = null, killTimer, timeoutTimer;
+    const signalDeliveryErrors = [];
     const settleReject = (error) => {
       if (settled) return;
       settled = true;
@@ -611,7 +612,10 @@ export function executeCargo(cargoArgs, executables, {
       handleLine(buffered);
       if (parseError) return settleReject(parseError);
       if (signal) process.stderr.write(`[v3-cargo-test] cargo terminated by ${signal}\n`);
-      if (timedOut) return settleReject(new Error(`cargo test timed out after ${timeoutMs}ms and was terminated`));
+      if (timedOut) {
+        const signalDetail = signalDeliveryErrors.length > 0 ? ` (${signalDeliveryErrors.join('; ')})` : '';
+        return settleReject(new Error(`cargo test timed out after ${timeoutMs}ms and was terminated${signalDetail}`));
+      }
       settleResolve(code ?? 1);
     };
     // Normal completion settles only after stdout closes; a timeout is the
@@ -622,6 +626,13 @@ export function executeCargo(cargoArgs, executables, {
     });
     const destroyStdoutSoon = () => {
       if (!child.stdout.destroyed) child.stdout.destroy();
+    };
+    // A group that could not be confirmed stopped must not keep this Node
+    // process alive through the ChildProcess handle. The lock owner already
+    // records the process group for a later run to reclaim.
+    const abandonUnreapedGroup = () => {
+      destroyStdoutSoon();
+      child.unref();
     };
     // Bounded by killGraceMs: a probe that throws and a probe that keeps
     // reporting a live member both produce a controlled `stopped: false`
@@ -656,12 +667,17 @@ export function executeCargo(cargoArgs, executables, {
       } catch (probeError) {
         probeDetail = probeError?.message ?? String(probeError);
       }
-      if (state === 'gone') return;
+      if (state === 'gone') {
+        const detail = `${stage} signal delivery failed with ${error?.code ?? String(error)}; process group confirmed gone`;
+        signalDeliveryErrors.push(detail);
+        process.stderr.write(`[v3-cargo-test] ${detail}\n`);
+        return;
+      }
       const detail = state === 'alive'
         ? `${stage} signal delivery failed with ${error?.code ?? String(error)}; process group still has live members`
         : `${stage} signal delivery failed with ${error?.code ?? String(error)}; unconfirmed absence (${probeDetail})`;
       settleReject(unreapedProcessGroupError(pid, detail));
-      destroyStdoutSoon();
+      abandonUnreapedGroup();
     };
     timeoutTimer = setTimeout(() => {
       timedOut = true;
@@ -676,7 +692,7 @@ export function executeCargo(cargoArgs, executables, {
           const reaped = await waitForProcessGroupGone(child.pid);
           if (!reaped.stopped) {
             settleReject(unreapedProcessGroupError(child.pid, reaped.detail));
-            destroyStdoutSoon();
+            abandonUnreapedGroup();
             return;
           }
           groupKilled = true;
@@ -688,7 +704,7 @@ export function executeCargo(cargoArgs, executables, {
           // No async rejection may escape this timer callback: it would bypass
           // the caller's controlled cleanup decision.
           settleReject(unreapedProcessGroupError(child.pid, `cleanup callback failed: ${error?.message ?? String(error)}`));
-          destroyStdoutSoon();
+          abandonUnreapedGroup();
         }
       }, killGraceMs);
     }, timeoutMs);
