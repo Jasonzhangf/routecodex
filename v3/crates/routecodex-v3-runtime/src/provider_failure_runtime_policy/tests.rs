@@ -12,32 +12,64 @@ use tokio::sync::Notify;
 // Test the post-observation policy separately from the public hold tests.
 // Await the real declared action gate, then finish a qualified physical
 // observation. No sleep, forced due time or synthetic cooldown is used.
-pub(super) async fn complete_due_precool_failures(health: &V3ProviderFailureRuntimeHealth, now_ms: u64) {
-    let tickets: Vec<_> = health.precool.lock().unwrap().iter()
-        .map(|(identity, action)| (identity.clone(), action.ticket.clone())).collect();
+pub(super) async fn complete_due_precool_failures(
+    health: &V3ProviderFailureRuntimeHealth,
+    now_ms: u64,
+) {
+    let tickets: Vec<_> = health
+        .precool
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(identity, action)| (identity.clone(), action.ticket.clone()))
+        .collect();
     for (identity, ticket) in tickets {
-        let transition = tokio::time::timeout(Duration::from_secs(15),
-            health.action_gate.wait_for_recovery_ticket(&ticket, ticket.key().provider_scope.clone()),
-        ).await.expect("declared observation gate must become due").unwrap();
+        let transition = tokio::time::timeout(
+            Duration::from_secs(15),
+            health
+                .action_gate
+                .wait_for_recovery_ticket(&ticket, ticket.key().provider_scope.clone()),
+        )
+        .await
+        .expect("declared observation gate must become due")
+        .unwrap();
         let V3ProviderActionRecoveryTransition::Admitted(mut admission) = transition else {
             panic!("isolated test observation must retain its current action: {transition:?}");
         };
-        let permit = health.store.acquire_provider_precool_probe_for_interface(
-            &identity.provider_id, &identity.interface_id,
-            identity.auth_alias.as_deref(), identity.model_id.as_deref(),
-        ).unwrap().expect("test observation must own the exact physical probe");
+        let permit = health
+            .store
+            .acquire_provider_precool_probe_for_interface(
+                &identity.provider_id,
+                &identity.interface_id,
+                identity.auth_alias.as_deref(),
+                identity.model_id.as_deref(),
+            )
+            .unwrap()
+            .expect("test observation must own the exact physical probe");
         let observation = V3PrecoolObservationGuard {
-            health: health.clone(), identity: identity.clone(), generation: ticket.generation(),
+            health: health.clone(),
+            identity: identity.clone(),
+            generation: ticket.generation(),
             _admission: admission.take_permit().expect("current action admission"),
         };
-        let cancellation = V3ProviderProbeCancellationGuard { store: health.store.clone(), permit };
-        health.complete_precool_observation(&observation, &cancellation,
-            Err(V3ProviderHealthProbeFailure::Provider(V3ProviderError::Transport {
-                request_id: "controlled-negative-observation".into(),
-                provider_id: identity.provider_id.clone(),
-                reason: "controlled failed observation after declared hold".into(),
-            })), now_ms,
-        ).unwrap();
+        let cancellation = V3ProviderProbeCancellationGuard {
+            store: health.store.clone(),
+            permit,
+        };
+        health
+            .complete_precool_observation(
+                &observation,
+                &cancellation,
+                Err(V3ProviderHealthProbeFailure::Provider(
+                    V3ProviderError::Transport {
+                        request_id: "controlled-negative-observation".into(),
+                        provider_id: identity.provider_id.clone(),
+                        reason: "controlled failed observation after declared hold".into(),
+                    },
+                )),
+                now_ms,
+            )
+            .unwrap();
     }
 }
 
@@ -77,22 +109,59 @@ mod relay_error_operator_fault;
 fn late_failure_of_already_cooled_identity_does_not_shadow_recovery_owner() {
     let manifest = target_resolution_manifest("late-cooled-observation");
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
-    let scope = test_provider_failure_scope("late-cooled-observation", "late-cooled-observation", "late-inflight").unwrap();
-    health.store.record_provider_cooldown_failure("primary", Some("key1"), Some("gpt-test"),
-        "first qualified observation committed cooldown", 100, 5000).unwrap();
-    let record = health.record_provider_failure_record_with_policy(
-        None, &manifest, &scope, "primary", Some("responses"), Some("key1"), Some("gpt-test"),
-        Some("late in-flight transport failure"), "V3ProviderResp14Raw", 502,
-        Some("provider_transport_error"), "late in-flight transport failure", 101,
-    ).unwrap();
+    let scope = test_provider_failure_scope(
+        "late-cooled-observation",
+        "late-cooled-observation",
+        "late-inflight",
+    )
+    .unwrap();
+    health
+        .store
+        .record_provider_cooldown_failure(
+            "primary",
+            Some("key1"),
+            Some("gpt-test"),
+            "first qualified observation committed cooldown",
+            100,
+            5000,
+        )
+        .unwrap();
+    let record = health
+        .record_provider_failure_record_with_policy(
+            None,
+            &manifest,
+            &scope,
+            "primary",
+            Some("responses"),
+            Some("key1"),
+            Some("gpt-test"),
+            Some("late in-flight transport failure"),
+            "V3ProviderResp14Raw",
+            502,
+            Some("provider_transport_error"),
+            "late in-flight transport failure",
+            101,
+        )
+        .unwrap();
     assert!(health.precool_probe_keys().unwrap().is_empty(),
         "an already-cooled identity must stay with its cooldown recovery owner, not a new unacquirable precool lane");
     assert_eq!(record.state, "cooldown");
-    let permit = health.store.acquire_provider_cooldown_probe("primary", Some("key1"), Some("gpt-test")).unwrap().unwrap();
-    health.store.complete_provider_cooldown_probe_success_with_permit(&permit, 6000).unwrap();
-    assert!(health.session_bound_availability(&scope).availability_for_interface(
-        "primary", "default", Some("key1"), Some("gpt-test"), 6001).available,
-        "qualified recovery must not remain hidden behind a late precool entry");
+    let permit = health
+        .store
+        .acquire_provider_cooldown_probe("primary", Some("key1"), Some("gpt-test"))
+        .unwrap()
+        .unwrap();
+    health
+        .store
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 6000)
+        .unwrap();
+    assert!(
+        health
+            .session_bound_availability(&scope)
+            .availability_for_interface("primary", "default", Some("key1"), Some("gpt-test"), 6001)
+            .available,
+        "qualified recovery must not remain hidden behind a late precool entry"
+    );
 }
 
 fn normalize_global_pool_priorities(manifest: &mut V3Config05ManifestPublished) {
@@ -481,8 +550,7 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
                 );
                 assert_eq!(record.state, "pre_cool_observation");
                 assert_eq!(record.cooldown_until_ms, None);
-                let observed =
-                    health.availability("first", Some("key1"), Some("gpt-test"), now_ms);
+                let observed = health.availability("first", Some("key1"), Some("gpt-test"), now_ms);
                 assert!(
                     !observed.available,
                     "status {status} must hold the exact identity for its observation"

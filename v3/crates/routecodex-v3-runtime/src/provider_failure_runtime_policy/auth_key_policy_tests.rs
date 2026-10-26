@@ -1,8 +1,7 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 
-static PRECOOL_OBSERVATION_TEST_LOCK: tokio::sync::Mutex<()> =
-    tokio::sync::Mutex::const_new(());
+static PRECOOL_OBSERVATION_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn account_threshold_manifest() -> V3Config05ManifestPublished {
     let source = r#"
@@ -255,11 +254,7 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_next_deadline_ms(
-                "primary",
-                Some("key1"),
-                Some("gpt-test"),
-            )
+            .provider_cooldown_probe_next_deadline_ms("primary", Some("key1"), Some("gpt-test"),)
             .expect("second-401 probe deadline"),
         Some(5_101),
         "business failures must not count as failed cooldown recovery probes"
@@ -276,21 +271,40 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
         Some(10_101),
         "two observed account failures must keep the exact identity blocked"
     );
-    let projection = health.store()
+    let projection = health
+        .store()
         .scheduling_projection("primary", "key1", "gpt-test", 1, 1, 102)
         .expect("observed business failure accounting");
-    assert_eq!(projection.score_generation, 2, "each original failure is counted once");
-    assert_eq!(projection.score_milli, 90, "the negative observation is not a third business failure");
-    let entry = health.store().cooldown_entries(102).into_iter()
-        .find(|entry| entry.provider_id == "primary"
-            && entry.interface_id == "default"
-            && entry.auth_alias.as_deref() == Some("key1")
-            && entry.model_id.as_deref() == Some("gpt-test")
-            && entry.kind == "probe")
+    assert_eq!(
+        projection.score_generation, 2,
+        "each original failure is counted once"
+    );
+    assert_eq!(
+        projection.score_milli, 90,
+        "the negative observation is not a third business failure"
+    );
+    let entry = health
+        .store()
+        .cooldown_entries(102)
+        .into_iter()
+        .find(|entry| {
+            entry.provider_id == "primary"
+                && entry.interface_id == "default"
+                && entry.auth_alias.as_deref() == Some("key1")
+                && entry.model_id.as_deref() == Some("gpt-test")
+                && entry.kind == "probe"
+        })
         .expect("qualified observation committed the exact cooldown owner");
-    assert_eq!(entry.failure_count, Some(0), "no cooldown recovery probe has failed yet");
-    assert!(health.store().provider_cooldown_probe_keys_due(5_100)
-        .expect("probe not due before initial five seconds").is_empty());
+    assert_eq!(
+        entry.failure_count,
+        Some(0),
+        "no cooldown recovery probe has failed yet"
+    );
+    assert!(health
+        .store()
+        .provider_cooldown_probe_keys_due(5_100)
+        .expect("probe not due before initial five seconds")
+        .is_empty());
     assert_eq!(
         health
             .store()

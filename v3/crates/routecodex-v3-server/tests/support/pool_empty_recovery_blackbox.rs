@@ -2656,11 +2656,7 @@ struct IndependencePeerState {
     holding_probe: Arc<std::sync::atomic::AtomicBool>,
 }
 
-fn independence_peer_success(
-    peer: IndependencePeer,
-    direct: bool,
-    text: &str,
-) -> Response<Body> {
+fn independence_peer_success(peer: IndependencePeer, direct: bool, text: &str) -> Response<Body> {
     let body = if direct {
         json!({
             "id": format!("independence-{}", peer.name()),
@@ -2698,8 +2694,8 @@ async fn independence_peer_handler(
     axum::Json(body): axum::Json<Value>,
 ) -> Response<Body> {
     let text = body.to_string();
-    let probe = text.contains("ping; reply pong")
-        || text.contains("Reply exactly OK. Do not call tools.");
+    let probe =
+        text.contains("ping; reply pong") || text.contains("Reply exactly OK. Do not call tools.");
     let observation = IndependenceObservation {
         path: uri.path().to_string(),
         authorization: header_text(&headers, "authorization"),
@@ -2778,7 +2774,8 @@ struct IndependencePeerHandle {
 
 impl IndependencePeerHandle {
     fn business_calls(&self) -> usize {
-        self.business_calls.load(std::sync::atomic::Ordering::SeqCst)
+        self.business_calls
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn probe_calls(&self) -> usize {
@@ -3119,18 +3116,10 @@ async fn assert_request_independence_same_session(direct: bool) {
         direct,
     )
     .await;
-    let mut peer_c = start_independence_peer(
-        IndependencePeer::C,
-        IndependencePeerMode::Healthy,
-        direct,
-    )
-    .await;
-    let mut peer_d = start_independence_peer(
-        IndependencePeer::D,
-        IndependencePeerMode::Healthy,
-        direct,
-    )
-    .await;
+    let mut peer_c =
+        start_independence_peer(IndependencePeer::C, IndependencePeerMode::Healthy, direct).await;
+    let mut peer_d =
+        start_independence_peer(IndependencePeer::D, IndependencePeerMode::Healthy, direct).await;
     let routing =
         request_independence_manifest(&peer_a.url, &peer_b.url, &peer_c.url, &peer_d.url, direct);
     let pinned_a = format!("{}.test", routing.a);
@@ -3280,8 +3269,7 @@ async fn assert_request_independence_same_session(direct: bool) {
     // it and prove B plus the healthy same-session aliases still continue. The
     // wait is produced by the real 503 -> pre-cool observation producer, not by
     // a test-injected cooldown.
-    let a_waiting =
-        spawn_independence_request(&base, &pinned_a, "independence-A-waiting-request");
+    let a_waiting = spawn_independence_request(&base, &pinned_a, "independence-A-waiting-request");
     sleep(Duration::from_millis(300)).await;
     assert!(
         !a_waiting.is_finished(),
@@ -3295,11 +3283,8 @@ async fn assert_request_independence_same_session(direct: bool) {
     a_waiting.abort();
     let _ = a_waiting.await;
 
-    let b_after_cancel = spawn_independence_request(
-        &base,
-        &pinned_b,
-        "independence-B-business-after-A-cancel",
-    );
+    let b_after_cancel =
+        spawn_independence_request(&base, &pinned_b, "independence-B-business-after-A-cancel");
     let label = format!("{mode} peer B business after A cancellation");
     recv_independence_business(
         &mut peer_b.business,

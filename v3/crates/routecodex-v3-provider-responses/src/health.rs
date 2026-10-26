@@ -1464,8 +1464,15 @@ impl V3ProviderHealthStore {
         now_ms: u64,
     ) -> Result<V3ProviderKeyHealthProjection, String> {
         self.record_provider_failure_action_impl(
-            provider_id, interface_id, auth_alias, model_id, action, now_ms, false,
-        )?.ok_or_else(|| "unconditional provider failure observation was not applied".into())
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+            action,
+            now_ms,
+            false,
+        )?
+        .ok_or_else(|| "unconditional provider failure observation was not applied".into())
     }
 
     /// A late business failure joins and updates the existing owner atomically.
@@ -1480,7 +1487,13 @@ impl V3ProviderHealthStore {
         now_ms: u64,
     ) -> Result<Option<V3ProviderKeyHealthProjection>, String> {
         self.record_provider_failure_action_impl(
-            provider_id, interface_id, auth_alias, model_id, action, now_ms, true,
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+            action,
+            now_ms,
+            true,
         )
     }
 
@@ -1504,8 +1517,16 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
-        if only_if_cooled && !state.provider_cooldown_probes.get(&key).is_some_and(|probe|
-            probe.active_probe.is_some() || probe.blocked_until_ms.is_some() || probe.next_probe_at_ms.is_some()) {
+        if only_if_cooled
+            && !state
+                .provider_cooldown_probes
+                .get(&key)
+                .is_some_and(|probe| {
+                    probe.active_probe.is_some()
+                        || probe.blocked_until_ms.is_some()
+                        || probe.next_probe_at_ms.is_some()
+                })
+        {
             return Ok(None);
         }
         if action

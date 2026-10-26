@@ -34,14 +34,26 @@ fn non429_failure_does_not_escalate_another_identity_in_the_same_session() {
     ] {
         let gate = V3ProviderActionGate::default();
         let original = V3ProviderActionGateKey::new(
-            &session("same-live-session"), "provider-a:default:key-a:model-a", "provider_transport_error",
-        ).unwrap();
+            &session("same-live-session"),
+            "provider-a:default:key-a:model-a",
+            "provider_transport_error",
+        )
+        .unwrap();
         let independent = V3ProviderActionGateKey::new(
-            &session("same-live-session"), other, "provider_transport_error",
-        ).unwrap();
-        assert_eq!(gate.record_failure(&original).unwrap().minimum_delay_ms, 1000);
-        assert_eq!(gate.record_failure(&independent).unwrap().minimum_delay_ms, 1000,
-            "another complete identity must keep its independent first-failure delay: {other}");
+            &session("same-live-session"),
+            other,
+            "provider_transport_error",
+        )
+        .unwrap();
+        assert_eq!(
+            gate.record_failure(&original).unwrap().minimum_delay_ms,
+            1000
+        );
+        assert_eq!(
+            gate.record_failure(&independent).unwrap().minimum_delay_ms,
+            1000,
+            "another complete identity must keep its independent first-failure delay: {other}"
+        );
     }
 }
 
@@ -71,34 +83,78 @@ fn rate_limit_backoff_is_independent_for_other_auth_keys() {
 #[tokio::test]
 async fn admitted_identity_cannot_occupy_another_identity_in_the_same_session() {
     let gate = V3ProviderActionGate::default();
-    let a = V3ProviderActionGateKey::new(&session("shared-session"), "a:default:k:m", "provider_transport_error").unwrap();
-    let b = V3ProviderActionGateKey::new(&session("shared-session"), "b:default:k:m", "provider_transport_error").unwrap();
+    let a = V3ProviderActionGateKey::new(
+        &session("shared-session"),
+        "a:default:k:m",
+        "provider_transport_error",
+    )
+    .unwrap();
+    let b = V3ProviderActionGateKey::new(
+        &session("shared-session"),
+        "b:default:k:m",
+        "provider_transport_error",
+    )
+    .unwrap();
     let first = gate.record_failure(&a).unwrap();
     let second = gate.record_failure(&b).unwrap();
-    let held = gate.wait_for_recovery_ticket(first.recovery_ticket(), a.provider_scope.clone()).await.unwrap();
-    assert!(matches!(held, V3ProviderActionRecoveryTransition::Admitted(_)));
-    let independent = tokio::time::timeout(Duration::from_millis(500),
+    let held = gate
+        .wait_for_recovery_ticket(first.recovery_ticket(), a.provider_scope.clone())
+        .await
+        .unwrap();
+    assert!(matches!(
+        held,
+        V3ProviderActionRecoveryTransition::Admitted(_)
+    ));
+    let independent = tokio::time::timeout(
+        Duration::from_millis(500),
         gate.wait_for_recovery_ticket(second.recovery_ticket(), b.provider_scope.clone()),
-    ).await.expect("B's due action cannot wait for A's active permit").unwrap();
-    assert!(matches!(independent, V3ProviderActionRecoveryTransition::Admitted(_)), "B remains current: {independent:?}");
+    )
+    .await
+    .expect("B's due action cannot wait for A's active permit")
+    .unwrap();
+    assert!(
+        matches!(independent, V3ProviderActionRecoveryTransition::Admitted(_)),
+        "B remains current: {independent:?}"
+    );
     drop(held);
 }
 
 #[tokio::test]
 async fn terminal_identity_cannot_supersede_another_identity_in_the_same_session() {
     let gate = V3ProviderActionGate::default();
-    let a = V3ProviderActionGateKey::new(&session("shared-session"), "a:default:k:m", "provider_transport_error").unwrap();
-    let b = V3ProviderActionGateKey::new(&session("shared-session"), "b:default:k:m", "provider_transport_error").unwrap();
+    let a = V3ProviderActionGateKey::new(
+        &session("shared-session"),
+        "a:default:k:m",
+        "provider_transport_error",
+    )
+    .unwrap();
+    let b = V3ProviderActionGateKey::new(
+        &session("shared-session"),
+        "b:default:k:m",
+        "provider_transport_error",
+    )
+    .unwrap();
     let first = gate.record_failure(&a).unwrap();
     let second = gate.record_failure(&b).unwrap();
-    let held = gate.wait_for_recovery_ticket(first.recovery_ticket(), a.provider_scope.clone()).await.unwrap();
-    let V3ProviderActionRecoveryTransition::Admitted(admission) = &held else { panic!("A admitted"); };
+    let held = gate
+        .wait_for_recovery_ticket(first.recovery_ticket(), a.provider_scope.clone())
+        .await
+        .unwrap();
+    let V3ProviderActionRecoveryTransition::Admitted(admission) = &held else {
+        panic!("A admitted");
+    };
     assert!(gate.commit_terminal_admission(&a, admission).unwrap());
-    let independent = tokio::time::timeout(Duration::from_millis(500),
+    let independent = tokio::time::timeout(
+        Duration::from_millis(500),
         gate.wait_for_recovery_ticket(second.recovery_ticket(), b.provider_scope.clone()),
-    ).await.expect("A's terminal cannot re-time B").unwrap();
-    assert!(matches!(independent, V3ProviderActionRecoveryTransition::Admitted(_)),
-        "A's terminal cannot supersede B's current generation: {independent:?}");
+    )
+    .await
+    .expect("A's terminal cannot re-time B")
+    .unwrap();
+    assert!(
+        matches!(independent, V3ProviderActionRecoveryTransition::Admitted(_)),
+        "A's terminal cannot supersede B's current generation: {independent:?}"
+    );
 }
 
 #[tokio::test]

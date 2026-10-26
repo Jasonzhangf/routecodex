@@ -547,8 +547,12 @@ async fn provider_probe_failure_is_local_and_does_not_fail_the_probe_batch() {
             Err(V3ProviderHealthProbeFailure::Provider(
                 V3ProviderError::HttpStatus {
                     response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
-                        request_id: "probe".into(), provider_id: "test".into(), status: 503,
-                        headers: vec![], body: b"controlled unavailable".to_vec(), body_read_failure: None,
+                        request_id: "probe".into(),
+                        provider_id: "test".into(),
+                        status: 503,
+                        headers: vec![],
+                        body: b"controlled unavailable".to_vec(),
+                        body_read_failure: None,
                     }),
                 },
             ))
@@ -698,7 +702,8 @@ async fn failed_probe_backoff_starts_at_probe_completion_time() {
                 completion_marker.store(finished_ms, Ordering::Relaxed);
                 Err(V3ProviderHealthProbeFailure::Provider(
                     V3ProviderError::Transport {
-                        request_id: "probe".into(), provider_id: "test".into(),
+                        request_id: "probe".into(),
+                        provider_id: "test".into(),
                         reason: "controlled probe failure".into(),
                     },
                 ))

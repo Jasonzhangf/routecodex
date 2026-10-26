@@ -110,11 +110,7 @@ public_code = "E_MATCHED_CLASS"
         assert_eq!(
             health
                 .store()
-                .provider_cooldown_probe_next_deadline_ms(
-                    "first",
-                    Some("key1"),
-                    Some("gpt-test"),
-                )
+                .provider_cooldown_probe_next_deadline_ms("first", Some("key1"), Some("gpt-test"),)
                 .expect("matched-policy probe deadline"),
             Some(5_101),
             "class {class} must start its own threshold-one streak"

@@ -46,12 +46,18 @@ async fn upstream(
         if body.to_string().contains("held success") {
             peer.success_release.acquire().await.unwrap().forget();
             if peer.late_business_failure {
-                return (axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                    Json(json!({"error":{"message":"late in-flight business failure"}}))).into_response();
+                return (
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({"error":{"message":"late in-flight business failure"}})),
+                )
+                    .into_response();
             }
         } else if probe {
             peer.release.acquire().await.unwrap().forget();
-            if peer.late_probe_failure.load(std::sync::atomic::Ordering::SeqCst) {
+            if peer
+                .late_probe_failure
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
                 return (
                     axum::http::StatusCode::SERVICE_UNAVAILABLE,
                     Json(json!({"error":{"message":"late observation failure"}})),
@@ -187,7 +193,9 @@ async fn recovery_with_observation_race(
     let failures = Arc::new(Mutex::new(0));
     let refusal_phase = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let success_release = Arc::new(Semaphore::new(0));
-    let probe_failure = Arc::new(std::sync::atomic::AtomicBool::new(late_probe_failure || late_business_failure));
+    let probe_failure = Arc::new(std::sync::atomic::AtomicBool::new(
+        late_probe_failure || late_business_failure,
+    ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_port = listener.local_addr().unwrap().port();
     // Aggregate health stores are isolated, but adaptive concurrency is keyed
@@ -336,18 +344,36 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
             release.add_permits(1);
             timeout(Duration::from_secs(8), async {
                 loop {
-                    if pool_entries(&client, managed.pool_url()).await.iter()
-                        .any(|entry| entry["provider_id"] == provider_id && entry["auth_alias"] == "key") { break; }
+                    if pool_entries(&client, managed.pool_url())
+                        .await
+                        .iter()
+                        .any(|entry| {
+                            entry["provider_id"] == provider_id && entry["auth_alias"] == "key"
+                        })
+                    {
+                        break;
+                    }
                     sleep(Duration::from_millis(20)).await;
                 }
-            }).await.expect("failed qualified observation must commit exact cooldown");
+            })
+            .await
+            .expect("failed qualified observation must commit exact cooldown");
             assert!(business(&client, &managed).await.contains("spare-secret"));
             success_release.add_permits(1);
-            assert!(timeout(Duration::from_secs(4), request).await
-                .expect("late failed attempt must immediately switch to healthy spare").unwrap().contains("spare-secret"));
-            assert!(pool_entries(&client, managed.pool_url()).await.iter()
-                .any(|entry| entry["provider_id"] == provider_id && entry["auth_alias"] == "key"),
-                "late failure must retain the existing cooldown owner");
+            assert!(timeout(Duration::from_secs(4), request)
+                .await
+                .expect("late failed attempt must immediately switch to healthy spare")
+                .unwrap()
+                .contains("spare-secret"));
+            assert!(
+                pool_entries(&client, managed.pool_url())
+                    .await
+                    .iter()
+                    .any(
+                        |entry| entry["provider_id"] == provider_id && entry["auth_alias"] == "key"
+                    ),
+                "late failure must retain the existing cooldown owner"
+            );
             probe_failure.store(false, std::sync::atomic::Ordering::SeqCst);
             while rx.try_recv().is_ok() {}
             let (status, body) = post_json(&client,
@@ -358,13 +384,26 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
             release.add_permits(1);
             timeout(Duration::from_secs(8), async {
                 loop {
-                    if pool_entries(&client, managed.pool_url()).await.iter()
-                        .all(|entry| entry["provider_id"] != provider_id || entry["auth_alias"] != "key") { break; }
+                    if pool_entries(&client, managed.pool_url())
+                        .await
+                        .iter()
+                        .all(|entry| {
+                            entry["provider_id"] != provider_id || entry["auth_alias"] != "key"
+                        })
+                    {
+                        break;
+                    }
                     sleep(Duration::from_millis(20)).await;
                 }
-            }).await.expect("current recovery must not be shadowed by a late precool lane");
-            assert!(business(&client, &managed).await.contains("controlled-secret"),
-                "the real recovered business identity must be selected again");
+            })
+            .await
+            .expect("current recovery must not be shadowed by a late precool lane");
+            assert!(
+                business(&client, &managed)
+                    .await
+                    .contains("controlled-secret"),
+                "the real recovered business identity must be selected again"
+            );
             managed.finish().await;
             task.abort();
             let _ = task.await;

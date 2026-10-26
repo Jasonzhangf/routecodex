@@ -7786,10 +7786,7 @@ async fn run_matching_identity_independence(second_session: &str, second_convers
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-admission");
     let mut manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
     pool_empty_recovery_blackbox::use_native_direct_responses(&mut manifest);
-    let handle =
-        spawn_v3_server_aggregate(manifest)
-            .await
-            .unwrap();
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
     let request = json!({"model":"client-test","input":"held","stream":true});
@@ -7831,7 +7828,9 @@ async fn run_matching_identity_independence(second_session: &str, second_convers
     });
     timeout(Duration::from_millis(700), captures.recv())
         .await
-        .expect("the same session must not block another independent request before provider selection")
+        .expect(
+            "the same session must not block another independent request before provider selection",
+        )
         .expect("second independent provider request must arrive while the first is held");
     assert!(timeout(Duration::from_millis(100), &mut second_task)
         .await
@@ -8142,9 +8141,15 @@ async fn responses_client_drop_releases_same_session_before_provider_eof() {
     // Release both independent upstream handlers. Cancelling the first client
     // must not cancel the second request or remove its delivery rights.
     release.add_permits(2);
-    let response = timeout(Duration::from_secs(3), retry_task).await.unwrap().unwrap();
+    let response = timeout(Duration::from_secs(3), retry_task)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let body = timeout(Duration::from_secs(3), response.text()).await.unwrap().unwrap();
+    let body = timeout(Duration::from_secs(3), response.text())
+        .await
+        .unwrap()
+        .unwrap();
     assert_responses_sse_delivered_business_text(&body, "held response released");
     handle.shutdown().await;
     shutdown.send(()).unwrap();

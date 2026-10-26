@@ -764,7 +764,10 @@ async fn changing_provider_and_error_family_keep_independent_isolated_delays() {
     );
 
     let first_admission = match gate
-        .wait_for_recovery_ticket(first_recorded.recovery_ticket(), first.provider_scope.clone())
+        .wait_for_recovery_ticket(
+            first_recorded.recovery_ticket(),
+            first.provider_scope.clone(),
+        )
         .await
         .expect("first lane recovery transition")
     {
@@ -825,7 +828,10 @@ async fn changed_provider_lanes_admit_independently_by_exact_generation() {
     );
 
     let first_admission = match gate
-        .wait_for_recovery_ticket(first_recorded.recovery_ticket(), first.provider_scope.clone())
+        .wait_for_recovery_ticket(
+            first_recorded.recovery_ticket(),
+            first.provider_scope.clone(),
+        )
         .await
         .expect("first provider transition")
     {
@@ -905,10 +911,7 @@ async fn admitted_action_failure_does_not_advance_another_provider_lane() {
     let independent_started = Instant::now();
     let independent = match tokio::time::timeout(
         Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS + 500),
-        gate.wait_for_recovery_ticket(
-            &independent_ticket,
-            independent_key.provider_scope.clone(),
-        ),
+        gate.wait_for_recovery_ticket(&independent_ticket, independent_key.provider_scope.clone()),
     )
     .await
     .expect("the admitted provider action blocked its independent lane")
@@ -920,7 +923,8 @@ async fn admitted_action_failure_does_not_advance_another_provider_lane() {
     assert_eq!(independent.mode, V3ProviderActionGateMode::Isolated);
     assert_eq!(independent.generation, 1);
     assert!(
-        independent_started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS),
+        independent_started.elapsed()
+            >= Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS),
         "the independent lane bypassed its own declared isolated delay"
     );
 

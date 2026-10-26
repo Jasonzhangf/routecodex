@@ -1025,21 +1025,22 @@ async fn request_local_exclusion_without_cooldown_probe_success_waits_residence_
     let cancel_scope =
         test_provider_failure_scope(server_id, server_id, "request-local-cancel-session")
             .expect("cancel session scope");
-    let cancel_expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
-        manifest: &cancel_manifest,
-        server_id,
-        failure_session_scope: &cancel_scope,
-        entry_kind: "responses",
-        endpoint_path: "/v1/responses",
-        body: &json!({"model":"client-responses","input":"hello"}),
-        request_local_excluded_candidates: &BTreeSet::new(),
-        provider_health: &cancel_health,
-        now_ms: 20_001,
-        deterministic_sample: 0,
-    }) {
-        Ok(expanded) => expanded,
-        Err(_) => panic!("expanded candidates failed"),
-    };
+    let cancel_expanded =
+        match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+            manifest: &cancel_manifest,
+            server_id,
+            failure_session_scope: &cancel_scope,
+            entry_kind: "responses",
+            endpoint_path: "/v1/responses",
+            body: &json!({"model":"client-responses","input":"hello"}),
+            request_local_excluded_candidates: &BTreeSet::new(),
+            provider_health: &cancel_health,
+            now_ms: 20_001,
+            deterministic_sample: 0,
+        }) {
+            Ok(expanded) => expanded,
+            Err(_) => panic!("expanded candidates failed"),
+        };
     let cancel_budget =
         crate::execution_control::V3AttemptBudget::from_manifest(&cancel_manifest, server_id)
             .expect("cancel attempt budget");
