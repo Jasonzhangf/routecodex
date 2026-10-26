@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 export const MAX_DEBUG_BYTES = 2147483648;
 const CLEANUP_FAILURE_EXIT = 86;
 export const CARGO_TEST_TIMEOUT_MS = 40 * 60 * 1000;
+export const PROCESS_GROUP_UNREAPED = 'V3_CARGO_TEST_PROCESS_GROUP_UNREAPED';
 const CARGO_TEST_KILL_GRACE_MS = 5_000;
 const STALE_LOCK_GRACE_MS = 60_000;
 const UNVERIFIABLE_LIVE_LOCK_MAX_AGE_MS = 12 * 60 * 60 * 1000;
@@ -51,6 +52,7 @@ const debugDir = join(targetDir, 'debug');
 const debugDepsDir = join(debugDir, 'deps');
 const lockDir = join(targetDir, '.routecodex-v3-test.lock');
 const lockOwnerPath = join(lockDir, 'owner.json');
+const lockExecutionPath = join(lockDir, 'execution-in-progress');
 
 function cargoEnv() {
   return {
@@ -332,17 +334,20 @@ export async function enforceV3DebugBudget({
   }
 }
 
-function acquireLock() {
+function acquireLock(probeCommand) {
   mkdirSync(targetDir, { recursive: true });
   try {
     createOwnedLock();
   } catch (error) {
     if (error && error.code === 'EEXIST') {
-      if (reclaimStaleLock()) {
+      const reclaim = reclaimStaleLock(probeCommand);
+      if (reclaim.reclaimed) {
         createOwnedLock();
         return;
       }
-      throw new Error(`another canonical V3 Cargo test owns ${lockDir}`);
+      throw new Error(
+        `another canonical V3 Cargo test owns ${lockDir}${reclaim.reason ? `: ${reclaim.reason}` : ''}`,
+      );
     }
     throw error;
   }
@@ -351,6 +356,7 @@ function acquireLock() {
 function createOwnedLock() {
   mkdirSync(lockDir);
   try {
+    writeFileSync(lockExecutionPath, 'canonical V3 Cargo test execution in progress\n');
     writeLockOwner();
   } catch (error) {
     removePath(lockDir);
@@ -362,52 +368,120 @@ function releaseLock() {
   removePath(lockDir);
 }
 
-function writeLockOwner() {
+function writeLockOwner(unreapedProcessGroup = null) {
   const identity = ownProcessIdentity();
+  const owner = {
+    pid: process.pid,
+    cwd: v3Root,
+    startedAt: new Date().toISOString(),
+    processStartedAt: identity.processStartedAt,
+  };
+  if (unreapedProcessGroup) owner.unreapedProcessGroup = unreapedProcessGroup;
   writeFileSync(
     lockOwnerPath,
-    JSON.stringify({
-      pid: process.pid,
-      cwd: v3Root,
-      startedAt: new Date().toISOString(),
-      processStartedAt: identity.processStartedAt,
-    }),
+    JSON.stringify(owner),
   );
 }
 
-function reclaimStaleLock() {
+// A wrapper that exits with an unreaped process group must not let its dead PID
+// authorize the next caller to reuse the target. Only a probe that confirms the
+// persisted group has no live member may release this lock.
+function reclaimUnreapedLock(owner, probeCommand) {
+  const processGroupId = Number(owner?.unreapedProcessGroup?.processGroupId);
+  if (!Number.isInteger(processGroupId) || processGroupId <= 0) {
+    return {
+      reclaimed: false,
+      reason: 'unreaped process group identity is incomplete; refusing to reuse the target',
+    };
+  }
+  let state;
+  try {
+    state = probeProcessGroup(processGroupId, probeCommand);
+  } catch (error) {
+    return {
+      reclaimed: false,
+      reason: `unreaped process group ${processGroupId} probe failed: ${error?.message ?? String(error)}`,
+    };
+  }
+  if (state !== 'gone') {
+    return {
+      reclaimed: false,
+      reason: `unreaped process group ${processGroupId} still has live members`,
+    };
+  }
+  removePath(lockDir);
+  return { reclaimed: true };
+}
+
+function reclaimStaleLock(probeCommand) {
   let lockStat;
   try {
     lockStat = statSync(lockDir);
   } catch (error) {
-    if (error && error.code === 'ENOENT') return true;
+    if (error && error.code === 'ENOENT') return { reclaimed: true };
     throw error;
   }
+  let executionInProgress;
+  try {
+    executionInProgress = existsSync(lockExecutionPath);
+  } catch (error) {
+    return {
+      reclaimed: false,
+      reason: `lock execution marker is unreadable: ${error?.message ?? String(error)}; refusing to reuse the target`,
+    };
+  }
   if (!existsSync(lockOwnerPath)) {
-    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_GRACE_MS) return false;
+    if (executionInProgress) {
+      return {
+        reclaimed: false,
+        reason: 'lock execution marker has no persisted unreaped group; refusing to reuse the target',
+      };
+    }
+    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_GRACE_MS) {
+      return { reclaimed: false, reason: 'lock grace has not elapsed' };
+    }
     removePath(lockDir);
-    return true;
+    return { reclaimed: true };
   }
   let owner;
   try {
     owner = JSON.parse(readFileSync(lockOwnerPath, 'utf8'));
   } catch {
-    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_GRACE_MS) return false;
+    if (executionInProgress) {
+      return {
+        reclaimed: false,
+        reason: 'lock owner is incomplete while an execution marker is retained; refusing to reuse the target',
+      };
+    }
+    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_GRACE_MS) {
+      return { reclaimed: false, reason: 'lock grace has not elapsed' };
+    }
     removePath(lockDir);
-    return true;
+    return { reclaimed: true };
+  }
+  if (owner?.unreapedProcessGroup) {
+    return reclaimUnreapedLock(owner, probeCommand);
+  }
+  if (executionInProgress) {
+    return {
+      reclaimed: false,
+      reason: 'lock execution marker has no unreaped group identity; refusing to reuse the target',
+    };
   }
   const pid = Number(owner?.pid);
   const liveIdentity = Number.isInteger(pid) && pid > 0 ? currentProcessIdentity(pid) : null;
-  if (liveIdentity && lockOwnerMatchesProcess(owner, liveIdentity)) return false;
+  if (liveIdentity && lockOwnerMatchesProcess(owner, liveIdentity)) {
+    return { reclaimed: false, reason: 'lock owner process is still alive' };
+  }
   if (
     liveIdentity
     && liveIdentity.processStartedAt === null
     && Date.now() - lockStat.mtimeMs <= UNVERIFIABLE_LIVE_LOCK_MAX_AGE_MS
   ) {
-    return false;
+    return { reclaimed: false, reason: 'lock owner process identity is unverifiable' };
   }
   removePath(lockDir);
-  return true;
+  return { reclaimed: true };
 }
 
 function ownProcessIdentity() {
@@ -454,16 +528,60 @@ export function lockOwnerMatchesProcess(owner, liveIdentity) {
     && owner.processStartedAt === liveIdentity?.processStartedAt;
 }
 
-export function executeCargo(cargoArgs, executables, { timeoutMs = CARGO_TEST_TIMEOUT_MS } = {}) {
+function defaultProbeCommand(command, args) {
+  return spawnSync(command, args, { encoding: 'utf8' });
+}
+
+// `pgrep -g` exit 0 means the group still has a live member and exit 1 means it
+// has none. Any other outcome is an unusable probe, never evidence of reaping.
+function probeProcessGroup(pid, probeCommand) {
+  const probe = probeCommand('pgrep', ['-g', String(pid)]);
+  if (probe?.error) throw probe.error;
+  if (probe?.status === 1) return 'gone';
+  if (probe?.status === 0) return 'alive';
+  throw new Error(`pgrep -g ${pid} failed with status ${probe?.status}`);
+}
+
+export function isUnreapedProcessGroupError(error) {
+  return Boolean(error) && typeof error === 'object' && error.code === PROCESS_GROUP_UNREAPED;
+}
+
+function unreapedProcessGroupError(pid, detail) {
+  return Object.assign(
+    new Error(`cargo test timed out and process group ${pid} was not confirmed stopped (${detail})`),
+    { code: PROCESS_GROUP_UNREAPED, processGroupId: pid },
+  );
+}
+
+export function executeCargo(cargoArgs, executables, {
+  timeoutMs = CARGO_TEST_TIMEOUT_MS,
+  killGraceMs = CARGO_TEST_KILL_GRACE_MS,
+  command = 'cargo',
+  probeCommand = defaultProbeCommand,
+} = {}) {
   return new Promise((resolveExit, reject) => {
-    const child = spawn('cargo', cargoArgs, {
+    const child = spawn(command, cargoArgs, {
       cwd: v3Root,
       env: cargoEnv(),
       stdio: ['inherit', 'pipe', 'inherit'],
+      detached: true,
     });
-    let buffered = '', parseError = null, timedOut = false, settled = false, killTimer;
-    const settleReject = (error) => { if (!settled) { settled = true; reject(error); } };
-    const settleResolve = (code) => { if (!settled) { settled = true; resolveExit(code); } };
+    let buffered = '', parseError = null, timedOut = false, settled = false, finishing = false;
+    let groupKilled = false, pendingClose = null, killTimer, timeoutTimer;
+    const settleReject = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      clearTimeout(killTimer);
+      reject(error);
+    };
+    const settleResolve = (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      clearTimeout(killTimer);
+      resolveExit(code);
+    };
     const handleLine = (line) => {
       if (!line || parseError) return;
       try {
@@ -474,37 +592,93 @@ export function executeCargo(cargoArgs, executables, { timeoutMs = CARGO_TEST_TI
     };
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
+      if (settled) return;
       buffered += chunk;
       while (buffered.includes('\n')) { const newline = buffered.indexOf('\n'); handleLine(buffered.slice(0, newline)); buffered = buffered.slice(newline + 1); }
     });
     child.on('error', settleReject);
-    child.on('close', (code, signal) => {
-      if (killTimer) clearTimeout(killTimer);
+    const finish = (code, signal) => {
+      if (settled || finishing) return;
+      // A timeout must stay pending until the kill-grace group SIGKILL has
+      // actually removed the process group. `exit` fires as soon as cargo
+      // itself dies from SIGTERM, but the group may still own descendants
+      // that ignore SIGTERM and hold the inherited stdout pipe.
+      if (timedOut && !groupKilled) {
+        pendingClose = { code, signal };
+        return;
+      }
+      finishing = true;
       handleLine(buffered);
       if (parseError) return settleReject(parseError);
       if (signal) process.stderr.write(`[v3-cargo-test] cargo terminated by ${signal}\n`);
       if (timedOut) return settleReject(new Error(`cargo test timed out after ${timeoutMs}ms and was terminated`));
       settleResolve(code ?? 1);
+    };
+    // Normal completion settles only after stdout closes; a timeout is the
+    // bounded escape hatch for a descendant that keeps the pipe open.
+    child.on('close', finish);
+    child.on('exit', (code, signal) => {
+      if (timedOut && groupKilled) finish(code, signal);
     });
-    const timeoutTimer = setTimeout(() => {
+    const destroyStdoutSoon = () => {
+      if (!child.stdout.destroyed) child.stdout.destroy();
+    };
+    // Bounded by killGraceMs: a probe that throws and a probe that keeps
+    // reporting a live member both produce a controlled `stopped: false`
+    // result instead of an unhandled rejection or a lost timeout signal.
+    const waitForProcessGroupGone = async (pid) => {
+      const deadline = Date.now() + killGraceMs;
+      for (;;) {
+        let state;
+        try {
+          state = probeProcessGroup(pid, probeCommand);
+        } catch (error) {
+          return { stopped: false, detail: `process-group probe failed: ${error?.message ?? String(error)}` };
+        }
+        if (state === 'gone') return { stopped: true };
+        if (Date.now() >= deadline) {
+          return { stopped: false, detail: `process group still has live members after the ${killGraceMs}ms kill grace` };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    };
+    timeoutTimer = setTimeout(() => {
       timedOut = true;
-      process.stderr.write(`[v3-cargo-test] cargo timeout ${timeoutMs}ms; sending SIGTERM to pid ${child.pid}\n`);
-      try { process.kill(child.pid, 'SIGTERM'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
-      killTimer = setTimeout(() => {
-        if (settled) return;
-        process.stderr.write(`[v3-cargo-test] cargo timeout grace expired; sending SIGKILL to pid ${child.pid}\n`);
-        try { process.kill(child.pid, 'SIGKILL'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
-      }, CARGO_TEST_KILL_GRACE_MS);
+      process.stderr.write(`[v3-cargo-test] cargo timeout ${timeoutMs}ms; sending SIGTERM to process group ${child.pid}\n`);
+      try { process.kill(-child.pid, 'SIGTERM'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
+      killTimer = setTimeout(async () => {
+        try {
+          process.stderr.write(`[v3-cargo-test] cargo timeout grace expired; sending SIGKILL to process group ${child.pid}\n`);
+          try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error?.code !== 'ESRCH') settleReject(error); }
+          // Wait until the SIGKILLed group has no live member before settling,
+          // so the caller's lock and artifact cleanup follow the group cleanup.
+          const reaped = await waitForProcessGroupGone(child.pid);
+          if (!reaped.stopped) {
+            settleReject(unreapedProcessGroupError(child.pid, reaped.detail));
+            destroyStdoutSoon();
+            return;
+          }
+          groupKilled = true;
+          // Closing the read end makes finish settle even if an orphan somehow
+          // still holds the pipe; pendingClose covers a close that already fired.
+          destroyStdoutSoon();
+          if (pendingClose) finish(pendingClose.code, pendingClose.signal);
+        } catch (error) {
+          // No async rejection may escape this timer callback: it would bypass
+          // the caller's controlled cleanup decision.
+          settleReject(unreapedProcessGroupError(child.pid, `cleanup callback failed: ${error?.message ?? String(error)}`));
+          destroyStdoutSoon();
+        }
+      }, killGraceMs);
     }, timeoutMs);
-    child.once('close', () => clearTimeout(timeoutTimer));
   });
 }
 
-export async function runV3CargoTest(args) {
+export async function runV3CargoTest(args, { execute = executeCargo, probeCommand = defaultProbeCommand } = {}) {
   let cargoArgs;
   try {
     cargoArgs = buildCargoArgs(args);
-    acquireLock();
+    acquireLock(probeCommand);
   } catch (error) {
     process.stderr.write(`[v3-cargo-test] ${error instanceof Error ? error.message : String(error)}\n`);
     return CLEANUP_FAILURE_EXIT;
@@ -513,20 +687,44 @@ export async function runV3CargoTest(args) {
   let cargoExit = 1;
   let terminalError = null;
   try {
-    cargoExit = await executeCargo(cargoArgs, executables);
+    cargoExit = await execute(cargoArgs, executables);
   } catch (error) {
     terminalError = error;
   } finally {
-    try {
-      await releaseOwnedTestArtifacts({ executables });
-      const bytes = await enforceV3DebugBudget();
-      if (bytes !== null) {
-        process.stdout.write(`[v3-cargo-test] debug allocation after cleanup: ${bytes} bytes\n`);
+    if (isUnreapedProcessGroupError(terminalError)) {
+      // The group may still own this target directory, so artifacts and the
+      // lock stay in place until a later run reclaims them. Persist the
+      // unreaped group identity as the lock owner so a dead wrapper PID can
+      // never by itself authorize reuse of the target.
+      let persistError = null;
+      try {
+        writeLockOwner({
+          processGroupId: terminalError.processGroupId,
+          detail: terminalError.message,
+        });
+      } catch (error) {
+        persistError = error;
       }
-    } catch (error) {
-      terminalError = terminalError ?? error;
+      if (persistError) {
+        // The group was never confirmed reaped, so even an unpersisted owner
+        // must keep the lock and artifacts fail-closed.
+        terminalError = persistError;
+        process.stderr.write('[v3-cargo-test] unable to persist unreaped process group identity; retaining test lock and artifacts\n');
+      } else {
+        process.stderr.write('[v3-cargo-test] process group not confirmed stopped; retaining test lock and artifacts\n');
+      }
+    } else {
+      try {
+        await releaseOwnedTestArtifacts({ executables });
+        const bytes = await enforceV3DebugBudget();
+        if (bytes !== null) {
+          process.stdout.write(`[v3-cargo-test] debug allocation after cleanup: ${bytes} bytes\n`);
+        }
+      } catch (error) {
+        terminalError = terminalError ?? error;
+      }
+      releaseLock();
     }
-    releaseLock();
   }
   if (terminalError) {
     process.stderr.write(`[v3-cargo-test] ${terminalError instanceof Error ? terminalError.message : String(terminalError)}\n`);
