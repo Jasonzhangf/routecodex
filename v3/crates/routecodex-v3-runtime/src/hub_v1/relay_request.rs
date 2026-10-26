@@ -10,7 +10,7 @@ use crate::operation_runner::{run_v3_single_node_operator, V3OperationGraph};
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use serde_json::{json, Value};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     sync::{Arc, Mutex},
 };
 
@@ -425,8 +425,9 @@ fn govern_chat_tool_outputs_at_req04(payload: &mut Value, current_payload_start:
     let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
         return 0;
     };
-    let mut expected_outputs: BTreeMap<String, Vec<V3HubRelayExpectedToolOutputKind>> =
+    let mut expected_outputs: BTreeMap<String, VecDeque<V3HubRelayExpectedToolOutputKind>> =
         BTreeMap::new();
+    let mut last_expected_outputs = BTreeMap::new();
     // Retain prior calls only to associate custom output types. Missing or
     // unmatched identities remain business data, including across assistant turns.
     let mut output_count = 0usize;
@@ -438,10 +439,11 @@ fn govern_chat_tool_outputs_at_req04(payload: &mut Value, current_payload_start:
                         if let Some((call_id, expected_kind)) =
                             expected_tool_call_output_from_chat_call(call)
                         {
+                            last_expected_outputs.insert(call_id.clone(), expected_kind);
                             expected_outputs
                                 .entry(call_id)
                                 .or_default()
-                                .push(expected_kind);
+                                .push_back(expected_kind);
                         }
                     }
                 }
@@ -461,15 +463,20 @@ fn govern_chat_tool_outputs_at_req04(payload: &mut Value, current_payload_start:
         else {
             continue;
         };
-        let Some(expected_kinds) = expected_outputs.get(&call_id) else {
+        // A call id may be reused by later actual calls. Pair each result with
+        // the next outstanding declaration of that id, and reuse the most
+        // recent declaration only when duplicate results exceed declarations.
+        let expected_kind = expected_outputs
+            .get_mut(&call_id)
+            .and_then(VecDeque::pop_front)
+            .or_else(|| last_expected_outputs.get(&call_id).copied());
+        let Some(expected_kind) = expected_kind else {
             continue;
         };
         if message
             .pointer("/routecodex_chat_extension/responses_tool_output_type")
             .is_none()
-            && expected_kinds
-                .iter()
-                .all(|kind| *kind == V3HubRelayExpectedToolOutputKind::Custom)
+            && expected_kind == V3HubRelayExpectedToolOutputKind::Custom
         {
             if let Some(row) = message.as_object_mut() {
                 if let Some(extension) = row
@@ -572,6 +579,74 @@ mod tests {
                 }
             }]
         })
+    }
+
+    #[test]
+    fn req04_pairs_reused_call_id_output_kind_by_actual_call_order() {
+        for (first_custom, second_custom) in [(false, true), (true, false)] {
+            let mut messages = vec![json!({"role": "user", "content": "execute both calls"})];
+            for custom in [first_custom, second_custom] {
+                let (arguments, output) = if custom {
+                    (
+                        json!(r#"{"input":{"retain":[1,2]}}"#),
+                        json!(r#"{"retain":[1,2]}"#),
+                    )
+                } else {
+                    (json!(r#"{"value":3}"#), json!(r#"{"value":3}"#))
+                };
+                let mut call = json!({
+                    "id": "call_reused",
+                    "type": "function",
+                    "function": {"name": "lookup", "arguments": arguments}
+                });
+                if custom {
+                    call["routecodex_chat_extension"] =
+                        json!({"responses_tool_call_type": "custom_tool_call"});
+                }
+                messages.push(json!({
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [call]
+                }));
+                messages.push(json!({
+                    "role": "tool",
+                    "tool_call_id": "call_reused",
+                    "content": output
+                }));
+            }
+            let payload = json!({"model": "gpt-test", "messages": messages});
+            let governed = compile_v3_hub_relay_request_hooks()
+                .run(
+                    build_v3_hub_req_inbound_01_client_raw(
+                        payload,
+                        V3HubEntryProtocol::OpenAiChat,
+                        V3HubInvocationSource::Client,
+                        V3HubTransportIntent::Json,
+                    ),
+                    &V3HubRequestHookProfile::disabled(),
+                )
+                .expect("Req04 must preserve reused call ids");
+            let wire =
+                crate::hub_v1::build_v3_openai_responses_standard_request_from_chat_canonical(
+                    governed.payload(),
+                )
+                .expect("governed Chat history must project to the Responses wire");
+            let output_types = wire["input"]
+                .as_array()
+                .expect("Responses input")
+                .iter()
+                .filter_map(|item| item["type"].as_str())
+                .filter(|kind| matches!(*kind, "function_call_output" | "custom_tool_call_output"))
+                .collect::<Vec<_>>();
+            let expected = [first_custom, second_custom].map(|custom| {
+                if custom {
+                    "custom_tool_call_output"
+                } else {
+                    "function_call_output"
+                }
+            });
+            assert_eq!(output_types, expected, "{wire}");
+        }
     }
 
     #[test]
