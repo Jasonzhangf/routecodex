@@ -1077,6 +1077,25 @@ targets = [{ kind = "forwarder", id = "client", priority = 1 }]
 }
 
 #[test]
+fn unconfigured_provider_concurrency_defaults_to_forty_as_the_hard_maximum() {
+    // The declared static `maxInFlight` is only the hard ceiling for the
+    // adaptive budget; a provider that omits it gets the documented default of
+    // forty, not the retired default of eight.
+    let expanded = expanded();
+    assert!(
+        !expanded.candidates.is_empty(),
+        "default manifest must expand at least one candidate"
+    );
+    for candidate in &expanded.candidates {
+        assert_eq!(
+            candidate.initial_concurrency_budget, 40,
+            "provider {} must default to a static hard maximum of 40",
+            candidate.provider_id
+        );
+    }
+}
+
+#[test]
 fn requested_forwarder_model_without_matching_target_falls_back_to_route_conditions() {
     let source = r#"
 version = 3

@@ -257,10 +257,10 @@ async fn direct_to_relay_handoff_preserves_capacity_busy_exhaustion_source() {
     release_capacity_leases(held_first);
     release_capacity_leases(held_second);
     V3AdaptiveConcurrencyController::process_shared()
-        .observe_business_success(&first_capacity_key)
+        .observe_business_success(&first_capacity_key, 0)
         .expect("clear first capacity saturation");
     V3AdaptiveConcurrencyController::process_shared()
-        .observe_business_success(&second_capacity_key)
+        .observe_business_success(&second_capacity_key, 0)
         .expect("clear second capacity saturation");
 
     assert_eq!(output.status, 502, "{output:?}");
@@ -309,7 +309,7 @@ async fn direct_to_relay_handoff_preserves_capacity_busy_exhaustion_source() {
     .await;
     release_capacity_leases(held_first);
     V3AdaptiveConcurrencyController::process_shared()
-        .observe_business_success(&first_capacity_key)
+        .observe_business_success(&first_capacity_key, 0)
         .expect("clear mixed first capacity saturation");
 
     assert_eq!(output.status, 502, "{output:?}");

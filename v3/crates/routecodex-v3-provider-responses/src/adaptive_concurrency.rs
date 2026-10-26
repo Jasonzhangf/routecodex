@@ -1,10 +1,19 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 
 pub const V3_PROVIDER_CONCURRENCY_PROBE_INTERVAL_MS: u64 = 10 * 60_000;
+
+/// The adaptive budget is derived from HTTP 429 observations in this trailing
+/// window. A sample records the in-flight count at the moment the provider
+/// rate-limited, which is the concurrency level the provider refused.
+pub const V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS: u64 = 60 * 60_000;
+
+/// Default provider concurrency hard maximum when the declaration omits
+/// `provider.concurrency.maxInFlight`.
+pub const V3_DEFAULT_PROVIDER_MAX_IN_FLIGHT: u32 = 40;
 
 fn current_epoch_ms() -> u64 {
     SystemTime::now()
@@ -21,6 +30,12 @@ pub struct V3AdaptiveConcurrencySnapshot {
     pub saturated: bool,
     pub probe_in_flight: bool,
     pub next_probe_at_ms: Option<u64>,
+    /// Configured static ceiling, taken from `provider.concurrency.maxInFlight`.
+    pub hard_max_in_flight: u32,
+    /// Number of HTTP 429 samples retained in the trailing one-hour window.
+    pub rate_limit_samples: usize,
+    /// Budget ceiling implied by the retained 429 samples.
+    pub smoothed_budget: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,6 +135,12 @@ impl V3AdaptiveConcurrencyPermit {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct V3AdaptiveConcurrencyRateLimitSample {
+    epoch_ms: u64,
+    in_flight_at_429: u32,
+}
+
 #[derive(Debug)]
 struct V3AdaptiveConcurrencyState {
     budget: u32,
@@ -129,6 +150,10 @@ struct V3AdaptiveConcurrencyState {
     probe_in_flight: bool,
     next_probe_at_ms: Option<u64>,
     notify: Arc<Notify>,
+    /// Trailing-window HTTP 429 samples. The sample's in_flight value is the
+    /// concurrency level the provider rate-limited at, captured before the
+    /// rate-limited request's own lease is released.
+    rate_limit_samples: VecDeque<V3AdaptiveConcurrencyRateLimitSample>,
 }
 
 impl Default for V3AdaptiveConcurrencyState {
@@ -141,6 +166,7 @@ impl Default for V3AdaptiveConcurrencyState {
             probe_in_flight: false,
             next_probe_at_ms: None,
             notify: Arc::new(Notify::new()),
+            rate_limit_samples: VecDeque::new(),
         }
     }
 }
@@ -169,7 +195,10 @@ impl V3AdaptiveConcurrencyController {
     pub fn process_shared() -> Self {
         static SHARED: OnceLock<V3AdaptiveConcurrencyController> = OnceLock::new();
         SHARED
-            .get_or_init(|| Self::new(8).expect("adaptive concurrency default budget is valid"))
+            .get_or_init(|| {
+                Self::new(V3_DEFAULT_PROVIDER_MAX_IN_FLIGHT)
+                    .expect("adaptive concurrency default budget is valid")
+            })
             .clone()
     }
 
@@ -420,16 +449,26 @@ impl V3AdaptiveConcurrencyController {
         if !state.probe_in_flight || state.in_flight == 0 {
             return Err("adaptive concurrency probe is not in flight".to_string());
         }
+        // Capture the concurrency the probe was admitted at before releasing its
+        // own lease: a rate-limited probe refused exactly that in-flight count.
+        let probe_level = state.in_flight;
         state.probe_in_flight = false;
         state.in_flight -= 1;
         match result {
             V3AdaptiveConcurrencyProbeResult::Accepted => {
-                state.budget = state.budget.saturating_add(1).min(state.hard_max_in_flight);
+                Self::prune_rate_limit_samples(state, now_ms);
+                state.budget = state
+                    .budget
+                    .saturating_add(1)
+                    .min(state.hard_max_in_flight)
+                    .max(1);
                 state.saturated = false;
                 state.next_probe_at_ms = None;
             }
             V3AdaptiveConcurrencyProbeResult::RateLimited => {
-                state.budget = state.budget.saturating_sub(1).max(1);
+                Self::record_rate_limit_sample(state, now_ms, probe_level);
+                let smoothed = Self::smoothed_budget(state);
+                state.budget = state.budget.min(smoothed).max(1);
                 state.saturated = true;
                 state.next_probe_at_ms =
                     Some(now_ms.saturating_add(V3_PROVIDER_CONCURRENCY_PROBE_INTERVAL_MS));
@@ -450,7 +489,9 @@ impl V3AdaptiveConcurrencyController {
         let state = states
             .get_mut(provider_key)
             .ok_or_else(|| "adaptive concurrency provider key is missing".to_string())?;
-        state.budget = state.budget.saturating_sub(1).max(1);
+        Self::record_rate_limit_sample(state, now_ms, state.in_flight);
+        let smoothed = Self::smoothed_budget(state);
+        state.budget = state.budget.min(smoothed).max(1);
         state.saturated = true;
         state.next_probe_at_ms =
             Some(now_ms.saturating_add(V3_PROVIDER_CONCURRENCY_PROBE_INTERVAL_MS));
@@ -460,10 +501,67 @@ impl V3AdaptiveConcurrencyController {
         Ok(())
     }
 
+    /// Record the concurrency level the provider refused, then drop samples that
+    /// fell out of the trailing one-hour window. The in-flight count includes the
+    /// request that received the 429, so it is the true refused watermark.
+    fn record_rate_limit_sample(
+        state: &mut V3AdaptiveConcurrencyState,
+        now_ms: u64,
+        refused_in_flight: u32,
+    ) {
+        state
+            .rate_limit_samples
+            .push_back(V3AdaptiveConcurrencyRateLimitSample {
+                epoch_ms: now_ms,
+                in_flight_at_429: refused_in_flight.max(1),
+            });
+        Self::prune_rate_limit_samples(state, now_ms);
+    }
+
+    fn prune_rate_limit_samples(state: &mut V3AdaptiveConcurrencyState, now_ms: u64) {
+        let window_start = now_ms.saturating_sub(V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS);
+        while state
+            .rate_limit_samples
+            .front()
+            .is_some_and(|sample| sample.epoch_ms < window_start)
+        {
+            state.rate_limit_samples.pop_front();
+        }
+    }
+
+    /// Adaptive budget ceiling implied by the trailing one-hour 429 samples.
+    ///
+    /// No sample means the provider accepted this concurrency for the whole
+    /// window, so the configured hard maximum is allowed again. A sample means
+    /// the provider refused that in-flight count, so the ceiling stays one slot
+    /// below it. Multiple samples use the median so one outlier (for example a
+    /// single-request key-level limit) cannot collapse the budget.
+    fn smoothed_budget(state: &V3AdaptiveConcurrencyState) -> u32 {
+        let hard_max = state.hard_max_in_flight.max(1);
+        if state.rate_limit_samples.is_empty() {
+            return hard_max;
+        }
+        let mut levels = state
+            .rate_limit_samples
+            .iter()
+            .map(|sample| sample.in_flight_at_429)
+            .collect::<Vec<_>>();
+        levels.sort_unstable();
+        let refused_level = if levels.len() % 2 == 1 {
+            u64::from(levels[levels.len() / 2])
+        } else {
+            let upper = u64::from(levels[levels.len() / 2]);
+            let lower = u64::from(levels[levels.len() / 2 - 1]);
+            (lower + upper) / 2
+        };
+        let refused_level = u32::try_from(refused_level).unwrap_or(u32::MAX);
+        refused_level.saturating_sub(1).clamp(1, hard_max)
+    }
+
     /// A completed business 2xx is the recovery counterpart of an observed 429.
     /// It restores one unit of adaptive budget and clears the saturation window.
     /// Keys without tracked state have nothing to restore.
-    pub fn observe_business_success(&self, provider_key: &str) -> Result<(), String> {
+    pub fn observe_business_success(&self, provider_key: &str, now_ms: u64) -> Result<(), String> {
         let mut states = self
             .inner
             .states
@@ -472,7 +570,12 @@ impl V3AdaptiveConcurrencyController {
         let Some(state) = states.get_mut(provider_key) else {
             return Ok(());
         };
-        state.budget = state.budget.saturating_add(1).min(state.hard_max_in_flight);
+        Self::prune_rate_limit_samples(state, now_ms);
+        state.budget = state
+            .budget
+            .saturating_add(1)
+            .min(state.hard_max_in_flight)
+            .max(1);
         state.saturated = false;
         state.next_probe_at_ms = None;
         let notify = state.notify.clone();
@@ -518,6 +621,9 @@ impl V3AdaptiveConcurrencyController {
                 saturated: state.saturated,
                 probe_in_flight: state.probe_in_flight,
                 next_probe_at_ms: state.next_probe_at_ms,
+                hard_max_in_flight: state.hard_max_in_flight,
+                rate_limit_samples: state.rate_limit_samples.len(),
+                smoothed_budget: Self::smoothed_budget(state),
             })
     }
 }
@@ -659,7 +765,7 @@ mod tests {
             controller.try_acquire_business(key).is_none(),
             "drained budget with an in-flight lease must report busy"
         );
-        controller.observe_business_success(key).unwrap();
+        controller.observe_business_success(key, 0).unwrap();
         let recovered = controller.snapshot(key).unwrap();
         assert_eq!(recovered.budget, 2);
         assert!(!recovered.saturated);
@@ -1008,5 +1114,212 @@ mod tests {
                 probe: false,
             })
             .is_err());
+    }
+
+    #[test]
+    fn rate_limit_samples_the_in_flight_watermark_and_lowers_budget_below_it() {
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(20, 40).unwrap();
+        let mut leases = Vec::new();
+        for _ in 0..12 {
+            leases.push(controller.try_acquire_business("opencode-go:key1").unwrap());
+        }
+        controller
+            .observe_rate_limit("opencode-go:key1", 1_000)
+            .unwrap();
+        let snapshot = controller.snapshot("opencode-go:key1").unwrap();
+        assert_eq!(snapshot.in_flight, 12);
+        assert_eq!(snapshot.hard_max_in_flight, 40);
+        assert_eq!(snapshot.rate_limit_samples, 1);
+        assert_eq!(snapshot.smoothed_budget, 11);
+        assert_eq!(
+            snapshot.budget, 11,
+            "a 429 at 12 concurrent must set budget to the refused watermark minus one"
+        );
+        for lease in leases {
+            controller.release(lease.into_permit()).unwrap();
+        }
+    }
+
+    #[test]
+    fn rate_limit_window_drops_samples_older_than_one_hour() {
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(40, 40).unwrap();
+        let first = (0..5)
+            .map(|_| controller.try_acquire_business("opencode-go:key1").unwrap())
+            .collect::<Vec<_>>();
+        controller
+            .observe_rate_limit("opencode-go:key1", 1_000)
+            .unwrap();
+        assert_eq!(controller.snapshot("opencode-go:key1").unwrap().budget, 4);
+        for lease in first {
+            controller.release(lease.into_permit()).unwrap();
+        }
+
+        let second = (0..3)
+            .map(|_| controller.try_acquire_business("opencode-go:key1").unwrap())
+            .collect::<Vec<_>>();
+        controller
+            .observe_rate_limit(
+                "opencode-go:key1",
+                1_000 + V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS + 1,
+            )
+            .unwrap();
+        let snapshot = controller.snapshot("opencode-go:key1").unwrap();
+        assert_eq!(
+            snapshot.rate_limit_samples, 1,
+            "a sample older than one hour must be pruned from the window"
+        );
+        assert_eq!(snapshot.smoothed_budget, 2);
+        assert_eq!(snapshot.budget, 2);
+        for lease in second {
+            controller.release(lease.into_permit()).unwrap();
+        }
+    }
+
+    #[test]
+    fn smoothed_budget_uses_the_median_of_the_hour_window() {
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(40, 40).unwrap();
+
+        let first = (0..30)
+            .map(|_| controller.try_acquire_business("opencode-go:key1").unwrap())
+            .collect::<Vec<_>>();
+        controller
+            .observe_rate_limit("opencode-go:key1", 1_000)
+            .unwrap();
+        assert_eq!(controller.snapshot("opencode-go:key1").unwrap().budget, 29);
+        for lease in first {
+            controller.release(lease.into_permit()).unwrap();
+        }
+
+        let second = (0..6)
+            .map(|_| controller.try_acquire_business("opencode-go:key1").unwrap())
+            .collect::<Vec<_>>();
+        controller
+            .observe_rate_limit("opencode-go:key1", 2_000)
+            .unwrap();
+        for lease in second {
+            controller.release(lease.into_permit()).unwrap();
+        }
+
+        let third = (0..8)
+            .map(|_| controller.try_acquire_business("opencode-go:key1").unwrap())
+            .collect::<Vec<_>>();
+        controller
+            .observe_rate_limit("opencode-go:key1", 3_000)
+            .unwrap();
+        let snapshot = controller.snapshot("opencode-go:key1").unwrap();
+        assert_eq!(snapshot.rate_limit_samples, 3);
+        assert_eq!(
+            snapshot.smoothed_budget, 7,
+            "median of [30, 6, 8] is 8, minus one slot; the 30 outlier must not collapse the budget"
+        );
+        assert_eq!(snapshot.budget, 7);
+        for lease in third {
+            controller.release(lease.into_permit()).unwrap();
+        }
+    }
+
+    #[test]
+    fn empty_window_restores_the_hard_max_as_smoothed_ceiling() {
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(40, 40).unwrap();
+        let leases = (0..5)
+            .map(|_| controller.try_acquire_business("opencode-go:key1").unwrap())
+            .collect::<Vec<_>>();
+        controller
+            .observe_rate_limit("opencode-go:key1", 1_000)
+            .unwrap();
+        assert_eq!(controller.snapshot("opencode-go:key1").unwrap().budget, 4);
+        for lease in leases {
+            controller.release(lease.into_permit()).unwrap();
+        }
+
+        controller
+            .observe_business_success(
+                "opencode-go:key1",
+                1_000 + V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS + 1,
+            )
+            .unwrap();
+        let snapshot = controller.snapshot("opencode-go:key1").unwrap();
+        assert_eq!(snapshot.rate_limit_samples, 0);
+        assert_eq!(
+            snapshot.smoothed_budget, 40,
+            "an empty one-hour window must allow the configured hard maximum again"
+        );
+        assert_eq!(snapshot.budget, 5);
+    }
+
+    #[test]
+    fn budget_never_exceeds_hard_max_and_never_falls_below_one() {
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(1, 2).unwrap();
+        let held = controller.try_acquire_business("opencode-go:key1").unwrap();
+        controller
+            .observe_rate_limit("opencode-go:key1", 1_000)
+            .unwrap();
+        assert_eq!(controller.snapshot("opencode-go:key1").unwrap().budget, 1);
+        controller.release(held.into_permit()).unwrap();
+
+        controller
+            .observe_business_success("opencode-go:key1", 2_000)
+            .unwrap();
+        controller
+            .observe_business_success("opencode-go:key1", 2_000)
+            .unwrap();
+        assert_eq!(
+            controller.snapshot("opencode-go:key1").unwrap().budget,
+            2,
+            "repeated success must stop at the hard maximum"
+        );
+
+        let held = controller.try_acquire_business("opencode-go:key1").unwrap();
+        controller
+            .observe_rate_limit("opencode-go:key1", 3_000)
+            .unwrap();
+        assert_eq!(
+            controller.snapshot("opencode-go:key1").unwrap().budget,
+            1,
+            "budget must never fall below one"
+        );
+        controller.release(held.into_permit()).unwrap();
+    }
+
+    #[test]
+    fn rate_limit_samples_are_isolated_per_provider_key() {
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(40, 40).unwrap();
+
+        let first = (0..20)
+            .map(|_| {
+                controller
+                    .try_acquire_business("opencode-go:key-a")
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        controller
+            .observe_rate_limit("opencode-go:key-a", 1_000)
+            .unwrap();
+        for lease in first {
+            controller.release(lease.into_permit()).unwrap();
+        }
+
+        let second = (0..3)
+            .map(|_| {
+                controller
+                    .try_acquire_business("opencode-go:key-b")
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        controller
+            .observe_rate_limit("opencode-go:key-b", 1_000)
+            .unwrap();
+        for lease in second {
+            controller.release(lease.into_permit()).unwrap();
+        }
+
+        let a = controller.snapshot("opencode-go:key-a").unwrap();
+        let b = controller.snapshot("opencode-go:key-b").unwrap();
+        assert_eq!(a.rate_limit_samples, 1);
+        assert_eq!(a.smoothed_budget, 19);
+        assert_eq!(a.budget, 19);
+        assert_eq!(b.rate_limit_samples, 1);
+        assert_eq!(b.smoothed_budget, 2);
+        assert_eq!(b.budget, 2);
     }
 }

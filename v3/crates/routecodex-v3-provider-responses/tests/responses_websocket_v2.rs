@@ -1415,7 +1415,7 @@ async fn websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner
         build_v3_transport_13_responses_request_from_v3_provider_12(waiting_wire).unwrap();
     assert_eq!(waiting_request.provider_key(), provider_key);
     let saturated = controller.snapshot(provider_key).unwrap();
-    assert_eq!(saturated.budget, 2);
+    assert_eq!(saturated.budget, 1);
     assert_eq!(saturated.in_flight, 2);
     assert!(saturated.saturated);
     let waiting_send = tokio::spawn({

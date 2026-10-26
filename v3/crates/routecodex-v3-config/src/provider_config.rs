@@ -151,7 +151,7 @@ pub(crate) fn compile_provider_directory(
                 responses,
                 concurrency: provider.concurrency.map(|concurrency| {
                     V3ProviderConcurrencyAuthoringConfig {
-                        max_in_flight: concurrency.max_in_flight.unwrap_or(8),
+                        max_in_flight: concurrency.max_in_flight.unwrap_or(40),
                         acquire_timeout_ms: concurrency.acquire_timeout_ms.unwrap_or(60000),
                         stale_lease_ms: concurrency.stale_lease_ms.unwrap_or(300000),
                     }

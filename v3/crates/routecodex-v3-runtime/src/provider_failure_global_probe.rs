@@ -110,7 +110,7 @@ fn build_v3_provider_global_probe_target_at(
             .concurrency
             .as_ref()
             .map(|value| value.max_in_flight)
-            .unwrap_or(8),
+            .unwrap_or(40),
         concurrency_acquire_timeout_ms: provider
             .concurrency
             .as_ref()
