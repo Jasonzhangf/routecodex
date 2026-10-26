@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 export const MAX_DEBUG_BYTES = 2147483648;
 const CLEANUP_FAILURE_EXIT = 86;
 export const CARGO_TEST_TIMEOUT_MS = 40 * 60 * 1000;
-const PROCESS_GROUP_UNREAPED = 'V3_CARGO_TEST_PROCESS_GROUP_UNREAPED';
+export const PROCESS_GROUP_UNREAPED = 'V3_CARGO_TEST_PROCESS_GROUP_UNREAPED';
 const CARGO_TEST_KILL_GRACE_MS = 5_000;
 const STALE_LOCK_GRACE_MS = 60_000;
 const UNVERIFIABLE_LIVE_LOCK_MAX_AGE_MS = 12 * 60 * 60 * 1000;
@@ -333,17 +333,20 @@ export async function enforceV3DebugBudget({
   }
 }
 
-function acquireLock() {
+function acquireLock(probeCommand) {
   mkdirSync(targetDir, { recursive: true });
   try {
     createOwnedLock();
   } catch (error) {
     if (error && error.code === 'EEXIST') {
-      if (reclaimStaleLock()) {
+      const reclaim = reclaimStaleLock(probeCommand);
+      if (reclaim.reclaimed) {
         createOwnedLock();
         return;
       }
-      throw new Error(`another canonical V3 Cargo test owns ${lockDir}`);
+      throw new Error(
+        `another canonical V3 Cargo test owns ${lockDir}${reclaim.reason ? `: ${reclaim.reason}` : ''}`,
+      );
     }
     throw error;
   }
@@ -363,52 +366,87 @@ function releaseLock() {
   removePath(lockDir);
 }
 
-function writeLockOwner() {
+function writeLockOwner(unreapedProcessGroup = null) {
   const identity = ownProcessIdentity();
+  const owner = {
+    pid: process.pid,
+    cwd: v3Root,
+    startedAt: new Date().toISOString(),
+    processStartedAt: identity.processStartedAt,
+  };
+  if (unreapedProcessGroup) owner.unreapedProcessGroup = unreapedProcessGroup;
   writeFileSync(
     lockOwnerPath,
-    JSON.stringify({
-      pid: process.pid,
-      cwd: v3Root,
-      startedAt: new Date().toISOString(),
-      processStartedAt: identity.processStartedAt,
-    }),
+    JSON.stringify(owner),
   );
 }
 
-function reclaimStaleLock() {
+// A wrapper that exits with an unreaped process group must not let its dead PID
+// authorize the next caller to reuse the target. Only a probe that confirms the
+// persisted group has no live member may release this lock.
+function reclaimUnreapedLock(owner, probeCommand) {
+  const processGroupId = Number(owner?.unreapedProcessGroup?.processGroupId);
+  if (!Number.isInteger(processGroupId) || processGroupId <= 0) {
+    return {
+      reclaimed: false,
+      reason: 'unreaped process group identity is incomplete; refusing to reuse the target',
+    };
+  }
+  let state;
+  try {
+    state = probeProcessGroup(processGroupId, probeCommand);
+  } catch (error) {
+    return {
+      reclaimed: false,
+      reason: `unreaped process group ${processGroupId} probe failed: ${error?.message ?? String(error)}`,
+    };
+  }
+  if (state !== 'gone') {
+    return {
+      reclaimed: false,
+      reason: `unreaped process group ${processGroupId} still has live members`,
+    };
+  }
+  removePath(lockDir);
+  return { reclaimed: true };
+}
+
+function reclaimStaleLock(probeCommand) {
   let lockStat;
   try {
     lockStat = statSync(lockDir);
   } catch (error) {
-    if (error && error.code === 'ENOENT') return true;
+    if (error && error.code === 'ENOENT') return { reclaimed: true };
     throw error;
   }
   if (!existsSync(lockOwnerPath)) {
-    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_GRACE_MS) return false;
+    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_GRACE_MS) return { reclaimed: false };
     removePath(lockDir);
-    return true;
+    return { reclaimed: true };
   }
   let owner;
   try {
     owner = JSON.parse(readFileSync(lockOwnerPath, 'utf8'));
   } catch {
-    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_GRACE_MS) return false;
+    if (Date.now() - lockStat.mtimeMs <= STALE_LOCK_GRACE_MS) return { reclaimed: false };
     removePath(lockDir);
-    return true;
+    return { reclaimed: true };
+  }
+  if (owner?.unreapedProcessGroup) {
+    return reclaimUnreapedLock(owner, probeCommand);
   }
   const pid = Number(owner?.pid);
   const liveIdentity = Number.isInteger(pid) && pid > 0 ? currentProcessIdentity(pid) : null;
-  if (liveIdentity && lockOwnerMatchesProcess(owner, liveIdentity)) return false;
+  if (liveIdentity && lockOwnerMatchesProcess(owner, liveIdentity)) return { reclaimed: false };
   if (
     liveIdentity
     && liveIdentity.processStartedAt === null
     && Date.now() - lockStat.mtimeMs <= UNVERIFIABLE_LIVE_LOCK_MAX_AGE_MS
   ) {
-    return false;
+    return { reclaimed: false };
   }
   removePath(lockDir);
-  return true;
+  return { reclaimed: true };
 }
 
 function ownProcessIdentity() {
@@ -476,7 +514,7 @@ export function isUnreapedProcessGroupError(error) {
 function unreapedProcessGroupError(pid, detail) {
   return Object.assign(
     new Error(`cargo test timed out and process group ${pid} was not confirmed stopped (${detail})`),
-    { code: PROCESS_GROUP_UNREAPED },
+    { code: PROCESS_GROUP_UNREAPED, processGroupId: pid },
   );
 }
 
@@ -601,11 +639,11 @@ export function executeCargo(cargoArgs, executables, {
   });
 }
 
-export async function runV3CargoTest(args, { execute = executeCargo } = {}) {
+export async function runV3CargoTest(args, { execute = executeCargo, probeCommand = defaultProbeCommand } = {}) {
   let cargoArgs;
   try {
     cargoArgs = buildCargoArgs(args);
-    acquireLock();
+    acquireLock(probeCommand);
   } catch (error) {
     process.stderr.write(`[v3-cargo-test] ${error instanceof Error ? error.message : String(error)}\n`);
     return CLEANUP_FAILURE_EXIT;
@@ -620,8 +658,26 @@ export async function runV3CargoTest(args, { execute = executeCargo } = {}) {
   } finally {
     if (isUnreapedProcessGroupError(terminalError)) {
       // The group may still own this target directory, so artifacts and the
-      // lock stay in place until a later run reclaims them.
-      process.stderr.write('[v3-cargo-test] process group not confirmed stopped; retaining test lock and artifacts\n');
+      // lock stay in place until a later run reclaims them. Persist the
+      // unreaped group identity as the lock owner so a dead wrapper PID can
+      // never by itself authorize reuse of the target.
+      let persistError = null;
+      try {
+        writeLockOwner({
+          processGroupId: terminalError.processGroupId,
+          detail: terminalError.message,
+        });
+      } catch (error) {
+        persistError = error;
+      }
+      if (persistError) {
+        // The group was never confirmed reaped, so even an unpersisted owner
+        // must keep the lock and artifacts fail-closed.
+        terminalError = persistError;
+        process.stderr.write('[v3-cargo-test] unable to persist unreaped process group identity; retaining test lock and artifacts\n');
+      } else {
+        process.stderr.write('[v3-cargo-test] process group not confirmed stopped; retaining test lock and artifacts\n');
+      }
     } else {
       try {
         await releaseOwnedTestArtifacts({ executables });

@@ -307,8 +307,8 @@ async function assertUnusableProbeIsAControlledFailure({ probeCommand, expectedD
   }
 }
 
-function startCargoTestDriver(probeExpression) {
-  const targetRoot = join(
+function startCargoTestDriver(probeExpression, { targetRoot: sharedTargetRoot = null, prepareArtifacts = true } = {}) {
+  const targetRoot = sharedTargetRoot ?? join(
     root,
     'target',
     `timeout-retention-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
@@ -317,21 +317,24 @@ function startCargoTestDriver(probeExpression) {
   mkdirSync(debugDeps, { recursive: true });
   const fakeExecutable = join(debugDeps, 'routecodex-v3-fake-timeout-bin');
   const fakeObject = join(debugDeps, 'routecodex-v3-fake-timeout-bin.abc.rcgu.o');
-  writeFileSync(fakeExecutable, 'fake executable\n');
-  writeFileSync(fakeObject, 'fake object\n');
+  if (prepareArtifacts) {
+    writeFileSync(fakeExecutable, 'fake executable\n');
+    writeFileSync(fakeObject, 'fake object\n');
+  }
   const { fixtureDir, cargoPath, pidsPath } = writeTimeoutFixture({ artifactPath: fakeExecutable });
   const driverPath = join(fixtureDir, 'driver.mjs');
   writeFileSync(driverPath, [
     `import { executeCargo, runV3CargoTest } from ${JSON.stringify(join(root, 'scripts', 'run-v3-cargo-test.mjs'))};`,
     'const unhandled = [];',
     "process.on('unhandledRejection', (reason) => unhandled.push(reason));",
+    `const probeCommand = ${probeExpression};`,
     `const execute = (args, executables) => executeCargo([${JSON.stringify(cargoPath)}, 'test'], executables, {`,
     '  command: process.execPath,',
     '  timeoutMs: 300,',
     '  killGraceMs: 200,',
-    `  probeCommand: ${probeExpression},`,
+    '  probeCommand,',
     '});',
-    'const code = await runV3CargoTest([], { execute });',
+    'const code = await runV3CargoTest([], { execute, probeCommand });',
     'await new Promise((resolve) => setTimeout(resolve, 100));',
     "if (unhandled.length > 0) { console.error('[driver] unhandled rejections: ' + unhandled.length); process.exit(97); }",
     'process.exit(code);',
@@ -353,10 +356,10 @@ function startCargoTestDriver(probeExpression) {
   };
 }
 
-function closeCargoTestDriver(state) {
+function closeCargoTestDriver(state, { keepTarget = false } = {}) {
   killFixtureProcesses(state.pidsPath);
   rmSync(state.fixtureDir, { recursive: true, force: true });
-  rmSync(state.targetRoot, { recursive: true, force: true });
+  if (!keepTarget) rmSync(state.targetRoot, { recursive: true, force: true });
 }
 
 async function assertCleanupOnlyRunsAfterConfirmedReap() {
@@ -411,6 +414,102 @@ async function assertCleanupOnlyRunsAfterConfirmedReap() {
   }
 }
 
+// Two successive public-wrapper calls on the same target. The first leaves an
+// unreaped process group behind and persists that identity as the lock owner.
+// The second call must not let the dead wrapper PID reclaim the target until the
+// persisted group is confirmed gone: while the probe still reports a live member
+// the second call is blocked (86) and the artifacts/lock stay; only a `gone`
+// probe lets it recover and run cleanup.
+async function assertUnreapedLockSurvivesDeadWrapperPid() {
+  const first = startCargoTestDriver("() => ({ status: 0, stdout: '', stderr: '' })");
+  try {
+    assert.equal(first.driver.error, undefined, `first driver must not hang: ${first.driver.error?.message ?? ''}`);
+    assert.equal(
+      first.driver.status,
+      CLEANUP_FAILURE_EXIT,
+      `first call must fail closed with artifacts retained; stderr:\n${first.driver.stderr}`,
+    );
+    assert.match(first.driver.stderr, /process group not confirmed stopped; retaining test lock and artifacts/u);
+    assert.equal(existsSync(first.lockDir), true, 'the unreaped-group lock must be present after the first call');
+    const ownerJson = readFileSync(join(first.lockDir, 'owner.json'), 'utf8');
+    const owner = JSON.parse(ownerJson);
+    assert.equal(
+      Boolean(owner?.unreapedProcessGroup?.processGroupId),
+      true,
+      `first call must persist the unreaped process group identity; owner:\n${ownerJson}`,
+    );
+    assert.equal(
+      existsSync(first.fakeExecutable),
+      true,
+      'first call must retain the test executable for the second call to find',
+    );
+    assert.equal(existsSync(first.fakeObject), true, 'first call must retain the compiled test object');
+
+    const stillAlive = startCargoTestDriver("() => ({ status: 0, stdout: '', stderr: '' })", {
+      targetRoot: first.targetRoot,
+      prepareArtifacts: false,
+    });
+    try {
+      assert.equal(
+        stillAlive.driver.error,
+        undefined,
+        `second call must not hang while the group is unreaped; ${stillAlive.driver.error?.message ?? ''}`,
+      );
+      assert.equal(
+        stillAlive.driver.status,
+        CLEANUP_FAILURE_EXIT,
+        `second call must be blocked by the unreaped-group lock; stderr:\n${stillAlive.driver.stderr}`,
+      );
+      assert.match(
+        stillAlive.driver.stderr,
+        /unreaped process group \d+ still has live members/u,
+        'second call must refuse to reuse the target while the group is unreaped',
+      );
+      assert.equal(existsSync(stillAlive.fakeExecutable), true, 'blocked second call must not delete the retained executable');
+      assert.equal(existsSync(stillAlive.fakeObject), true, 'blocked second call must not delete the retained object');
+      assert.equal(existsSync(stillAlive.lockDir), true, 'blocked second call must not release the lock');
+    } finally {
+      closeCargoTestDriver(stillAlive, { keepTarget: true });
+    }
+
+    // Once the persisted group is confirmed gone the next caller may reclaim
+    // the lock, own the target, and run its cleanup.
+    const recovered = startCargoTestDriver("() => ({ status: 1, stdout: '', stderr: '' })", {
+      targetRoot: first.targetRoot,
+      prepareArtifacts: false,
+    });
+    try {
+      assert.equal(
+        recovered.driver.error,
+        undefined,
+        `recovery driver must not hang: ${recovered.driver.error?.message ?? ''}`,
+      );
+      assert.equal(
+        recovered.driver.status,
+        CLEANUP_FAILURE_EXIT,
+        `recovery call must fail the timeout but reclaim the lock; stderr:\n${recovered.driver.stderr}`,
+      );
+      assert.match(
+        recovered.driver.stderr,
+        /cargo test timed out after 300ms and was terminated/u,
+        'recovery call must keep the plain timeout diagnostic',
+      );
+      assert.match(
+        recovered.driver.stdout,
+        /debug allocation after cleanup/u,
+        'recovery call must run artifact cleanup once the group is confirmed gone',
+      );
+      assert.equal(existsSync(recovered.fakeExecutable), false, 'recovery call must release the test executable');
+      assert.equal(existsSync(recovered.fakeObject), false, 'recovery call must release the compiled test object');
+      assert.equal(existsSync(recovered.lockDir), false, 'recovery call must release the canonical test lock');
+    } finally {
+      closeCargoTestDriver(recovered, { keepTarget: true });
+    }
+  } finally {
+    closeCargoTestDriver(first);
+  }
+}
+
 await assertDescendantHoldingStdoutIsBounded();
 await assertEarlyCargoExitStillReapsGroupAndSettles();
 await assertCargoExitOnSigtermWaitsForGroupKillBeforeSettling();
@@ -425,6 +524,7 @@ await assertUnusableProbeIsAControlledFailure({
   label: 'pgrep non-0/1 status',
 });
 await assertCleanupOnlyRunsAfterConfirmedReap();
+await assertUnreapedLockSurvivesDeadWrapperPid();
 
 assert.match(source, /CARGO_TEST_TIMEOUT_MS\s*=\s*40\s*\*\s*60\s*\*\s*1000/u);
 assert.match(source, /detached:\s*true/u);
