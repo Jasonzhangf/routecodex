@@ -70,6 +70,7 @@ impl ProviderResponsesTransport {
                     provider_headers,
                     timeout,
                     sse_first_frame_timeout_ms,
+                    None,
                     cancellation.clone(),
                 )
                 .await?;
