@@ -28,6 +28,7 @@ export const CARGO_TEST_TIMEOUT_MS = 40 * 60 * 1000;
 const CARGO_TEST_KILL_GRACE_MS = 5_000;
 const STALE_LOCK_GRACE_MS = 60_000;
 const UNVERIFIABLE_LIVE_LOCK_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const DEFAULT_V3_TEST_THREAD_STACK_BYTES = '8388608';
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifestPath = join(v3Root, 'Cargo.toml');
 const suppliedCargoTargetDir = process.env.CARGO_TARGET_DIR;
@@ -55,6 +56,7 @@ function cargoEnv() {
   return {
     ...process.env,
     CARGO_TARGET_DIR: targetDir,
+    RUST_MIN_STACK: process.env.RUST_MIN_STACK ?? DEFAULT_V3_TEST_THREAD_STACK_BYTES,
   };
 }
 

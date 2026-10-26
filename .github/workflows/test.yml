@@ -190,6 +190,9 @@ jobs:
           else
             node v3/scripts/run-v3-cargo-test.mjs --workspace -- --nocapture
           fi
+      - name: V3 cargo test stack environment regression
+        if: needs.scope.outputs.v3_build == 'true'
+        run: npm --prefix v3 run --silent test:v3-cargo-test-stack-env-regression
 
   v4-build:
     needs: scope
