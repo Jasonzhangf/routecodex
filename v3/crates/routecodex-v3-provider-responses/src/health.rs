@@ -304,6 +304,7 @@ pub(super) struct V3ProviderHealthState {
     persistence: Option<V3ProviderHealthPersistenceWriter>,
     configured_disabled: BTreeSet<String>,
     health_disabled: BTreeSet<String>,
+    configured_health_providers: BTreeSet<String>,
     failure_policies: BTreeMap<String, V3ProviderFailurePolicy>,
     consecutive_failures: BTreeMap<V3ProviderFailureSessionKey, V3ProviderConsecutiveFailure>,
     cooldowns: BTreeMap<V3ProviderFailureSessionKey, V3ProviderCooldown>,
@@ -500,6 +501,7 @@ impl V3ProviderHealthStore {
             .map(|provider| provider.id.clone())
             .collect();
         let mut health_disabled = BTreeSet::new();
+        let mut configured_health_providers = BTreeSet::new();
         let mut failure_policies = BTreeMap::new();
         for provider in manifest.providers.values() {
             match provider.health.as_ref() {
@@ -507,6 +509,7 @@ impl V3ProviderHealthStore {
                     health_disabled.insert(provider.id.clone());
                 }
                 Some(health) => {
+                    configured_health_providers.insert(provider.id.clone());
                     failure_policies.insert(
                         provider.id.clone(),
                         V3ProviderFailurePolicy {
@@ -531,6 +534,7 @@ impl V3ProviderHealthStore {
         let mut state = V3ProviderHealthState {
             configured_disabled,
             health_disabled,
+            configured_health_providers,
             failure_policies,
             ..V3ProviderHealthState::default()
         };
@@ -1428,6 +1432,16 @@ impl V3ProviderHealthStore {
         if state.health_disabled.contains(provider_id) {
             return Ok(key_health_projection(&state, &key, now_ms));
         }
+        let configured_health_policy = state
+            .configured_health_providers
+            .contains(provider_id)
+            .then(|| {
+                state
+                    .failure_policies
+                    .get(provider_id)
+                    .copied()
+                    .unwrap_or_default()
+            });
         let configured_max_probe_interval_ms = state
             .failure_policies
             .get(provider_id)
@@ -1438,6 +1452,14 @@ impl V3ProviderHealthStore {
             V3ProviderRecoveryKind::RecoverableCounted if action.failure_threshold == 0 => {
                 V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
             }
+            V3ProviderRecoveryKind::RecoverableCounted => configured_health_policy
+                .map(|policy| {
+                    action
+                        .failure_threshold
+                        .max(policy.failure_threshold)
+                        .max(1)
+                })
+                .unwrap_or_else(|| action.failure_threshold.max(1)),
             _ => action.failure_threshold.max(1),
         };
         let history = state.adaptive_history.entry(key.clone()).or_default();
@@ -1517,11 +1539,15 @@ impl V3ProviderHealthStore {
                     Some(auth_alias),
                     Some(model_id),
                     now_ms,
-                    now_ms.saturating_add(provider_failure_cooldown_ms(
-                        failure_streak,
-                        observed_attempts,
-                        observed_failures,
-                    )),
+                    configured_health_policy
+                        .map(|policy| now_ms.saturating_add(policy.cooldown_ms.max(1)))
+                        .unwrap_or_else(|| {
+                            now_ms.saturating_add(provider_failure_cooldown_ms(
+                                failure_streak,
+                                observed_attempts,
+                                observed_failures,
+                            ))
+                        }),
                     interval,
                     action.long_probe_backoff,
                 );

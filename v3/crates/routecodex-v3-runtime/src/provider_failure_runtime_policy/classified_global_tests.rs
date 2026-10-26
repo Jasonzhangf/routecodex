@@ -1,5 +1,6 @@
 use super::*;
 use crate::provider_failure_runtime_policy::apply_v3_internal_provider_failure_policy;
+use routecodex_v3_config::V3ProviderHealthAuthoringConfig;
 use routecodex_v3_error::build_v3_provider_failure_action_from_v3_error_02;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised_external, build_v3_error_02_classified_from_v3_error_01,
@@ -151,6 +152,160 @@ fn classified_provider_error(
         },
     );
     build_v3_error_02_classified_from_v3_error_01(source)
+}
+
+#[test]
+fn configured_provider_health_governs_transport_failure_exclusion_and_probe_recovery() {
+    let scope_name = "configured_health_runtime_transport";
+    let mut manifest = global_pool_alive_manifest(scope_name);
+    for group in manifest.route_groups.values_mut() {
+        for pool in group.pools.values_mut() {
+            for target in &mut pool.targets {
+                target.priority = if target.provider.as_deref() == Some("first") {
+                    Some(100)
+                } else {
+                    Some(1)
+                };
+            }
+        }
+    }
+    manifest
+        .providers
+        .get_mut("first")
+        .expect("first provider")
+        .health = Some(V3ProviderHealthAuthoringConfig {
+        enabled: true,
+        failure_threshold: 3,
+        cooldown_ms: 900_000,
+        probe_interval_ms: None,
+    });
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let scope = test_provider_failure_scope(scope_name, scope_name, "configured-health-transport")
+        .expect("failure session scope");
+    let now_ms = v3_relay_provider_policy_now_epoch_ms().expect("policy now");
+
+    // A provider transport failure without an upstream status is a typed
+    // RecoverableCounted action with a class-code fingerprint.
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderReqOutbound09TransportRequest",
+        "provider_transport_failure",
+        "connection closed before response completed",
+    );
+
+    let selected = resolve_target_for_scope(
+        &manifest,
+        scope_name,
+        &BTreeSet::new(),
+        &health,
+        &scope,
+        now_ms,
+    );
+    let V3RelayProviderTargetResolution::Selected(selected) = selected else {
+        panic!("the configured provider must be selected initially");
+    };
+    assert_eq!(selected.candidate.provider_id, "first");
+
+    // The configured threshold keeps the exact provider+interface+auth+model
+    // identity available for the first two failures.
+    for _ in 0..2 {
+        health
+            .record_provider_failure_record_from_source_for_interface(
+                &scope,
+                "first",
+                "default",
+                Some("key1"),
+                Some("gpt-test"),
+                &source,
+                now_ms,
+            )
+            .expect("transport failure record");
+        let selected = resolve_target_for_scope(
+            &manifest,
+            scope_name,
+            &BTreeSet::new(),
+            &health,
+            &scope,
+            now_ms,
+        );
+        let V3RelayProviderTargetResolution::Selected(selected) = selected else {
+            panic!("configured provider must stay selectable before the declared threshold");
+        };
+        assert_eq!(
+            selected.candidate.provider_id, "first",
+            "configured health policy must not cool the identity before the third failure"
+        );
+    }
+
+    health
+        .record_provider_failure_record_from_source_for_interface(
+            &scope,
+            "first",
+            "default",
+            Some("key1"),
+            Some("gpt-test"),
+            &source,
+            now_ms,
+        )
+        .expect("third transport failure record");
+
+    let entry = health
+        .store
+        .cooldown_entries(now_ms)
+        .into_iter()
+        .find(|entry| {
+            entry.provider_id == "first"
+                && entry.interface_id == "default"
+                && entry.auth_alias.as_deref() == Some("key1")
+                && entry.model_id.as_deref() == Some("gpt-test")
+                && entry.kind == "probe"
+        })
+        .expect("configured cooldown entry");
+    assert_eq!(
+        entry.state, "blocked",
+        "the declared threshold must create a blocked cooldown entry on the third failure"
+    );
+    let blocked_until = entry.until_ms.expect("configured cooldown deadline");
+    assert!(
+        (now_ms..=now_ms + 5_000).contains(&(blocked_until - 900_000)),
+        "configured cooldown_ms must govern the blocked deadline: {entry:?}"
+    );
+
+    let selected = resolve_target_for_scope(
+        &manifest,
+        scope_name,
+        &BTreeSet::new(),
+        &health,
+        &scope,
+        now_ms,
+    );
+    let V3RelayProviderTargetResolution::Selected(selected) = selected else {
+        panic!("the sibling candidate must remain selectable after the configured identity cools");
+    };
+    assert_eq!(
+        selected.candidate.provider_id, "second",
+        "the cooled exact identity must be excluded from runtime target selection"
+    );
+
+    health
+        .store
+        .complete_probe_success("first", "key1", "gpt-test", now_ms)
+        .expect("probe recovery");
+    let selected = resolve_target_for_scope(
+        &manifest,
+        scope_name,
+        &BTreeSet::new(),
+        &health,
+        &scope,
+        now_ms,
+    );
+    let V3RelayProviderTargetResolution::Selected(selected) = selected else {
+        panic!("probe success must restore the configured identity for selection");
+    };
+    assert_eq!(
+        selected.candidate.provider_id, "first",
+        "a successful probe must restore only the exact configured identity"
+    );
 }
 
 #[test]
