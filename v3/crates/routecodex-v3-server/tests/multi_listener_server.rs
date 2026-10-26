@@ -4246,7 +4246,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
 }
 
 #[tokio::test]
-async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_parent_call() {
+async fn responses_relay_client_metadata_not_projected_without_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -4293,11 +4293,11 @@ async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_pa
             }
         }))
         .send()
-        .await;
-    assert!(
-        second.is_err(),
-        "orphan tool output must fail without client error response"
-    );
+        .await
+        .unwrap();
+    assert_eq!(second.status(), 200);
+    let second_body: Value = second.json().await.unwrap();
+    assert_eq!(second_body["status"], "completed");
 
     let first_capture = timeout(Duration::from_secs(2), captures.recv())
         .await
@@ -4306,7 +4306,36 @@ async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_pa
     assert_eq!(first_capture.body["model"], "wire-test");
     assert!(first_capture.body.get("client_metadata").is_none());
     assert!(first_capture.body.get("metadata").is_none());
-    assert_no_remote_continuation_provider_send(&mut captures).await;
+    assert_eq!(first_capture.session_id, None);
+    assert_eq!(first_capture.thread_id, None);
+    assert_eq!(first_capture.x_session_id, None);
+    assert_eq!(first_capture.x_conversation_id, None);
+    assert_eq!(first_capture.x_codex_turn_metadata, None);
+
+    let second_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("second request must reach provider")
+        .unwrap();
+    assert!(
+        second_capture.body["input"]
+            .as_array()
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item["type"] == "function_call_output"
+                        && item["call_id"] == "call_body_metadata"
+                        && item["output"] == "weather=clear RCCV3_BODY_METADATA_TURN2_OK"
+                })
+            }),
+        "{:?}",
+        second_capture.body
+    );
+    assert!(second_capture.body.get("client_metadata").is_none());
+    assert!(second_capture.body.get("metadata").is_none());
+    assert_eq!(second_capture.session_id, None);
+    assert_eq!(second_capture.thread_id, None);
+    assert_eq!(second_capture.x_session_id, None);
+    assert_eq!(second_capture.x_conversation_id, None);
+    assert_eq!(second_capture.x_codex_turn_metadata, None);
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
@@ -4314,7 +4343,7 @@ async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_pa
 }
 
 #[tokio::test]
-async fn responses_relay_different_client_metadata_still_cannot_authorize_tool_output() {
+async fn responses_relay_different_client_metadata_not_projected_without_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -4362,18 +4391,48 @@ async fn responses_relay_different_client_metadata_still_cannot_authorize_tool_o
             }
         }))
         .send()
-        .await;
+        .await
+        .unwrap();
+    assert_eq!(second.status(), 200);
+    let second_body: Value = second.json().await.unwrap();
+    assert_eq!(second_body["status"], "completed");
+
+    let first_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("first request must reach provider")
+        .unwrap();
+    assert!(first_capture.body.get("client_metadata").is_none());
+    assert!(first_capture.body.get("metadata").is_none());
+    assert_eq!(first_capture.session_id, None);
+    assert_eq!(first_capture.thread_id, None);
+    assert_eq!(first_capture.x_session_id, None);
+    assert_eq!(first_capture.x_conversation_id, None);
+    assert_eq!(first_capture.x_codex_turn_metadata, None);
+
+    let second_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("second request must reach provider")
+        .unwrap();
     assert!(
-        second.is_err(),
-        "wrong scope must fail without client error response"
+        second_capture.body["input"]
+            .as_array()
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item["type"] == "function_call_output"
+                        && item["call_id"] == "call_body_metadata"
+                        && item["output"] == "wrong scope"
+                })
+            }),
+        "{:?}",
+        second_capture.body
     );
-    let _first_capture = captures.recv().await.unwrap();
-    assert!(
-        timeout(Duration::from_millis(100), captures.recv())
-            .await
-            .is_err(),
-        "payload metadata must fail before the second provider send"
-    );
+    assert!(second_capture.body.get("client_metadata").is_none());
+    assert!(second_capture.body.get("metadata").is_none());
+    assert_eq!(second_capture.session_id, None);
+    assert_eq!(second_capture.thread_id, None);
+    assert_eq!(second_capture.x_session_id, None);
+    assert_eq!(second_capture.x_conversation_id, None);
+    assert_eq!(second_capture.x_codex_turn_metadata, None);
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
@@ -4381,7 +4440,7 @@ async fn responses_relay_different_client_metadata_still_cannot_authorize_tool_o
 }
 
 #[tokio::test]
-async fn responses_relay_orphan_tool_output_fails_before_provider_send() {
+async fn responses_relay_orphan_tool_output_reaches_provider() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -4413,7 +4472,15 @@ async fn responses_relay_orphan_tool_output_fails_before_provider_send() {
     assert_eq!(response.status(), 200);
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["status"], "requires_action");
-    let _first_capture = captures.recv().await.unwrap();
+    let first_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("first request must reach provider")
+        .unwrap();
+    assert_eq!(first_capture.session_id, None);
+    assert_eq!(first_capture.thread_id, None);
+    assert_eq!(first_capture.x_session_id, None);
+    assert_eq!(first_capture.x_conversation_id, None);
+    assert_eq!(first_capture.x_codex_turn_metadata, None);
 
     let response = client
         .post(&endpoint)
@@ -4426,17 +4493,36 @@ async fn responses_relay_orphan_tool_output_fails_before_provider_send() {
             }]
         }))
         .send()
-        .await;
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["status"], "completed");
+
+    let second_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("second request must reach provider")
+        .unwrap();
     assert!(
-        response.is_err(),
-        "missing scope must fail without client error response"
+        second_capture.body["input"]
+            .as_array()
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item["type"] == "function_call_output"
+                        && item["call_id"] == "call_body_metadata"
+                        && item["output"] == "missing scope"
+                })
+            }),
+        "{:?}",
+        second_capture.body
     );
-    assert!(
-        timeout(Duration::from_millis(100), captures.recv())
-            .await
-            .is_err(),
-        "missing continuation scope must fail before provider send"
-    );
+    assert!(second_capture.body.get("client_metadata").is_none());
+    assert!(second_capture.body.get("metadata").is_none());
+    assert_eq!(second_capture.session_id, None);
+    assert_eq!(second_capture.thread_id, None);
+    assert_eq!(second_capture.x_session_id, None);
+    assert_eq!(second_capture.x_conversation_id, None);
+    assert_eq!(second_capture.x_codex_turn_metadata, None);
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
