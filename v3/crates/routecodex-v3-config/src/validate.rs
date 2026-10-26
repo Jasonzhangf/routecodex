@@ -928,6 +928,11 @@ fn compile_models(
                 )));
             }
         }
+        if let Some(availability) = model.availability.as_ref() {
+            availability
+                .validate(&format!("provider {provider_id} model {id}"))
+                .map_err(validation)?;
+        }
         if !(10_000..=100_000).contains(&model.context_token_estimate_scale_bps) {
             return Err(validation(format!(
                 "provider {provider_id} model {id} context_token_estimate_scale_bps must be between 10000 and 100000"
@@ -948,6 +953,7 @@ fn compile_models(
                 max_context_tokens: model.max_context_tokens.or(Some(200_000)),
                 context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                 features: model.features,
+                availability: model.availability,
             },
         );
     }

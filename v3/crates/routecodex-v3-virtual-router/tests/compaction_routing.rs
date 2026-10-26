@@ -76,6 +76,7 @@ fn manifest() -> V3Config05ManifestPublished {
                         max_context_tokens: None,
                         context_token_estimate_scale_bps: 10_000,
                         features: BTreeMap::new(),
+                        availability: None,
                     },
                 )]),
                 responses: None,

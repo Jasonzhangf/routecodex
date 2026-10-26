@@ -27,6 +27,8 @@ pub struct V3TargetCandidate {
     pub wire_model: String,
     pub visible_model_ids: Vec<String>,
     pub model_capabilities: Vec<String>,
+    pub model_availability:
+        Option<routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig>,
     pub web_search_execution_mode: V3WebSearchExecutionMode,
     pub max_context_tokens: Option<u64>,
     pub max_tokens: Option<u64>,
@@ -389,6 +391,42 @@ impl V3TargetInterpreter {
             })
     }
 
+    /// Whether `now_ms` falls inside the candidate's declared availability
+    /// window. A candidate without a declared window is always inside it. This
+    /// predicate is shared by admission, the direct send gate and real provider
+    /// probes, so a probe cannot touch a minute that routing itself would
+    /// refuse.
+    pub fn candidate_in_availability_window(candidate: &V3TargetCandidate, now_ms: u64) -> bool {
+        candidate
+            .model_availability
+            .as_ref()
+            .is_none_or(|availability| availability.is_available_at(now_ms))
+    }
+
+    /// A candidate is admitted when its declared capabilities match the
+    /// request and its provider-model availability window contains `now_ms`.
+    /// This is the single admission basis shared by Target10 selection, the
+    /// direct send gate, remaining-candidate accounting and recovery probes:
+    /// every consumer must agree on which candidates the route can actually
+    /// reach, or a candidate admitted by one stage is refused by another and a
+    /// provider that was never contacted receives a health failure.
+    pub fn candidate_admitted(candidate: &V3TargetCandidate, now_ms: u64) -> bool {
+        candidate_satisfies_required_capabilities(candidate)
+            && Self::candidate_in_availability_window(candidate, now_ms)
+    }
+
+    /// Number of candidates admitted by capability and declared availability.
+    pub fn admitted_candidate_count(
+        expanded: &V3Target09CandidateSetExpanded,
+        now_ms: u64,
+    ) -> usize {
+        expanded
+            .candidates
+            .iter()
+            .filter(|candidate| Self::candidate_admitted(candidate, now_ms))
+            .count()
+    }
+
     pub fn select_available_with_health<R: V3ProviderSchedulingReader>(
         &self,
         expanded: V3Target09CandidateSetExpanded,
@@ -398,11 +436,27 @@ impl V3TargetInterpreter {
     ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
         let mut unavailable = Vec::new();
         let mut eligible = Vec::new();
+        // Automatic-cooldown exemption counts only candidates still admitted by
+        // capability and declared availability, so a window-inactive or
+        // capability-mismatched sibling cannot inflate the pool size.
+        let admitted_candidate_count = Self::admitted_candidate_count(&expanded, now_ms);
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
                     "{}:{}:{}:capability_mismatch",
                     candidate.provider_id, candidate.auth_alias, candidate.model_id
+                ));
+                continue;
+            }
+            // Availability is declared on the provider model and is not a
+            // fallback tier: outside its windows the candidate is not eligible.
+            if !Self::candidate_admitted(candidate, now_ms) {
+                unavailable.push(format!(
+                    "{}:{}:{}:{}:availability_inactive",
+                    candidate.provider_id,
+                    candidate.interface_id,
+                    candidate.auth_alias,
+                    candidate.model_id
                 ));
                 continue;
             }
@@ -442,7 +496,7 @@ impl V3TargetInterpreter {
             // scheduling. Keep manual auth, capacity and request-local blocks.
             if !projection.available
                 && Self::ignores_single_candidate_automatic_cooldown(
-                    expanded.candidates.len(),
+                    admitted_candidate_count,
                     &projection.blocked_scopes,
                 )
             {
@@ -867,6 +921,7 @@ impl V3TargetInterpreter {
                     wire_model: model.wire_name.clone(),
                     visible_model_ids: visible_model_ids.clone(),
                     model_capabilities: model.capabilities.clone(),
+                    model_availability: model.availability.clone(),
                     web_search_execution_mode: model.web_search_execution_mode,
                     max_context_tokens: model.max_context_tokens,
                     max_tokens: model.max_tokens,
