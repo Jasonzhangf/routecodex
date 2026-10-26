@@ -246,7 +246,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3OpenAiChatRelayCodec；Chat Process 有界续杯循环在骨架之上的
     // 共享入口，策略仍只有 decide_v3_chat_process_refill 一处实现。
-    let routing_group = server_routing_group(manifest, &input.server_id)
+    let _routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?
         .to_string();
     let (output, _failure_events) =
@@ -792,7 +792,7 @@ fn enqueue_sse_client_chunks(
         if object.has_data() && !object.is_json_valid() {
             return Err("OpenAI Chat SSE data is not valid JSON".into());
         }
-        let Some(mut payload) = object.data_value().cloned() else {
+        let Some(payload) = object.data_value().cloned() else {
             continue;
         };
         if !payload.is_object() {
@@ -1064,7 +1064,7 @@ fn project_responses_sse_as_openai_chat_stream(
                             stream_observation
                                 .record_provider_event_json(&event)
                                 .map_err(|error| error.to_string())?;
-                            for mut payload in transducer.push_event(event)? {
+                            for payload in transducer.push_event(event)? {
                                 let governed = project_sse_event_payload(
                                     request_id.as_str(),
                                     Some(session_id.as_str()),

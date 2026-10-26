@@ -611,7 +611,7 @@ mod relay_markup_source_tests {
 
 pub(crate) fn provider_failure_output(
     failure: V3ResponsesRelayProviderFailure,
-    mut trace: Vec<&'static str>,
+    trace: Vec<&'static str>,
     _candidates_remaining: usize,
 ) -> V3ResponsesRelayRuntimeOutput {
     provider_failure_output_with_observation(failure, trace, None)
@@ -678,7 +678,7 @@ pub(crate) fn error_output(
     source: routecodex_v3_error::V3Error01SourceRaised,
     status: u16,
     provider_id: &str,
-    mut trace: Vec<&'static str>,
+    trace: Vec<&'static str>,
     mut observability: Option<V3RuntimeObservability>,
     candidates_remaining: usize,
 ) -> V3ResponsesRelayRuntimeOutput {

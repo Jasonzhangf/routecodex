@@ -53,6 +53,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 pub mod direct_request_key_hooks;
 mod direct_runtime_helpers_stream;
 pub(crate) use direct_runtime_helpers_stream::wrap_direct_sse_provider_event_json_observation_stream_with_compat as wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook;
+pub(crate) use direct_runtime_helpers_stream::*;
 mod direct_client_sse_collapse;
 mod direct_execution_control;
 mod direct_runtime_timing;
@@ -1195,7 +1196,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 )
             }
             Err(Ok(source)) => {
-                let transport_source = source.clone();
+                let _transport_source = source.clone();
                 if provider_response_is_stream {
                     if let Err(error) = runtime_timing.finish_external() {
                         return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(

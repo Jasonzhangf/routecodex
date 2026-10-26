@@ -58,7 +58,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     compatibility_profile: Option<String>,
     retain_response_cipher: bool,
-    tool_thinking_enabled: bool,
+    _tool_thinking_enabled: bool,
     _stream_observation: V3RuntimeStreamObservation,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3RelayProjectedSseStream {
@@ -289,7 +289,7 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 let is_message_stop =
                                     event.get("type").and_then(Value::as_str) == Some("message_stop");
                                 let mut mark_terminal = is_message_stop;
-                                for mut payload in transducer.push_event(event)? {
+                                for payload in transducer.push_event(event)? {
                                     let governed = project_sse_event_payload(
                                         request_id.as_str(),
                                         Some(session_id.as_str()),

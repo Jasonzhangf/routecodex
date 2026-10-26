@@ -1,15 +1,15 @@
 use super::*;
 use crate::hub_v1::{
     classify_v3_provider_sse_json_data, collect_v3_provider_sse_json_data,
-    is_v3_provider_sse_transport_keepalive_data, is_v3_provider_sse_transport_keepalive_frame,
-    V3ProviderResponsesJsonFrameOutcome,
+    is_v3_provider_sse_keepalive_text, is_v3_provider_sse_transport_keepalive_data,
+    is_v3_provider_sse_transport_keepalive_frame, V3ProviderResponsesJsonFrameOutcome,
 };
 use crate::kernel::direct_sse_consumers::{
     build_v3_sse_transport_error_source, V3DirectSseContentConsumer,
 };
 use crate::nodes::{V3SseAttemptFrame, V3SseAttemptStream, V3SseFrameDisposition};
 
-fn wrap_direct_sse_provider_event_json_observation_stream(
+pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream(
     source: V3ProviderAttemptSseStream,
     stream_observation: V3RuntimeStreamObservation,
     runtime_timing: V3RuntimeTimingState,
@@ -1299,7 +1299,7 @@ fn materialize_direct_responses_terminal_usage(frame: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
-fn test_direct_sse_attempt_stream(
+pub(crate) fn test_direct_sse_attempt_stream(
     source: V3ClientSseStream,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> V3SseAttemptStream {
@@ -2677,7 +2677,7 @@ pub(crate) fn relay_handoff_output(
     }
 }
 
-fn debug_error_output(
+pub(crate) fn debug_error_output(
     stage: &'static str,
     error: V3DebugError,
     hook_registry: &V3HookRegistry,
@@ -2694,7 +2694,7 @@ fn debug_error_output(
     )
 }
 
-fn client_payload_debug_value(payload: &V3Resp15ClientPayload) -> Value {
+pub(crate) fn client_payload_debug_value(payload: &V3Resp15ClientPayload) -> Value {
     match &payload.body {
         V3ClientBody::Json(value) => value.clone(),
         V3ClientBody::Bytes(bytes) => json!({
@@ -2754,7 +2754,7 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderAvailabilityReader
     }
 }
 
-fn candidate_key(candidate: &V3TargetCandidate) -> String {
+pub(crate) fn candidate_key(candidate: &V3TargetCandidate) -> String {
     availability_key(
         &candidate.provider_id,
         &candidate.interface_id,
@@ -2778,7 +2778,7 @@ fn availability_key(
     )
 }
 
-fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
+pub(crate) fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
     candidates: &[V3TargetCandidate],
     availability: &R,
     failed_candidates: &BTreeSet<String>,
@@ -2803,7 +2803,7 @@ fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
         .count()
 }
 
-fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
+pub(crate) fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
     candidates: &[V3TargetCandidate],
     availability: &R,
     failed_candidates: &BTreeSet<String>,
@@ -2828,7 +2828,7 @@ fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
         .map(candidate_key)
 }
 
-fn require_static_hooks(hook_registry: &V3HookRegistry) {
+pub(crate) fn require_static_hooks(hook_registry: &V3HookRegistry) {
     for hook in [
         "ResponsesDirectRouteHook",
         "ResponsesDirectRequestProjectionHook",
@@ -2859,14 +2859,14 @@ pub(crate) fn direct_runtime_allowed_execution_modes(
         .unwrap_or_else(|| vec!["direct".to_string()])
 }
 
-fn total_attempts(
+pub(crate) fn total_attempts(
     accumulator: &V3RuntimeObservabilityAccumulator,
     current_leg_attempts: usize,
 ) -> usize {
     accumulator.attempts().saturating_add(current_leg_attempts)
 }
 
-fn validate_initial_direct_plan(
+pub(crate) fn validate_initial_direct_plan(
     has_initial_target: bool,
     has_initial_protocol_decision: bool,
 ) -> Result<(), &'static str> {

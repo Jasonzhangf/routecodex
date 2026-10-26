@@ -12,7 +12,7 @@ pub async fn execute_v3_direct_runtime_kernel_core<
     C: V3DirectProtocolCodec,
     T: ResponsesTransport + ?Sized + 'static,
 >(
-    mut control: C::Control,
+    control: C::Control,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
     transport: &T,
@@ -49,7 +49,7 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
     C: V3DirectProtocolCodec,
     T: ResponsesTransport + ?Sized + 'static,
 >(
-    mut control: C::Control,
+    control: C::Control,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
     transport: &T,

@@ -983,7 +983,7 @@ fn responses_custom_tool_as_anthropic_compatibility_tool(
     let description = source_description
         .map(|source| format!("{source}\n\n{compatibility_note}"))
         .unwrap_or_else(|| compatibility_note.clone());
-    let mut input_schema = json!({
+    let input_schema = json!({
         "type":"object",
         "properties":{
             "input":{

@@ -586,8 +586,8 @@ async fn process_direct_sse_stream(
     provider_response_compat: Option<&str>,
     custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
-    tool_thinking_enabled: bool,
-    toolreason_client_projection: bool,
+    _tool_thinking_enabled: bool,
+    _toolreason_client_projection: bool,
 ) -> Result<
     (
         V3ProviderAttemptSseStream,

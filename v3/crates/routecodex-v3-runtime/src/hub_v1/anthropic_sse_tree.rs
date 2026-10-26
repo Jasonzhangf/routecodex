@@ -689,7 +689,7 @@ fn apply_delta(
                 .ok_or(V3AnthropicSseTreeError::SignatureDeltaRequired)?;
             block.signature = Some(signature.to_owned());
         }
-        delta_type => block.extensions.extend(object_extensions(delta, &["type"])),
+        _ => block.extensions.extend(object_extensions(delta, &["type"])),
     }
     Ok(())
 }

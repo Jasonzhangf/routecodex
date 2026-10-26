@@ -864,7 +864,7 @@ fn responses_reasoning_summary_survives_chat_canonical_round_trip_before_tool_ou
 
 fn v3_output_cap_test_candidate(
     provider_type: &'static str,
-    entry_protocol: V3HubEntryProtocol,
+    _entry_protocol: V3HubEntryProtocol,
     declared_max_tokens: Option<u64>,
 ) -> routecodex_v3_target::V3TargetCandidate {
     routecodex_v3_target::V3TargetCandidate {
@@ -1004,7 +1004,7 @@ fn provider_req_compat_keeps_client_output_cap_over_declared_cap() {
     // Every Responses alias a client can send must win over the declared cap and
     // must not be joined by a second alias.
     for alias in ["max_output_tokens", "max_completion_tokens", "max_tokens"] {
-        let client_payload = serde_json::Map::new();
+        let _client_payload = serde_json::Map::new();
         let mut client_payload = json!({"messages":[{"role":"user","content":"hi"}]});
         client_payload[alias] = json!(64);
         let wire = project_v3_output_cap_wire(

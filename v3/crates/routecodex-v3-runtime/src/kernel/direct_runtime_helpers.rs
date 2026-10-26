@@ -959,5 +959,4 @@ fn v3_direct_client_transport_label(payload: &V3Resp15ClientPayload) -> &str {
     }
 }
 
-include!("direct_runtime_helpers_stream.rs");
 include!("direct_response_thinking_compat.rs");

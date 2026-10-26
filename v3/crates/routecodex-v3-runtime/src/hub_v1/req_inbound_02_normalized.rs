@@ -266,7 +266,7 @@ fn normalize_v3_hub_req_inbound_02_payload(
         // Gemini→X 成对 converter；工具历史交给既有 Chat Process 治理。
         let source_payload = std::mem::replace(&mut input.payload.0, Arc::new(Value::Null));
         let source_payload = Arc::try_unwrap(source_payload).unwrap_or_else(|arc| (*arc).clone());
-        let mut canonical =
+        let canonical =
             super::gemini_request_normalization::build_v3_chat_canonical_request_from_gemini_payload(
                 &source_payload,
             )

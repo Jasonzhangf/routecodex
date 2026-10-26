@@ -251,7 +251,7 @@ fn provider_response_projection_failure_projects_internal_599() {
 
 #[test]
 fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
-    let upstream = routecodex_v3_error::V3ExternalHttpWitness::new(
+    let _upstream = routecodex_v3_error::V3ExternalHttpWitness::new(
         429,
         vec![("retry-after".to_string(), b"17".to_vec())],
         br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),

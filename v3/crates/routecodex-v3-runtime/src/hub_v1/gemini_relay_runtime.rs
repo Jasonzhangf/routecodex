@@ -216,7 +216,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
     // 协议差异收敛在 V3GeminiRelayCodec；Chat Process 有界续杯循环在骨架之上的
     // 共享入口，策略仍只有 decide_v3_chat_process_refill 一处实现。
-    let routing_group = server_routing_group(manifest, &input.server_id)
+    let _routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?
         .to_string();
     let (output, _failure_events) =

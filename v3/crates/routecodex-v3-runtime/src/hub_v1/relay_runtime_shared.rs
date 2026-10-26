@@ -330,7 +330,7 @@ pub(crate) fn bind_v3_selected_business_auth_kind(
 pub async fn handle_provider_failure(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    mut failure: V3RelayProviderFailure,
+    failure: V3RelayProviderFailure,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,

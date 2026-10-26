@@ -921,13 +921,10 @@ fn resp03_plain_responses_text_is_not_projected() {
     });
     map_v3_toolreason_to_reasoning_content_at_resp03(&mut payload, true);
     assert_eq!(payload["output"][0]["type"], "output_text");
-    assert_eq!(
-        payload["output"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("<legacy-control>"),
-        true
-    );
+    assert!(payload["output"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("<legacy-control>"));
     assert_eq!(payload["output"][1]["type"], "function_call");
 }
 

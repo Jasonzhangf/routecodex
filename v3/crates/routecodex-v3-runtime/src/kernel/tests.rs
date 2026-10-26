@@ -402,7 +402,7 @@ fn protocol_plan_failure_preserves_source_status_and_pool_exhausted() {
     );
     assert_eq!(projected.diagnostic_source, original_source);
     assert_eq!(projected.status, 598);
-    assert_eq!(projected.pool_exhausted, false);
+    assert!(!projected.pool_exhausted);
     assert_eq!(
         projected.chain,
         routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
@@ -517,8 +517,8 @@ fn direct_provider_failure_blocks_after_configured_threshold() {
             .store()
             .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 200)
             .expect("direct health projection");
-        assert_eq!(
-            projection.available, false,
+        assert!(
+            !projection.available,
             "one typed recoverable 502 failure cools the exact identity"
         );
     }

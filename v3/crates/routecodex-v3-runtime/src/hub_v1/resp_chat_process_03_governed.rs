@@ -101,7 +101,7 @@ fn classify_v3_toolreason_observation_at_resp03(
 
 fn classify_v3_toolreason_observation_at_resp03_with_expected_model(
     raw: Option<&str>,
-    expected_model_id: Option<&str>,
+    _expected_model_id: Option<&str>,
 ) -> (V3ToolreasonObservationStatus, Option<V3ToolreasonFields>) {
     let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
         return (V3ToolreasonObservationStatus::Missing, None);
@@ -316,7 +316,7 @@ fn v3_is_gemini_tool_call_object_at_resp03(object: &serde_json::Map<String, Valu
 
 fn v3_tool_thinking_object_reason_at_resp03(
     object: &serde_json::Map<String, Value>,
-    expected_model_id: Option<&str>,
+    _expected_model_id: Option<&str>,
 ) -> Option<V3ToolreasonFields> {
     if v3_is_gemini_tool_call_object_at_resp03(object) {
         return None;

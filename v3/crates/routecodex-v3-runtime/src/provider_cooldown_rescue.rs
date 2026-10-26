@@ -297,7 +297,7 @@ pub(crate) fn step_v3_target_planning_sync(
         failure_session_scope,
         provider_health,
         request_local_excluded_candidates,
-        request_local_busy_candidates,
+        request_local_busy_candidates: _,
         now_ms,
         deterministic_sample,
         allow_exhaustion_rescue_probe,
@@ -542,7 +542,7 @@ impl V3ProviderFailureRuntimeHealth {
             let health = self.clone();
             let provider_id = candidate.provider_id.clone();
             let auth_alias = candidate.auth_alias.clone();
-            let model_id = candidate.model_id.clone();
+            let _model_id = candidate.model_id.clone();
             let target = permit
                 .as_ref()
                 .map(|permit| {

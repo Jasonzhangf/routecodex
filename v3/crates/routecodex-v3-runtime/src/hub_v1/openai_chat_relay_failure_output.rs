@@ -53,7 +53,7 @@ pub(super) fn error_output(
     source: routecodex_v3_error::V3Error01SourceRaised,
     status: u16,
     provider_id: &str,
-    mut trace: Vec<&'static str>,
+    trace: Vec<&'static str>,
 ) -> V3OpenAiChatRelayRuntimeOutput {
     let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
     error_output_from_projection(projected, trace)

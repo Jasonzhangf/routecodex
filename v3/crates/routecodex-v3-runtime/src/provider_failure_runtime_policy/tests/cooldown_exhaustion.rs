@@ -1207,7 +1207,7 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
         "default",
         "http://127.0.0.1:1/v1".to_string(),
     );
-    let mut third_provider = manifest
+    let third_provider = manifest
         .providers
         .get("second")
         .expect("second provider")
