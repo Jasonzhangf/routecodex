@@ -751,12 +751,6 @@ impl V3ManagedLifecycle {
         // replacement observation. Ordinary Status keeps its separate budget.
         let deadline = tokio::time::Instant::now() + timeout;
         let (declaration, manifest) = self.declaration(executable_path.as_ref())?;
-        if tokio::time::Instant::now() >= deadline {
-            return Err(V3LifecycleError::Timeout(format!(
-                "restart {}",
-                declaration.instance_id
-            )));
-        }
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
         let _lock = acquire_operation_lock(&instance_dir, "restart")?;
@@ -819,6 +813,12 @@ impl V3ManagedLifecycle {
                     Some(previous_owner_lock),
                 )
             };
+        if tokio::time::Instant::now() >= deadline {
+            return Err(V3LifecycleError::Timeout(format!(
+                "restart {}",
+                declaration.instance_id
+            )));
+        }
         observe(V3ManagedLifecycleObservation::RestartTargetResolved {
             instance_id: declaration.instance_id.clone(),
             control_instance_id: control_declaration.instance_id.clone(),

@@ -1,14 +1,31 @@
 use super::*;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use tempfile::TempDir;
 
 #[cfg(unix)]
 #[path = "../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 
-pub(crate) static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+/// Tests mutate process environment variables under one lock. Recover a
+/// poisoned guard so one failing test cannot turn later tests into cascades.
+pub(crate) struct TestEnvLock(Mutex<()>);
+
+impl TestEnvLock {
+    const fn new() -> Self {
+        Self(Mutex::new(()))
+    }
+
+    pub(crate) fn lock(&self) -> Result<MutexGuard<'_, ()>, std::convert::Infallible> {
+        Ok(self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()))
+    }
+}
+
+pub(crate) static TEST_ENV_LOCK: TestEnvLock = TestEnvLock::new();
 pub(crate) const TEST_HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
 
 #[cfg(unix)]
@@ -1029,12 +1046,12 @@ fn restart_without_current_instance_state_fails_without_bootstrap() {
         .build()
         .unwrap();
     let error = runtime
-        .block_on(lifecycle.restart(&executable, Duration::from_millis(1)))
+        .block_on(lifecycle.restart(&executable, Duration::ZERO))
         .unwrap_err();
 
     assert!(
         matches!(&error, V3LifecycleError::NotRunning(instance_id) if instance_id == &declaration.instance_id),
-        "restart without live managed truth must fail explicitly instead of bootstrapping a detached runtime, got {error}"
+        "restart without managed truth must report NotRunning before budget expiry, got {error}"
     );
     assert!(
         !instance_dir.join("instance.json").exists(),
