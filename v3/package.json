@@ -181,7 +181,7 @@
     "test:artifact-budget:red": "node tests/scripts/v3-build-test-artifact-budget-red-fixtures.mjs",
     "verify:v3-build-test-artifact-budget": "node scripts/architecture/verify-v3-build-test-artifact-budget.mjs",
     "test:v3-build-test-artifact-budget-red-fixtures": "node tests/scripts/v3-build-test-artifact-budget-red-fixtures.mjs",
-    "test:distribution": "node --test tests/scripts/v3-cli-distribution.spec.mjs",
+    "test:distribution": "node --test tests/scripts/v3-cli-distribution.spec.mjs tests/scripts/install-lifecycle-boundary.spec.mjs",
     "test:v3-cli-distribution": "npm run test:distribution",
     "test:install-cleanup": "node --test tests/scripts/install-cli-target-cleanup.spec.mjs",
     "install": "node scripts/install-cli.mjs",

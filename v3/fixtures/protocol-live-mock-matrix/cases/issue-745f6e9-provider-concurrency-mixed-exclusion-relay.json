@@ -195,12 +195,12 @@
     "body_must": {
       "text": "held response released",
       "status": "completed",
-      "output_items.0.type": "reasoning",
-      "output_items.0.summary.0.text": "concurrency holder completed",
-      "output_items.1.type": "message",
-      "output_items.1.role": "assistant",
-      "output_items.1.content.0.type": "output_text",
-      "output_items.1.content.0.text": "held response released"
+      "output_items.0.type": "message",
+      "output_items.0.role": "assistant",
+      "output_items.0.content.0.type": "output_text",
+      "output_items.0.content.0.text": "held response released",
+      "output_items.1.type": "reasoning",
+      "output_items.1.summary.0.text": "concurrency holder completed"
     },
     "body_must_not": [
       "provider_error",
@@ -257,12 +257,12 @@
       "body_must": {
         "text": "capacity reused",
         "status": "completed",
-        "output_items.0.type": "reasoning",
-        "output_items.0.summary.0.text": "capacity reuse completed",
-        "output_items.1.type": "message",
-        "output_items.1.role": "assistant",
-        "output_items.1.content.0.type": "output_text",
-        "output_items.1.content.0.text": "capacity reused"
+        "output_items.0.type": "message",
+        "output_items.0.role": "assistant",
+        "output_items.0.content.0.type": "output_text",
+        "output_items.0.content.0.text": "capacity reused",
+        "output_items.1.type": "reasoning",
+        "output_items.1.summary.0.text": "capacity reuse completed"
       },
       "body_must_not": [
         "provider_error",

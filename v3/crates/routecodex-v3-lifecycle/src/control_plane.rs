@@ -1044,15 +1044,31 @@ pub(crate) async fn send_control_without_timeout(
     Ok(serde_json::from_str(&line)?)
 }
 
+pub(crate) fn is_business_listener_declaration(listener: &V3ManagedListenerDeclaration) -> bool {
+    listener.server_id != "admin_webui"
+}
+
+pub(crate) fn business_listener_declarations(
+    listeners: &[V3ManagedListenerDeclaration],
+) -> Vec<V3ManagedListenerDeclaration> {
+    listeners
+        .iter()
+        .filter(|listener| is_business_listener_declaration(listener))
+        .cloned()
+        .collect()
+}
+
 pub(crate) fn listener_set_is_available(listeners: &[V3ManagedListenerDeclaration]) -> bool {
     listeners
         .iter()
+        .filter(|listener| is_business_listener_declaration(listener))
         .all(|listener| listener_address_is_available(&listener.bind, listener.port))
 }
 
 pub(crate) fn occupied_listener_ports(listeners: &[V3ManagedListenerDeclaration]) -> BTreeSet<u16> {
     listeners
         .iter()
+        .filter(|listener| is_business_listener_declaration(listener))
         .filter(|listener| !listener_address_is_available(&listener.bind, listener.port))
         .map(|listener| listener.port)
         .collect()
