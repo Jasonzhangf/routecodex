@@ -19,6 +19,133 @@ use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
 
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
+// Stable public-entry regression ID: issue13d6279_representable_history_roundtrip.
+#[tokio::test]
+async fn issue13d6279_representable_history_roundtrip() {
+    let _guard = TEST_LOCK.lock().await;
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    std::env::set_var("V3_OPENAI_CHAT_CONTROLLED_KEY", "controlled-secret");
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_port = upstream.local_addr().unwrap().port();
+    let (captures_tx, mut captures_rx) = mpsc::unbounded_channel();
+    let app = Router::new()
+        .route("/v1/chat/completions", post(req04_shape_checking_upstream))
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    let upstream_task = tokio::spawn(async move { axum::serve(upstream, app).await.unwrap() });
+    let handle = spawn_v3_server_aggregate(manifest(free_port(), upstream_port))
+        .await
+        .unwrap();
+    let endpoint = format!("http://{}/v1/chat/completions", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let mut history = json!([
+        {"role":"tool","tool_call_id":"trimmed-call","content":"prior error: invalid arguments"},
+        {"role":"assistant","content":null,"tool_calls":[{"id":"older-call","type":"function","function":{"name":"lookup","arguments":"{broken"}}]},
+        {"role":"assistant","content":"intervening assistant"},
+        {"role":"tool","tool_call_id":"older-call","content":"client error: invalid JSON"},
+        {"role":"user","content":"try again"}
+    ]);
+    let tools = json!([{"type":"function","function":{"name":"lookup","parameters":{"type":"object","properties":{"key":{"type":"string"}},"required":["key"]}}}]);
+    let result = client
+        .post(&endpoint)
+        .json(&json!({"model":"chat-client-alias","messages":history,"tools":tools}))
+        .send()
+        .await;
+    if let Err(error) = &result {
+        assert!(
+            captures_rx.try_recv().is_err(),
+            "provider was attempted before failure"
+        );
+        panic!("Req04 rejected representable history; provider_attempts=0: {error}");
+    }
+    let response: Value = result
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let first = captures_rx.recv().await.unwrap();
+    assert_eq!(first.body["messages"], history);
+    assert_eq!(first.body["tools"], tools);
+    assert!(
+        captures_rx.try_recv().is_err(),
+        "first request must use one provider attempt"
+    );
+    let assistant = response.pointer("/choices/0/message").unwrap().clone();
+    let call = &assistant["tool_calls"][0];
+    assert_eq!(call["id"], "invalid-call");
+    assert_eq!(call["function"]["arguments"], "{invalid");
+    // The client actually invokes its tool argument parser and returns its error receipt.
+    let arguments = call["function"]["arguments"].as_str().unwrap();
+    let tool_error = serde_json::from_str::<Value>(arguments).unwrap_err();
+    let receipt = json!({"role":"tool","tool_call_id":call["id"],"content":format!("client tool error: {tool_error}")});
+    history.as_array_mut().unwrap().extend([assistant, receipt]);
+    let followup: Value = client
+        .post(&endpoint)
+        .json(&json!({"model":"chat-client-alias","messages":history,"tools":tools}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        followup.pointer("/choices/0/message/content"),
+        Some(&json!("corrected"))
+    );
+    assert_eq!(captures_rx.recv().await.unwrap().body["messages"], history);
+    assert!(captures_rx.try_recv().is_err());
+    handle.shutdown().await;
+    upstream_task.abort();
+    std::env::remove_var("V3_OPENAI_CHAT_CONTROLLED_KEY");
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(None);
+}
+
+async fn req04_shape_checking_upstream(
+    State(state): State<Arc<ProviderState>>,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture {
+            authorization: None,
+            body: body.clone(),
+        })
+        .unwrap();
+    let messages = &body["messages"];
+    let valid = messages
+        .as_array()
+        .is_some_and(|items| matches!(items.len(), 5 | 7))
+        && messages[0]["tool_call_id"] == "trimmed-call"
+        && messages[1]["tool_calls"][0]["function"]["arguments"] == "{broken"
+        && messages[2]["content"] == "intervening assistant"
+        && messages[3]["tool_call_id"] == "older-call"
+        && body["tools"][0]["function"]["name"] == "lookup";
+    let followup = messages.as_array().is_some_and(|items| items.len() == 7);
+    let valid = valid
+        && (!followup
+            || (messages[5]["tool_calls"][0]["id"] == "invalid-call"
+                && messages[6]["tool_call_id"] == "invalid-call"
+                && messages[6]["content"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("client tool error:"))));
+    let message = if followup {
+        json!({"role":"assistant","content":"corrected"})
+    } else {
+        json!({"role":"assistant","content":null,"tool_calls":[{"id":"invalid-call","type":"function","function":{"name":"lookup","arguments":"{invalid"}}]})
+    };
+    Response::builder().status(if valid { StatusCode::OK } else { StatusCode::BAD_REQUEST })
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&json!({"id":"req04-controlled","object":"chat.completion","model":"chat-wire-model","choices":[{"index":0,"message":message,"finish_reason":if followup {"stop"} else {"tool_calls"}}]})).unwrap())).unwrap()
+}
+
 #[derive(Debug)]
 struct ProviderCapture {
     authorization: Option<String>,
