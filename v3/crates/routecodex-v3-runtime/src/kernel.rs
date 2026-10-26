@@ -362,6 +362,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
                     attempt_budget.residence_deadline(),
                     crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes(
+                        attempt_budget.clone(),
                     standardized.body.clone(),
                     manifest,
                     source.clone(),
@@ -382,7 +383,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 {
                     Ok((planned_request, plan)) => {
                         standardized.body = planned_request;
-                        attempt_budget.set_transport_attempt_limit(plan.expanded.candidates.len());
                         failed_candidates = plan.request_local_excluded_candidates;
                         request_local_busy_candidates = plan.request_local_busy_candidates;
                         expanded = Some(plan.expanded.clone());
@@ -488,7 +488,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             drop(provider_action_permit.take());
             provider_action_permit_target = None;
         }
-        attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         trace.push("V3Target10ConcreteProviderSelected");
         if let Some(sink) = route_selection_event_sink.as_ref() {
             let transport_label = if standardized
@@ -512,7 +511,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             observability.attempts = Some(total_attempts(&accumulator, send_attempts));
             sink(&observability);
         }
-        let _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
+        let mut _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
             admission.take_rate_limit_control(&mut pending_provider_action_recovery)
         });
         if pending_provider_action_recovery.is_some() {
@@ -879,25 +878,33 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 )
             }
         };
+        trace.push("V3Transport13ResponsesHttpRequest");
+        provider_request_snapshot = Some(transport_request.provider_request_projection());
+
+        send_attempts =
+            match crate::provider_failure_runtime_policy::admit_v3_provider_transport_attempt(
+                &attempt_budget,
+                &mut selected_admission,
+                &mut _rate_limit_permit,
+                &mut provider_action_permit,
+            )
+            .await
+            {
+                Ok(attempts) => attempts,
+                Err(error) => {
+                    return direct_runtime_helpers_stream::source_failure_output(
+                        direct_runtime_helpers_stream::direct_attempt_budget_error_source(error),
+                        last_external_http.clone(),
+                        trace,
+                        &hook_registry,
+                    )
+                }
+            };
         let transport_request = match selected_admission.take() {
             Some(admission) => {
                 transport_request.with_pre_acquired_admission(admission.into_lease())
             }
             None => transport_request,
-        };
-        trace.push("V3Transport13ResponsesHttpRequest");
-        provider_request_snapshot = Some(transport_request.provider_request_projection());
-
-        send_attempts = match attempt_budget.admit_transport_attempt() {
-            Ok(attempts) => attempts,
-            Err(error) => {
-                return direct_runtime_helpers_stream::source_failure_output(
-                    direct_runtime_helpers_stream::direct_attempt_budget_error_source(error),
-                    last_external_http.clone(),
-                    trace,
-                    &hook_registry,
-                )
-            }
         };
         if let Err(error) = runtime_timing.start_external() {
             return direct_runtime_helpers_stream::source_failure_output(
@@ -927,6 +934,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         }) {
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                attempt_budget.release_unsent_transport_attempt();
+                send_attempts = attempt_budget.transport_attempts();
                 if let Err(error) = runtime_timing.finish_external() {
                     return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3RuntimeTimingExternal", error),

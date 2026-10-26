@@ -610,6 +610,7 @@ where
                 .attempt_budget()
                 .residence_deadline(),
             run_v3_plan_execution_operator_with_probes(
+                request_execution_control.attempt_budget(),
                 target_resolved_request,
                 manifest,
                 target_source,
@@ -725,6 +726,7 @@ where
                 crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
                     attempt_budget.residence_deadline(),
                     run_v3_plan_execution_operator_with_probes(
+                        attempt_budget.clone(),
                         (*req05.previous.previous.previous.payload.0).clone(),
                         manifest,
                         V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
@@ -823,7 +825,6 @@ where
             drop(provider_action_permit.take());
             provider_action_permit_target = None;
         }
-        attempt_budget.set_transport_attempt_limit(retained_expanded.candidates.len());
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_interface_id = selected.candidate.interface_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
@@ -1003,7 +1004,7 @@ where
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let provider_request_snapshot = transport_request.provider_request_projection();
-        let _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
+        let mut _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
             admission.take_rate_limit_control(&mut pending_provider_action_recovery)
         });
         if pending_provider_action_recovery.is_some() {
@@ -1068,11 +1069,19 @@ where
                 }
             }
         }
-        let transport_attempt = attempt_budget.admit_transport_attempt().map_err(|error| {
-            V3RelayCoreError::Target(format!(
-                "V3ExecutionAttemptBudget rejected provider transport attempt: {error}"
-            ))
-        })?;
+        let transport_attempt =
+            crate::provider_failure_runtime_policy::admit_v3_provider_transport_attempt(
+                &attempt_budget,
+                &mut selected_admission,
+                &mut _rate_limit_permit,
+                &mut provider_action_permit,
+            )
+            .await
+            .map_err(|error| {
+                V3RelayCoreError::Target(format!(
+                    "V3ExecutionAttemptBudget rejected provider transport attempt: {error}"
+                ))
+            })?;
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3RelayCoreError::Target(timing_error));
         }
@@ -1100,6 +1109,7 @@ where
                 }) {
                 Ok(raw) => raw,
                 Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                    attempt_budget.release_unsent_transport_attempt();
                     runtime_timing
                         .finish_external()
                         .map_err(V3RelayCoreError::Target)?;

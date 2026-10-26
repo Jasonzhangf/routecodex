@@ -1316,7 +1316,7 @@ if (captureEntry?.status === 'runtime_bound') {
   const symbol = 'execute_v3_operation_runner_request_capture_client_json';
   for (const [rel, start, boundary] of [
     ['v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
-      'pub(crate) async fn pending_endpoint_after_responses_admission_inner(',
+      'pub(crate) async fn pending_endpoint_after_json_parse_inner(',
       'V3EntryProtocolExecutionMode::Direct'],
     ['v3/crates/routecodex-v3-server/src/websocket.rs',
       'pub(crate) async fn handle_responses_websocket_message_with_mode(',

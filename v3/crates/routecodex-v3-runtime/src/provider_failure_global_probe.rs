@@ -110,7 +110,7 @@ fn build_v3_provider_global_probe_target_at(
             .concurrency
             .as_ref()
             .map(|value| value.max_in_flight)
-            .unwrap_or(8),
+            .unwrap_or(40),
         concurrency_acquire_timeout_ms: provider
             .concurrency
             .as_ref()
@@ -173,6 +173,11 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
 ) -> Result<(), V3ProviderHealthProbeFailure> {
     let provider_id = target.provider_id.clone();
     let provider_key = format!("{}:{}", target.provider_id, target.auth.alias);
+    let identity_scope =
+        routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+            interface_id: target.interface_id.clone(),
+            model_id: target.canonical_model_id.clone(),
+        };
     let initial_concurrency_budget = target.initial_concurrency_budget;
     let request = build_v3_provider_global_probe_request(
         target,
@@ -186,7 +191,7 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
     let now_ms =
         v3_relay_provider_policy_now_epoch_ms().map_err(V3ProviderHealthProbeFailure::Internal)?;
     let admission = concurrency
-        .try_acquire(&provider_key, now_ms)
+        .try_acquire_scoped(&provider_key, Some(&identity_scope), now_ms)
         .ok_or(V3ProviderHealthProbeFailure::ConcurrencyBusy)?;
     ReqwestResponsesTransport::default()
         .send_probe(request.with_pre_acquired_admission(admission))
@@ -204,9 +209,7 @@ fn provider_probe_error(error: V3ProviderError) -> V3ProviderHealthProbeFailure 
         | V3ProviderError::WebSocketProviderEvent { .. }
         | V3ProviderError::UnexpectedContentType { .. }
         | V3ProviderError::ResponseBody { .. }
-        | V3ProviderError::MalformedSse { .. } => {
-            V3ProviderHealthProbeFailure::Provider(error.to_string())
-        }
+        | V3ProviderError::MalformedSse { .. } => V3ProviderHealthProbeFailure::Provider(error),
         _ => V3ProviderHealthProbeFailure::Internal(error.to_string()),
     }
 }

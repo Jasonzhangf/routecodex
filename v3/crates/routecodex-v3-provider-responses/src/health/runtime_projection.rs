@@ -74,10 +74,15 @@ fn key_health_projection(
     now_ms: u64,
 ) -> V3ProviderKeyHealthProjection {
     let history = state.adaptive_history.get(key);
-    let cooldown_until_ms = state
-        .provider_cooldown_probes
-        .get(key)
-        .and_then(|probe| probe.next_probe_at_ms);
+    let cooldown_until_ms = history
+        .and_then(|history| history.rate_limit_episode.as_ref())
+        .and_then(|episode| episode.not_before_ms)
+        .or_else(|| {
+            state
+                .provider_cooldown_probes
+                .get(key)
+                .and_then(|probe| probe.next_probe_at_ms)
+        });
     let cooldown = state
         .provider_cooldown_probes
         .get(key)
@@ -98,8 +103,7 @@ fn key_health_projection(
 }
 
 fn record_health_delta(history: &mut V3ProviderAdaptiveHistory, delta: i32) {
-    history.score_milli =
-        (i64::from(history.score_milli) + i64::from(delta)).clamp(0, 150) as u32;
+    history.score_milli = (i64::from(history.score_milli) + i64::from(delta)).clamp(0, 150) as u32;
 }
 
 fn provider_failure_session_scope_label(key: &V3ProviderFailureSessionKey) -> String {
@@ -305,15 +309,24 @@ fn complete_provider_probe_success_at_generation(
     key: &V3ProviderCooldownProbeKey,
     now_ms: u64,
     expected_generation: Option<u64>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let current_generation = state
         .adaptive_history
         .get(key)
         .map_or(0, |history| history.score_generation);
     if let Some(expected_generation) = expected_generation {
         if expected_generation != current_generation {
-            return Ok(());
+            return Ok(false);
         }
+    }
+
+    if !rate_limit::accept_qualified_probe_success(
+        state,
+        key,
+        now_ms,
+        expected_generation.is_some(),
+    ) {
+        return Ok(false);
     }
 
     record_adaptive_success(state, key, now_ms);
@@ -330,7 +343,7 @@ fn complete_provider_probe_success_at_generation(
 
     state.provider_cooldown_probes.remove(key);
     state.auth_key_cooldowns.remove(key);
-    Ok(())
+    Ok(true)
 }
 
 #[allow(clippy::too_many_arguments)]

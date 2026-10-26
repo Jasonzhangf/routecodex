@@ -689,7 +689,14 @@ impl ResponsesTransport for PostTransportConcurrencyTransport {
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         let provider_id = request.provider_id().to_string();
-        self.sends.lock().unwrap().push(provider_id.clone());
+        {
+            let mut calls = self.sends.lock().unwrap();
+            calls.push(provider_id.clone());
+            assert!(
+                calls.len() <= 32,
+                "capacity rejection must back off, not spin"
+            );
+        }
         if self.busy_providers.contains(&provider_id) {
             return Err(V3ProviderError::ConcurrencyBusy {
                 request_id: request.request_id().to_string(),
@@ -2626,7 +2633,7 @@ async fn provider_concurrency_budget_reselects_sibling_auth_key() {
 }
 
 #[tokio::test]
-async fn provider_concurrency_saturated_candidates_exhaust_without_send() {
+async fn provider_concurrency_saturated_candidates_wait_then_exhaust_without_send() {
     let first = "conc_all_busy_timeout_first";
     let second = "conc_all_busy_timeout_second";
     let held_first = saturate_capacity_key(&format!("{first}:key"));
@@ -2654,7 +2661,8 @@ async fn provider_concurrency_saturated_candidates_exhaust_without_send() {
     .await;
     release_capacity_leases(held_first);
     release_capacity_leases(held_second);
-    assert!(started.elapsed() < Duration::from_millis(500));
+    assert!(started.elapsed() >= Duration::from_millis(5_000));
+    assert!(started.elapsed() < Duration::from_millis(6_500));
     assert_eq!(output.client_payload.status, 502, "{output:?}");
     assert_eq!(
         output.terminal_disposition,
@@ -2783,11 +2791,16 @@ async fn provider_concurrency_post_transport_mixed_exhaustion_stays_generic() {
         output.terminal_disposition,
         Some(V3ProviderTerminalDisposition::NoResponse)
     );
-    assert_eq!(
-        transport.sends.lock().unwrap().as_slice(),
-        &[first.to_string()],
-        "the cooled candidate must not be sent and mixed exhaustion must add no extra send"
+    let calls = transport.sends.lock().unwrap();
+    assert!(
+        (2..=8).contains(&calls.len()),
+        "capacity retries must remain paced: {calls:?}"
     );
+    assert!(
+        calls.iter().all(|provider| provider == first),
+        "the cooled candidate must never be sent"
+    );
+    drop(calls);
     assert!(
         provider_health
             .availability(first, Some("key"), Some("test"), 50)
@@ -2903,7 +2916,7 @@ async fn provider_concurrency_exact_pin_exhausts_without_escape_or_probe() {
 }
 
 #[tokio::test]
-async fn provider_concurrency_recovery_skips_saturated_later_candidate_without_waiting() {
+async fn provider_concurrency_recovery_waits_for_saturated_later_candidate_without_sending() {
     struct FirstFailsSecondMustNotSend {
         sends: Arc<Mutex<Vec<String>>>,
     }
@@ -2950,7 +2963,7 @@ async fn provider_concurrency_recovery_skips_saturated_later_candidate_without_w
         .observe_rate_limit(&second_key, 0)
         .expect("rate limit must schedule a due recovery probe");
 
-    let manifest = provider_concurrency_two_provider_manifest(first, second, 5_000);
+    let manifest = provider_concurrency_two_provider_manifest(first, second, 200);
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let transport = FirstFailsSecondMustNotSend {
         sends: Arc::new(Mutex::new(Vec::new())),
@@ -2981,15 +2994,15 @@ async fn provider_concurrency_recovery_skips_saturated_later_candidate_without_w
     let elapsed = started.elapsed();
     release_capacity_leases(held);
 
-    let output = output.expect("recovery to a saturated candidate must not wait for concurrency");
+    let output = output.expect("recovery must stop within the original acquisition budget");
     assert_eq!(
         transport.sends.lock().unwrap().as_slice(),
         &[first.to_string()],
         "after the first provider fails, a full later provider must not receive the request"
     );
     assert!(
-        elapsed < Duration::from_millis(2_500),
-        "recovery readmission must not fall back to transport acquire_timeout: {elapsed:?}"
+        elapsed >= Duration::from_millis(150) && elapsed < Duration::from_millis(1_500),
+        "recovery must wait without renewing the acquisition budget: {elapsed:?}"
     );
     assert_eq!(output.client_payload.status, 502, "{output:?}");
     assert!(matches!(output.terminal_disposition,
@@ -3198,11 +3211,16 @@ async fn provider_concurrency_relay_post_transport_mixed_exhaustion_stays_generi
     .expect("Relay must project mixed exhaustion");
 
     assert_eq!(output.status, 502, "{output:?}");
-    assert_eq!(
-        transport.sends.lock().unwrap().as_slice(),
-        &[first.to_string()],
-        "the cooled relay candidate must not be sent and mixed exhaustion must add no extra send"
+    let calls = transport.sends.lock().unwrap();
+    assert!(
+        (2..=8).contains(&calls.len()),
+        "capacity retries must remain paced: {calls:?}"
     );
+    assert!(
+        calls.iter().all(|provider| provider == first),
+        "the cooled relay candidate must never be sent"
+    );
+    drop(calls);
     assert!(
         provider_health
             .runtime_health()

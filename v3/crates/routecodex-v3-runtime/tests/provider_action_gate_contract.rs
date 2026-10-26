@@ -106,13 +106,20 @@ async fn terminal_projection_does_not_revoke_an_active_sibling_action_permit() {
         "provider-a:key-a:model-a",
         "provider_transport",
     );
-    gate.record_failure(&active_key)
+    let active_failure = gate
+        .record_failure(&active_key)
         .expect("record active action failure");
-    let active = gate
-        .wait_for_provider_action(&provider_scope("provider-a:key-a:model-a"))
+    let active = match gate
+        .wait_for_recovery_ticket(
+            active_failure.recovery_ticket(),
+            active_key.provider_scope.clone(),
+        )
         .await
-        .expect("active provider action admission")
-        .expect("active provider action permit");
+        .expect("active provider action transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("active provider ticket must be admitted: {transition:?}"),
+    };
 
     let started = Instant::now();
     gate.record_failure_and_commit_terminal_projection(scoped_key(
@@ -138,13 +145,20 @@ async fn terminal_projection_does_not_revoke_an_active_sibling_action_permit() {
 async fn terminal_projection_advances_an_active_exact_key_and_preserves_its_permit() {
     let gate = V3ProviderActionGate::default();
     let active_key = key("provider_http_401");
-    gate.record_failure(&active_key)
+    let active_failure = gate
+        .record_failure(&active_key)
         .expect("record active exact-key failure");
-    let active = gate
-        .wait_for_provider_action(&provider_scope("provider-a:key-a:model-a"))
+    let active = match gate
+        .wait_for_recovery_ticket(
+            active_failure.recovery_ticket(),
+            active_key.provider_scope.clone(),
+        )
         .await
-        .expect("active exact-key action admission")
-        .expect("active exact-key permit");
+        .expect("active exact-key action transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("active exact-key ticket must be admitted: {transition:?}"),
+    };
 
     let waiter = {
         let gate = gate.clone();
@@ -237,15 +251,17 @@ async fn success_after_terminal_admission_invalidates_atomic_commit() {
 }
 
 #[tokio::test]
-async fn overlapping_waiter_promotes_scope_to_five_seconds_and_one_admission() {
+async fn overlapping_waiters_do_not_promote_the_declared_isolated_delay() {
     let gate = V3ProviderActionGate::default();
     let scope = key("provider_transport");
     let started = Instant::now();
 
+    gate.record_failure(&scope)
+        .expect("record overlapping waiter failure");
     let mut first = {
         let gate = gate.clone();
         let scope = scope.clone();
-        tokio::spawn(async move { gate.record_failure_and_wait(scope).await })
+        tokio::spawn(async move { gate.wait_for_active_failure(scope).await })
     };
     tokio::time::sleep(Duration::from_millis(25)).await;
     let mut second = {
@@ -254,14 +270,18 @@ async fn overlapping_waiter_promotes_scope_to_five_seconds_and_one_admission() {
         tokio::spawn(async move { gate.wait_for_active_failure(scope).await })
     };
 
-    let (admission, first_won) = tokio::select! {
-        result = &mut first => (result.expect("first waiter task").expect("first sustained admission"), true),
-        result = &mut second => (result.expect("second waiter task").expect("second sustained admission"), false),
-    };
-    assert_eq!(admission.mode, V3ProviderActionGateMode::Sustained);
+    let (admission, first_won) = tokio::time::timeout(Duration::from_millis(2_000), async {
+        tokio::select! {
+            result = &mut first => (result.expect("first waiter task").expect("first admission"), true),
+            result = &mut second => (result.expect("second waiter task").expect("second admission"), false),
+        }
+    })
+    .await
+    .expect("adding a waiter promoted the isolated delay beyond two seconds");
+    assert_eq!(admission.mode, V3ProviderActionGateMode::Isolated);
     assert!(
-        started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
-        "overlapping provider actions were admitted before the five-second floor"
+        started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS),
+        "overlapping provider actions bypassed the isolated one-second floor"
     );
     assert!(
         if first_won {
@@ -269,7 +289,7 @@ async fn overlapping_waiter_promotes_scope_to_five_seconds_and_one_admission() {
         } else {
             !first.is_finished()
         },
-        "one gate generation admitted more than one provider action"
+        "one exact provider generation admitted more than one physical action"
     );
 
     gate.record_success(&scope).expect("success reset");
@@ -325,82 +345,88 @@ async fn scopes_are_isolated_and_success_does_not_reset_other_error_family() {
 }
 
 #[tokio::test]
-async fn reselected_provider_action_consumes_failed_scope_gate_and_success_releases_waiters() {
+async fn independent_provider_action_tickets_admit_without_consuming_another_lane() {
     let gate = V3ProviderActionGate::default();
-    let failed = key("provider_http_500");
-    let started = Instant::now();
-    gate.record_failure(&failed).expect("record failure");
-
-    let admission = gate
-        .wait_for_provider_action(&provider_scope("provider-b:key-b:model-b"))
-        .await
-        .expect("wait for reselected action")
-        .expect("active routing-group gate");
-    assert_eq!(admission.mode, V3ProviderActionGateMode::Isolated);
-    assert!(
-        started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS),
-        "reselected provider action bypassed the failed provider gate"
+    let first_key = key("provider_http_500");
+    let second_key = scoped_key(
+        "server-a",
+        "group-a",
+        "provider-b:key-b:model-b",
+        "provider_http_500",
+    );
+    let first_failure = gate
+        .record_failure(&first_key)
+        .expect("record first provider failure");
+    let second_failure = gate
+        .record_failure(&second_key)
+        .expect("record second provider failure");
+    assert_eq!(first_failure.mode, V3ProviderActionGateMode::Isolated);
+    assert_eq!(
+        second_failure.mode,
+        V3ProviderActionGateMode::Isolated,
+        "a second identity inherited the first identity's failure sequence"
     );
 
-    let blocked = {
-        let gate = gate.clone();
-        tokio::spawn(async move {
-            gate.wait_for_provider_action(&provider_scope("provider-a:key-a:model-a"))
-                .await
-        })
+    let first_admission = match gate
+        .wait_for_recovery_ticket(
+            first_failure.recovery_ticket(),
+            first_key.provider_scope.clone(),
+        )
+        .await
+        .expect("first provider ticket transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("first provider ticket must be admitted: {transition:?}"),
     };
-    tokio::time::sleep(Duration::from_millis(25)).await;
+    assert_eq!(first_admission.mode, V3ProviderActionGateMode::Isolated);
+
+    let second_started = Instant::now();
+    let second_admission = match tokio::time::timeout(
+        Duration::from_millis(500),
+        gate.wait_for_recovery_ticket(
+            second_failure.recovery_ticket(),
+            second_key.provider_scope.clone(),
+        ),
+    )
+    .await
+    .expect("the first identity's physical permit blocked the second identity")
+    .expect("second provider ticket transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("second provider ticket must be admitted: {transition:?}"),
+    };
+    assert_eq!(second_admission.mode, V3ProviderActionGateMode::Isolated);
     assert!(
-        !blocked.is_finished(),
-        "one admission released another provider action in the same generation"
+        second_started.elapsed() < Duration::from_millis(500),
+        "the second identity waited for the first identity's admitted action"
     );
 
-    gate.record_provider_success(&provider_scope("provider-b:key-b:model-b"))
-        .expect("reselected provider success reset");
-    let released = blocked
-        .await
-        .expect("blocked waiter task")
-        .expect("blocked waiter result")
-        .expect("released admission");
-    assert!(released.released_by_success);
-
-    let next_started = Instant::now();
-    let next = gate
-        .wait_for_provider_action(&provider_scope("provider-a:key-a:model-a"))
-        .await
-        .expect("next action wait")
-        .expect("retained sustained lane");
-    assert_eq!(next.mode, V3ProviderActionGateMode::Sustained);
-    assert!(
-        next_started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
-        "provider success with queued requests must not broadcast stale actions"
-    );
-    gate.record_provider_success(&provider_scope("provider-a:key-a:model-a"))
-        .expect("retained lane cleanup");
+    drop(first_admission);
+    drop(second_admission);
 }
 
 #[tokio::test]
 async fn unrelated_same_group_provider_success_cannot_release_an_owned_action_permit() {
     let gate = V3ProviderActionGate::default();
     let failed = key("provider_http_500");
-    gate.record_failure(&failed)
+    let failure = gate
+        .record_failure(&failed)
         .expect("record provider A failure");
-    let admission = gate
-        .wait_for_active_failure(failed)
+    let admission = match gate
+        .wait_for_recovery_ticket(failure.recovery_ticket(), failed.provider_scope.clone())
         .await
-        .expect("provider A recovery admission");
+        .expect("provider A recovery transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("provider A recovery ticket must be admitted: {transition:?}"),
+    };
 
     gate.record_provider_success(&provider_scope("provider-c:key-c:model-c"))
         .expect("unrelated provider C success");
 
-    let provider_a = provider_scope("provider-a:key-a:model-a");
-    let still_owned = tokio::time::timeout(
-        Duration::from_millis(100),
-        gate.wait_for_exact_provider_action(&provider_a),
-    )
-    .await;
     assert!(
-        still_owned.is_err(),
+        gate.abandon_admission(&failed, admission.generation)
+            .expect("provider A permit release"),
         "unrelated same-group provider success released provider A's owned recovery permit"
     );
 
@@ -408,7 +434,7 @@ async fn unrelated_same_group_provider_success_cannot_release_an_owned_action_pe
 }
 
 #[tokio::test]
-async fn exact_provider_lookup_ignores_another_provider_recovery_lane() {
+async fn exact_provider_recovery_tickets_remain_independent_of_another_lane() {
     let gate = V3ProviderActionGate::default();
     let provider_b_failure = scoped_key(
         "server-exact",
@@ -416,25 +442,50 @@ async fn exact_provider_lookup_ignores_another_provider_recovery_lane() {
         "provider-b:key-b:model-b",
         "provider_http_503",
     );
-    gate.record_failure(&provider_b_failure)
+    let provider_a_failure = scoped_key(
+        "server-exact",
+        "group-exact",
+        "provider-a:key-a:model-a",
+        "provider_http_503",
+    );
+    let provider_b_recorded = gate
+        .record_failure(&provider_b_failure)
         .expect("record provider B failure");
+    let provider_a_recorded = gate
+        .record_failure(&provider_a_failure)
+        .expect("record provider A failure");
 
-    let provider_a =
-        scoped_provider_scope("server-exact", "group-exact", "provider-a:key-a:model-a");
-    let exact = tokio::time::timeout(
-        Duration::from_millis(100),
-        gate.wait_for_exact_provider_action(&provider_a),
+    let provider_a = match gate
+        .wait_for_recovery_ticket(
+            provider_a_recorded.recovery_ticket(),
+            provider_a_failure.provider_scope.clone(),
+        )
+        .await
+        .expect("provider A recovery transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("provider A recovery ticket must be admitted: {transition:?}"),
+    };
+    assert_eq!(provider_a.mode, V3ProviderActionGateMode::Isolated);
+
+    let provider_b = match tokio::time::timeout(
+        Duration::from_millis(500),
+        gate.wait_for_recovery_ticket(
+            provider_b_recorded.recovery_ticket(),
+            provider_b_failure.provider_scope.clone(),
+        ),
     )
     .await
-    .expect("exact provider lookup must not wait on another provider")
-    .expect("exact provider lookup");
-    assert!(
-        exact.is_none(),
-        "pinned provider A consumed provider B's recovery lane"
-    );
+    .expect("provider A's active lane blocked provider B's own recovery")
+    .expect("provider B recovery transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("provider B recovery ticket must be admitted: {transition:?}"),
+    };
+    assert_eq!(provider_b.mode, V3ProviderActionGateMode::Isolated);
 
-    gate.record_success(&provider_b_failure)
-        .expect("cleanup provider B failure");
+    drop(provider_a);
+    drop(provider_b);
 }
 
 #[tokio::test]
@@ -639,7 +690,7 @@ async fn terminal_transition_wakes_old_waiter_for_reselection_then_serializes_ne
         result = &mut first => (result.expect("first action task").expect("first action admission"), true),
         result = &mut second => (result.expect("second action task").expect("second action admission"), false),
     };
-    assert_eq!(admitted.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(admitted.mode, V3ProviderActionGateMode::Isolated);
     assert!(if first_won {
         !second.is_finished()
     } else {
@@ -683,7 +734,7 @@ async fn terminal_transition_wakes_old_waiter_for_reselection_then_serializes_ne
 }
 
 #[tokio::test]
-async fn changing_provider_and_error_family_cannot_restart_an_active_lane_at_one_second() {
+async fn changing_provider_and_error_family_keep_independent_isolated_delays() {
     let gate = V3ProviderActionGate::default();
     let first = scoped_key(
         "storm-server",
@@ -697,33 +748,58 @@ async fn changing_provider_and_error_family_cannot_restart_an_active_lane_at_one
         "provider-b:key:model-b",
         "provider_malformed_sse",
     );
-    gate.record_failure(&first).expect("first lane failure");
-
-    let changed_at = Instant::now();
-    let recorded = gate
+    let first_recorded = gate.record_failure(&first).expect("first lane failure");
+    let changed_recorded = gate
         .record_failure(&changed)
         .expect("changed provider/family failure");
-    assert_eq!(recorded.mode, V3ProviderActionGateMode::Sustained);
-    let admission = gate
-        .wait_for_active_failure(changed.clone())
-        .await
-        .expect("changed failure admission");
-    assert_eq!(admission.mode, V3ProviderActionGateMode::Sustained);
-    assert!(
-        changed_at.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
-        "changing provider or error family restarted an active storm lane at one second"
+    assert_eq!(first_recorded.mode, V3ProviderActionGateMode::Isolated);
+    assert_eq!(
+        changed_recorded.mode,
+        V3ProviderActionGateMode::Isolated,
+        "changing provider or error family inherited another identity's failure count"
+    );
+    assert_eq!(
+        changed_recorded.minimum_delay_ms,
+        V3_PROVIDER_ACTION_ISOLATED_DELAY_MS
     );
 
-    gate.record_provider_success(&scoped_provider_scope(
-        "storm-server",
-        "storm-group",
-        "provider-b:key:model-b",
-    ))
-    .expect("storm lane cleanup");
+    let first_admission = match gate
+        .wait_for_recovery_ticket(first_recorded.recovery_ticket(), first.provider_scope.clone())
+        .await
+        .expect("first lane recovery transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("first lane recovery ticket must be admitted: {transition:?}"),
+    };
+    assert_eq!(first_admission.mode, V3ProviderActionGateMode::Isolated);
+
+    let changed_started = Instant::now();
+    let changed_admission = match tokio::time::timeout(
+        Duration::from_millis(500),
+        gate.wait_for_recovery_ticket(
+            changed_recorded.recovery_ticket(),
+            changed.provider_scope.clone(),
+        ),
+    )
+    .await
+    .expect("the first provider's active permit blocked the changed provider")
+    .expect("changed provider recovery transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("changed provider recovery ticket must be admitted: {transition:?}"),
+    };
+    assert_eq!(changed_admission.mode, V3ProviderActionGateMode::Isolated);
+    assert!(
+        changed_started.elapsed() < Duration::from_millis(500),
+        "changing provider or error family waited for another identity's permit"
+    );
+
+    drop(first_admission);
+    drop(changed_admission);
 }
 
 #[tokio::test]
-async fn changed_provider_lanes_admit_one_action_per_routing_group_interval() {
+async fn changed_provider_lanes_admit_independently_by_exact_generation() {
     let gate = V3ProviderActionGate::default();
     let first = scoped_key(
         "server-serial",
@@ -737,95 +813,152 @@ async fn changed_provider_lanes_admit_one_action_per_routing_group_interval() {
         "provider-b:key:model",
         "provider_http_500",
     );
-    gate.record_failure(&first).expect("first provider failure");
-    gate.record_failure(&second)
+    let first_recorded = gate.record_failure(&first).expect("first provider failure");
+    let second_recorded = gate
+        .record_failure(&second)
         .expect("second provider failure");
+    assert_eq!(first_recorded.mode, V3ProviderActionGateMode::Isolated);
+    assert_eq!(
+        second_recorded.mode,
+        V3ProviderActionGateMode::Isolated,
+        "a changed provider inherited the routing group's failure interval"
+    );
 
-    let first_admission = gate
-        .wait_for_active_failure(first)
+    let first_admission = match gate
+        .wait_for_recovery_ticket(first_recorded.recovery_ticket(), first.provider_scope.clone())
         .await
-        .expect("first group admission");
-    assert_eq!(first_admission.mode, V3ProviderActionGateMode::Sustained);
+        .expect("first provider transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("first provider ticket must be admitted: {transition:?}"),
+    };
+    assert_eq!(first_admission.mode, V3ProviderActionGateMode::Isolated);
 
     let second_started = Instant::now();
-    drop(first_admission);
-    let second_admission = gate
-        .wait_for_active_failure(second)
-        .await
-        .expect("second group admission");
-    assert_eq!(second_admission.mode, V3ProviderActionGateMode::Sustained);
+    let second_admission = match tokio::time::timeout(
+        Duration::from_millis(500),
+        gate.wait_for_recovery_ticket(
+            second_recorded.recovery_ticket(),
+            second.provider_scope.clone(),
+        ),
+    )
+    .await
+    .expect("the first provider's permit serialized a changed provider lane")
+    .expect("second provider transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("second provider ticket must be admitted: {transition:?}"),
+    };
+    assert_eq!(second_admission.mode, V3ProviderActionGateMode::Isolated);
     assert!(
-        second_started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS),
-        "provider/error-family change admitted a second routing-group action without five seconds"
+        second_started.elapsed() < Duration::from_millis(500),
+        "provider/error-family change waited for the routing group's first action"
     );
+
+    drop(first_admission);
+    drop(second_admission);
 }
 
 #[tokio::test]
-async fn admitted_action_failure_advances_the_group_before_reselecting() {
+async fn admitted_action_failure_does_not_advance_another_provider_lane() {
     let gate = V3ProviderActionGate::default();
-    let terminal = scoped_key(
+    let admitted_key = scoped_key(
         "server-outcome",
         "group-outcome",
         "provider-a:key:model",
         "provider_http_503",
     );
-    gate.record_failure_and_commit_terminal_projection(terminal.clone())
-        .expect("terminal projection admission");
-
-    let primary = scoped_provider_scope("server-outcome", "group-outcome", "provider-a:key:model");
-    gate.wait_for_provider_action(&primary)
+    let admitted_recorded = gate
+        .record_failure(&admitted_key)
+        .expect("record admitted provider failure");
+    let admitted = match gate
+        .wait_for_recovery_ticket(
+            admitted_recorded.recovery_ticket(),
+            admitted_key.provider_scope.clone(),
+        )
         .await
-        .expect("next request admission")
-        .expect("retained terminal lane");
+        .expect("admitted provider transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("admitted provider ticket must be admitted: {transition:?}"),
+    };
 
-    let next_failure = scoped_key(
+    let independent_key = scoped_key(
         "server-outcome",
         "group-outcome",
-        "provider-a:key:model",
+        "provider-b:key:model",
         "provider_http_500",
     );
-    gate.record_failure(&next_failure)
-        .expect("admitted provider action failure");
+    let independent_recorded = gate
+        .record_failure(&independent_key)
+        .expect("record independent provider failure");
+    let independent_ticket = independent_recorded.recovery_ticket().clone();
 
-    let reselected = tokio::time::timeout(
-        Duration::from_millis(V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS + 500),
-        gate.wait_for_active_failure(terminal),
+    gate.record_failure(&admitted_key)
+        .expect("record the admitted provider action failure");
+    assert_eq!(
+        independent_ticket.generation(),
+        1,
+        "the admitted provider action advanced another identity's generation"
+    );
+
+    let independent_started = Instant::now();
+    let independent = match tokio::time::timeout(
+        Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS + 500),
+        gate.wait_for_recovery_ticket(
+            &independent_ticket,
+            independent_key.provider_scope.clone(),
+        ),
     )
     .await
-    .expect("stale admitted generation blocked the reselected provider")
-    .expect("reselected provider admission");
-    assert_eq!(reselected.mode, V3ProviderActionGateMode::Sustained);
+    .expect("the admitted provider action blocked its independent lane")
+    .expect("independent provider transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("independent provider ticket must be admitted: {transition:?}"),
+    };
+    assert_eq!(independent.mode, V3ProviderActionGateMode::Isolated);
+    assert_eq!(independent.generation, 1);
+    assert!(
+        independent_started.elapsed() >= Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS),
+        "the independent lane bypassed its own declared isolated delay"
+    );
+
+    drop(admitted);
+    drop(independent);
 }
 
 #[tokio::test]
 async fn admitted_action_requires_explicit_drop_before_replacement_generation() {
     let gate = V3ProviderActionGate::default();
     let scope = key("provider_http_503");
-    gate.record_failure(&scope)
+    let failure = gate
+        .record_failure(&scope)
         .expect("record provider failure");
-    let admitted = gate
-        .wait_for_active_failure(scope.clone())
+    let admitted = match gate
+        .wait_for_recovery_ticket(failure.recovery_ticket(), scope.provider_scope.clone())
         .await
-        .expect("first provider action admission");
-
-    let competing_scope = scoped_key(
-        "server-a",
-        "group-a",
-        "provider-b:key-b:model-b",
-        "provider_http_503",
-    );
+        .expect("first provider action transition")
+    {
+        V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+        transition => panic!("first provider ticket must be admitted: {transition:?}"),
+    };
     let competing_failure = gate
-        .record_failure(&competing_scope)
+        .record_failure(&scope)
         .expect("record concurrent provider failure");
-    assert_eq!(competing_failure.mode, V3ProviderActionGateMode::Sustained);
+    assert_eq!(competing_failure.mode, V3ProviderActionGateMode::Medium);
+    assert_eq!(
+        competing_failure.generation, admitted.generation,
+        "a new failure replaced the generation whose permit is still owned"
+    );
 
     let mut next = {
         let gate = gate.clone();
-        let scope = competing_scope.clone();
+        let scope = scope.clone();
         tokio::spawn(async move { gate.wait_for_active_failure(scope).await })
     };
     tokio::time::sleep(Duration::from_millis(
-        V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS + 100,
+        V3_PROVIDER_ACTION_MEDIUM_DELAY_MS + 100,
     ))
     .await;
     assert!(
@@ -1003,7 +1136,7 @@ async fn success_released_recovery_reenters_the_retained_five_second_generation(
         "success-release-server",
         "success-release-group",
         "provider-a:key:model",
-        "provider_http_429",
+        "provider_http_500",
     );
     let first = gate.record_failure(&failed).expect("first failure");
     let first_ticket = first.recovery_ticket().clone();

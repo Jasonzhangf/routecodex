@@ -354,7 +354,7 @@ fn post_commit_sse_failure_enters_provider_cooldown_after_one_same_error() {
 }
 
 #[test]
-fn business_success_resets_post_commit_sse_streak_without_releasing_cooldown() {
+fn business_success_releases_matching_post_commit_sse_cooldown() {
     let manifest = target_resolution_manifest("post_commit_sse_success_reset");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -381,7 +381,7 @@ fn business_success_resets_post_commit_sse_streak_without_releasing_cooldown() {
             )
             .expect("post-commit SSE failure observation");
     }
-    health
+    let success = health
         .store()
         .record_provider_key_success(
             "primary",
@@ -390,6 +390,14 @@ fn business_success_resets_post_commit_sse_streak_without_releasing_cooldown() {
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
         )
         .expect("successful retry must clear failure state");
+    assert_eq!(
+        success.failure_streak, 0,
+        "a matching business success resets the post-commit SSE failure streak"
+    );
+    assert!(
+        success.available,
+        "a matching business success clears the exact non-429 cooldown"
+    );
 
     let projection =
         routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
@@ -401,9 +409,12 @@ fn business_success_resets_post_commit_sse_streak_without_releasing_cooldown() {
             1,
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
         );
-    assert!(!projection.available);
     assert!(
-        health
+        projection.available,
+        "a real matching business success must release this exact recoverable identity"
+    );
+    assert!(
+        !health
             .store()
             .provider_cooldown_probe_keys_due(u64::MAX)
             .expect("provider cooldown probe query")
@@ -413,25 +424,7 @@ fn business_success_resets_post_commit_sse_streak_without_releasing_cooldown() {
                     && key.as_deref() == Some("key1")
                     && model.as_deref() == Some("gpt-test")
             }),
-        "a business success must not release the exact existing cooldown"
-    );
-
-    let permit = health
-        .store()
-        .acquire_provider_cooldown_probe("primary", Some("key1"), Some("gpt-test"))
-        .unwrap()
-        .expect("matching semantic recovery permit");
-    health
-        .store()
-        .complete_provider_cooldown_probe_success_with_permit(
-            &permit,
-            v3_relay_provider_policy_now_epoch_ms().unwrap(),
-        )
-        .unwrap();
-    assert!(
-        health
-            .availability("primary", Some("key1"), Some("gpt-test"), u64::MAX)
-            .available
+        "a matching business success must remove the exact cooldown instead of keeping its probe"
     );
 
     for _ in 0..1 {
@@ -457,7 +450,25 @@ fn business_success_resets_post_commit_sse_streak_without_releasing_cooldown() {
         );
     assert!(
         !after_post_success_failures.available,
-        "after semantic recovery, one non-429 provider failure must cool again"
+        "after the business-success release, one non-429 provider failure must cool again"
+    );
+
+    let permit = health
+        .store()
+        .acquire_provider_cooldown_probe("primary", Some("key1"), Some("gpt-test"))
+        .unwrap()
+        .expect("matching semantic recovery permit");
+    health
+        .store()
+        .complete_provider_cooldown_probe_success_with_permit(
+            &permit,
+            v3_relay_provider_policy_now_epoch_ms().unwrap(),
+        )
+        .unwrap();
+    assert!(
+        health
+            .availability("primary", Some("key1"), Some("gpt-test"), u64::MAX)
+            .available
     );
 }
 
@@ -534,7 +545,12 @@ async fn provider_probe_failure_is_local_and_does_not_fail_the_probe_batch() {
     health
         .run_due_provider_health_probes(u64::MAX, true, |_, _, _, _| async {
             Err(V3ProviderHealthProbeFailure::Provider(
-                "HTTP 503".to_string(),
+                V3ProviderError::HttpStatus {
+                    response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
+                        request_id: "probe".into(), provider_id: "test".into(), status: 503,
+                        headers: vec![], body: b"controlled unavailable".to_vec(), body_read_failure: None,
+                    }),
+                },
             ))
         })
         .await
@@ -681,7 +697,10 @@ async fn failed_probe_backoff_starts_at_probe_completion_time() {
                     .as_millis() as u64;
                 completion_marker.store(finished_ms, Ordering::Relaxed);
                 Err(V3ProviderHealthProbeFailure::Provider(
-                    "controlled probe failure".to_string(),
+                    V3ProviderError::Transport {
+                        request_id: "probe".into(), provider_id: "test".into(),
+                        reason: "controlled probe failure".into(),
+                    },
                 ))
             }
         })

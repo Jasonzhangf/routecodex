@@ -76,6 +76,7 @@ async fn busy_preferred_candidate_preserves_cooled_peer_recovery() {
     let outcome = tokio::time::timeout(
         Duration::from_secs(2),
         run_v3_plan_execution_operator_with_probes(
+            crate::execution_control::V3AttemptBudget::process_default(),
             json!({"model":"client-responses","input":"hello"}),
             &manifest,
             V3PlanExecutionTargetSource::Expanded(expanded),
@@ -390,6 +391,7 @@ async fn fresh_cooldown_only_exhaustion_runs_one_rescue_probe_and_resumes_same_r
     let outcome = tokio::time::timeout(
         Duration::from_secs(2),
         run_v3_plan_execution_operator_with_probes(
+            crate::execution_control::V3AttemptBudget::process_default(),
             json!({"model":"client-responses","input":"hello"}),
             &manifest,
             V3PlanExecutionTargetSource::Expanded(expanded),
@@ -477,6 +479,7 @@ async fn stale_rescue_probe_completion_does_not_abort_reselection_of_next_provid
     let selection_health = health.clone();
     let selection = tokio::spawn(async move {
         run_v3_plan_execution_operator_with_probes(
+            crate::execution_control::V3AttemptBudget::process_default(),
             json!({"model":"client-responses","input":"hello"}),
             &selection_manifest,
             V3PlanExecutionTargetSource::Expanded(selection_expanded),
@@ -589,6 +592,7 @@ async fn cooldown_only_exhaustion_waits_for_other_requests_successful_probe() {
         let request_local_busy_candidates = BTreeSet::new();
         tokio::spawn(async move {
             let task = run_v3_plan_execution_operator_with_probes(
+                crate::execution_control::V3AttemptBudget::process_default(),
                 json!({"model":"client-responses","input":"hello"}),
                 &manifest,
                 V3PlanExecutionTargetSource::Expanded(expanded),
@@ -701,6 +705,7 @@ async fn cooldown_only_exhaustion_preserves_independent_failed_and_successful_pr
         let request_local_busy_candidates = BTreeSet::new();
         tokio::spawn(async move {
             let task = run_v3_plan_execution_operator_with_probes(
+                crate::execution_control::V3AttemptBudget::process_default(),
                 json!({"model":"client-responses","input":"hello"}),
                 &manifest,
                 V3PlanExecutionTargetSource::Expanded(expanded),
@@ -785,7 +790,7 @@ async fn cooldown_only_exhaustion_waits_until_budget_after_independent_probe_fai
             .local_addr()
             .expect("provider probe listener address")
     );
-    let mut manifest = global_pool_alive_manifest(server_id);
+    let mut manifest = global_pool_alive_manifest_with_rescue_timeout(server_id, Some(200));
     set_provider_interface_base_url(&mut manifest, "first", "default", base_url);
     let provider = manifest.providers.get_mut("first").expect("first provider");
     provider.auth.entries[0].env = Some("ROUTECODEX_V3_DUE_RETRY_PROBE_KEY".into());
@@ -827,6 +832,8 @@ async fn cooldown_only_exhaustion_waits_until_budget_after_independent_probe_fai
         let failure_session_scope = failure_session_scope.clone();
         async move {
             run_v3_plan_execution_operator_with_probes(
+                crate::execution_control::V3AttemptBudget::from_manifest(&manifest, server_id)
+                    .unwrap(),
                 json!({"model":"client-responses","input":"hello"}),
                 &manifest,
                 V3PlanExecutionTargetSource::Expanded(expanded),
@@ -848,7 +855,7 @@ async fn cooldown_only_exhaustion_waits_until_budget_after_independent_probe_fai
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
         !selection.is_finished(),
-        "failed rescue must wait for the declared acquisition budget"
+        "failed rescue must wait for the original request residence budget"
     );
     health
         .store
@@ -886,9 +893,9 @@ async fn cooldown_only_exhaustion_waits_until_budget_after_independent_probe_fai
 }
 
 #[tokio::test]
-async fn cooldown_only_exhaustion_terminates_after_acquisition_budget() {
+async fn cooldown_only_exhaustion_terminates_after_request_residence_budget() {
     let server_id = "cooldown_only_exhaustion_rescue_deadline";
-    let manifest = global_pool_alive_manifest_with_rescue_timeout(server_id, Some(900_000));
+    let manifest = global_pool_alive_manifest_with_rescue_timeout(server_id, Some(150));
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let failure_session_scope = test_provider_failure_scope(
         server_id,
@@ -914,12 +921,13 @@ async fn cooldown_only_exhaustion_terminates_after_acquisition_budget() {
     put_all_candidates_in_provider_cooldown(&health, &expanded);
     let mut expanded = expanded;
     for candidate in &mut expanded.candidates {
-        candidate.concurrency_acquire_timeout_ms = 150;
+        candidate.concurrency_acquire_timeout_ms = 2000;
     }
     let started = tokio::time::Instant::now();
     let selection = tokio::time::timeout(
         Duration::from_secs(2),
         run_v3_plan_execution_operator_with_probes(
+            crate::execution_control::V3AttemptBudget::from_manifest(&manifest, server_id).unwrap(),
             json!({"model":"client-responses","input":"hello"}),
             &manifest,
             V3PlanExecutionTargetSource::Expanded(expanded),
@@ -937,18 +945,18 @@ async fn cooldown_only_exhaustion_terminates_after_acquisition_budget() {
         ),
     )
     .await
-    .expect("cooldown-only recovery must use acquisition rather than residence budget");
+    .expect("cooldown recovery must respect the original residence budget independently of candidate acquisition");
     assert!(started.elapsed() >= Duration::from_millis(150));
     assert!(
         matches!(selection, Err(V3PlanExecutionStop::Exhausted { .. })),
-        "failed recovery must exhaust only after its declared acquisition budget"
+        "failed recovery must exhaust only after its original request residence budget"
     );
 }
 
 #[tokio::test]
-async fn request_local_exclusion_without_cooldown_probe_success_stays_terminal() {
+async fn request_local_exclusion_without_cooldown_probe_success_waits_residence_budget() {
     let server_id = "request_local_exclusion_without_probe";
-    let manifest = global_pool_alive_manifest(server_id);
+    let manifest = global_pool_alive_manifest_with_rescue_timeout(server_id, Some(300));
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let failure_session_scope =
         test_provider_failure_scope(server_id, server_id, "request-local-exclusion-session")
@@ -969,10 +977,15 @@ async fn request_local_exclusion_without_cooldown_probe_success_stays_terminal()
         Err(_) => panic!("expanded candidates failed"),
     };
     let request_local_excluded_candidates = all_candidate_keys(&expanded);
+    let attempt_budget =
+        crate::execution_control::V3AttemptBudget::from_manifest(&manifest, server_id)
+            .expect("attempt budget");
 
+    let started = tokio::time::Instant::now();
     let selection = tokio::time::timeout(
-        Duration::from_millis(500),
+        Duration::from_secs(2),
         run_v3_plan_execution_operator_with_probes(
+            attempt_budget.clone(),
             json!({"model":"client-responses","input":"hello"}),
             &manifest,
             V3PlanExecutionTargetSource::Expanded(expanded),
@@ -990,10 +1003,80 @@ async fn request_local_exclusion_without_cooldown_probe_success_stays_terminal()
         ),
     )
     .await
-    .expect("non-cooldown request-local exclusion must not hang");
+    .expect("an excluded request must still reach its own residence deadline");
     assert!(
         matches!(selection, Err(V3PlanExecutionStop::Exhausted { .. })),
-        "ordinary request-local provider failures must remain terminal"
+        "exhaustion may only terminate after the original request residence budget"
+    );
+    assert!(
+        started.elapsed() >= Duration::from_millis(300),
+        "the protected request must wait its original residence budget instead of closing immediately"
+    );
+    assert_eq!(
+        attempt_budget.transport_attempts(),
+        0,
+        "a wait held by request-local exclusions must not send another provider attempt"
+    );
+
+    // Cancellation must end the same wait promptly, without a default 600s hang
+    // and without a new provider attempt. The waiter owns no business lease.
+    let cancel_manifest = global_pool_alive_manifest_with_rescue_timeout(server_id, Some(2000));
+    let cancel_health = V3ProviderFailureRuntimeHealth::from_manifest(&cancel_manifest);
+    let cancel_scope =
+        test_provider_failure_scope(server_id, server_id, "request-local-cancel-session")
+            .expect("cancel session scope");
+    let cancel_expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+        manifest: &cancel_manifest,
+        server_id,
+        failure_session_scope: &cancel_scope,
+        entry_kind: "responses",
+        endpoint_path: "/v1/responses",
+        body: &json!({"model":"client-responses","input":"hello"}),
+        request_local_excluded_candidates: &BTreeSet::new(),
+        provider_health: &cancel_health,
+        now_ms: 20_001,
+        deterministic_sample: 0,
+    }) {
+        Ok(expanded) => expanded,
+        Err(_) => panic!("expanded candidates failed"),
+    };
+    let cancel_budget =
+        crate::execution_control::V3AttemptBudget::from_manifest(&cancel_manifest, server_id)
+            .expect("cancel attempt budget");
+    let cancel_excluded = all_candidate_keys(&cancel_expanded);
+    let busy = BTreeSet::new();
+    let waiting = tokio::spawn(async move {
+        run_v3_plan_execution_operator_with_probes(
+            cancel_budget,
+            json!({"model":"client-responses","input":"hello"}),
+            &cancel_manifest,
+            V3PlanExecutionTargetSource::Expanded(cancel_expanded),
+            &cancel_scope,
+            &cancel_health,
+            &cancel_excluded,
+            &busy,
+            20_001,
+            0,
+            true,
+            None,
+            V3PlanExecutionModePolicy::RelayOnly {
+                entry_protocol: V3HubEntryProtocol::Responses,
+            },
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !waiting.is_finished(),
+        "the excluded request must still be pending before cancellation"
+    );
+    waiting.abort();
+    let cancelled = tokio::time::timeout(Duration::from_millis(500), waiting)
+        .await
+        .expect("client cancellation must end the excluded request wait promptly");
+    assert!(
+        cancelled.is_err(),
+        "client cancellation must cancel the pending wait instead of letting it run to its residence deadline"
     );
 }
 
@@ -1047,6 +1130,7 @@ async fn auth_key_cooldown_exhaustion_preserves_independent_probe_recovery() {
         let failure_session_scope = failure_session_scope.clone();
         async move {
             run_v3_plan_execution_operator_with_probes(
+                crate::execution_control::V3AttemptBudget::process_default(),
                 json!({"model":"client-responses","input":"hello"}),
                 &manifest,
                 V3PlanExecutionTargetSource::Expanded(expanded),
@@ -1167,6 +1251,7 @@ async fn auth_key_cooldown_exhaustion_waits_for_other_requests_successful_probe(
         let failure_session_scope = failure_session_scope.clone();
         async move {
             run_v3_plan_execution_operator_with_probes(
+                crate::execution_control::V3AttemptBudget::process_default(),
                 json!({"model":"client-responses","input":"hello"}),
                 &manifest,
                 V3PlanExecutionTargetSource::Expanded(expanded),
@@ -1360,6 +1445,7 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
     let selection = tokio::time::timeout(
         Duration::from_millis(500),
         run_v3_plan_execution_operator_with_probes(
+            crate::execution_control::V3AttemptBudget::process_default(),
             json!({"model":"client-responses","input":"hello"}),
             &manifest,
             V3PlanExecutionTargetSource::Expanded(expanded),
@@ -1498,6 +1584,7 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
     let selection = tokio::time::timeout(
         Duration::from_millis(500),
         run_v3_plan_execution_operator_with_probes(
+            crate::execution_control::V3AttemptBudget::process_default(),
             json!({"model":"client-responses","input":"hello"}),
             &manifest,
             V3PlanExecutionTargetSource::Expanded(expanded),
@@ -1538,7 +1625,7 @@ async fn all_busy_async_admission_preserves_provider_concurrency_busy_source() {
     let first_id = "async_all_busy_first";
     let second_id = "async_all_busy_second";
     let mut manifest =
-        global_pool_alive_manifest_with_provider_names(server_id, None, first_id, second_id);
+        global_pool_alive_manifest_with_provider_names(server_id, Some(150), first_id, second_id);
     for id in [first_id, second_id] {
         manifest.providers.get_mut(id).unwrap().concurrency =
             Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
@@ -1576,6 +1663,7 @@ async fn all_busy_async_admission_preserves_provider_concurrency_busy_source() {
     let selection = tokio::time::timeout(
         Duration::from_millis(500),
         run_v3_plan_execution_operator_with_probes(
+            crate::execution_control::V3AttemptBudget::from_manifest(&manifest, server_id).unwrap(),
             json!({"model":"client-responses","input":"hello"}),
             &manifest,
             V3PlanExecutionTargetSource::Expanded(expanded),
@@ -1611,7 +1699,7 @@ async fn mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhauste
     let first_id = "async_mixed_first";
     let second_id = "async_mixed_second";
     let mut manifest =
-        global_pool_alive_manifest_with_provider_names(server_id, None, first_id, second_id);
+        global_pool_alive_manifest_with_provider_names(server_id, Some(150), first_id, second_id);
     for id in [first_id, second_id] {
         manifest.providers.get_mut(id).unwrap().concurrency =
             Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
@@ -1653,6 +1741,7 @@ async fn mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhauste
     let selection = tokio::time::timeout(
         Duration::from_millis(500),
         run_v3_plan_execution_operator_with_probes(
+            crate::execution_control::V3AttemptBudget::from_manifest(&manifest, server_id).unwrap(),
             json!({"model":"client-responses","input":"hello"}),
             &manifest,
             V3PlanExecutionTargetSource::Expanded(expanded),
@@ -1766,6 +1855,7 @@ async fn busy_preferred_candidate_reselects_later_tier_without_capacity_wait() {
     let selected = tokio::time::timeout(
         std::time::Duration::from_millis(500),
         run_v3_plan_execution_operator_with_probes(
+            crate::execution_control::V3AttemptBudget::process_default(),
             json!({"model":"client-responses","input":"hello"}),
             &manifest,
             V3PlanExecutionTargetSource::Expanded(expanded),

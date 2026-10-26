@@ -284,6 +284,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     .attempt_budget()
                     .residence_deadline(),
                 run_v3_plan_execution_operator_with_probes(
+                    request_execution_control.attempt_budget(),
                     target_resolved_request,
                     manifest,
                     target_source,
@@ -440,6 +441,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
                     attempt_budget.residence_deadline(),
                     run_v3_plan_execution_operator_with_probes(
+                        attempt_budget.clone(),
                     (*req05.previous.previous.previous.payload.0).clone(),
                     manifest,
                     V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
@@ -533,10 +535,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             response_processing_code: None,
                         };
                         return Ok(provider_failure_output(
-                            super::responses_relay_failures::terminalize_v3_responses_relay_provider_failure_with_source(
-                                failure,
-                                source,
-                                last_external_http.clone(),
+                            attach_v3_provider_failure_events_to_failure(
+                                super::responses_relay_failures::terminalize_v3_responses_relay_provider_failure_with_source(
+                                    failure,
+                                    source,
+                                    last_external_http.clone(),
+                                ),
+                                &provider_failure_events,
                             ),
                             trace,
                             0,
@@ -555,7 +560,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 drop(_provider_action_permit.take());
                 provider_action_permit_target = None;
             }
-            attempt_budget.set_transport_attempt_limit(retained_expanded.candidates.len());
             if matches!(
                 protocol_decision.mode,
                 crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
@@ -753,7 +757,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             }
             trace.push("V3ProviderReqOutbound09TransportRequest");
             let provider_request_snapshot = transport_request.provider_request_projection();
-            let _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
+            let mut _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
                 admission.take_rate_limit_control(&mut pending_provider_action_recovery)
             });
             if pending_provider_action_recovery.is_some() {
@@ -816,10 +820,16 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     }
                 }
             }
-            provider_send_attempts =
-                handle_error_before_resp03!(attempt_budget.admit_transport_attempt().map_err(
-                    |error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
-                ));
+            provider_send_attempts = handle_error_before_resp03!(
+                crate::provider_failure_runtime_policy::admit_v3_provider_transport_attempt(
+                    &attempt_budget,
+                    &mut selected_admission,
+                    &mut _rate_limit_permit,
+                    &mut _provider_action_permit,
+                )
+                .await
+                .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))
+            );
             handle_error_before_resp03!(runtime_timing
                 .start_external()
                 .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
@@ -845,6 +855,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             let provider_raw = match transport_result {
                 Ok(raw) => raw,
                 Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                    attempt_budget.release_unsent_transport_attempt();
+                    provider_send_attempts = attempt_budget.transport_attempts();
                     handle_error_before_resp03!(runtime_timing
                         .finish_external()
                         .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));

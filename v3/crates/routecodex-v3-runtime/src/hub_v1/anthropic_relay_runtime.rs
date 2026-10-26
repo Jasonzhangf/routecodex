@@ -648,6 +648,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
             attempt_budget.residence_deadline(),
             run_v3_plan_execution_operator_with_probes(
+                attempt_budget.clone(),
                 resolved_request,
                 manifest,
                 target_source,
@@ -774,6 +775,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
                     attempt_budget.residence_deadline(),
                     run_v3_plan_execution_operator_with_probes(
+                        attempt_budget.clone(),
                         (*req05.previous.previous.previous.payload.0).clone(),
                         manifest,
                         V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
@@ -1097,6 +1099,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let provider_raw = match transport_result {
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                attempt_budget.release_unsent_transport_attempt();
                 runtime_timing
                     .finish_external()
                     .map_err(V3AnthropicRelayRuntimeError::Target)?;

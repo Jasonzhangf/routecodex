@@ -529,6 +529,13 @@ resources:
   - v3.error.execution_decision
   - v3.error.provider_action_gate
   - v3.provider.health_state
+request_independence:
+  business_scope: request_local
+  shared_recovery_scope: listener_provider_interface_model_auth_key
+  session_group_admission: forbidden
+  sibling_identity_delay_generation_mutation: forbidden
+  waiter_count_is_failure_evidence: false
+  precool_and_429_state_owner: existing_exact_identity_owner
 terminal_transition:
   admission_operation: V3ProviderActionGate::record_failure_and_commit_terminal_projection
   atomic_commit_operation: V3ProviderActionGate::commit_terminal_generation_locked
@@ -548,6 +555,7 @@ admission_permit:
   abandon_increments_failure_count: false
   abandon_mutates_provider_health: false
   waiter_order: fifo_ticket
+  admission_scope: exact_control_lane_only
   fresh_request_consumes_active_recovery_lane: http_429_only
 downstream_projection:
   owner_crate: routecodex-v3-error

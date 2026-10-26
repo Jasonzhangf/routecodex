@@ -3,6 +3,30 @@ pub(crate) struct V3AdmittedTargetSelection {
     pub(crate) admission: V3RuntimeProviderAdmission,
 }
 
+pub(crate) async fn admit_v3_provider_transport_attempt(
+    budget: &crate::execution_control::V3AttemptBudget,
+    admission: &mut Option<V3RuntimeProviderAdmission>,
+    rate_limit_permit: &mut Option<crate::provider_action_gate::V3ProviderActionPermit>,
+    action_permit: &mut Option<crate::provider_action_gate::V3ProviderActionPermit>,
+) -> Result<usize, crate::execution_control::V3AttemptStoreError> {
+    use crate::execution_control::V3AttemptStoreError;
+    match budget.admit_transport_attempt() {
+        Err(error @ V3AttemptStoreError::TransportAttemptsExhausted(_)) => {
+            // This request cannot send again. It must not retain shared
+            // capacity or an exact-identity admission while it remains pending.
+            drop(admission.take());
+            drop(rate_limit_permit.take());
+            drop(action_permit.take());
+            tokio::time::sleep_until(tokio::time::Instant::from_std(budget.residence_deadline()))
+                .await;
+            Err(V3AttemptStoreError::ResidenceDeadlineExceeded(format!(
+                "request residence deadline expired while waiting after {error}"
+            )))
+        }
+        result => result,
+    }
+}
+
 pub(crate) struct V3RuntimeProviderAdmission {
     controller: V3AdaptiveConcurrencyController,
     lease: Option<V3AdaptiveConcurrencyLease>,
@@ -26,7 +50,10 @@ impl V3RuntimeProviderAdmission {
     ) -> Option<crate::provider_action_gate::V3ProviderActionPermit> {
         // A 429 witness belongs to the failed identity, not its replacement.
         // Target admission has already selected and reserved the new identity.
-        if pending.as_ref().is_some_and(|w| w.normalized_error_family() == "provider_http_429") {
+        if pending
+            .as_ref()
+            .is_some_and(|w| w.normalized_error_family() == "provider_http_429")
+        {
             *pending = None;
         }
         if pending.is_none() {
@@ -40,9 +67,13 @@ impl V3RuntimeProviderAdmission {
         control: crate::provider_action_gate::V3ExactRateLimitAdmission,
     ) {
         match control {
-            crate::provider_action_gate::V3ExactRateLimitAdmission::Unrestricted => {},
-            crate::provider_action_gate::V3ExactRateLimitAdmission::Admitted(permit) => self.rate_limit_permit = Some(permit),
-            crate::provider_action_gate::V3ExactRateLimitAdmission::Blocked(witness) => self.rate_limit_recovery = Some(witness),
+            crate::provider_action_gate::V3ExactRateLimitAdmission::Unrestricted => {}
+            crate::provider_action_gate::V3ExactRateLimitAdmission::Admitted(permit) => {
+                self.rate_limit_permit = Some(permit)
+            }
+            crate::provider_action_gate::V3ExactRateLimitAdmission::Blocked(witness) => {
+                self.rate_limit_recovery = Some(witness)
+            }
         }
     }
 
@@ -220,7 +251,10 @@ pub(crate) fn try_admit_v3_selected_target(
     controller
         .ensure_initial_budget(&capacity_key, selected.candidate.initial_concurrency_budget)?;
     Ok(controller
-        .try_acquire_business(&capacity_key)
+        .try_acquire_business_scoped(&capacity_key, Some(&routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+            interface_id: selected.candidate.interface_id.clone(),
+            model_id: selected.candidate.model_id.clone(),
+        }))
         .map(|lease| V3RuntimeProviderAdmission::new(controller, lease)))
 }
 
@@ -491,7 +525,7 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
                                 .filter(|key| !rate_limited.contains(*key))
                                 .cloned()
                                 .collect(),
-                            request_local_busy_candidates: BTreeSet::new(),
+                            request_local_busy_candidates: busy,
                         };
                     }
                     Ok(None) => {
@@ -526,6 +560,10 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
                 mut request_local_excluded_candidates,
             } => {
                 request_local_excluded_candidates.extend(excluded);
+                // The async probe continuation starts a new admission step.
+                // Keep exact-identity 429 backpressure in its gate, rather than
+                // publishing this step's temporary mask as a failed candidate.
+                request_local_excluded_candidates.retain(|key| !rate_limited.contains(key));
                 return V3SynchronousTargetAdmissionStep::NeedPreExhaustionProbes {
                     expanded,
                     rescue_candidates,
@@ -539,6 +577,7 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
                 mut request_local_excluded_candidates,
             } => {
                 request_local_excluded_candidates.extend(excluded);
+                request_local_excluded_candidates.retain(|key| !rate_limited.contains(key));
                 return V3SynchronousTargetAdmissionStep::NeedExhaustionProbes {
                     expanded,
                     exhaustion,
@@ -577,6 +616,16 @@ pub(crate) fn step_v3_target_planning_with_admission_sync(
 impl V3ProviderFailureRuntimeHealth {
     pub(crate) fn target_availability_generation(&self) -> u64 {
         self.store.availability_generation()
+    }
+
+    pub(crate) async fn wait_for_target_availability_change(
+        &self,
+        observed_generation: u64,
+    ) -> Result<u64, String> {
+        self.store
+            .wait_for_availability_change(observed_generation)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     async fn run_cooldown_rescue_probes_for_candidates(

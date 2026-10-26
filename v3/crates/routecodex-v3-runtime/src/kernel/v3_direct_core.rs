@@ -220,6 +220,7 @@ where
         let (planned_request, plan) = match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
             attempt_budget.residence_deadline(),
             crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes(
+            attempt_budget.clone(),
             C::body(&standardized).clone(),
             manifest,
             target_source.clone(),
@@ -335,7 +336,6 @@ where
             drop(provider_action_permit.take());
             provider_action_permit_target = None;
         }
-        attempt_budget.set_transport_attempt_limit(expanded.candidates.len());
         trace.push("V3Target10ConcreteProviderSelected");
         if let Some(sink) = route_selection_event_sink.as_ref() {
             let transport_label = if C::body(&standardized)
@@ -504,7 +504,7 @@ where
         };
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());
-        let _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
+        let mut _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
             admission.take_rate_limit_control(&mut pending_provider_action_recovery)
         });
         if pending_provider_action_recovery.is_some() {
@@ -591,31 +591,39 @@ where
                 }
             }
         }
-        send_attempts = match attempt_budget.admit_transport_attempt() {
-            Ok(attempts) => attempts,
-            Err(error) => {
-                if let Err(release_error) = C::release_after_error(
-                    &control,
-                    manifest,
-                    C::server_id(&standardized),
-                    &standardized,
-                    C::request_id(&standardized),
-                    &mut trace,
-                ) {
-                    return error_output(
-                        release_error,
+        send_attempts =
+            match crate::provider_failure_runtime_policy::admit_v3_provider_transport_attempt(
+                &attempt_budget,
+                &mut selected_admission,
+                &mut _rate_limit_permit,
+                &mut provider_action_permit,
+            )
+            .await
+            {
+                Ok(attempts) => attempts,
+                Err(error) => {
+                    if let Err(release_error) = C::release_after_error(
+                        &control,
+                        manifest,
+                        C::server_id(&standardized),
+                        &standardized,
+                        C::request_id(&standardized),
+                        &mut trace,
+                    ) {
+                        return error_output(
+                            release_error,
+                            trace,
+                            &crate::hooks::register_responses_direct_hooks(),
+                        );
+                    }
+                    return direct_runtime_helpers_stream::source_failure_output(
+                        direct_runtime_helpers_stream::direct_attempt_budget_error_source(error),
+                        last_external_http.clone(),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
                     );
                 }
-                return direct_runtime_helpers_stream::source_failure_output(
-                    direct_runtime_helpers_stream::direct_attempt_budget_error_source(error),
-                    last_external_http.clone(),
-                    trace,
-                    &crate::hooks::register_responses_direct_hooks(),
-                );
-            }
-        };
+            };
         if let Err(error) = runtime_timing.start_external() {
             return direct_runtime_helpers_stream::source_failure_output(
                 runtime_source("V3RuntimeTimingExternal", error),
@@ -633,6 +641,8 @@ where
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                attempt_budget.release_unsent_transport_attempt();
+                send_attempts = attempt_budget.transport_attempts();
                 if let Err(error) = runtime_timing.finish_external() {
                     return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3RuntimeTimingExternal", error),

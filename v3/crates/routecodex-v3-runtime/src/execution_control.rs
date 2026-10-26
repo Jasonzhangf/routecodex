@@ -2,7 +2,7 @@ use futures_util::Stream;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -83,6 +83,7 @@ impl Default for V3AttemptStoreLimits {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum V3AttemptStoreError {
     ResidenceDeadlineExceeded(String),
+    TransportAttemptsExhausted(String),
     LocalResourceExhausted(String),
     InvalidAttemptState(String),
     /// The complete-attempt text governance must decide a committed tail, but
@@ -95,6 +96,7 @@ impl fmt::Display for V3AttemptStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ResidenceDeadlineExceeded(message)
+            | Self::TransportAttemptsExhausted(message)
             | Self::LocalResourceExhausted(message)
             | Self::InvalidAttemptState(message)
             | Self::PostCommitGovernedTail(message) => formatter.write_str(message),
@@ -167,10 +169,6 @@ impl V3RequestExecutionControl {
             .inner
             .transport_attempts
             .store(0, Ordering::Release);
-        self.attempt_budget
-            .inner
-            .transport_attempt_limit
-            .store(0, Ordering::Release);
     }
 
     pub fn deadline_unix_ms(&self) -> Result<u64, V3AttemptStoreError> {
@@ -211,13 +209,19 @@ impl V3RequestExecutionControl {
 
 struct V3AttemptBudgetInner {
     limits: V3AttemptStoreLimits,
-    transport_attempt_limit: AtomicUsize,
     transport_attempts: AtomicUsize,
     rate_limited_attempts: AtomicUsize,
+    target_recovery_cursor: Mutex<V3TargetRecoveryCursor>,
     refill_used: AtomicU32,
     request_resident_bytes: AtomicUsize,
     process_resident_bytes: V3ProcessResidentBytes,
     deadline: Instant,
+}
+
+#[derive(Default)]
+struct V3TargetRecoveryCursor {
+    step_index: usize,
+    step_due_at: Option<Instant>,
 }
 
 enum V3ProcessResidentBytes {
@@ -284,9 +288,9 @@ impl V3AttemptBudget {
                 limits,
                 // Zero means no Target10 candidate plan has been installed;
                 // admission then uses the configured request ceiling.
-                transport_attempt_limit: AtomicUsize::new(0),
                 transport_attempts: AtomicUsize::new(0),
                 rate_limited_attempts: AtomicUsize::new(0),
+                target_recovery_cursor: Mutex::new(V3TargetRecoveryCursor::default()),
                 refill_used: AtomicU32::new(0),
                 request_resident_bytes: AtomicUsize::new(0),
                 process_resident_bytes,
@@ -319,14 +323,42 @@ impl V3AttemptBudget {
         self.inner.deadline
     }
 
+    pub(crate) fn target_recovery_started(&self) -> tokio::time::Instant {
+        tokio::time::Instant::from_std(self.inner.deadline - self.inner.limits.residence_timeout)
+    }
+
+    pub(crate) fn current_target_recovery_deadline(&self, now: Instant) -> Option<Instant> {
+        if now >= self.inner.deadline {
+            return None;
+        }
+        let mut cursor = self
+            .inner
+            .target_recovery_cursor
+            .lock()
+            .expect("request recovery cursor lock should not be poisoned");
+        let wait_ms = routecodex_v3_config::internal::v3_internal_target_recovery()
+            .wait_ms(cursor.step_index);
+        let due_at = *cursor
+            .step_due_at
+            .get_or_insert_with(|| (now + Duration::from_millis(wait_ms)).min(self.inner.deadline));
+        Some(due_at.min(self.inner.deadline))
+    }
+
+    pub(crate) fn advance_target_recovery_step_if_due(&self, now: Instant) {
+        let mut cursor = self
+            .inner
+            .target_recovery_cursor
+            .lock()
+            .expect("request recovery cursor lock should not be poisoned");
+        if cursor.step_due_at.is_some_and(|due_at| now >= due_at) {
+            cursor.step_index = cursor.step_index.saturating_add(1);
+            cursor.step_due_at = None;
+        }
+    }
+
     pub(crate) fn admit_transport_attempt(&self) -> Result<usize, V3AttemptStoreError> {
         self.ensure_resident()?;
-        let planned_limit = self.inner.transport_attempt_limit.load(Ordering::Acquire);
-        let limit = if planned_limit == 0 {
-            self.inner.limits.request_max_attempts
-        } else {
-            planned_limit.min(self.inner.limits.request_max_attempts)
-        };
+        let limit = self.inner.limits.request_max_attempts;
         self.inner
             .transport_attempts
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
@@ -338,23 +370,24 @@ impl V3AttemptBudget {
             })
             .map(|previous| previous + 1)
             .map_err(|_| {
-                V3AttemptStoreError::LocalResourceExhausted(format!(
+                V3AttemptStoreError::TransportAttemptsExhausted(format!(
                     "request provider transport attempt limit {} exhausted",
                     limit
                 ))
             })
     }
 
-    pub(crate) fn set_transport_attempt_limit(&self, candidate_count: usize) {
-        self.inner
-            .transport_attempt_limit
-            .fetch_max(candidate_count.max(1), Ordering::AcqRel);
-    }
-
     pub(crate) fn record_rate_limited_attempt(&self) {
         self.inner
             .rate_limited_attempts
             .fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Settle the pending admission when transport reports no wire send.
+    /// Every caller owns one successful admit_transport_attempt reservation.
+    pub(crate) fn release_unsent_transport_attempt(&self) {
+        let previous = self.inner.transport_attempts.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(previous > 0, "unsent release requires a pending admission");
     }
 
     pub(crate) fn transport_attempts(&self) -> usize {

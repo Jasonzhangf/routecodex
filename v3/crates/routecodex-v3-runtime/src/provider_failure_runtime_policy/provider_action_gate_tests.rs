@@ -77,7 +77,7 @@ targets = [
 }
 
 #[tokio::test]
-async fn unmatched_transient_reselect_keeps_returned_recovery_witness_admissible() {
+async fn unmatched_transient_reselect_keeps_healthy_alternative_independent() {
     let manifest = transport_thrash_manifest("unmatched_transient_reselect");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let selected = match resolve_target(
@@ -130,7 +130,7 @@ async fn unmatched_transient_reselect_keeps_returned_recovery_witness_admissible
     .expect("unmatched transient must project through the policy");
 
     assert_eq!(result.event.action, "switch_provider");
-    assert!(result.event.wait_ms.is_some());
+    assert_eq!(result.event.wait_ms, None);
     let reselected = result
         .retry_selected
         .as_ref()
@@ -139,23 +139,10 @@ async fn unmatched_transient_reselect_keeps_returned_recovery_witness_admissible
         v3_relay_provider_candidate_key(&reselected.candidate),
         v3_relay_provider_candidate_key(&result.event.candidate)
     );
-    let V3Error05ExecutionAction::WaitThenReselect { recovery } = &result.decision.action else {
-        panic!("unmatched transient alternative must return a reselect recovery witness");
-    };
-
-    let transition = tokio::time::timeout(
-        Duration::from_secs(30),
-        health.wait_for_error05_recovery(
-            recovery,
-            reselected,
-            std::time::Instant::now() + Duration::from_secs(30),
-        ),
-    )
-    .await
-    .expect("unmatched transient reselect must not hang on recovery admission")
-    .expect("recovery wait must not fail");
     assert!(
-        matches!(transition, V3ProviderActionRecoveryTransition::Admitted(_)),
-        "returned recovery witness must remain admissible, got: {transition:?}"
+        matches!(result.decision.action, V3Error05ExecutionAction::ReevaluateTarget),
+        "a healthy alternative must not inherit the failed identity's recovery lane"
     );
+    assert!(result.decision.action.recovery_witness().is_none());
+    assert!(result.terminal_projection.is_none());
 }

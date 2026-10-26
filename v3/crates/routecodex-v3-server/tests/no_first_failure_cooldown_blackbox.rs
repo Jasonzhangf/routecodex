@@ -1,4 +1,4 @@
-//! Public regression: ordinary 429 cools only after three consecutive failures.
+//! Public regression: 429 is health-neutral; real 500/401 cool exact identities.
 //! Command: CARGO_NET_OFFLINE=true cargo test --locked --manifest-path v3/Cargo.toml
 //! -p routecodex-v3-server --test no_first_failure_cooldown_blackbox -- --nocapture
 //! Run with an isolated test HOME, as server error sampling uses HOME/.rcc.
@@ -21,6 +21,7 @@ mod hub_v1_fixture;
 #[derive(Default)]
 struct Upstream {
     receipts: Mutex<BTreeMap<String, usize>>,
+    fallback_receipts: Mutex<BTreeMap<String, usize>>,
 }
 
 async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
@@ -50,6 +51,10 @@ async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -
         };
         return controlled_failure(status, kind);
     }
+    successful_response(input)
+}
+
+fn successful_response(input: &str) -> Response<Body> {
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/json")
@@ -152,20 +157,16 @@ targets = [
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
-async fn request(client: &reqwest::Client, base: &str, model: &str, marker: &str, success: bool) {
-    let response = timeout(
-        Duration::from_secs(8),
-        client
+async fn request(client: &reqwest::Client, base: &str, model: &str, marker: &str) {
+    timeout(Duration::from_secs(8), async {
+        let response = client
             .post(format!("{base}/v1/responses"))
             .header("session-id", marker)
             .header("thread-id", marker)
             .json(&json!({"model":model,"input":marker,"stream":false}))
-            .send(),
-    )
-    .await
-    .expect("multi-candidate recovery must finish within the declared action-gate delay bound");
-    if success {
-        let response = response.expect("a healthy provider must actually answer the next request");
+            .send()
+            .await
+            .expect("healthy candidate must answer");
         assert_eq!(response.status(), 200);
         let body = response.text().await.unwrap();
         assert!(
@@ -176,9 +177,9 @@ async fn request(client: &reqwest::Client, base: &str, model: &str, marker: &str
             !body.contains("\"error\""),
             "client must not receive an error envelope: {body}"
         );
-    } else {
-        assert!(response.is_err(), "real upstream failure must terminate transport without fabricated completion or client error response");
-    }
+    })
+    .await
+    .expect("healthy fallback must complete headers and body within the unchanged bound");
 }
 
 async fn pool(client: &reqwest::Client, base: &str) -> Vec<Value> {
@@ -194,12 +195,70 @@ async fn pool(client: &reqwest::Client, base: &str) -> Vec<Value> {
         .clone()
 }
 
+async fn wait_for_cooldown_count(
+    client: &reqwest::Client,
+    base: &str,
+    expected: usize,
+) -> Vec<Value> {
+    timeout(Duration::from_secs(4), async {
+        loop {
+            let entries = pool(client, base).await;
+            if entries.len() == expected {
+                return entries;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("failed observation must commit the eligible exact cooldown")
+}
+
 async fn receipt(state: &Upstream, marker: &str) {
     assert_eq!(
         state.receipts.lock().await.get(marker),
         Some(&1),
         "{marker}: must reach upstream exactly once; no retry may hide a failure"
     );
+}
+
+async fn fallback_receipt(state: &Upstream, marker: &str) {
+    assert_eq!(
+        state.fallback_receipts.lock().await.get(marker),
+        Some(&1),
+        "{marker}: healthy fallback must receive exactly one actual attempt"
+    );
+}
+
+fn assert_identities(entries: Vec<Value>, expected: &[(&str, &str, &str, &str)]) {
+    let mut actual: Vec<_> = entries
+        .iter()
+        .map(|e| {
+            (
+                e["provider_id"].as_str().unwrap(),
+                e["interface_id"].as_str().unwrap(),
+                e["auth_alias"].as_str().unwrap(),
+                e["model_id"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    actual.sort();
+    let mut expected = expected.to_vec();
+    expected.sort();
+    assert_eq!(
+        actual, expected,
+        "cooldown must contain only the exact failed identities"
+    );
+}
+
+async fn fallback(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
+    let input = body["input"].as_str().unwrap_or("");
+    *state
+        .fallback_receipts
+        .lock()
+        .await
+        .entry(input.to_string())
+        .or_default() += 1;
+    successful_response(input)
 }
 
 #[tokio::test]
@@ -213,10 +272,7 @@ async fn no_first_failure_cooldown_public_http() {
     let (shutdown, stopped) = oneshot::channel::<()>();
     let app = Router::new()
         .route("/v1/responses", post(provider))
-        .route(
-            "/fallback/v1/responses",
-            post(|| async { controlled_failure(StatusCode::SERVICE_UNAVAILABLE, "server_error") }),
-        )
+        .route("/fallback/v1/responses", post(fallback))
         .with_state(state.clone());
     let upstream = tokio::spawn(async move {
         axum::serve(listener, app)
@@ -237,127 +293,69 @@ async fn no_first_failure_cooldown_public_http() {
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
 
-    request(&client, &base, "main", "health-test:fail-isolated", false).await;
+    let began = tokio::time::Instant::now();
+    request(&client, &base, "main", "health-test:fail-isolated").await;
     receipt(&state, "health-test:fail-isolated").await;
-    assert!(
-        pool(&client, &base)
-            .await
-            .iter()
-            .all(|e| e["provider_id"] != "primary"),
-        "first ordinary HTTP 429 must not create global cooldown"
-    );
-    request(&client, &base, "main", "health-test:success-reset", true).await;
-    receipt(&state, "health-test:success-reset").await;
-
-    request(
-        &client,
-        &base,
-        "main",
-        "health-test:fail-after-reset",
-        false,
-    )
-    .await;
-    receipt(&state, "health-test:fail-after-reset").await;
-    assert!(
-        pool(&client, &base)
-            .await
-            .iter()
-            .all(|e| e["provider_id"] != "primary"),
-        "a real success must reset the failure streak"
-    );
-    request(&client, &base, "main", "health-test:fail-repeat", false).await;
-    receipt(&state, "health-test:fail-repeat").await;
-    assert!(
-        pool(&client, &base)
-            .await
-            .iter()
-            .all(|e| e["provider_id"] != "primary"),
-        "second consecutive ordinary HTTP 429 must not create global cooldown"
-    );
-    request(&client, &base, "main", "health-test:fail-third", false).await;
-    receipt(&state, "health-test:fail-third").await;
-    let entries = pool(&client, &base).await;
-    assert!(
-        entries.iter().any(|e| e["provider_id"] == "primary"
-            && e["auth_alias"] == alias
-            && e["model_id"] == "main"),
-        "consecutive third HTTP 429 must cool exact provider/key/model: {entries:?}"
-    );
-    request(&client, &base, "main", "health-test:blocked", false).await;
+    fallback_receipt(&state, "health-test:fail-isolated").await;
+    assert_identities(pool(&client, &base).await, &[]);
+    request(&client, &base, "main", "health-test:fresh-after-429").await;
     assert!(
         !state
             .receipts
             .lock()
             .await
-            .contains_key("health-test:blocked"),
-        "cooled key must not receive another business attempt"
+            .contains_key("health-test:fresh-after-429"),
+        "fresh session must skip gated primary"
     );
-    request(&client, &base, "other", "health-test:other-model", true).await;
-    request(&client, &base, "sibling", "health-test:other-key", true).await;
-    request(
-        &client,
-        &base,
-        "independent",
-        "health-test:independent",
-        true,
-    )
-    .await;
+    fallback_receipt(&state, "health-test:fresh-after-429").await;
+    receipt(&state, "health-test:fail-isolated").await;
+    assert!(
+        began.elapsed() < Duration::from_millis(900),
+        "fresh proof must precede the earliest 1s backoff expiry"
+    );
+    assert_identities(pool(&client, &base).await, &[]);
+    request(&client, &base, "other", "health-test:other-model").await;
+    request(&client, &base, "sibling", "health-test:other-key").await;
+    request(&client, &base, "independent", "health-test:independent").await;
     receipt(&state, "health-test:other-model").await;
     receipt(&state, "health-test:other-key").await;
     receipt(&state, "health-test:independent").await;
-    assert!(
-        pool(&client, &base)
-            .await
-            .iter()
-            .any(|e| e["provider_id"] == "primary"
-                && e["auth_alias"] == alias
-                && e["model_id"] == "main"),
-        "sibling success must not reset another identity's streak/cooldown"
-    );
+    assert_identities(pool(&client, &base).await, &[]);
 
-    request(
-        &client,
-        &base,
-        "other",
-        "health-test:server-terminal",
-        false,
-    )
-    .await;
+    request(&client, &base, "other", "health-test:server-terminal").await;
     receipt(&state, "health-test:server-terminal").await;
-    assert!(
-        pool(&client, &base)
-            .await
-            .iter()
-            .any(|e| e["provider_id"] == "primary"
-                && e["auth_alias"] == alias
-                && e["model_id"] == "other"),
-        "HTTP 500 retains its declared immediate threshold on the other model"
+    fallback_receipt(&state, "health-test:server-terminal").await;
+    assert_identities(pool(&client, &base).await, &[]);
+    assert_identities(
+        wait_for_cooldown_count(&client, &base, 1).await,
+        &[("primary", "default", &alias, "other")],
     );
     request(
         &client,
         &base,
         "sibling",
         "health-test:after-server-failure",
-        true,
     )
     .await;
     receipt(&state, "health-test:after-server-failure").await;
+    assert_identities(
+        pool(&client, &base).await,
+        &[("primary", "default", &alias, "other")],
+    );
 
-    request(
-        &client,
-        &base,
-        "independent",
-        "health-test:auth-terminal",
-        false,
-    )
-    .await;
+    request(&client, &base, "independent", "health-test:auth-terminal").await;
     receipt(&state, "health-test:auth-terminal").await;
-    assert!(
-        pool(&client, &base)
-            .await
-            .iter()
-            .any(|e| e["provider_id"] == "independent"),
-        "auth failure retains immediate isolation"
+    fallback_receipt(&state, "health-test:auth-terminal").await;
+    assert_identities(
+        pool(&client, &base).await,
+        &[("primary", "default", &alias, "other")],
+    );
+    assert_identities(
+        wait_for_cooldown_count(&client, &base, 2).await,
+        &[
+            ("primary", "default", &alias, "other"),
+            ("independent", "default", "independent", "main"),
+        ],
     );
     handle.shutdown().await;
     shutdown.send(()).unwrap();

@@ -67,6 +67,14 @@ pub struct V3ResponsesRelayProviderHealthHandle {
 }
 
 impl V3ResponsesRelayProviderHealthHandle {
+    pub fn with_observation_clock(
+        mut self,
+        clock: std::sync::Arc<dyn crate::V3ProviderHealthObservationClock>,
+    ) -> Self {
+        self.runtime_health = self.runtime_health.with_observation_clock(clock);
+        self
+    }
+
     pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         Self {
             runtime_health: V3ProviderFailureRuntimeHealth::from_manifest(manifest),

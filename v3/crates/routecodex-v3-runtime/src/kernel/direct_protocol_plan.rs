@@ -4,24 +4,39 @@ pub async fn plan_v3_responses_protocol_execution_with_recovery(
     raw: V3Server03HttpRequestRaw,
     provider_health: impl Into<V3ProviderFailureRuntimeHealth>,
     now_epoch_ms: u64,
-) -> Result<(V3ResponsesProtocolExecutionPlan, V3RequestExecutionControl), V3ResponsesProtocolExecutionPlanFailure> {
-    let control = V3RequestExecutionControl::from_manifest(manifest, &raw.server_id)
-        .map_err(|error| protocol_plan_source_failure(
-            runtime_source("V3RequestExecutionControl", error.to_string()),
-            vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"],
-        ))?;
+) -> Result<
+    (V3ResponsesProtocolExecutionPlan, V3RequestExecutionControl),
+    V3ResponsesProtocolExecutionPlanFailure,
+> {
+    let control =
+        V3RequestExecutionControl::from_manifest(manifest, &raw.server_id).map_err(|error| {
+            protocol_plan_source_failure(
+                runtime_source("V3RequestExecutionControl", error.to_string()),
+                vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"],
+            )
+        })?;
     let plan = tokio::time::timeout_at(
         tokio::time::Instant::from_std(control.attempt_budget().residence_deadline()),
-        plan_v3_responses_protocol_execution_recovery_inner(manifest, raw, provider_health.into(), now_epoch_ms),
-    ).await.map_err(|_| protocol_plan_source_failure(
-        Ok(build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3TargetRecoveryWait",
-            "request_residence_deadline_exceeded",
-            "protocol preplanning exceeded the request residence deadline",
-        )),
-        vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"],
-    ))??;
+        plan_v3_responses_protocol_execution_recovery_inner(
+            manifest,
+            raw,
+            provider_health.into(),
+            now_epoch_ms,
+            &control.attempt_budget(),
+        ),
+    )
+    .await
+    .map_err(|_| {
+        protocol_plan_source_failure(
+            Ok(build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3TargetRecoveryWait",
+                "request_residence_deadline_exceeded",
+                "protocol preplanning exceeded the request residence deadline",
+            )),
+            vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"],
+        )
+    })??;
     Ok((plan, control))
 }
 
@@ -30,10 +45,10 @@ async fn plan_v3_responses_protocol_execution_recovery_inner(
     raw: V3Server03HttpRequestRaw,
     provider_health: V3ProviderFailureRuntimeHealth,
     mut now_epoch_ms: u64,
+    attempt_budget: &crate::execution_control::V3AttemptBudget,
 ) -> Result<V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure> {
     let health = provider_health;
-    let started = tokio::time::Instant::now();
-    let mut delay_ms = 50;
+    let started = attempt_budget.target_recovery_started();
     let mut captured_target = None;
     loop {
         let failure = match plan_v3_responses_protocol_execution_with_captured_target(
@@ -90,19 +105,21 @@ async fn plan_v3_responses_protocol_execution_recovery_inner(
             &mut BTreeSet::new(),
             &mut BTreeSet::new(),
             now_epoch_ms,
-            started,
-            &mut delay_ms,
+            attempt_budget,
         )
         .await
+        .map_err(|source| protocol_plan_source_failure(Ok(source), failure.node_trace.clone()))?
         {
             return Err(failure);
         }
         now_epoch_ms =
             crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
-                .map_err(|error| protocol_plan_source_failure(
-                    runtime_source("V3TargetRecoveryWait", error),
-                    failure.node_trace.clone(),
-                ))?;
+                .map_err(|error| {
+                    protocol_plan_source_failure(
+                        runtime_source("V3TargetRecoveryWait", error),
+                        failure.node_trace.clone(),
+                    )
+                })?;
     }
 }
 

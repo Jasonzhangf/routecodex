@@ -9,6 +9,7 @@ pub mod probe;
 mod probe_backoff;
 mod provider_auth;
 mod provider_cooldown_probe;
+pub use provider_cooldown_probe::V3ProviderCooldownProbeKey;
 pub mod raw_response;
 mod shared;
 pub mod transport;
@@ -29,7 +30,9 @@ pub use health::{
 };
 pub use key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
-    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
+    V3ProviderPrecoolObservationOutcome, V3ProviderProbePurpose,
+    V3ProviderRateLimitProbeDisposition, V3ProviderSchedulingProjection,
+    V3ProviderSchedulingReader,
 };
 pub use opencode_zen_headers::stamp_opencode_zen_dynamic_request_headers;
 pub use probe::{build_v3_provider_global_probe_request, build_v3_provider_global_request};

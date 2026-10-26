@@ -64,7 +64,8 @@ pub use nodes::*;
 pub use provider_action_gate::*;
 pub use provider_failure_runtime_policy::{
     build_v3_provider_global_probe_target, probe_v3_provider_global_target,
-    V3ProviderFailureRuntimeHealth, V3ProviderHealthProbeFailure, V3RelayErrorOperatorFault,
+    V3ProviderFailureRuntimeHealth, V3ProviderHealthObservationClock, V3ProviderHealthProbeFailure,
+    V3RelayErrorOperatorFault,
 };
 pub use route_policy::*;
 pub use routecodex_v3_provider_responses::V3ProviderHealthListenerScope;

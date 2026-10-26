@@ -13,6 +13,7 @@ use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorSourceKind,
     V3ProviderFailureSessionScope,
 };
+use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
 use routecodex_v3_target::{
     V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
     V3TargetExhaustion,
@@ -657,6 +658,7 @@ pub(crate) async fn await_v3_plan_execution_with_deadline(
 
 #[inline(never)]
 pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
+    attempt_budget: crate::execution_control::V3AttemptBudget,
     target_resolved_request: Value,
     manifest: &'a V3Config05ManifestPublished,
     target_source: V3PlanExecutionTargetSource,
@@ -678,6 +680,7 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
     >,
 > {
     Box::pin(run_v3_plan_execution_with_probes_unboxed(
+        attempt_budget,
         target_resolved_request,
         manifest,
         target_source,
@@ -694,6 +697,7 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
 }
 
 async fn run_v3_plan_execution_with_probes_unboxed(
+    attempt_budget: crate::execution_control::V3AttemptBudget,
     target_resolved_request: Value,
     manifest: &V3Config05ManifestPublished,
     target_source: V3PlanExecutionTargetSource,
@@ -709,16 +713,17 @@ async fn run_v3_plan_execution_with_probes_unboxed(
 ) -> Result<(Value, V3PlanExecutionCompleted), V3PlanExecutionStop> {
     let mut source = target_source;
     let mut preferred = preferred_selected;
+    // Carry busy provenance separately through Error policy. Only this planning
+    // scan masks it, until a paced wait authorizes a fresh admission check.
     let mut request_local_excluded_candidates: BTreeSet<String> = request_local_excluded_candidates
-        .difference(request_local_busy_candidates)
+        .union(request_local_busy_candidates)
         .cloned()
         .collect();
     let mut request_local_busy_candidates = request_local_busy_candidates.clone();
     let mut pre_exhaustion_probes_completed = false;
     let mut exhaustion_probes_completed = false;
     let mut exhaustion_generation = None;
-    let recovery_started = tokio::time::Instant::now();
-    let mut recovery_delay_ms = 50_u64;
+    let recovery_started = attempt_budget.target_recovery_started();
     let current_time = |code| {
         crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms().map_err(
             |error| {
@@ -732,10 +737,6 @@ async fn run_v3_plan_execution_with_probes_unboxed(
         )
     };
     loop {
-        if pre_exhaustion_probes_completed || exhaustion_probes_completed {
-            request_local_excluded_candidates
-                .retain(|key| !request_local_busy_candidates.contains(key));
-        }
         let outcome = match run_v3_plan_execution_operator(
             target_resolved_request.clone(),
             manifest.clone(),
@@ -842,18 +843,18 @@ async fn run_v3_plan_execution_with_probes_unboxed(
                         source = V3PlanExecutionTargetSource::Expanded(expanded);
                     }
                     Ok(false) => {
-                        if wait_for_target_recovery(
+                        let waited = wait_for_target_recovery(
                             &expanded,
                             provider_health,
                             failure_session_scope,
                             &mut request_local_excluded_candidates,
                             &mut request_local_busy_candidates,
                             now_ms,
-                            recovery_started,
-                            &mut recovery_delay_ms,
+                            &attempt_budget,
                         )
                         .await
-                        {
+                        .map_err(V3PlanExecutionStop::Failed)?;
+                        if waited {
                             now_ms = current_time("target_recovery_wait_clock_failed")
                                 .map_err(V3PlanExecutionStop::Failed)?;
                             source = V3PlanExecutionTargetSource::Expanded(expanded);
@@ -903,18 +904,18 @@ async fn run_v3_plan_execution_with_probes_unboxed(
                 // exhaustion; the source label cannot reconstruct these sets.
                 request_local_excluded_candidates = admitted_exclusions;
                 request_local_busy_candidates = admitted_busy;
-                if wait_for_target_recovery(
+                let waited = wait_for_target_recovery(
                     &expanded,
                     provider_health,
                     failure_session_scope,
                     &mut request_local_excluded_candidates,
                     &mut request_local_busy_candidates,
                     now_ms,
-                    recovery_started,
-                    &mut recovery_delay_ms,
+                    &attempt_budget,
                 )
                 .await
-                {
+                .map_err(V3PlanExecutionStop::Failed)?;
+                if waited {
                     now_ms = current_time("target_recovery_wait_clock_failed")
                         .map_err(V3PlanExecutionStop::Failed)?;
                     pre_exhaustion_probes_completed = false;
@@ -962,25 +963,59 @@ pub(crate) async fn wait_for_target_recovery(
     excluded: &mut BTreeSet<String>,
     busy: &mut BTreeSet<String>,
     now_ms: u64,
-    started: tokio::time::Instant,
-    delay_ms: &mut u64,
-) -> bool {
-    let remaining = target_recovery_remaining(expanded, started);
-    if remaining.is_zero() {
-        return false;
-    }
+    attempt_budget: &crate::execution_control::V3AttemptBudget,
+) -> Result<bool, V3Error01SourceRaised> {
+    let Some(due_at) = attempt_budget.current_target_recovery_deadline(std::time::Instant::now())
+    else {
+        return Ok(false);
+    };
+    let observed_generation = health.target_availability_generation();
     let permanent: BTreeSet<String> = excluded.difference(busy).cloned().collect();
-    let cooldown_only = crate::provider_failure_runtime_policy::v3_exhaustion_is_cooldown_only(
-        expanded, &permanent, scope, health, now_ms,
-    );
-    if busy.is_empty() && !cooldown_only {
-        return false;
+    let availability = health.session_bound_availability(scope);
+    let recovered_before_registration = expanded.candidates.iter().any(|candidate| {
+        let key =
+            crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate);
+        !permanent.contains(&key)
+            && !busy.contains(&key)
+            && availability
+                .availability_for_interface(
+                    &candidate.provider_id,
+                    &candidate.interface_id,
+                    Some(&candidate.auth_alias),
+                    Some(&candidate.model_id),
+                    now_ms,
+                )
+                .available
+    });
+    if recovered_before_registration {
+        return Ok(true);
     }
-    tokio::time::sleep(std::time::Duration::from_millis(*delay_ms).min(remaining)).await;
-    *delay_ms = delay_ms.saturating_mul(2).min(5_000);
+    // No recoverable peer is not permission to close this request early.
+    // Keep the last identity protected and wait without a business lease;
+    // cancellation and the original request deadline still bound the wait.
+    let capacity_keys: BTreeSet<_> = expanded.candidates.iter()
+        .filter(|candidate| busy.contains(
+            &crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate)))
+        .map(|candidate| (crate::provider_failure_runtime_policy::v3_provider_concurrency_key_parts(
+            &candidate.provider_id, &candidate.auth_alias), Some(routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+                interface_id: candidate.interface_id.clone(), model_id: candidate.model_id.clone(),
+            })))
+        .collect();
+    let capacity_keys: Vec<_> = capacity_keys.into_iter().collect();
+    let concurrency = routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController::process_shared();
+    tokio::select! {
+        _ = tokio::time::sleep_until(tokio::time::Instant::from_std(due_at)) => {}
+        changed = health.wait_for_target_availability_change(observed_generation) => {
+            changed.map_err(|error| build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure, "V3TargetRecoveryWait",
+                "target_availability_wait_failed", error))?;
+        }
+        _ = concurrency.wait_for_scoped_capacity_change(&capacity_keys), if !capacity_keys.is_empty() => {}
+    }
+    attempt_budget.advance_target_recovery_step_if_due(std::time::Instant::now());
     *excluded = permanent;
     busy.clear();
-    true
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -1104,6 +1139,113 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
                 .in_flight,
             before
         );
+    }
+
+    #[tokio::test]
+    async fn target_recovery_reselects_if_health_restored_before_wait_registration() {
+        let manifest = test_manifest("r05_recovered_before_wait");
+        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+        let scope =
+            V3ProviderFailureSessionScope::new("test", "default", "recovered-wait").unwrap();
+        let hit = crate::provider_failure_runtime_policy::resolve_v3_relay_opaque_target_once(
+            &manifest,
+            "test",
+            "responses",
+            "/v1/responses",
+            &json!({"model":"client-model","input":"opaque"}),
+            0,
+        )
+        .unwrap();
+        let expanded =
+            expand_v3_relay_target_candidates_from_opaque_hit(&manifest, hit, 0).unwrap();
+        let budget =
+            crate::execution_control::V3AttemptBudget::from_manifest(&manifest, "test").unwrap();
+        let now_ms =
+            crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                .unwrap();
+        let reselect = wait_for_target_recovery(
+            &expanded,
+            &health,
+            &scope,
+            &mut BTreeSet::new(),
+            &mut BTreeSet::new(),
+            now_ms,
+            &budget,
+        )
+        .await
+        .unwrap();
+        assert!(reselect, "a stale exhaustion decision must not reject a candidate that is healthy before wait registration");
+    }
+
+    #[tokio::test]
+    async fn target_recovery_health_signal_wakes_without_a_capacity_release() {
+        let provider_id = "r05_health_signal_only";
+        let manifest = test_manifest(provider_id);
+        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+        let scope = V3ProviderFailureSessionScope::new("test", "default", "health-signal").unwrap();
+        let hit = crate::provider_failure_runtime_policy::resolve_v3_relay_opaque_target_once(
+            &manifest,
+            "test",
+            "responses",
+            "/v1/responses",
+            &json!({"model":"client-model","input":"opaque"}),
+            0,
+        )
+        .unwrap();
+        let expanded =
+            expand_v3_relay_target_candidates_from_opaque_hit(&manifest, hit, 0).unwrap();
+        let now_ms =
+            crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                .unwrap();
+        let action =
+            routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("transport");
+        for _ in 0..3 {
+            health
+                .record_provider_key_failure_action(
+                    provider_id,
+                    Some("key1"),
+                    Some("gpt-test"),
+                    &action,
+                    now_ms,
+                )
+                .unwrap();
+        }
+        let store = health.store();
+        let permit = store
+            .acquire_provider_cooldown_rescue_probe_for_interface(
+                provider_id,
+                "default",
+                Some("key1"),
+                Some("gpt-test"),
+            )
+            .unwrap()
+            .unwrap();
+        let budget =
+            crate::execution_control::V3AttemptBudget::from_manifest(&manifest, "test").unwrap();
+        let mut waiting = tokio::spawn(async move {
+            wait_for_target_recovery(
+                &expanded,
+                &health,
+                &scope,
+                &mut BTreeSet::new(),
+                &mut BTreeSet::new(),
+                now_ms,
+                &budget,
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        store
+            .complete_provider_cooldown_probe_success_with_permit(&permit, now_ms)
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_millis(200), &mut waiting).await;
+        if result.is_err() {
+            waiting.abort();
+        }
+        assert!(result
+            .expect("typed health recovery must wake independently of capacity")
+            .unwrap()
+            .unwrap());
     }
 
     fn preplan_test_input(
@@ -1731,6 +1873,7 @@ targets = [
         let request = json!({"model": "client-model", "input": "opaque"});
         let run = tokio::spawn(async move {
             run_v3_plan_execution_operator_with_probes(
+                crate::execution_control::V3AttemptBudget::process_default(),
                 request,
                 &task_manifest,
                 V3PlanExecutionTargetSource::Expanded(expanded),

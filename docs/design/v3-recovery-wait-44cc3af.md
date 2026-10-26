@@ -1,5 +1,132 @@
 # 44cc3af: recovery waiting before terminal exhaustion
 
+## Current pool-empty recovery contract
+
+### Sustained 429 policy override, 2026-10-26
+
+Early 429 remains exact-identity capacity backpressure. A new real 429 spanning
+at least two minutes since the first unresolved 429 commits a 30-minute minimum
+cooldown. Matching real success resets the unresolved observation before a
+probe-required disposition is established. Count alone and elapsed time without
+a new provider response cannot upgrade the observation. After one hour of the
+same unresolved episode, restoration requires a current exact-identity probe
+returning a real non-429 HTTP response. Other HTTP failures remain failures in
+the Error chain; no status or transport error is rewritten as success. Recovery
+must satisfy the minimum and all remaining health restrictions. The existing
+Store and probe owner carry and persist this typed state; no second scheduler
+or payload control fields are introduced. Healthy alternatives remain usable.
+
+### 4945 public-entry gap: every captured candidate failed transport
+
+Real7777 request `openai-responses-router-gpt-5.5-20261026T030605800-1712330-7383`
+failed after connection refusal, response-header timeout and TLS EOF. Each
+attempt had no upstream HTTP status. Internal502 is diagnostic, not provider
+response data. Earlier all-cooled fixtures do not cover this all-tried path.
+The current exclusion predicate filters every failed identity before deciding
+whether pool recovery is possible, so it reaches the terminal exit instead.
+
+The recovery handoff must include a previously failed identity whose existing
+cooldown can recover. A matching typed successful probe or real business
+success may release that identity's failure exclusion; elapsed time or an
+unrelated wake cannot do so. Preserve request-shape exclusions, original
+residence and acquisition budgets, exact identity isolation and cancellation.
+Do not reenter Router or introduce another retry scheduler.
+
+```mermaid
+flowchart TD
+    I([未提交内容的 provider 失败]) --> E[Error 保留原始错误及完整身份]
+    E --> Q{捕获目标中存在可恢复身份?}
+    Q -->|存在| R[交给既有池恢复 owner]
+    R --> H[按原始预算读取健康与到期探测]
+    H --> A{匹配身份已真实恢复?}
+    A -->|已恢复| S[解除该身份失败排除并正常准入]
+    A -->|未恢复| W[无业务 lease 等待或最终期限复核]
+    Q -->|暂无可恢复身份| W
+    S --> O([本轮唯一处置出口])
+    W --> O
+```
+
+The protected last candidate is not cooled, probed or automatically retried.
+Its failure does not immediately terminate the client request. With no other
+recoverable peer the request remains pending without business capacity until
+client cancellation or its original deadline; final checks then decide the
+request transport disposition. A notification cannot release that protection.
+Public regressions first prove waiting and recovery of a previously failed
+candidate after every candidate suffered real transport failure, for native
+Responses Direct and actual Responses-to-Chat Relay. They must distinguish a
+matching probe success from spontaneous retry and forbid provider error bodies
+or fabricated terminal success. No new last-candidate health amendment is
+authorized. Before cooling another failed identity, hold it for observation in
+typed control state, allow healthy alternatives immediately, and cancel its
+pending cooling decision on matching real success. The existing declared
+policy owns this timing; the pool wait ladder is not a new health threshold.
+The probe permit is shared with the existing cooldown probe owner. Observation
+does not manufacture a cooldown entry. Matching business success invalidates
+the observation generation and cancels its transport. A late failure cannot
+restore that pending action or cool the recovered identity. Other identities
+do not share the observation lane or its timing escalation.
+Candidate count is not a second transport-attempt ceiling. A recovered earlier
+peer may receive the original request while the declared request attempt budget
+and original deadline still allow it. Every real send retains its sequence;
+the configured hard ceiling and existing 429 accounting remain enforced.
+
+### PR489 combination: exact dynamic identity and shared hard ceiling
+
+Keep the actual429 in-flight watermark, one-hour median-minus-one smoothing and
+default40 configured ceiling. Dynamic samples, budgets and adaptive probe state
+belong to the selected typed interface/model identity inside provider/auth.
+The sum of all identity leases remains bounded by the shared configured ceiling.
+429 on one identity never contracts another identity. The Error/action gate owns
+retry timing; capacity admission owns the measured dynamic limit. This adds no
+retry owner and no control fields to business payloads.
+
+```mermaid
+flowchart TD
+    A([已声明的目标身份]) --> B{共享硬上限与本身份动态预算均可用?}
+    B -->|否| C[返回内部容量状态并由原选路等待或重选]
+    B -->|是| D[取得携带完整身份的唯一容量凭证]
+    D --> E[执行原候选尝试]
+    E --> F{尝试结果}
+    F -->|429| G[按本身份实际并发水位采样并调整动态预算]
+    F -->|可保真处理的响应| H[保留原响应并进入原业务校验路径]
+    F -->|其他错误或取消| I[保留原内部错误来源]
+    G --> J[原容量凭证恰好释放一次]
+    H --> J
+    I --> J
+    J --> K{已有校验确认真实业务成功?}
+    K -->|是| L[原成功记录者恢复匹配身份预算并唤醒等待]
+    K -->|否| M[原错误链或原取消路径继续]
+    C --> Z([本轮内部处置])
+    L --> Z
+    M --> Z
+```
+
+The existing request/error SESE graphs retain their operator order and separate
+payload/error objects. The typed capacity resource and mapped lease lifecycle
+carry the new identity dimension. Probe outcomes and early drops use their
+existing owners; do not invent a second released flag, body-derived identity,
+global adaptive budget or response-header business-success shortcut.
+
+When no eligible candidate is presently available, each request independently
+waits 1, 3, 15, 35 and 90 seconds, then rechecks every 1 second. These are
+intervals, not cumulative deadlines or the provider health-probe ladder.
+Matching health or capacity recovery wakes the request early. Notifications and
+reselection retain the current scheduled due time; only interval expiry advances
+the cursor. Each fresh request starts at the first step.
+
+Pool recovery ends at the original request residence deadline or client
+cancellation. Individual candidate acquisition and probe budgets remain
+separate. A 60-second candidate acquisition budget cannot truncate this recovery
+sequence. Waiting holds no business lease and cannot block unrelated requests.
+HTTP429 still immediately switches to an eligible healthy alternative and
+limits only its exact declared provider/interface/model/key identity.
+
+Public Direct/Relay regressions cover successive fresh sessions after a prior
+request exhausts, occupied capacity, all-cooled probes, recovery during a long
+interval, cancelled capacity owners, cancellation and original request deadlines.
+Complete-attempt buffering and active-stream lifetime work remain a separate
+milestone under the same issue; this candidate delivers the pool recovery policy.
+
 ## Follow-up: failure with only cooled peers remaining
 
 4939 overall review identified incomplete caller coverage. Every Direct

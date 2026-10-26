@@ -3,6 +3,13 @@
 Canonical implementation plan:
 `docs/goals/direct-relay-cross-request-error-storm-control-plan.md`.
 
+Each request retains its own cancellation, attempts, exclusions and original
+deadline. A real session is never a business action lock. Distinct complete
+provider/interface/model/key identities cannot change each other's action delay,
+generation, permit or terminal disposition. Waiter count is not a new failure.
+Only the declared exact429 and health observation owners coordinate recovery
+within their listener. Normal provider capacity limits remain effective.
+
 ```mermaid
 flowchart TD
   Compat[ProviderReqCompat06ProviderCompat]

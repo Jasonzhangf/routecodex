@@ -80,7 +80,7 @@ pub(crate) fn finish_v3_protocol_execution_plan_failure(
     Ok(projected)
 }
 
-pub(crate) fn pending_endpoint_after_responses_admission(
+pub(crate) fn pending_endpoint_after_json_parse(
     state: Arc<V3ListenerState>,
     front_connection_identity: Option<V3FrontConnectionIdentity>,
     request_headers: HeaderMap,
@@ -95,7 +95,7 @@ pub(crate) fn pending_endpoint_after_responses_admission(
     payload: Value,
 ) -> std::pin::Pin<Box<impl std::future::Future<Output = Response<Body>> + Send>> {
     // Avoid a second poll frame for the large protocol-dispatch future.
-    Box::pin(pending_endpoint_after_responses_admission_inner(
+    Box::pin(pending_endpoint_after_json_parse_inner(
         state,
         front_connection_identity,
         request_headers,
@@ -111,7 +111,7 @@ pub(crate) fn pending_endpoint_after_responses_admission(
     ))
 }
 
-pub(crate) async fn pending_endpoint_after_responses_admission_inner(
+pub(crate) async fn pending_endpoint_after_json_parse_inner(
     state: Arc<V3ListenerState>,
     front_connection_identity: Option<V3FrontConnectionIdentity>,
     request_headers: HeaderMap,

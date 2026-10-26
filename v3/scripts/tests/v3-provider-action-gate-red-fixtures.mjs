@@ -15,8 +15,10 @@ const copied = [
   'v3/crates/routecodex-v3-error/src/lib.rs',
   'v3/crates/routecodex-v3-error/tests/typed_error05_terminal_contract.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
+  'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_session_isolation_contract.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_events.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs',
@@ -212,13 +214,13 @@ const cases = [
     diagnostic: /missing impl Drop for V3ProviderActionPermit/u,
   },
   {
-    name: 'V3 waiter ignores an already-owned group permit',
+    name: 'V3 waiter ignores an already-owned exact permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      '(!self.admit_action || !group_has_active_admission)',
+      '(!self.admit_action || !exact_has_active_admission)',
       '(!self.admit_action || true)',
     ),
-    diagnostic: /missing \(!self\.admit_action \|\| !group_has_active_admission\)/u,
+    diagnostic: /missing \(!self\.admit_action \|\| !exact_has_active_admission\)/u,
   },
   {
     name: 'V3 success release drops the retained recovery ticket',
@@ -239,7 +241,7 @@ const cases = [
     diagnostic: /Responses Relay must re-arm the exact retained recovery ticket/u,
   },
   {
-    name: 'V3 unrelated failure revokes an already-owned group permit',
+    name: 'V3 new failure revokes an already-owned exact permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
       'if !active_admission_owned {',
@@ -251,10 +253,10 @@ const cases = [
     name: 'V3 unrelated same-group provider success releases another provider permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      'key.provider_scope == *provider_scope\n                        || state.admitted_action_scope.as_ref() == Some(provider_scope)',
+      'key.provider_scope == *provider_scope',
       'key.provider_scope.server_id == provider_scope.server_id\n                        && key.provider_scope.routing_group == provider_scope.routing_group',
     ),
-    diagnostic: /provider success may release only its exact provider scope or the permit-owned action scope/u,
+    diagnostic: /provider success may release only its exact provider scope/u,
   },
   {
     name: 'Direct fresh requests enter the recovery gate by default',
@@ -345,10 +347,10 @@ const cases = [
     name: 'V3 terminal projection revokes an active exact-key provider permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      '!require_admission && *active_key == *key && state.admitted_generation.is_some()',
+      '!require_admission && state.admitted_generation.is_some()',
       'false',
     ),
-    diagnostic: /missing !require_admission && \*active_key == \*key && state\.admitted_generation\.is_some\(\)/u,
+    diagnostic: /missing !require_admission && state\.admitted_generation\.is_some\(\)/u,
   },
   {
     name: 'V3 terminal admission leaves only a commented atomic commit',

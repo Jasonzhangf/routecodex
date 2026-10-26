@@ -214,8 +214,14 @@ async fn witness(startup: bool) {
             }
         }
     });
-    // No scheduler exists while the real business failures establish cooldown.
-    for id in ids.iter().filter(|id| !startup || *id == &ids[4]) {
+    // No probe scheduler exists while the real business failures establish
+    // their holds. The subsequent qualified observations commit Store cooldown.
+    let failing_ids: Vec<_> = ids
+        .iter()
+        .filter(|id| !startup || *id == &ids[4])
+        .cloned()
+        .collect();
+    for id in &failing_ids {
         let result = timeout(
             Duration::from_secs(2),
             business(
@@ -232,6 +238,58 @@ async fn witness(startup: bool) {
             result.error_chain.is_none(),
             "eligible fallback must deliver: {result:?}"
         );
+        let failure = result
+            .observability
+            .as_ref()
+            .expect("focused failure observability")
+            .provider_failure_events
+            .last()
+            .expect("real provider failure event");
+        assert_eq!(failure.health_state, "pre_cool_observation");
+        assert_eq!(
+            failure.failure_count, 0,
+            "health counters wait for the qualified observation"
+        );
+        assert!(
+            failure.cooldown_until_ms.is_none(),
+            "a real nonterminal failure must not commit cooldown before observation"
+        );
+        assert!(
+            health
+                .store
+                .availability_for_interface(
+                    id,
+                    "default",
+                    Some("key"),
+                    Some("recovery"),
+                    v3_relay_provider_policy_now_epoch_ms().unwrap()
+                )
+                .available,
+            "the pre-cool hold must not write a Store cooldown"
+        );
+        let held = V3ProviderAvailabilityReader::availability_for_interface(
+            &health,
+            id,
+            "default",
+            Some("key"),
+            Some("recovery"),
+            v3_relay_provider_policy_now_epoch_ms().unwrap(),
+        );
+        assert!(!held.available, "the exact identity must be held");
+        assert!(
+            held.blocked_scopes
+                .iter()
+                .any(|scope| scope == "provider_pre_cool_observation"),
+            "the hold must be the typed pre-cool observation: {held:?}"
+        );
+    }
+    let precool_now_ms = v3_relay_provider_policy_now_epoch_ms().unwrap();
+    crate::provider_failure_runtime_policy::tests::complete_due_precool_failures(
+        &health,
+        precool_now_ms,
+    )
+    .await;
+    for id in &failing_ids {
         assert!(
             !health
                 .store
@@ -243,7 +301,7 @@ async fn witness(startup: bool) {
                     v3_relay_provider_policy_now_epoch_ms().unwrap()
                 )
                 .available,
-            "the real nonterminal failure must cool its exact identity"
+            "the qualified negative observation must cool its exact identity"
         );
     }
     let deadlines: Vec<_> = ids

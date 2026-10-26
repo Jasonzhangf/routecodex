@@ -491,10 +491,11 @@ async fn stage_l3(
     )];
     match probe_v3_provider_global_target(target).await {
         Ok(()) => StageRun::passed(evidence, json!({ "http_2xx": true })),
-        Err(V3ProviderHealthProbeFailure::Provider(message)) => {
-            StageRun::failed("provider_rejected", json!({ "message": message }))
-                .with_evidence(evidence)
-        }
+        Err(V3ProviderHealthProbeFailure::Provider(message)) => StageRun::failed(
+            "provider_rejected",
+            json!({ "message": message.to_string() }),
+        )
+        .with_evidence(evidence),
         Err(V3ProviderHealthProbeFailure::Internal(message)) => {
             StageRun::failed("probe_internal_error", json!({ "message": message }))
                 .with_evidence(evidence)

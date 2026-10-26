@@ -21,6 +21,8 @@ impl V3ProviderFailureRuntimeHealth {
             store,
             action_gate: V3ProviderActionGate::process_shared(),
             probe_owner: Default::default(),
+            precool: Default::default(),
+            observation_clock: None,
             default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
                 manifest,
             )
@@ -34,6 +36,8 @@ impl V3ProviderFailureRuntimeHealth {
             store,
             action_gate: V3ProviderActionGate::default(),
             probe_owner: Default::default(),
+            precool: Default::default(),
+            observation_clock: None,
             default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
                 manifest,
             )
@@ -56,6 +60,8 @@ impl V3ProviderFailureRuntimeHealth {
             store,
             action_gate: V3ProviderActionGate::default(),
             probe_owner: Default::default(),
+            precool: Default::default(),
+            observation_clock: None,
             default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
                 manifest,
             )
@@ -75,6 +81,8 @@ impl V3ProviderFailureRuntimeHealth {
             store,
             action_gate: V3ProviderActionGate::process_shared(),
             probe_owner: Default::default(),
+            precool: Default::default(),
+            observation_clock: None,
             default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
                 manifest,
             )
@@ -183,9 +191,12 @@ impl V3ProviderFailureRuntimeHealth {
                     now_ms
                 }
             };
-            if let Err(error) =
-                complete_v3_provider_health_probe(&cancellation, result, completion_now_ms)
-            {
+            if let Err(error) = complete_v3_provider_health_probe(
+                &cancellation,
+                &self.action_gate,
+                result,
+                self.observation_now_ms(completion_now_ms),
+            ) {
                 probe_errors.push(error);
             }
             drop(cancellation);
@@ -319,7 +330,7 @@ impl V3ProviderFailureRuntimeHealth {
             status,
             &source.code,
         );
-        self.record_provider_failure_record_with_action_for_interface(
+        self.defer_provider_health_action(
             failure_session_scope,
             provider_id,
             interface_id,
@@ -328,6 +339,8 @@ impl V3ProviderFailureRuntimeHealth {
             Some(&source.message),
             now_ms,
             &action,
+            None,
+            0,
         )
     }
 
@@ -519,19 +532,19 @@ impl V3ProviderFailureRuntimeHealth {
             .flatten()
         {
             return self
-                .store
-                .record_provider_failure_in_session_with_policy_for_interface(
+                .defer_provider_health_action(
                     failure_session_scope,
                     provider_id,
                     interface_id,
                     auth_alias,
                     model_id,
                     reason,
-                    failure_action.failure_fingerprint.clone(),
                     now_ms,
+                    &failure_action,
                     Some(policy),
+                    configured_retry_backoff_ms(matched_policy_directive, 0),
                 )
-                .map_err(|error| Ok(error.to_string()));
+                .map_err(Ok);
         }
         // 统一错误模型：任何 provider 失败（含 400/invalid_request）都按
         // internal 全局策略表盖章阈值后计入全局健康；连续达到阈值即进入
@@ -542,48 +555,19 @@ impl V3ProviderFailureRuntimeHealth {
             status,
             error_type.unwrap_or("provider_failure"),
         );
-        let projection = self
-            .record_provider_key_failure_action_for_interface(
-                provider_id,
-                interface_id,
-                auth_alias,
-                model_id,
-                &action,
-                now_ms,
-            )
-            .map_err(Ok)?;
-        let session_record = self
-            .record_provider_failure_in_session_without_health_cooldown_for_interface(
-                failure_session_scope,
-                provider_id,
-                interface_id,
-                auth_alias,
-                model_id,
-                reason,
-                now_ms,
-            )
-            .map_err(Ok)?;
-        let Some(projection) = projection else {
-            return Ok(session_record);
-        };
-        let provider_key = v3_relay_provider_candidate_key_parts(
-            &projection.provider_id,
-            Some(&projection.interface_id),
-            Some(&projection.auth_alias),
-            Some(&projection.model_id),
-        );
-        Ok(V3ProviderFailureRecord {
-            scope_label: session_record.scope_label,
-            provider_key,
-            state: if projection.cooldown {
-                "cooldown".to_string()
-            } else {
-                "healthy".to_string()
-            },
-            failure_count: projection.failure_streak,
-            cooldown_until_ms: projection.cooldown_until_ms,
-            reason: session_record.reason,
-        })
+        self.defer_provider_health_action(
+            failure_session_scope,
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+            reason,
+            now_ms,
+            &action,
+            None,
+            configured_retry_backoff_ms(matched_policy_directive, 0),
+        )
+        .map_err(Ok)
     }
 
     pub(crate) fn record_provider_success_in_failure_scope(
@@ -616,6 +600,16 @@ impl V3ProviderFailureRuntimeHealth {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> Result<(), String> {
+        let health_now_ms = self.observation_now_ms(now_ms);
+        let mut pending = self.precool.lock().map_err(|error| error.to_string())?;
+        if let Some(action) = pending.remove(&precool_identity(
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+        )) {
+            self.action_gate.record_success(action.ticket.key())?;
+        }
         self.store
             .record_provider_success_in_session_for_interface(
                 failure_session_scope,
@@ -623,7 +617,7 @@ impl V3ProviderFailureRuntimeHealth {
                 interface_id,
                 auth_alias,
                 model_id,
-                now_ms,
+                health_now_ms,
             )
             .map_err(|error| error.to_string())?;
         if let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) {
@@ -632,18 +626,22 @@ impl V3ProviderFailureRuntimeHealth {
                 interface_id,
                 auth_alias,
                 model_id,
-                now_ms,
+                health_now_ms,
             )?;
         }
         // A completed business 2xx is the recovery counterpart of an observed
-        // 429: it restores one unit of adaptive concurrency budget and clears
-        // the saturation window for the same provider/auth identity.
+        // 429: it restores one unit of adaptive concurrency budget up to the
+        // configured hard maximum and clears the saturation window for the
+        // same provider/auth/interface/model identity.
         if let Some(auth_alias) = auth_alias {
             V3AdaptiveConcurrencyController::process_shared()
-                .observe_business_success(&v3_provider_concurrency_key_parts(
-                    provider_id,
-                    auth_alias,
-                ))
+                .observe_business_success_scoped(
+                    &v3_provider_concurrency_key_parts(provider_id, auth_alias),
+                    model_id.map(|model_id| routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+                        interface_id: interface_id.to_owned(), model_id: model_id.to_owned(),
+                    }).as_ref(),
+                    now_ms,
+                )
                 .map_err(|error| error.to_string())?;
         }
         let provider_scope = V3ProviderActionProviderScope::new(
@@ -970,6 +968,39 @@ impl V3ProviderFailureRuntimeHealth {
         selected: &V3Target10ConcreteProviderSelected,
         deadline: std::time::Instant,
     ) -> Result<V3ProviderActionRecoveryTransition, String> {
+        if witness.normalized_error_family() == "provider_pre_cool" {
+            let ticket =
+                crate::provider_action_gate::V3ProviderActionRecoveryTicket::from_recovery_witness(
+                    witness,
+                )?;
+            let identity = precool_identity(
+                &selected.candidate.provider_id,
+                &selected.candidate.interface_id,
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+            );
+            return tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
+                loop {
+                    let generation = self.target_availability_generation();
+                    let held = self
+                        .precool
+                        .lock()
+                        .map_err(|error| error.to_string())?
+                        .contains_key(&identity);
+                    if !held
+                        || witness.provider_runtime_identity()
+                            != v3_relay_provider_candidate_key(&selected.candidate)
+                    {
+                        return Ok(V3ProviderActionRecoveryTransition::Consumed(ticket));
+                    }
+                    self.wait_for_target_availability_change(generation).await?;
+                }
+            })
+            .await
+            .map_err(|_| {
+                "provider observation exceeded original request residence deadline".to_string()
+            })?;
+        }
         let provider_scope = V3ProviderActionProviderScope::new(
             witness.failure_session_scope(),
             v3_relay_provider_candidate_key_parts(
@@ -993,6 +1024,23 @@ impl V3ProviderFailureRuntimeHealth {
         failure_session_scope: &V3ProviderFailureSessionScope,
         candidate: &V3TargetCandidate,
     ) -> Result<crate::provider_action_gate::V3ExactRateLimitAdmission, String> {
+        if let Some(action) =
+            self.precool
+                .lock()
+                .map_err(|error| error.to_string())?
+                .get(&precool_identity(
+                    &candidate.provider_id,
+                    &candidate.interface_id,
+                    Some(&candidate.auth_alias),
+                    Some(&candidate.model_id),
+                ))
+        {
+            return Ok(
+                crate::provider_action_gate::V3ExactRateLimitAdmission::Blocked(
+                    action.ticket.recovery_witness()?,
+                ),
+            );
+        }
         let scope = V3ProviderActionProviderScope::new(
             failure_session_scope,
             v3_relay_provider_candidate_key_parts(
@@ -1015,6 +1063,7 @@ impl V3ProviderFailureRuntimeHealth {
         failure_session_scope: &V3ProviderFailureSessionScope,
     ) -> V3SessionGlobalAvailabilityReader {
         V3SessionGlobalAvailabilityReader {
+            health: self.clone(),
             session: V3ProviderSessionAvailabilityReader::new(
                 self.store.clone(),
                 failure_session_scope.clone(),

@@ -46,11 +46,19 @@ fn no_first_failure_429_retains_diagnostics_without_health_cooldown() {
             100,
         )
         .unwrap();
-    assert_eq!(first_failure.failure_count, 1);
-    health
+    // The early 429 window is capacity backpressure. The returned record must
+    // stay neutral with streak 0 instead of counting a provider failure.
+    assert_eq!(first_failure.failure_count, 0);
+    assert_eq!(first_failure.state, "rate_limit_capacity_wait");
+    assert_eq!(first_failure.cooldown_until_ms, None);
+    let recovered_by_business = health
         .store()
         .record_provider_key_success("first", "key1", "gpt-test", 101)
         .unwrap();
+    assert_eq!(
+        recovered_by_business.failure_streak, 0,
+        "429 backpressure must not leave a provider failure streak"
+    );
     health
         .store()
         .record_provider_success_in_session(&scope, "first", Some("key1"), Some("gpt-test"), 101)
@@ -72,7 +80,11 @@ fn no_first_failure_429_retains_diagnostics_without_health_cooldown() {
                 now_ms,
             )
             .unwrap();
-        assert_eq!(record.failure_count, (now_ms - 101) as u32);
+        assert_eq!(
+            record.failure_count, 0,
+            "repeated 429s inside the early window must keep streak 0"
+        );
+        assert_eq!(record.state, "rate_limit_capacity_wait");
         assert_eq!(
             health
                 .availability("first", Some("key1"), Some("gpt-test"), now_ms)
@@ -130,7 +142,8 @@ fn no_first_failure_429_retains_diagnostics_without_health_cooldown() {
         .unwrap();
     // This source wrapper retains request/session error bookkeeping even though
     // provider health stays routable and never needs a recovery probe.
-    assert_eq!(after_recovery.failure_count, 4);
+    assert_eq!(after_recovery.failure_count, 0);
+    assert_eq!(after_recovery.state, "rate_limit_capacity_wait");
     assert!(
         health
             .availability("first", Some("key1"), Some("gpt-test"), 5_106)

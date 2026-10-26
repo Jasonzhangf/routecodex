@@ -21,9 +21,7 @@ struct DirectTransportFailureWithoutResponse {
 const HANDOFF_DIRECT_PROVIDER: &str = "first_handoff_busy_r5";
 const HANDOFF_RELAY_PROVIDER: &str = "chat_handoff_busy_r5";
 
-fn mixed_protocol_capacity_handoff_manifest(
-    routing_group: &str,
-) -> V3Config05ManifestPublished {
+fn mixed_protocol_capacity_handoff_manifest(routing_group: &str) -> V3Config05ManifestPublished {
     let mut manifest = mixed_protocol_reselection_manifest();
     let mut direct = manifest
         .providers
@@ -172,10 +170,7 @@ async fn direct_busy_cross_protocol_handoff(
     let handoff = output
         .protocol_relay_handoff
         .expect("Direct busy admission must hand off the Chat candidate");
-    assert_eq!(
-        handoff.target.candidate.provider_id,
-        HANDOFF_RELAY_PROVIDER
-    );
+    assert_eq!(handoff.target.candidate.provider_id, HANDOFF_RELAY_PROVIDER);
     assert!(
         handoff
             .request_local_excluded_candidates
@@ -201,26 +196,25 @@ async fn exhaust_handoff_at_relay(
     };
     let expanded = handoff.expanded;
     let excluded = handoff.request_local_excluded_candidates;
-    let output =
-        crate::execute_v3_responses_relay_runtime_with_default_transport_health(
-            manifest,
-            crate::V3ResponsesRelayRuntimeInput {
-                server_id: "test".to_string(),
-                failure_session_scope: test_failure_session_scope(routing_group),
-                request_id: request_id.to_string(),
-                payload: json!({"model": "client-model", "input": "hello"}),
-            },
-            relay_health,
-            crate::V3ResponsesRelayProviderSnapshotCapture::new(true, true),
-            None,
-            None,
-            selected_target,
-            Some(expanded),
-            excluded,
-            relay_seeds,
-        )
-        .await
-        .expect("Relay handoff exhaustion must return typed runtime output");
+    let output = crate::execute_v3_responses_relay_runtime_with_default_transport_health(
+        manifest,
+        crate::V3ResponsesRelayRuntimeInput {
+            server_id: "test".to_string(),
+            failure_session_scope: test_failure_session_scope(routing_group),
+            request_id: request_id.to_string(),
+            payload: json!({"model": "client-model", "input": "hello"}),
+        },
+        relay_health,
+        crate::V3ResponsesRelayProviderSnapshotCapture::new(true, true),
+        None,
+        None,
+        selected_target,
+        Some(expanded),
+        excluded,
+        relay_seeds,
+    )
+    .await
+    .expect("Relay handoff exhaustion must return typed runtime output");
     output
 }
 
@@ -257,10 +251,10 @@ async fn direct_to_relay_handoff_preserves_capacity_busy_exhaustion_source() {
     release_capacity_leases(held_first);
     release_capacity_leases(held_second);
     V3AdaptiveConcurrencyController::process_shared()
-        .observe_business_success(&first_capacity_key)
+        .observe_business_success(&first_capacity_key, 0)
         .expect("clear first capacity saturation");
     V3AdaptiveConcurrencyController::process_shared()
-        .observe_business_success(&second_capacity_key)
+        .observe_business_success(&second_capacity_key, 0)
         .expect("clear second capacity saturation");
 
     assert_eq!(output.status, 502, "{output:?}");
@@ -309,7 +303,7 @@ async fn direct_to_relay_handoff_preserves_capacity_busy_exhaustion_source() {
     .await;
     release_capacity_leases(held_first);
     V3AdaptiveConcurrencyController::process_shared()
-        .observe_business_success(&first_capacity_key)
+        .observe_business_success(&first_capacity_key, 0)
         .expect("clear mixed first capacity saturation");
 
     assert_eq!(output.status, 502, "{output:?}");

@@ -54,7 +54,7 @@ const V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY: usize = 4;
 
 #[derive(Debug)]
 pub enum V3ProviderHealthProbeFailure {
-    Provider(String),
+    Provider(V3ProviderError),
     Internal(String),
     ConcurrencyBusy,
 }
@@ -604,6 +604,30 @@ pub struct V3ProviderFailureRuntimeHealth {
     action_gate: V3ProviderActionGate,
     default_same_provider_retries: usize,
     probe_owner: std::sync::Arc<std::sync::Mutex<Option<V3ManagedProbeSender>>>,
+    precool: std::sync::Arc<std::sync::Mutex<BTreeMap<V3PrecoolIdentity, V3DeferredHealthAction>>>,
+    observation_clock: Option<Arc<dyn V3ProviderHealthObservationClock>>,
+}
+
+/// Observation time belongs to the health owner. Request residence and actual
+/// transport time remain independent of this injected dependency.
+pub trait V3ProviderHealthObservationClock: std::fmt::Debug + Send + Sync {
+    fn now_epoch_ms(&self) -> u64;
+}
+
+impl V3ProviderFailureRuntimeHealth {
+    pub fn with_observation_clock(
+        mut self,
+        clock: Arc<dyn V3ProviderHealthObservationClock>,
+    ) -> Self {
+        self.observation_clock = Some(clock);
+        self
+    }
+
+    fn observation_now_ms(&self, supplied_now_ms: u64) -> u64 {
+        self.observation_clock
+            .as_ref()
+            .map_or(supplied_now_ms, |clock| clock.now_epoch_ms())
+    }
 }
 
 impl V3ProviderSchedulingReader for V3ProviderFailureRuntimeHealth {
@@ -617,6 +641,7 @@ impl V3ProviderSchedulingReader for V3ProviderFailureRuntimeHealth {
         base_weight: u32,
         now_ms: u64,
     ) -> V3ProviderSchedulingProjection {
+        let now_ms = self.observation_now_ms(now_ms);
         let mut projection = self.store.scheduling_projection_for_interface(
             provider_id,
             interface_id,
@@ -626,7 +651,8 @@ impl V3ProviderSchedulingReader for V3ProviderFailureRuntimeHealth {
             base_weight,
             now_ms,
         );
-        let availability = self.store.availability_for_interface(
+        let availability = V3ProviderAvailabilityReader::availability_for_interface(
+            self,
             provider_id,
             interface_id,
             Some(auth_alias),
@@ -651,6 +677,7 @@ impl V3ProviderSchedulingReader for V3ProviderFailureRuntimeHealth {
         base_weight: u32,
         now_ms: u64,
     ) -> V3ProviderSchedulingProjection {
+        let now_ms = self.observation_now_ms(now_ms);
         let mut projection = V3ProviderSchedulingReader::scheduling_projection(
             &self.store,
             provider_id,
@@ -660,9 +687,13 @@ impl V3ProviderSchedulingReader for V3ProviderFailureRuntimeHealth {
             base_weight,
             now_ms,
         );
-        let availability =
-            self.store
-                .availability(provider_id, Some(auth_alias), Some(model_id), now_ms);
+        let availability = V3ProviderAvailabilityReader::availability(
+            self,
+            provider_id,
+            Some(auth_alias),
+            Some(model_id),
+            now_ms,
+        );
         if !availability.available {
             projection.available = false;
         }
@@ -675,6 +706,7 @@ impl V3ProviderSchedulingReader for V3ProviderFailureRuntimeHealth {
 
 pub(crate) struct V3SessionGlobalAvailabilityReader {
     session: V3ProviderSessionAvailabilityReader,
+    health: V3ProviderFailureRuntimeHealth,
 }
 
 impl V3ProviderAvailabilityReader for V3SessionGlobalAvailabilityReader {
@@ -686,13 +718,21 @@ impl V3ProviderAvailabilityReader for V3SessionGlobalAvailabilityReader {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> V3ProviderAvailabilityProjection {
-        self.session.availability_for_interface(
+        let mut projection = self.session.availability_for_interface(
             provider_id,
             interface_id,
             auth_alias,
             model_id,
-            now_ms,
-        )
+            self.health.observation_now_ms(now_ms),
+        );
+        self.health.apply_precool_availability(
+            &mut projection,
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+        );
+        projection
     }
 
     fn availability(
@@ -702,18 +742,20 @@ impl V3ProviderAvailabilityReader for V3SessionGlobalAvailabilityReader {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> V3ProviderAvailabilityProjection {
-        self.session
-            .availability(provider_id, auth_alias, model_id, now_ms)
+        self.availability_for_interface(provider_id, "default", auth_alias, model_id, now_ms)
     }
 }
 
 include!("provider_failure_runtime_policy_health.rs");
+include!("provider_precool_hold.rs");
 
 impl From<V3ProviderHealthStore> for V3ProviderFailureRuntimeHealth {
     fn from(store: V3ProviderHealthStore) -> Self {
         Self {
             store,
             probe_owner: Default::default(),
+            precool: Default::default(),
+            observation_clock: None,
             action_gate: V3ProviderActionGate::process_shared(),
             default_same_provider_retries: 0,
         }
@@ -729,13 +771,21 @@ impl V3ProviderAvailabilityReader for V3ProviderFailureRuntimeHealth {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> V3ProviderAvailabilityProjection {
-        self.store.availability_for_interface(
+        let mut projection = self.store.availability_for_interface(
             provider_id,
             interface_id,
             auth_alias,
             model_id,
-            now_ms,
-        )
+            self.observation_now_ms(now_ms),
+        );
+        self.apply_precool_availability(
+            &mut projection,
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+        );
+        projection
     }
 
     fn availability(
@@ -745,8 +795,7 @@ impl V3ProviderAvailabilityReader for V3ProviderFailureRuntimeHealth {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> V3ProviderAvailabilityProjection {
-        self.store
-            .availability(provider_id, auth_alias, model_id, now_ms)
+        self.availability_for_interface(provider_id, "default", auth_alias, model_id, now_ms)
     }
 }
 
@@ -848,11 +897,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     provider_body_read_failure: Option<&str>,
 ) -> Result<V3RelayProviderFailurePolicyResult, Result<String, V3RelayErrorOperatorFault>> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
-    // Non-capacity failures permanently exclude this identity for the request.
-    // A received 429 stays eligible behind the shared rate-limit action gate.
-    if status != 429 {
-        state.failed_candidates.insert(candidate_key.clone());
-    }
+    // Permanent request exclusions are recorded only after classification.
+    // Recoverable failures remain owned by typed observation/health state.
     // Preserve the original typed Error01 source of this provider attempt before
     // the Error05 decision consumes it, so a later target-resolution failure
     // cannot erase the provider cause that actually began this attempt.
@@ -917,7 +963,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     // attempt publishes diagnostics only; it does not update health or actions.
     // The last or only eligible candidate stays health-neutral for every
     // provider failure class.
-    let health_record = if status == 429 || is_request_local_compat_failure || !has_alternative {
+    let health_record = if is_request_local_compat_failure || (!has_alternative && status != 429) {
         V3ProviderFailureRecord {
             scope_label: candidate_key.clone(),
             provider_key: candidate_key.clone(),
@@ -982,7 +1028,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                         1,
                     )
                 };
-                let recovery = if is_request_local_compat_failure {
+                let recovery = if is_request_local_compat_failure || status != 429 {
                     None
                 } else {
                     let configured_backoff_ms =
@@ -1031,15 +1077,18 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                                 .recovery_witness()
                                 .map_err(v3_relay_provider_policy_ordinary_error)?,
                         )
+                    } else if !is_request_local_compat_failure && status != 429 {
+                        None
                     } else {
                         Some(
                             request_local_recovery()
                                 .map_err(v3_relay_provider_policy_ordinary_error)?,
                         )
                     },
+                    !is_request_local_compat_failure && status != 429,
                 )
                 .map_err(Err)?;
-                if status != 429 {
+                if is_request_local_compat_failure {
                     state.failed_candidates.insert(candidate_key);
                 }
                 state.trace.push("V3TargetLocalReselected");
@@ -1151,6 +1200,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
             false,
             true,
             Some(witness),
+            false,
         )
         .map_err(Err)?;
         let event =
@@ -1176,13 +1226,14 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     let recovery_now_ms =
         v3_relay_provider_policy_now_epoch_ms().map_err(v3_relay_provider_policy_ordinary_error)?;
     if context.captured_target_09.is_some_and(|expanded| {
-        v3_exhaustion_is_cooldown_only(
-            expanded,
-            &excluded_with_failed,
-            &context.failure_session_scope,
-            context.provider_health,
-            recovery_now_ms,
-        )
+        (!is_request_local_compat_failure && status != 429)
+            || v3_exhaustion_is_cooldown_only(
+                expanded,
+                &excluded_with_failed,
+                &context.failure_session_scope,
+                context.provider_health,
+                recovery_now_ms,
+            )
     }) {
         state.failed_candidates.insert(candidate_key.clone());
         let (_, decision) =
@@ -1237,6 +1288,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
             false,
             false,
             None,
+            false,
         )
         .map_err(Err)?;
         return Ok(V3RelayProviderFailurePolicyResult {
@@ -1279,6 +1331,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
         false,
         false,
         None,
+        false,
     )
     .map_err(Err)?;
     let terminal_projection =
@@ -1487,9 +1540,10 @@ fn build_v3_relay_provider_error_05_decision(
     default_pool_available: bool,
     same_provider_retry_available: bool,
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
+    target_recovery_pending: bool,
 ) -> Result<(Value, V3Error05ExecutionDecision), V3RelayErrorOperatorFault> {
     let original_source = source.clone();
-    run_v3_error_02_to_05_decision_operators(
+    crate::operation_runner::run_v3_error_02_to_05_decision_operators_with_target_recovery(
         source_projection,
         source,
         V3ErrorActionScope::ProviderKeyModel {
@@ -1501,6 +1555,7 @@ fn build_v3_relay_provider_error_05_decision(
         default_pool_available,
         same_provider_retry_available,
         recovery,
+        target_recovery_pending,
     )
     .map_err(|error| {
         relay_error_operator_fault(

@@ -72,6 +72,8 @@ mod image_input_blackbox;
 
 #[path = "support/pool_empty_recovery_blackbox.rs"]
 mod pool_empty_recovery_blackbox;
+#[path = "support/sustained_429_window_blackbox.rs"]
+mod sustained_429_window_blackbox;
 
 #[path = "multi_listener_server/issue127_disabled_health.rs"]
 mod issue127_disabled_health;
@@ -7763,13 +7765,29 @@ async fn responses_provider_concurrency_relay_mixed_exclusion_stays_generic() {
 }
 
 #[tokio::test]
-async fn responses_same_listener_same_session_waits_for_release_then_returns_ok() {
+async fn responses_same_listener_same_session_admits_independent_requests() {
+    run_matching_identity_independence("session-overlap", "conversation-overlap").await;
+}
+
+#[tokio::test]
+async fn responses_independent_matching_identity_session_only() {
+    run_matching_identity_independence("session-overlap", "conversation-other").await;
+}
+
+#[tokio::test]
+async fn responses_independent_matching_identity_conversation_only() {
+    run_matching_identity_independence("session-other", "conversation-overlap").await;
+}
+
+async fn run_matching_identity_independence(second_session: &str, second_conversation: &str) {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, release, shutdown) =
         start_controlled_held_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-admission");
+    let mut manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    pool_empty_recovery_blackbox::use_native_direct_responses(&mut manifest);
     let handle =
-        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+        spawn_v3_server_aggregate(manifest)
             .await
             .unwrap();
     let client = reqwest::Client::new();
@@ -7795,12 +7813,14 @@ async fn responses_same_listener_same_session_waits_for_release_then_returns_ok(
     let second_client = client.clone();
     let second_endpoint = endpoint.clone();
     let second_request = request.clone();
+    let second_session = second_session.to_string();
+    let second_conversation = second_conversation.to_string();
     let mut second_task = tokio::spawn(async move {
         let response = second_client
             .post(second_endpoint)
             .header("accept", "text/event-stream")
-            .header("session-id", "session-overlap")
-            .header("thread-id", "conversation-overlap")
+            .header("session-id", second_session)
+            .header("thread-id", second_conversation)
             .json(&second_request)
             .send()
             .await
@@ -7809,14 +7829,15 @@ async fn responses_same_listener_same_session_waits_for_release_then_returns_ok(
         let body = response.text().await.unwrap();
         (status, body)
     });
-    assert!(timeout(Duration::from_millis(100), captures.recv())
+    timeout(Duration::from_millis(700), captures.recv())
         .await
-        .is_err());
+        .expect("the same session must not block another independent request before provider selection")
+        .expect("second independent provider request must arrive while the first is held");
     assert!(timeout(Duration::from_millis(100), &mut second_task)
         .await
         .is_err());
 
-    release.add_permits(1);
+    release.add_permits(2);
     let first = timeout(Duration::from_secs(2), first_task)
         .await
         .expect("first response headers must arrive after provider release")
@@ -7824,14 +7845,9 @@ async fn responses_same_listener_same_session_waits_for_release_then_returns_ok(
     assert_eq!(first.status(), StatusCode::OK);
     let first_body = first.text().await.unwrap();
     assert_responses_sse_delivered_business_text(&first_body, "held response released");
-    timeout(Duration::from_secs(2), captures.recv())
-        .await
-        .expect("second provider request must start after the first body releases")
-        .expect("second provider capture must remain open");
-    release.add_permits(1);
     let (status, body) = timeout(Duration::from_secs(2), second_task)
         .await
-        .expect("second request must complete after admission release")
+        .expect("second independent request must complete after its provider release")
         .expect("second request task must not panic");
     assert_eq!(status, StatusCode::OK);
     assert!(!body.contains("request_in_flight"));
@@ -7874,6 +7890,10 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
         .await
         .unwrap()
         .unwrap();
+    let preparation = timeout(Duration::from_secs(2), handle.prepare_exec_attempt())
+        .await
+        .expect("exec preparation must not wait for the held business response")
+        .unwrap();
     let mut queued = Box::pin(async {
         let response = client
             .post(&endpoint)
@@ -7888,10 +7908,6 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
     assert!(timeout(Duration::from_millis(100), &mut queued)
         .await
         .is_err());
-    let preparation = timeout(Duration::from_secs(2), handle.prepare_exec_attempt())
-        .await
-        .expect("exec preparation must not wait for the held business response")
-        .unwrap();
     release.add_permits(1);
     let first_body = timeout(Duration::from_secs(5), first)
         .await
@@ -7899,14 +7915,14 @@ async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finis
         .unwrap();
     assert_eq!(first_body.matches("event: response.completed").count(), 1);
     assert_responses_sse_delivered_business_text(&first_body, "held response released");
-    // The session permit has now dropped. The queued request must still wait
-    // at the aggregate maintenance gate rather than entering Runtime.
+    // Only explicit maintenance pauses dispatch. The first response finishing
+    // must not let a new request escape that maintenance owner.
     assert!(timeout(Duration::from_millis(100), &mut queued)
         .await
         .is_err());
     assert!(
         captures.try_recv().is_err(),
-        "session waiter escaped maintenance"
+        "independent request escaped maintenance"
     );
     drop(preparation);
     tokio::select! {
@@ -8110,8 +8126,6 @@ async fn responses_client_drop_releases_same_session_before_provider_eof() {
     socket.write_all(request_head.as_bytes()).await.unwrap();
     socket.write_all(&request_body).await.unwrap();
     captures.recv().await.expect("first provider request");
-    drop(socket);
-    sleep(Duration::from_millis(100)).await;
 
     let retry = reqwest::Client::new()
         .post(format!("http://{listener_addr}/v1/responses"))
@@ -8122,10 +8136,16 @@ async fn responses_client_drop_releases_same_session_before_provider_eof() {
     let retry_task = tokio::spawn(async move { retry.send().await.unwrap() });
     timeout(Duration::from_secs(2), captures.recv())
         .await
-        .expect("client drop must release admission before provider EOF")
+        .expect("second request must reach upstream before the first client is cancelled")
         .unwrap();
-    release.add_permits(1);
-    assert_eq!(retry_task.await.unwrap().status(), StatusCode::OK);
+    drop(socket);
+    // Release both independent upstream handlers. Cancelling the first client
+    // must not cancel the second request or remove its delivery rights.
+    release.add_permits(2);
+    let response = timeout(Duration::from_secs(3), retry_task).await.unwrap().unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = timeout(Duration::from_secs(3), response.text()).await.unwrap().unwrap();
+    assert_responses_sse_delivered_business_text(&body, "held response released");
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");

@@ -947,7 +947,7 @@ impl V3TargetInterpreter {
                     initial_concurrency_budget: provider
                         .concurrency
                         .as_ref()
-                        .map_or(8, |concurrency| concurrency.max_in_flight),
+                        .map_or(40, |concurrency| concurrency.max_in_flight),
                     concurrency_acquire_timeout_ms: provider
                         .concurrency
                         .as_ref()
