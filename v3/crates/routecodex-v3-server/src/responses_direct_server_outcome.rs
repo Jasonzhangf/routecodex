@@ -126,33 +126,38 @@ fn publish_responses_direct_terminal_outcome(
     // Error06 chain before breaking the transport: the Direct lane really holds
     // `V3Error06ClientProjected`, so the terminal row keeps the real chain
     // instead of reading "not_reached" or, worse, leaving no row at all.
-    let client_disconnect = output.diagnostic_source.as_ref().is_some_and(|source| {
-        source.source_kind == routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect
-    });
-    if !client_disconnect {
-        if let Some(error_chain) = output.error_chain.as_deref() {
-            if let Err(error) = webui_observability::record_v3_webui_error_projection(
-                &state.webui_observability,
-                state.server.port,
-                request_id,
-                path,
-                "responses",
-                None,
-                None,
-                output.status,
-                None,
-                webui_observability::V3ObsErrorProjection {
-                    exposed: true,
-                    error_chain,
-                    ..Default::default()
-                },
-            ) {
-                let line = format_v3_console_timed_content(
-                    "[webui-observability]",
-                    &format!("req={} error={}", request_id, error),
-                );
-                append_v3_human_console_line(state, &line);
-            }
+    //
+    // The typed terminal disposition and Error01 source travel with the chain so
+    // the ledger derives `provider_status`/`error_category` from the real
+    // provider terminal, never from the projected client status. A client
+    // disconnect terminal records `request.cancelled` here instead of being
+    // skipped: this lane does not run the Direct frame closeout, so skipping it
+    // would leave the request without any terminal row.
+    let error_chain = output.error_chain.as_deref();
+    if error_chain.is_some() || output.diagnostic_source.is_some() {
+        if let Err(error) = webui_observability::record_v3_webui_error_projection(
+            &state.webui_observability,
+            state.server.port,
+            request_id,
+            path,
+            "responses",
+            None,
+            None,
+            output.status,
+            None,
+            webui_observability::V3ObsErrorProjection {
+                exposed: error_chain.is_some(),
+                error_chain: error_chain.unwrap_or(&[]),
+                diagnostic_source: output.diagnostic_source.as_ref(),
+                terminal_disposition: Some(&output.disposition),
+                ..Default::default()
+            },
+        ) {
+            let line = format_v3_console_timed_content(
+                "[webui-observability]",
+                &format!("req={} error={}", request_id, error),
+            );
+            append_v3_human_console_line(state, &line);
         }
     }
 }
