@@ -1302,7 +1302,7 @@ resources:
     owner_node: V3ProviderFailureSessionScope
     identity: [serverId, routingGroup, sessionId]
     allowed_writers: [V3ProviderFailureSessionScope::new]
-    allowed_readers: [V3Server03HttpRequestRaw, V3Error05RecoveryAdmissionWitness::new, V3ProviderFailureRuntimeHealth::record_provider_failure_record, V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope, V3ProviderFailureRuntimeHealth::session_bound_availability, V3ProviderActionProviderScope::new, V3ProviderSessionAvailabilityReader::availability]
+    allowed_readers: [V3Server03HttpRequestRaw, V3Error05RecoveryAdmissionWitness::new, V3ProviderFailureRuntimeHealth::record_provider_failure_record, V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope, V3ProviderFailureRuntimeHealth::session_bound_availability, V3ProviderActionProviderScope::new, V3ProviderSessionAvailabilityReader::availability, run_v3_relay_provider_failure_policy_with_response_source]
     forbidden_writers: [routecodex-v3-provider-responses, V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, routecodex-v3-virtual-router, routecodex-v3-target]
     may_enter_provider_body: false
     may_enter_client_body: false

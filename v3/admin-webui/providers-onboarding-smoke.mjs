@@ -350,4 +350,8 @@ assert.throws(
   /maxTokens must be a positive number/,
 );
 
+// The patrol editor owns its unsaved draft; this regression runs the real
+// loadPatrol owner against a small DOM and stays in the same webui gate.
+await import("./providers-patrol-draft-smoke.mjs");
+
 console.log("providers onboarding smoke passed");

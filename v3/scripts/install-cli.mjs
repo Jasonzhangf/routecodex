@@ -60,6 +60,12 @@ function fail(message) {
   throw new Error(message);
 }
 
+export function isAutomaticDependencyInstallLifecycle(sourceEnv = process.env) {
+  const event = String(sourceEnv.npm_lifecycle_event ?? '').trim();
+  const command = String(sourceEnv.npm_command ?? '').trim();
+  return event === 'install' && (command === 'install' || command === 'ci');
+}
+
 class InstallInterruptedError extends Error {
   constructor(signal) {
     super(`V3 install interrupted by ${signal}`);
@@ -311,6 +317,11 @@ function installAliasAtomic(aliasPath, binaryPath) {
 }
 
 async function main() {
+  if (isAutomaticDependencyInstallLifecycle()) {
+    console.log('[install-cli] skip: dependency-install lifecycle does not build or publish CLI binaries; use `npm run install:v3` for the canonical install');
+    return;
+  }
+
   return withOwnedV3CargoTarget(async (build) => {
     const sourceBin = await buildV3Cli(build);
     copyExecutableAtomic(sourceBin, repoBin);

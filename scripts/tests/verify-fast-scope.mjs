@@ -65,6 +65,7 @@ const cases = [
     v4Full: true,
   },
   { relative: 'scripts/ensure-cli-command-shim.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/ensure-cli-executable.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'scripts/install-v3-cli.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'tests/scripts/v3-cli-distribution.spec.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'v3/crates/routecodex-v3-provider-responses/src/lib.rs', contents: 'pub const SCOPE_FIXTURE: bool = true;\n', fine: { v3_build: true, v3_provider: true }, v3: true, v4: false },

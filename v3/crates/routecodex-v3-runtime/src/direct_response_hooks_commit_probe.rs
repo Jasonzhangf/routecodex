@@ -177,6 +177,31 @@ impl V3DirectPrefixCommitProbe {
         Self::new_with_declared_tools(protocol, false)
     }
 
+    /// Create the probe for an attempt whose complete-attempt text-governance
+    /// owner is not the Direct owner.
+    ///
+    /// The probe is a gate, not a second owner: it only decides when a buffered
+    /// prefix may cross the client commit point and when a committed tail must
+    /// wait. The marker set must therefore describe exactly what the registered
+    /// owner can rewrite, no more and no less. A marker the owner never acts on
+    /// would hold legal business text that the owner returns unchanged; a marker
+    /// the owner does act on would let a committed prefix carry bytes the owner
+    /// must change after the client already holds them.
+    pub(crate) fn new_with_governed_markers(
+        protocol: V3HubProviderWireProtocol,
+        markers: Vec<V3GovernedTextMarker>,
+    ) -> Self {
+        Self {
+            protocol,
+            markers,
+            visible_text: false,
+            tool_call_started: false,
+            tool_arguments_pending: std::collections::BTreeSet::new(),
+            confirmed_marker: false,
+            tails_by_carrier: std::collections::BTreeMap::new(),
+        }
+    }
+
     /// Create the probe for one provider attempt.
     ///
     /// When the request declares tools, the DSML owner can harvest declared
@@ -422,8 +447,9 @@ impl V3DirectPrefixCommitProbe {
 
     /// A complete governed marker was observed. Production code uses
     /// [`Self::governed_text_pending`] because only the registered owner may
-    /// decide a committed tail; the probe's own tests check this state directly.
-    #[cfg(test)]
+    /// decide a committed tail; the probe's own tests and the Relay projector
+    /// check this state directly when deciding whether a held tail must remain
+    /// buffered to the terminal.
     pub(crate) fn confirmed_governed_marker(&self) -> bool {
         self.confirmed_marker
     }

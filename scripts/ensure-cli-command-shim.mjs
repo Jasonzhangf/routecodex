@@ -3,6 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+if (
+  process.env.npm_lifecycle_event === 'postinstall'
+  && (process.env.npm_command === 'install' || process.env.npm_command === 'ci')
+) {
+  console.log('[cli-shim] skip: dependency-install lifecycle does not create CLI shims');
+  process.exit(0);
+}
+
 function resolveShimDirs() {
   if (process.env.ROUTECODEX_SHIM_DIR) {
     return [path.resolve(process.env.ROUTECODEX_SHIM_DIR)];

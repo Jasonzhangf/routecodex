@@ -109,11 +109,14 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
     .await
 }
 
-pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context_and_projection(
     provider_protocol: V3HubProviderWireProtocol,
     mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: &V3RuntimeStreamObservation,
     anthropic_context: &V3AnthropicResponsesProjectionContext,
+    mut relay_client_projection: Option<
+        &mut super::relay_client_frames::V3RelayChatClientStreamProjector,
+    >,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     // upstream 200 + body 0 字节（如 glmrelay_anthropic / glmrelay_openai 在
     // /v1/responses 上声明 text/event-stream 但不发帧）：先把 stream 的第一个
@@ -134,9 +137,15 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
             .await?
         }
         V3HubProviderWireProtocol::OpenAiChat => {
-            build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            let mut hook = V3OpenAiChatMaterializationHook {
+                observation,
+                catalog: compile_v3_hub_relay_response_hooks().typed_sse_catalog(),
+            };
+            build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events_with_hook_and_projection(
                 replayed,
                 observation,
+                &mut hook,
+                relay_client_projection.take(),
             )
             .await?
         }
@@ -455,10 +464,45 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
     .await
 }
 
+/// Four-argument shim: the protocol dispatcher owns the projection handle.
+pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+    provider_protocol: V3HubProviderWireProtocol,
+    provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    observation: &V3RuntimeStreamObservation,
+    anthropic_context: &V3AnthropicResponsesProjectionContext,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context_and_projection(
+        provider_protocol,
+        provider,
+        observation,
+        anthropic_context,
+        None,
+    )
+    .await
+}
+
+/// Three-argument shim for callers that do not project client frames.
 pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events_with_hook(
+    provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    observation: &V3RuntimeStreamObservation,
+    hook: &mut impl V3OpenAiChatSseSemanticHook,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events_with_hook_and_projection(
+        provider,
+        observation,
+        hook,
+        None,
+    )
+    .await
+}
+
+pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events_with_hook_and_projection(
     mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: &V3RuntimeStreamObservation,
     hook: &mut impl V3OpenAiChatSseSemanticHook,
+    mut relay_client_projection: Option<
+        &mut super::relay_client_frames::V3RelayChatClientStreamProjector,
+    >,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     use futures_util::StreamExt;
 
@@ -587,6 +631,11 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
             reducer.apply_chunk(&projected).map_err(|error| {
                 V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
             })?;
+            if let Some(projection) = relay_client_projection.as_mut() {
+                projection.on_chat_chunk(&projected).map_err(|error| {
+                    V3ResponsesRelayRuntimeError::ExecutionControlResponse(error)
+                })?;
+            }
             if terminal_seen && is_v3_openai_chat_usage_closeout_frame(&projected) {
                 terminal_usage_closeout_seen = true;
             }
