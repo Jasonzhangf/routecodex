@@ -530,6 +530,9 @@ mod tests {
         assert_eq!(restored_checkpoint.scope.runtime_generation, 7);
         let restored_fact = restored.send_fact(&key).unwrap();
         assert_eq!(restored_fact.key, key);
-        assert_eq!(restored_fact.phase, V3ProviderTransportSendPhase::SendStarted);
+        assert_eq!(
+            restored_fact.phase,
+            V3ProviderTransportSendPhase::SendStarted
+        );
     }
 }

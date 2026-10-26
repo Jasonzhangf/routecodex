@@ -58,9 +58,8 @@ pub use transport::{
 };
 pub use transport_handoff::{
     V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptControl,
-    V3ProviderTransportAttemptKey, V3ProviderTransportAttemptState,
-    V3ProviderTransportCheckpoint, V3ProviderTransportHandoffScope,
-    V3ProviderTransportKind, V3ProviderTransportSendFact,
+    V3ProviderTransportAttemptKey, V3ProviderTransportAttemptState, V3ProviderTransportCheckpoint,
+    V3ProviderTransportHandoffScope, V3ProviderTransportKind, V3ProviderTransportSendFact,
     V3ProviderTransportSendPhase,
 };
 pub use wire::{

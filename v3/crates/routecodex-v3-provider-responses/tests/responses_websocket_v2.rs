@@ -320,7 +320,10 @@ async fn websocket_v2_send_fact_distinguishes_handshake_from_business_send() {
             runtime_generation: 1,
         })
         .unwrap();
-    let control = transport.begin_transport_attempt(&request).unwrap().unwrap();
+    let control = transport
+        .begin_transport_attempt(&request)
+        .unwrap()
+        .unwrap();
     let initial_fact = control.send_fact().unwrap();
     assert_eq!(initial_fact.phase, V3ProviderTransportSendPhase::NotSent);
     let send = transport.send_observed(request, Some(control.clone()));
@@ -342,7 +345,10 @@ async fn websocket_v2_send_fact_distinguishes_handshake_from_business_send() {
         }
         let business_fact = control.send_fact().unwrap();
         assert_eq!(business_fact.key, initial_fact.key);
-        assert_eq!(business_fact.phase, V3ProviderTransportSendPhase::SendStarted);
+        assert_eq!(
+            business_fact.phase,
+            V3ProviderTransportSendPhase::SendStarted
+        );
         release_terminal_tx.send(()).unwrap();
 
         let response = send.await.unwrap();

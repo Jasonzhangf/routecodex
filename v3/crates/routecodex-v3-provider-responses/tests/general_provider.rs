@@ -772,10 +772,7 @@ async fn provider_send_fact_distinguishes_pre_send_cancel_from_first_poll_timeou
         .expect("handoff request must expose a send fact control");
     assert!(matches!(
         transport
-            .send_observed(
-                cancelled_request,
-                Some(cancelled_control.clone()),
-            )
+            .send_observed(cancelled_request, Some(cancelled_control.clone()),)
             .await
             .unwrap_err(),
         V3ProviderError::ClientDisconnect { .. }
@@ -812,11 +809,10 @@ async fn provider_send_fact_distinguishes_pre_send_cancel_from_first_poll_timeou
         json!({"model":"model","input":"hang"}),
     )
     .unwrap();
-    let hanging_request =
-        build_v3_transport_13_responses_http_request_from_v3_provider_12(hanging)
-            .unwrap()
-            .with_handoff_scope(handoff_scope("req-sendfact-hang"))
-            .unwrap();
+    let hanging_request = build_v3_transport_13_responses_http_request_from_v3_provider_12(hanging)
+        .unwrap()
+        .with_handoff_scope(handoff_scope("req-sendfact-hang"))
+        .unwrap();
     let hanging_control = transport
         .begin_transport_attempt(&hanging_request)
         .unwrap()
@@ -874,11 +870,10 @@ async fn provider_send_fact_control_is_single_use_per_attempt() {
         json!({"model":"model","input":"single use"}),
     )
     .unwrap();
-    let first_request =
-        build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)
-            .unwrap()
-            .with_handoff_scope(handoff_scope("req-sendfact-single-use"))
-            .unwrap();
+    let first_request = build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)
+        .unwrap()
+        .with_handoff_scope(handoff_scope("req-sendfact-single-use"))
+        .unwrap();
     let control = transport
         .begin_transport_attempt(&first_request)
         .unwrap()
@@ -909,10 +904,7 @@ async fn provider_send_fact_control_is_single_use_per_attempt() {
         .expect("second send must resolve quickly")
         .expect_err("second send must be rejected before upstream bytes");
     assert!(
-        matches!(
-            second_error,
-            V3ProviderError::InternalTransport { .. }
-        ),
+        matches!(second_error, V3ProviderError::InternalTransport { .. }),
         "second send with the same control must be rejected by the owning broker"
     );
 

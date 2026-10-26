@@ -153,7 +153,10 @@ impl V3Transport13ResponsesRequest {
         Ok(self)
     }
 
-    fn with_transport_attempt_control(mut self, control: V3ProviderTransportAttemptControl) -> Self {
+    fn with_transport_attempt_control(
+        mut self,
+        control: V3ProviderTransportAttemptControl,
+    ) -> Self {
         self.transport_attempt_control = Some(control);
         self
     }
@@ -802,7 +805,8 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     &request_id,
                     &provider_id,
                     request.transport_kind(),
-                ) || !attempt_control.claim_for_send() {
+                ) || !attempt_control.claim_for_send()
+                {
                     return Err(V3ProviderError::InternalTransport {
                         request_id: request_id.clone(),
                         provider_id: provider_id.clone(),
@@ -822,8 +826,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                             request_id: request_id.clone(),
                             provider_id: provider_id.clone(),
                             lane: V3ProviderInternalTransportLane::Request,
-                            reason:
-                                "provider transport attempt was already claimed".to_string(),
+                            reason: "provider transport attempt was already claimed".to_string(),
                         });
                     }
                 }
@@ -1160,10 +1163,7 @@ impl ProviderResponsesTransport {
                 request = request.header(header.name(), header.value());
             }
         }
-        let send = mark_send_started_when_polled(
-            request.json(&body).send(),
-            attempt_control,
-        );
+        let send = mark_send_started_when_polled(request.json(&body).send(), attempt_control);
         send_http_await(
             request_id.to_string(),
             provider_id.to_string(),
@@ -1334,10 +1334,8 @@ impl ProviderResponsesTransport {
             .expect("WebSocket connection initialized");
         let encoded = serde_json::to_string(&event)
             .map_err(|error| websocket_protocol_error(&request_id, &provider_id, error))?;
-        let send = mark_send_started_when_polled(
-            socket.send(Message::Text(encoded)),
-            attempt_control,
-        );
+        let send =
+            mark_send_started_when_polled(socket.send(Message::Text(encoded)), attempt_control);
         match cancellation.clone() {
             Some(cancellation) => {
                 tokio::select! {
