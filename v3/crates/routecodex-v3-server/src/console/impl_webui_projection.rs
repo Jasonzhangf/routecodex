@@ -35,6 +35,7 @@ pub(crate) fn build_v3_webui_meta_for_context(
         execution_mode: Some(observability.execution_mode.clone()),
         transport: Some(observability.transport.clone()),
         provider_status: observability.provider_status,
+        terminal_typed_status_cleared: false,
         response_status: observability.response_status.clone(),
         finish_reason: observability.finish_reason.clone(),
         error_category: None,

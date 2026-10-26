@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 /// drop, and its pending runtime task is aborted before the runtime closeout can
 /// record anything. The typed `ClientDisconnect` source keeps the row a
 /// `request.cancelled` with no upstream provider status, instead of a fabricated
-/// provider 502.
+/// provider 502. The source string names the typed Error01 fact this transport
+/// path actually holds; it is not the typed `V3Error06ClientProjected` of the
+/// Direct lane, so `exposed` stays false and no Error06 projection is claimed.
 fn record_v3_transport_disconnect_cancelled(
     state: &V3ListenerState,
     endpoint: &str,
@@ -38,8 +40,12 @@ fn record_v3_transport_disconnect_cancelled(
         499,
         None,
         crate::webui_observability::V3ObsErrorProjection {
-            exposed: true,
+            exposed: false,
             diagnostic_source: Some(&source),
+            observed_source: Some(
+                crate::webui_observability::V3_OBS_SOURCE_ERROR01_CLIENT_DISCONNECT,
+            ),
+            terminal_typed_status_cleared: true,
             ..Default::default()
         },
     ) {

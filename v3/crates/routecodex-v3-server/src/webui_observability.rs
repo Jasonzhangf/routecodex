@@ -22,6 +22,11 @@ const V3_WEBUI_RECENT_REQUEST_CAPACITY: usize = 10_000;
 const V3_WEBUI_PERSISTENCE_QUEUE_CAPACITY: usize = 1_024;
 const V3_WEBUI_HISTORY_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
+/// The transport-cancel path holds a typed Error01 `ClientDisconnect` source
+/// but no `V3Error06ClientProjected`. This source names that actual fact instead
+/// of claiming Error06 exposure or describing only its absence.
+pub(crate) const V3_OBS_SOURCE_ERROR01_CLIENT_DISCONNECT: &str = "error01_client_disconnect";
+
 /// Unique request key: `<port>:<requestId>`.
 pub(crate) fn build_v3_obs_request_key(port: u16, request_id: &str) -> String {
     format!("{port}:{request_id}")
@@ -61,14 +66,15 @@ pub(crate) fn record_v3_webui_error_projection(
     // (body decode/operation timeout, transport break, client cancel) has no
     // upstream HTTP status; only a real upstream witness (or a typed external
     // error status) may set `provider_status`.
-    let terminal_provider_status = typed.terminal_disposition.and_then(|disposition| {
-        match disposition {
-            routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => {
-                Some(witness.status())
-            }
-            routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => None,
-        }
-    });
+    let terminal_provider_status =
+        typed
+            .terminal_disposition
+            .and_then(|disposition| match disposition {
+                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => {
+                    Some(witness.status())
+                }
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => None,
+            });
     let external_error_status = typed
         .diagnostic_source
         .and_then(|source| source.external_error.as_ref())
@@ -76,12 +82,12 @@ pub(crate) fn record_v3_webui_error_projection(
     // Lanes that expose no typed terminal facts keep the legacy projection:
     // the already-projected client status stands in for `provider_status`. Only
     // a lane that carries a typed provider terminal may report `None`.
-    let provider_status = if typed.terminal_disposition.is_some() || typed.diagnostic_source.is_some()
-    {
-        terminal_provider_status.or(external_error_status)
-    } else {
-        Some(status)
-    };
+    let provider_status =
+        if typed.terminal_disposition.is_some() || typed.diagnostic_source.is_some() {
+            terminal_provider_status.or(external_error_status)
+        } else {
+            Some(status)
+        };
     let (error_category, error_detail) = match body {
         Some(body) => crate::v3_error_body_code_message(body),
         None => match (typed.diagnostic_source, typed.terminal_disposition) {
@@ -118,12 +124,14 @@ pub(crate) fn record_v3_webui_error_projection(
         session: session.map(str::to_string),
     };
     let observed_error = V3ObsErrorTruth {
-        source: if typed.exposed {
-            "error06_projection"
-        } else {
-            "error06_projection_not_exposed"
-        }
-        .to_string(),
+        source: typed
+            .observed_source
+            .unwrap_or(if typed.exposed {
+                "error06_projection"
+            } else {
+                "error06_projection_not_exposed"
+            })
+            .to_string(),
         error_class: typed.error_class.map(str::to_string),
         chain: build_v3_obs_error_chain(typed.error_chain, typed.error_class, status),
         internal_code: typed
@@ -139,15 +147,12 @@ pub(crate) fn record_v3_webui_error_projection(
             .and_then(|source| source.external_error.as_ref())
             .and_then(|external| external.code.clone()),
         external_error_status,
-        upstream_request_id: typed
-            .upstream_request_id
-            .map(str::to_string)
-            .or_else(|| {
-                typed
-                    .diagnostic_source
-                    .and_then(|source| source.external_error.as_ref())
-                    .and_then(|external| external.upstream_request_id.clone())
-            }),
+        upstream_request_id: typed.upstream_request_id.map(str::to_string).or_else(|| {
+            typed
+                .diagnostic_source
+                .and_then(|source| source.external_error.as_ref())
+                .and_then(|external| external.upstream_request_id.clone())
+        }),
         health_action: match typed.health_action {
             Some(plan) => Some(v3_obs_health_action_from_plan(plan)?),
             None => None,
@@ -160,6 +165,11 @@ pub(crate) fn record_v3_webui_error_projection(
         entry_protocol: Some(entry_protocol.to_string()),
         execution_mode: typed.execution_mode.map(str::to_string),
         provider_status,
+        terminal_typed_status_cleared: typed.terminal_typed_status_cleared
+            || matches!(
+                typed.terminal_disposition,
+                Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+            ),
         response_status: Some("error".to_string()),
         finish_reason: Some("error".to_string()),
         route: Some("-".to_string()),
@@ -225,6 +235,19 @@ fn merge_v3_obs_request_meta(
         .route
         .filter(|value| !value.trim().is_empty() && value != "-")
         .or(previous.route);
+    // The typed Error06 projection lane distinguishes "the current typed
+    // terminal has no provider HTTP status" from "this event supplies no
+    // provider-status update". Only the former clears the row's inherited
+    // status: `record_v3_webui_error_projection` derives a typed NoResponse as
+    // `provider_status: None` while also carrying a typed terminal/disposition
+    // fact, so a later terminal on candidate B must not keep candidate A's real
+    // 502. A legacy lane with no typed terminal facts keeps the existing
+    // incoming-or-previous behavior.
+    let provider_status = if incoming.terminal_typed_status_cleared {
+        None
+    } else {
+        incoming.provider_status.or(previous.provider_status)
+    };
     V3ObsRequestMeta {
         request_id: if incoming.request_id.is_empty() {
             previous.request_id
@@ -249,11 +272,13 @@ fn merge_v3_obs_request_meta(
         entry_protocol: incoming.entry_protocol.or(previous.entry_protocol),
         execution_mode: incoming.execution_mode.or(previous.execution_mode),
         transport: incoming.transport.or(previous.transport),
-        provider_status: incoming.provider_status.or(previous.provider_status),
+        provider_status,
         response_status: incoming.response_status.or(previous.response_status),
         finish_reason: incoming.finish_reason.or(previous.finish_reason),
         error_category: incoming.error_category.or(previous.error_category),
         error_detail: incoming.error_detail.or(previous.error_detail),
+        terminal_typed_status_cleared: incoming.terminal_typed_status_cleared
+            || previous.terminal_typed_status_cleared,
         observed_error: merge_v3_obs_error_truth(previous.observed_error, incoming.observed_error),
     }
 }
@@ -323,6 +348,12 @@ pub(crate) struct V3ObsRequestMeta {
     pub execution_mode: Option<String>,
     pub transport: Option<String>,
     pub provider_status: Option<u16>,
+    /// Internal merge control, never persisted or rendered: `true` only on a
+    /// row update from the typed Error06 projection whose terminal explicitly
+    /// has no provider HTTP status (`provider_status: None`). It clears a
+    /// previously inherited provider status instead of falling back to it.
+    #[serde(skip)]
+    pub terminal_typed_status_cleared: bool,
     pub response_status: Option<String>,
     pub finish_reason: Option<String>,
     pub error_category: Option<String>,
@@ -341,9 +372,10 @@ pub(crate) struct V3ObsRequestMeta {
 #[serde(default)]
 pub(crate) struct V3ObsErrorTruth {
     /// Origin of the snapshot: `provider_attempt_failure` |
-    /// `error06_projection` | `error06_projection_not_exposed`.
-    /// The last value makes "this lane exposed no typed Error06 truth" explicit
-    /// instead of an empty object that reads as "there was no error chain".
+    /// `error06_projection` | `error06_projection_not_exposed` |
+    /// `error01_client_disconnect`. The transport-cancel value records the
+    /// typed Error01 `ClientDisconnect` fact the lane actually holds; the
+    /// not-exposed value says only that no typed Error06 truth is available.
     pub source: String,
     /// `V3Error02Classified.class` as projected by `V3Error06ClientProjected`.
     pub error_class: Option<String>,
@@ -414,14 +446,20 @@ pub(crate) struct V3ObsErrorProjection<'a> {
     /// silently writing an empty chain.
     pub exposed: bool,
     pub error_class: Option<&'a str>,
+    /// Explicit `observed_error.source` for a typed terminal whose source fact
+    /// is neither a real Error06 projection nor merely its absence.
+    pub observed_source: Option<&'a str>,
     pub error_chain: &'a [&'static str],
     pub health_action: Option<&'a routecodex_v3_error::V3ErrorActionPlan>,
     pub upstream_request_id: Option<&'a str>,
     /// Typed Error01 source raised at the terminal, when the lane exposes it.
     pub diagnostic_source: Option<&'a routecodex_v3_error::V3Error01SourceRaised>,
     /// Typed provider terminal disposition, when the lane exposes it.
-    pub terminal_disposition:
-        Option<&'a routecodex_v3_error::V3ProviderTerminalDisposition>,
+    pub terminal_disposition: Option<&'a routecodex_v3_error::V3ProviderTerminalDisposition>,
+    /// `true` when the caller's lane explicitly reports that its typed terminal
+    /// has no provider HTTP status. The row merge must not inherit an earlier
+    /// provider attempt's status onto this terminal.
+    pub terminal_typed_status_cleared: bool,
 }
 
 /// Canonical typed state per Error chain node. Keyed by node id so the chain the
@@ -504,6 +542,8 @@ fn v3_obs_health_action_from_plan(
 /// * `error06_projection_not_exposed` — the terminal Error06 projection happened
 ///   but this lane cannot carry its typed form (relay lane, plan §9.4 boundary A).
 ///   This is a statement about the *carrier*, not about the request.
+/// * `error01_client_disconnect` — the transport-cancel lane holds the typed
+///   Error01 `ClientDisconnect` source but no `V3Error06ClientProjected`.
 /// * `error06_projection` — the terminal typed `V3Error06ClientProjected`.
 ///
 /// The ladder is what makes the merge order-independent: the absence marker can
@@ -514,6 +554,7 @@ fn v3_obs_error_source_rank(source: &str) -> u8 {
         "" => 0,
         "provider_attempt_failure" => 1,
         "error06_projection_not_exposed" => 2,
+        V3_OBS_SOURCE_ERROR01_CLIENT_DISCONNECT => 2,
         "error06_projection" => 3,
         // An unlisted source is a real observation of unknown provenance; rank it
         // at terminal level so the absence marker can never erase it silently.
