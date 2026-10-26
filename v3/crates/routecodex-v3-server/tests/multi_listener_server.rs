@@ -4090,6 +4090,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                             .web_search_execution_mode
                             .clone(),
                         features: std::collections::BTreeMap::new(),
+                        availability: None,
                     },
                 ),
                 (
@@ -4114,6 +4115,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                             .web_search_execution_mode
                             .clone(),
                         features: std::collections::BTreeMap::new(),
+                        availability: None,
                     },
                 ),
             ]),

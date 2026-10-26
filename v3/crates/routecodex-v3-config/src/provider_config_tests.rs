@@ -20,6 +20,7 @@ fn directory_compilation_uses_referenced_models_only() {
                 web_search_execution_mode: None,
                 web_search_backend: None,
                 features: BTreeMap::new(),
+                availability: None,
             },
         ),
         (
@@ -39,6 +40,7 @@ fn directory_compilation_uses_referenced_models_only() {
                 web_search_execution_mode: None,
                 web_search_backend: None,
                 features: BTreeMap::new(),
+                availability: None,
             },
         ),
     ]);
