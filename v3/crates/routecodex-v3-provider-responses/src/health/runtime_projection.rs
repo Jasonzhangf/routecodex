@@ -102,6 +102,27 @@ fn record_health_delta(history: &mut V3ProviderAdaptiveHistory, delta: i32) {
         (i64::from(history.score_milli) + i64::from(delta)).clamp(0, 150) as u32;
 }
 
+/// A probe excludes the identity only while the real cooldown window is open.
+/// A 429 rate-limit hold is bounded: it stops blocking once `blocked_until_ms`
+/// passes, so the identity is released automatically even without a probe. An
+/// advisory probe's scheduling state (active, pending, in-flight) is never an
+/// availability decision: upstream stays selectable and the probe remains the
+/// recovery path, so a probe failure cannot lock the provider out.
+fn probe_state_blocks_availability(probe: &V3ProviderCooldownProbeState, now_ms: u64) -> bool {
+    if probe.cooldown_cause == Some(crate::global_cooldown::V3ProviderCooldownFailureClass::RateLimit)
+        || probe.advisory_probe
+    {
+        return probe
+            .blocked_until_ms
+            .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms);
+    }
+    probe.active_probe.is_some()
+        || probe.next_probe_at_ms.is_some()
+        || probe
+            .blocked_until_ms
+            .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms)
+}
+
 fn provider_failure_session_scope_label(key: &V3ProviderFailureSessionKey) -> String {
     format!(
         "provider_failure_session:{}:{}:{}:{}",
@@ -257,6 +278,10 @@ fn upsert_provider_cooldown_probe(
         blocked_until_ms,
         V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
         false,
+        state
+            .failure_policies
+            .get(provider_id)
+            .is_some_and(|policy| policy.advisory_probe),
     );
 }
 
@@ -344,6 +369,7 @@ fn upsert_provider_cooldown_probe_with_interval(
     blocked_until_ms: u64,
     probe_interval_ms: u64,
     long_probe_backoff: bool,
+    advisory_probe: bool,
 ) {
     // 已有 probe 在途时保留 in-flight 标记：并发失败 re-upsert 不得清掉
     // 单飞锁，否则会并发启动第二个 probe。
@@ -381,6 +407,10 @@ fn upsert_provider_cooldown_probe_with_interval(
     state.provider_cooldown_probes.insert(
         provider_cooldown_probe_key_for_interface(provider_id, interface_id, auth_alias, model_id),
         V3ProviderCooldownProbeState {
+            // A new failure owns the cooldown state it creates. The 429 caller
+            // re-stamps `RateLimit` right after this upsert, so inheriting a
+            // previous cause here would let a later non-429 failure keep the
+            // bounded rate-limit marker and lose its probe-owned window.
             cooldown_cause: None,
             blocked_until_ms: Some(blocked_until_ms),
             next_probe_at_ms: Some(now_ms.saturating_add(probe_interval_ms.max(1))),
@@ -395,6 +425,7 @@ fn upsert_provider_cooldown_probe_with_interval(
             active_probe,
             probe_model_id: model_id.map(str::to_string),
             rescue_probe_attempted,
+            advisory_probe,
         },
     );
 }
