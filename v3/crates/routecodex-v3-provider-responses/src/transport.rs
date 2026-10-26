@@ -802,13 +802,14 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     &request_id,
                     &provider_id,
                     request.transport_kind(),
-                ) {
+                ) || !attempt_control.claim_for_send() {
                     return Err(V3ProviderError::InternalTransport {
                         request_id: request_id.clone(),
                         provider_id: provider_id.clone(),
                         lane: V3ProviderInternalTransportLane::Request,
-                        reason: "provider transport attempt control does not belong to this request"
-                            .to_string(),
+                        reason:
+                            "provider transport attempt control is not bound or already claimed"
+                                .to_string(),
                     });
                 }
                 Some(attempt_control)

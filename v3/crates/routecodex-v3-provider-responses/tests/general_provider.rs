@@ -844,3 +844,85 @@ async fn provider_send_fact_distinguishes_pre_send_cancel_from_first_poll_timeou
     server.await.unwrap();
     std::env::remove_var("V3_GENERAL_SENDFACT_KEY");
 }
+
+#[tokio::test]
+async fn provider_send_fact_control_is_single_use_per_attempt() {
+    std::env::set_var("V3_GENERAL_SENDFACT_KEY", "secret-sendfact");
+    let transport = ReqwestResponsesTransport::default();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (request_received_tx, request_received_rx) = oneshot::channel::<Vec<u8>>();
+    let (server_shutdown_tx, server_shutdown_rx) = oneshot::channel::<()>();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 16_384];
+        let read = socket.read(&mut request).await.unwrap();
+        let _ = request_received_tx.send(request[..read].to_vec());
+        let _ = server_shutdown_rx.await;
+    });
+
+    let wire = build_v3_provider_12_responses_wire_payload(
+        "req-sendfact-single-use",
+        target(
+            "sendfact",
+            &format!("http://{address}/v1/responses"),
+            "model",
+            "error",
+            "V3_GENERAL_SENDFACT_KEY",
+        ),
+        json!({"model":"model","input":"single use"}),
+    )
+    .unwrap();
+    let first_request =
+        build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)
+            .unwrap()
+            .with_handoff_scope(handoff_scope("req-sendfact-single-use"))
+            .unwrap();
+    let control = transport
+        .begin_transport_attempt(&first_request)
+        .unwrap()
+        .expect("handoff request must expose a send fact control");
+    let second_wire = build_v3_provider_12_responses_wire_payload(
+        "req-sendfact-single-use",
+        target(
+            "sendfact",
+            &format!("http://{address}/v1/responses"),
+            "model",
+            "error",
+            "V3_GENERAL_SENDFACT_KEY",
+        ),
+        json!({"model":"model","input":"single use"}),
+    )
+    .unwrap();
+    let second_request =
+        build_v3_transport_13_responses_http_request_from_v3_provider_12(second_wire)
+            .unwrap()
+            .with_handoff_scope(handoff_scope("req-sendfact-single-use"))
+            .unwrap();
+
+    let first = transport.send_observed(first_request, Some(control.clone()));
+    let second = transport.send_observed(second_request, Some(control));
+    let _ = tokio::time::timeout(Duration::from_millis(300), first).await;
+    let second_error = tokio::time::timeout(Duration::from_secs(1), second)
+        .await
+        .expect("second send must resolve quickly")
+        .expect_err("second send must be rejected before upstream bytes");
+    assert!(
+        matches!(
+            second_error,
+            V3ProviderError::InternalTransport { .. }
+        ),
+        "second send with the same control must be rejected by the owning broker"
+    );
+
+    let received = tokio::time::timeout(Duration::from_secs(5), request_received_rx)
+        .await
+        .expect("first send must reach the strict loopback fixture")
+        .expect("strict fixture must observe the request bytes");
+    assert!(!received.is_empty(), "the real request must not be empty");
+
+    server_shutdown_tx.send(()).unwrap();
+    server.await.unwrap();
+    std::env::remove_var("V3_GENERAL_SENDFACT_KEY");
+}

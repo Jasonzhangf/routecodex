@@ -63,6 +63,9 @@ struct V3ProviderTransportAttempt {
     // Kept beside the checkpoint, not inside it: an outer timeout must retain
     // this fact without changing the restart checkpoint serialization.
     send_phase: V3ProviderTransportSendPhase,
+    // True once a send has claimed this attempt identity. A control clone may
+    // still read the fact, but only one send may own the attempt.
+    send_claimed: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -126,9 +129,28 @@ impl V3ProviderTransportAttemptBroker {
                     runtime_generation,
                 },
                 send_phase: V3ProviderTransportSendPhase::NotSent,
+                send_claimed: false,
             },
         );
         Ok(())
+    }
+
+    /// Atomically claim the attempt for exactly one send. Returns true only
+    /// for the caller that wins; a second claim for the same identity returns
+    /// false and no upstream bytes are sent under that identity.
+    pub(crate) fn claim_for_send(&self, key: &V3ProviderTransportAttemptKey) -> bool {
+        let mut attempts = self
+            .attempts
+            .lock()
+            .expect("provider transport attempt lock");
+        let Some(attempt) = attempts.get_mut(key) else {
+            return false;
+        };
+        if attempt.send_claimed {
+            return false;
+        }
+        attempt.send_claimed = true;
+        true
     }
 
     pub fn state(
@@ -318,6 +340,7 @@ impl V3ProviderTransportAttemptBroker {
                     // The old checkpoint cannot prove NotSent. Keep the
                     // conservative uncertainty across restart.
                     send_phase: V3ProviderTransportSendPhase::SendStarted,
+                    send_claimed: false,
                 },
             );
         }
@@ -398,6 +421,13 @@ impl V3ProviderTransportAttemptControl {
 
     pub(crate) fn mark_send_started(&self) {
         self.broker.mark_send_started(&self.key);
+    }
+
+    /// Atomically claim the attempt for this send. A clone of the same control
+    /// that is passed to another send_observed call is rejected at the broker
+    /// before any upstream send is attempted.
+    pub(crate) fn claim_for_send(&self) -> bool {
+        self.broker.claim_for_send(&self.key)
     }
 }
 
