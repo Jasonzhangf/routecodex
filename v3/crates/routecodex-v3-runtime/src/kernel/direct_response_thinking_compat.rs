@@ -113,8 +113,19 @@ fn rewrite_v3_direct_thinking_tag_sse_bytes(input: &[u8]) -> Result<Vec<u8>, Str
     rewrite_v3_direct_thinking_tag_sse_frames(&frames)
 }
 
+/// Whole-attempt thinking-tag governance.
+///
+/// `flushed` is the number of frames that already crossed the client commit
+/// point. With the first-frame commit gate enabled, a provider can deliver a
+/// clean visible prefix and only then introduce a `<thinking>` marker. The
+/// delivered frames are append-only, so this owner keeps `frames[..flushed]`
+/// byte-identical and continues the governed item from the delivered visible
+/// text instead of re-emitting the whole item. That mirrors the DSML owner's
+/// `flushed` continuation and stops a late marker from turning a delivered
+/// response into a post-commit governance break.
 pub(crate) fn rewrite_v3_direct_thinking_attempt(
     frames: &[Vec<u8>],
+    flushed: usize,
 ) -> Option<(Vec<Vec<u8>>, usize)> {
     let terminal_position = frames.iter().position(|frame| {
         direct_thinking_event_value(frame).is_some_and(|value| {
@@ -124,6 +135,12 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
             )
         })
     })?;
+    // The terminal frame is always held inside the attempt, so a flushed
+    // prefix can never cover it. A larger count is incoherent and fails closed
+    // instead of rewriting an unknown coordinate.
+    if flushed > terminal_position {
+        return None;
+    }
     let terminal = direct_thinking_event_value(&frames[terminal_position])?;
     let original_output = terminal
         .get("response")
@@ -171,14 +188,19 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
 
+    // Visible text of every plan item that already reached the client. The
+    // governed continuation subtracts it from the item's full visible text so a
+    // delivered delta is never re-emitted.
+    let delivered = delivered_thinking_visible_text(frames, flushed, &plans, &wire_items);
     let mut rewritten = Vec::with_capacity(frames.len() + plans.len());
+    rewritten.extend_from_slice(&frames[..flushed]);
     let mut terminal_index = None;
     let mut emitted_pure_reasoning = BTreeSet::new();
     let first_appended_wire_index = match wire_items.keys().next_back() {
         Some(index) => index.checked_add(1)?,
         None => original_output.len(),
     };
-    for (frame_index, frame) in frames.iter().enumerate() {
+    for (frame_index, frame) in frames.iter().enumerate().skip(flushed) {
         if frame_index == terminal_position {
             for (index, item) in transformed_output.iter().enumerate().skip(original_output.len()) {
                 let wire_index = first_appended_wire_index.checked_add(index - original_output.len())?;
@@ -259,11 +281,19 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
             }
             "response.output_text.done" => {
                 let visible = direct_thinking_visible_part(plan, &value)?;
-                if !visible.is_empty() {
+                let content_index = direct_thinking_event_content_index(&value);
+                let delivered_text = delivered
+                    .get(&(plan.output_index, content_index))
+                    .map(String::as_str)
+                    .unwrap_or_default();
+                // A delivered frame is never rewritten or re-emitted, so only
+                // the visible remainder the client has not seen is projected.
+                let remaining = visible.strip_prefix(delivered_text)?;
+                if !remaining.is_empty() {
                     rewritten.push(direct_thinking_output_text_delta_frame(
                         &value,
                         &plan,
-                        visible,
+                        remaining,
                         response_id.as_deref(),
                     ));
                 }
@@ -394,6 +424,63 @@ fn direct_thinking_event_item_id(event: &Value) -> Option<&str> {
     })
 }
 
+fn direct_thinking_event_content_index(event: &Value) -> usize {
+    event
+        .get("content_index")
+        .and_then(Value::as_u64)
+        .and_then(|index| usize::try_from(index).ok())
+        .unwrap_or(0)
+}
+
+/// Visible text per `(snapshot output_index, content_index)` that already
+/// crossed the client commit point for a plan item. Delta carriers accumulate;
+/// a complete carrier repeats the deltas, so it replaces the accumulated text.
+fn delivered_thinking_visible_text(
+    frames: &[Vec<u8>],
+    flushed: usize,
+    plans: &[crate::shared_direct_thinking_compat::V3DirectThinkingOutputItemPlan],
+    wire_items: &BTreeMap<usize, Option<String>>,
+) -> BTreeMap<(usize, usize), String> {
+    let mut delivered = BTreeMap::new();
+    for frame in frames.iter().take(flushed) {
+        let Some(value) = direct_thinking_event_value(frame) else {
+            continue;
+        };
+        let Some(plan) = direct_thinking_plan_for_event(plans, &value, wire_items) else {
+            continue;
+        };
+        let key = (
+            plan.output_index,
+            direct_thinking_event_content_index(&value),
+        );
+        match value.get("type").and_then(Value::as_str) {
+            Some("response.output_text.delta") => {
+                if let Some(delta) = value.get("delta").and_then(Value::as_str) {
+                    delivered
+                        .entry(key)
+                        .or_insert_with(String::new)
+                        .push_str(delta);
+                }
+            }
+            Some("response.output_text.done") => {
+                if let Some(text) = value.get("text").and_then(Value::as_str) {
+                    delivered.insert(key, text.to_owned());
+                }
+            }
+            Some("response.content_part.done") => {
+                if let Some(text) = value
+                    .pointer("/part/text")
+                    .and_then(Value::as_str)
+                {
+                    delivered.insert(key, text.to_owned());
+                }
+            }
+            _ => {}
+        }
+    }
+    delivered
+}
+
 fn direct_thinking_visible_part<'a>(
     plan: &'a crate::shared_direct_thinking_compat::V3DirectThinkingOutputItemPlan,
     event: &Value,
@@ -510,7 +597,7 @@ fn rewrite_v3_direct_thinking_tag_sse_frames(
     let wire = frames.iter().map(|frame| {
         build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(frame).as_bytes().to_vec()
     }).collect::<Vec<_>>();
-    Ok(rewrite_v3_direct_thinking_attempt(&wire)
+    Ok(rewrite_v3_direct_thinking_attempt(&wire, 0)
         .map_or_else(|| wire.concat(), |(rewritten, _)| rewritten.concat()))
 }
 

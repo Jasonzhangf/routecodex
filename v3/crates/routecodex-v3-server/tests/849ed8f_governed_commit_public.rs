@@ -145,11 +145,16 @@ fn message_with_id(text: &str, item_id: &str) -> Value {
 
 fn scenario(input: &str, model: &str) -> Vec<String> {
     match input {
-        "post-commit-thinking-failure" => vec![
+        // A clean visible prefix commits the client channel, then the provider
+        // delivers a thinking wrapper in a later frame. The whole-attempt owner
+        // must continue governance from the delivered prefix instead of
+        // rewriting flushed client frames. The terminal text is the exact
+        // concatenation of the streamed deltas, as a real provider produces.
+        "post-commit-thinking-governed" => vec![
             delta(0, 0, "committed-prefix"),
             delta(0, 0, "<thinking>secret</thinking>"),
             completed(json!([message(
-                "committed-prefix <thinking>secret</thinking>"
+                "committed-prefix<thinking>secret</thinking>"
             )])),
         ],
         "split-orphan-before-commit" if model != "wire-recover" => {
@@ -664,14 +669,71 @@ fn assert_no_client_error(text: &str) {
     );
 }
 
+/// The per-listener request-records ledger for the running fixture listener.
+fn request_records_path(port: u16) -> std::path::PathBuf {
+    std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap()
+        .join(".rcc")
+        .join("logs")
+        .join(format!("server-v3-{port}.request-records.jsonl"))
+}
+
+fn read_request_rows(path: &std::path::Path) -> Vec<Value> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter_map(|line| line.get("row").cloned())
+        .collect()
+}
+
+/// A repaired post-commit attempt is a normal success: the terminal row must
+/// not carry the `error06_projection` http_598 label the live sample recorded.
+fn assert_no_http_598_terminal(rows: &[Value]) -> Vec<Value> {
+    let terminal_rows: Vec<Value> = rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row["event_type"].as_str(),
+                Some("request.completed" | "request.failed" | "request.cancelled")
+            )
+        })
+        .cloned()
+        .collect();
+    assert!(
+        !terminal_rows.is_empty(),
+        "the governed attempt must persist a terminal ledger row: {rows:#?}"
+    );
+    for row in &terminal_rows {
+        let encoded = row.to_string();
+        assert!(
+            !encoded.contains("\"error06_projection\"")
+                && !encoded.contains("\"http_598\"")
+                && !encoded.contains("\"provider_status\":598")
+                && !encoded.contains("\"provider_status\": 598"),
+            "the repaired terminal must not carry a 598 projection label: {row}"
+        );
+    }
+    terminal_rows
+}
+
+/// Public proof that a thinking wrapper arriving after a clean committed
+/// prefix is governed by the whole-attempt owner without rewriting the flushed
+/// client frames. The committed prefix stays on the wire, the wrapper body is
+/// projected as reasoning, the attempt ends with a normal `response.completed`,
+/// and the client never receives an error payload or a 598 projection. This is
+/// the live sample's post-commit governance break, now sealed by the owner's
+/// `flushed` continuation instead of ending the transport.
 #[tokio::test]
-async fn post_commit_thinking_governance_breaks_before_completion() {
+async fn post_commit_thinking_governance_delivers_governed_tail() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, ended) = raw_request(
         &entry,
         "849ed8f-post-commit-thinking",
-        "post-commit-thinking-failure",
+        "post-commit-thinking-governed",
     )
     .await;
     let text = wire_text(&wire);
@@ -679,21 +741,55 @@ async fn post_commit_thinking_governance_breaks_before_completion() {
 
     assert!(text.contains("committed-prefix"), "{text}");
     assert!(
-        !text.contains("<thinking>") && !text.contains("secret"),
-        "{text}"
+        !text.contains("<thinking>"),
+        "the raw thinking wrapper must not reach the client: {text}"
     );
-    assert!(!text.contains("response.completed"), "{text}");
     assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+        text.contains("response.reasoning_summary_text.delta"),
+        "the wrapper body must be projected as reasoning: {text}"
+    );
+    assert_eq!(
+        completed_output_texts(&wire),
+        vec!["committed-prefix"],
+        "the governed message text is exactly the delivered prefix"
+    );
+    assert!(
+        text.contains("response.completed"),
+        "the governed attempt must complete normally: {text}"
+    );
+    assert!(
+        text.ends_with("0\r\n\r\n"),
+        "the completed attempt must end the chunked body: {text}"
     );
     assert_no_client_error(&text);
     assert!(
-        ended.is_ok()
-            || ended
-                .as_ref()
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
-        "unexpected transport ending: {ended:?}"
+        ended.is_ok(),
+        "a governed post-commit attempt must end cleanly: {ended:?}"
+    );
+
+    // The ledger must agree with the wire: a completed terminal with no
+    // `error06_projection` http_598 label. The live sample recorded one from the
+    // same post-commit governance break.
+    let port = entry.handle.listeners[0].addr.port();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let terminal_rows = loop {
+        let rows = read_request_rows(&request_records_path(port));
+        if rows.iter().any(|row| {
+            matches!(
+                row["event_type"].as_str(),
+                Some("request.completed" | "request.failed" | "request.cancelled")
+            )
+        }) || std::time::Instant::now() >= deadline
+        {
+            break assert_no_http_598_terminal(&rows);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert!(
+        terminal_rows
+            .iter()
+            .any(|row| row["event_type"] == "request.completed"),
+        "a governed post-commit attempt must record request.completed: {terminal_rows:#?}"
     );
     entry.stop().await;
 }
@@ -776,25 +872,44 @@ async fn snapshot_carrier_collision_does_not_release_split_marker_early() {
     let text = wire_text(&wire);
 
     assert!(text.contains("safe-prefix"), "{text}");
-    assert!(!text.contains("<thin"), "{text}");
     assert!(!text.contains("<thinking>"), "{text}");
     assert!(!text.contains("</thinking>"), "{text}");
-    assert!(!text.contains("secret"), "{text}");
+    // The provider's non-terminal `response.in_progress` state mirror can carry
+    // the partial carrier text (`safe-prefix <thin`). That mirror is
+    // provider state, not deliverable business text, and the fully buffered
+    // reference carries it too. The split marker itself must never be released
+    // as a delta or a completed text.
     assert!(
-        !text.contains("response.completed"),
-        "the bounded truncation must not project completion: {text}"
+        !projected_delta_text(&wire).contains("<thin"),
+        "the split marker must not be released as client-visible text: {text}"
     );
     assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+        completed_output_texts(&wire)
+            .iter()
+            .all(|text| !text.contains("<thin")),
+        "the split marker must not appear in the completed output: {text}"
+    );
+    assert!(
+        text.contains("response.reasoning_summary_text.delta"),
+        "the split marker must be governed into reasoning, not projected as text: {text}"
+    );
+    assert!(
+        text.contains("response.completed"),
+        "the governed split marker must complete the attempt: {text}"
+    );
+    assert!(
+        text.ends_with("0\r\n\r\n"),
+        "the completed attempt must end the chunked body: {text}"
+    );
+    assert_eq!(
+        completed_output_texts(&wire),
+        vec!["safe-prefix  tail", "ordinary"],
+        "the committed prefix and the surviving tail are the visible text"
     );
     assert_no_client_error(&text);
     assert!(
-        ended.is_ok()
-            || ended
-                .as_ref()
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
-        "unexpected transport ending: {ended:?}"
+        ended.is_ok(),
+        "a governed post-commit attempt must end cleanly: {ended:?}"
     );
     entry.stop().await;
 }
@@ -893,19 +1008,27 @@ async fn interleaved_carriers_hold_thinking_marker_without_leaking() {
     assert!(text.contains("safe-prefix"), "{text}");
     assert!(!text.contains("<thinking>"), "{text}");
     assert!(!text.contains("</thinking>"), "{text}");
-    assert!(!text.contains("secret"), "{text}");
-    assert!(!text.contains("response.completed"), "{text}");
     assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+        text.contains("response.reasoning_summary_text.delta"),
+        "the interleaved marker must be governed into reasoning: {text}"
+    );
+    assert!(
+        text.contains("response.completed"),
+        "the governed interleaved marker must complete the attempt: {text}"
+    );
+    assert!(
+        text.ends_with("0\r\n\r\n"),
+        "the completed attempt must end the chunked body: {text}"
+    );
+    assert_eq!(
+        completed_output_texts(&wire),
+        vec!["safe-prefix  tail", "other"],
+        "the committed prefix, surviving tail and other part are the visible text"
     );
     assert_no_client_error(&text);
     assert!(
-        ended.is_ok()
-            || ended
-                .as_ref()
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
-        "unexpected transport ending: {ended:?}"
+        ended.is_ok(),
+        "a governed post-commit attempt must end cleanly: {ended:?}"
     );
     entry.stop().await;
 }

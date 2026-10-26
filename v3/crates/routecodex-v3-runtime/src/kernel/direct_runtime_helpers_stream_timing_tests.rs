@@ -1859,11 +1859,14 @@ async fn first_frame_commit_keeps_governance_after_commit() {
     );
 }
 
-/// A marker that appears only after the commit cannot be governed in place.
-/// The builder must refuse to rewrite already flushed frames, so the transport
-/// ends detectably and no raw marker reaches the client.
+/// A marker that appears only after the commit must be governed by the
+/// registered whole-attempt owner without rewriting already flushed frames. The
+/// committed prefix stays on the client channel; the owner continues the
+/// governed item from the delivered visible text, so the tail is delivered as
+/// reasoning and no raw marker reaches the client. This is the Direct SSE
+/// post-commit governance contract: no transport break, no 598 ledger label.
 #[tokio::test]
-async fn first_frame_commit_marker_after_commit_breaks_visibly_without_leaking() {
+async fn first_frame_commit_marker_after_commit_is_governed_without_leaking() {
     let first = "hello";
     let second = " <thinking>x</thinking>";
     let full = format!("{first}{second}");
@@ -1891,13 +1894,17 @@ async fn first_frame_commit_marker_after_commit_breaks_visibly_without_leaking()
     let run = run_early_commit_attempt(chunks).await;
     assert!(run.committed, "the clean first delta must commit");
     assert!(
-        run.failed,
-        "a post-commit whole-attempt rewrite must end the transport detectably"
+        !run.failed,
+        "a governed post-commit attempt must seal without a transport break"
     );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     assert!(
         !streamed.contains("<thinking>"),
         "no raw marker may reach the client after a committed prefix: {streamed}"
+    );
+    assert!(
+        streamed.contains("response.reasoning_summary_text.delta"),
+        "the post-commit marker must be governed into reasoning: {streamed}"
     );
     assert!(
         streamed.contains("hello"),
@@ -1974,18 +1981,19 @@ async fn first_frame_commit_marker_split_across_deltas_never_commits() {
     );
 }
 
-/// The same split after a certified prefix: the held frame and the frame that
-/// confirms the marker must not be projected.
+/// The same split after a certified prefix: the owner continues from the
+/// delivered visible text, so the held frame and the frame that confirms the
+/// marker are governed into reasoning and nothing leaks. The attempt seals.
 #[tokio::test]
-async fn first_frame_commit_marker_split_after_commit_breaks_without_leaking() {
+async fn first_frame_commit_marker_split_after_commit_is_governed_without_leaking() {
     let full = "hello <thinking>secret</thinking>";
     let chunks =
         responses_split_delta_sequence(&["hello ", "<thin", "king>secret</thinking>"], full);
     let run = run_early_commit_attempt(chunks).await;
     assert!(run.committed, "the clean prefix must commit");
     assert!(
-        run.failed,
-        "the split marker must end the committed channel detectably"
+        !run.failed,
+        "the split marker must be governed, not break the committed channel"
     );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     assert!(
@@ -1993,15 +2001,25 @@ async fn first_frame_commit_marker_split_after_commit_breaks_without_leaking() {
         "the certified prefix must still reach the client: {streamed}"
     );
     assert!(
-        !streamed.contains("<thin") && !streamed.contains("secret"),
-        "neither the held prefix frame nor the reasoning body may reach the client: {streamed}"
+        !streamed.contains("<thin"),
+        "the raw split marker fragment must not reach the client: {streamed}"
+    );
+    assert!(
+        streamed.contains("response.reasoning_summary_text.delta"),
+        "the post-commit marker body must be governed into reasoning: {streamed}"
+    );
+    assert!(
+        streamed.contains("response.completed"),
+        "a governed post-commit attempt must finish with a normal terminal: {streamed}"
     );
 }
 
 /// A marker that only appears in the terminal snapshot is still governed,
-/// because the complete-attempt owners read that snapshot.
+/// because the complete-attempt owners read that snapshot. The delivered text
+/// is a prefix of the governed visible text, so the owner replays only the
+/// undelivered remainder and the attempt seals.
 #[tokio::test]
-async fn first_frame_commit_marker_only_in_terminal_snapshot_breaks_without_leaking() {
+async fn first_frame_commit_marker_only_in_terminal_snapshot_is_governed_without_leaking() {
     let clean = "hello";
     let governed = "hello <thinking>secret</thinking>";
     let chunks: Vec<Vec<u8>> = [
@@ -2024,8 +2042,8 @@ async fn first_frame_commit_marker_only_in_terminal_snapshot_breaks_without_leak
     let run = run_early_commit_attempt(chunks).await;
     assert!(run.committed, "the clean delta must commit");
     assert!(
-        run.failed,
-        "a governed terminal snapshot must end the committed channel detectably"
+        !run.failed,
+        "a governed terminal snapshot must seal, not break the committed channel"
     );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     assert!(
@@ -2033,8 +2051,16 @@ async fn first_frame_commit_marker_only_in_terminal_snapshot_breaks_without_leak
         "the certified prefix must still reach the client: {streamed}"
     );
     assert!(
-        !streamed.contains("<thinking>") && !streamed.contains("secret"),
-        "the terminal snapshot marker must not reach the client: {streamed}"
+        !streamed.contains("<thinking>"),
+        "the terminal snapshot raw marker must not reach the client: {streamed}"
+    );
+    assert!(
+        streamed.contains("response.reasoning_summary_text.delta"),
+        "the terminal snapshot marker must be governed into reasoning: {streamed}"
+    );
+    assert!(
+        streamed.contains("response.completed"),
+        "a governed post-commit attempt must finish with a normal terminal: {streamed}"
     );
 }
 

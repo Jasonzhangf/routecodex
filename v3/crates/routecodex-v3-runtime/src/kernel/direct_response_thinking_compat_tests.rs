@@ -19,7 +19,7 @@ fn direct_thinking_sse_preserves_raw_extensions_and_snapshot() {
     let number = "123456789012345678901234567890";
     let created = format!("data: {}\n\n", json!({"type":"response.created","response":{"output":[item.clone()]}}));
     let terminal = format!("data: {{\"type\":\"response.completed\",\"vendor\":{number},\"response\":{{\"vendor\":{number},\"status\":\"completed\",\"output\":[{item}]}}}}\n\n");
-    let (frames, _) = rewrite_v3_direct_thinking_attempt(&[created.into_bytes(), terminal.into_bytes()]).unwrap();
+    let (frames, _) = rewrite_v3_direct_thinking_attempt(&[created.into_bytes(), terminal.into_bytes()], 0).unwrap();
     let wire = String::from_utf8(frames.concat()).unwrap();
     assert!(!wire.contains("<thinking>"), "snapshot leaked: {wire}");
     assert_eq!(wire.matches(number).count(), 2, "opaque number changed: {wire}");
@@ -31,13 +31,13 @@ fn direct_thinking_sse_opaque_carrier_remains_associated() {
     let mut frames = sse_frames(&source);
     let event = json!({"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","content_index":0,"delta":"<thinking>private</thinking>","vendor":{"keep":true}});
     frames[2] = format!("data: {event}\n\n").into_bytes();
-    assert!(rewrite_v3_direct_thinking_attempt(&frames).is_none());
+    assert!(rewrite_v3_direct_thinking_attempt(&frames, 0).is_none());
 }
 
 #[test]
 fn direct_thinking_sse_mixed_body_emits_appended_reasoning() {
     let source = tagged_sse(&["<thinking>private</thinking>answer"], "<thinking>private</thinking>answer");
-    let (frames, _) = rewrite_v3_direct_thinking_attempt(&sse_frames(&source)).unwrap();
+    let (frames, _) = rewrite_v3_direct_thinking_attempt(&sse_frames(&source), 0).unwrap();
     let wire = String::from_utf8(frames.concat()).unwrap();
     assert!(wire.contains("response.reasoning_summary_text.delta"), "{wire}");
     assert!(wire.contains("answer"));
@@ -290,7 +290,7 @@ fn direct_thinking_attempt_sse_split_open_without_tools_becomes_reasoning() {
     let input = tagged_sse(&["<thin", "king>leading ", "body"], "<thinking>leading body");
     let frames = sse_frames(&input);
     let (rewritten, terminal_index) =
-        rewrite_v3_direct_thinking_attempt(&frames).expect("thinking attempt must change");
+        rewrite_v3_direct_thinking_attempt(&frames, 0).expect("thinking attempt must change");
     assert!(terminal_index < rewritten.len());
     let text = rewritten
         .iter()
@@ -317,7 +317,7 @@ fn direct_thinking_attempt_sse_tool_preserves_half_marker_body_as_text() {
     );
     let frames = sse_frames(input.as_bytes());
     let (rewritten, _) =
-        rewrite_v3_direct_thinking_attempt(&frames).expect("thinking markers must be cleaned");
+        rewrite_v3_direct_thinking_attempt(&frames, 0).expect("thinking markers must be cleaned");
     let text = rewritten
         .iter()
         .map(|frame| String::from_utf8_lossy(frame))

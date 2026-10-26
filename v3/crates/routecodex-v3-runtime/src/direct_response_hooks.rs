@@ -82,7 +82,7 @@ pub(crate) fn rewrite_v3_direct_complete_response_attempt(
     let normalized = serialized_tools
         .as_ref()
         .map_or(frames, |(frames, _)| frames.as_slice());
-    Ok(crate::kernel::rewrite_v3_direct_thinking_attempt(normalized).or(serialized_tools))
+    Ok(crate::kernel::rewrite_v3_direct_thinking_attempt(normalized, flushed).or(serialized_tools))
 }
 
 /// The sole Direct response payload hook for protocol-neutral response cleanup.
