@@ -545,14 +545,15 @@ fn provider_model_availability_admitted_count_ignores_window_inactive_siblings()
     // exempted: a window-inactive sibling must never inflate the pool size and
     // suppress the exemption.
     let mut manifest = provider_priority_schedule_manifest();
-    let window_excluding_ten_am = routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
-        timezone: "Asia/Shanghai".into(),
-        guard_minutes: 0,
-        periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
-            start: "00:00".into(),
-            end: "08:00".into(),
-        }],
-    };
+    let window_excluding_ten_am =
+        routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+            timezone: "Asia/Shanghai".into(),
+            guard_minutes: 0,
+            periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
+                start: "00:00".into(),
+                end: "08:00".into(),
+            }],
+        };
     for provider in ["b", "c"] {
         manifest
             .providers

@@ -218,8 +218,12 @@ mod tests {
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use routecodex_v3_provider_responses::{V3ProviderError, V3ProviderInternalTransportLane};
 
-    fn probe_manifest(availability: Option<&str>) -> routecodex_v3_config::V3Config05ManifestPublished {
-        let availability_line = availability.map(|value| format!("availability = {value}\n")).unwrap_or_default();
+    fn probe_manifest(
+        availability: Option<&str>,
+    ) -> routecodex_v3_config::V3Config05ManifestPublished {
+        let availability_line = availability
+            .map(|value| format!("availability = {value}\n"))
+            .unwrap_or_default();
         let source = format!(
             r#"
 version = 3
