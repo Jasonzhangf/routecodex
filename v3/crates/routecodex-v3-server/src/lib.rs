@@ -26,7 +26,7 @@ use compaction_request::classify_v3_request_purpose;
 use console::*;
 use endpoint_handlers::{
     allocate_v3_console_request_id, allocate_v3_console_request_identity,
-    format_v3_request_id_entry, format_v3_request_id_token,
+    commit_v3_console_request_success, format_v3_request_id_entry, format_v3_request_id_token,
     merge_v3_direct_handoff_provider_failure_events, merge_v3_protocol_plan_trace,
     merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
     next_v3_console_request_identity, pending_endpoint_after_responses_admission,

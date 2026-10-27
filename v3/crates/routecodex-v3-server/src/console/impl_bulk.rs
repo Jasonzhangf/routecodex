@@ -505,6 +505,13 @@ pub(crate) fn emit_v3_dry_run_console_lines(
     status: u16,
     node_count: usize,
 ) {
+    // A provider-request dry-run answers the client with a normal completed
+    // response, so it commits one success count exactly like a real success
+    // terminal. The commit stays ahead of the console gate so a disabled
+    // console still counts.
+    if status < 400 {
+        commit_v3_request_success_once(context);
+    }
     if !context.state.console_enabled {
         return;
     }
@@ -797,6 +804,11 @@ pub(crate) fn emit_v3_observability_console_lines(
     }
     emit_v3_provider_observability_console_lines(context, observability);
     if include_usage {
+        // Commit is decoupled from console rendering: it must run even when
+        // console_enabled is false, and only for a terminal success.
+        if should_emit_v3_request_complete_console_line(status, observability) {
+            commit_v3_request_success_once(context);
+        }
         let elapsed = started_at.elapsed();
         let terminal_event = v3_webui_terminal_event_for_response(status, observability);
         if terminal_event == V3ObsEventType::Completed {
@@ -940,6 +952,16 @@ pub(crate) fn enrich_v3_direct_observability_from_frame(
     }
 }
 
+/// Commits the request success count for one terminal success. The counter claim
+/// makes this idempotent per allocated identity, so provider retries, provider
+/// switches and repeated completion frames cannot count a request twice.
+fn commit_v3_request_success_once(context: &V3ConsoleEmissionContext) {
+    if let Err(error) = commit_v3_console_request_success(&context.state, &context.request_identity)
+    {
+        eprintln!("V3 request success count commit failed: {error}");
+    }
+}
+
 pub(crate) fn should_emit_v3_request_complete_console_line(
     status: u16,
     observability: &V3RuntimeObservability,
@@ -1009,6 +1031,11 @@ impl V3SseConsoleFinalizer {
     }
 
     pub(crate) fn emit_relay_sse_complete_console_lines(self) {
+        // A completed relay SSE stream is a delivered success terminal, so it is
+        // the only SSE place that commits the request success count.
+        if should_emit_v3_request_complete_console_line(self.status, &self.observability) {
+            commit_v3_request_success_once(&self.context);
+        }
         let elapsed = self.started_at.elapsed();
         // Typed WebUI projection: SSE stream completed.
         if let Err(error) = record_v3_webui_event_for_context(
@@ -1114,6 +1141,7 @@ impl V3DirectSseConsoleFinalizer {
             emit_v3_webui_projection_failure(&self.context, &error);
         }
         if should_emit_v3_request_complete_console_line(self.status, &self.observability) {
+            commit_v3_request_success_once(&self.context);
             if let Err(error) = emit_v3_request_complete_console_line(
                 &self.context,
                 self.status,

@@ -2,14 +2,12 @@
 
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-const repo = resolve(
-  process.cwd(),
-  process.env.ROUTECODEX_V3_SOURCE_ROOT || ".",
-);
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const verifier = resolve(
   repo,
   "v3/scripts/architecture/verify-v3-console-request-count-visibility.mjs",
@@ -23,6 +21,7 @@ const copied = [
   "docs/architecture/v3-mainline-call-map.yml",
   "docs/architecture/v3-resource-operation-map.yml",
   "docs/architecture/v3-verification-map.yml",
+  "v3/crates/routecodex-v3-server/src/executors.rs",
 ];
 const cases = [
   {
@@ -118,6 +117,81 @@ const cases = [
         "  - v3-console-count-03\n  - v3-console-count-02",
       ),
     diagnostic: /V3 verification map must bind request count edges 01 through 04 in order/u,
+  },
+  {
+    name: "V3 count function map drops the success commit symbol",
+    path: "docs/architecture/v3-function-map.yml",
+    mutate: (source) =>
+      source.replace("  - V3RequestIdCounter::commit_request_success\n", ""),
+    diagnostic: /must declare the success commit V3RequestIdCounter::commit_request_success/u,
+  },
+  {
+    name: "global count function map drops the success commit builder",
+    path: "docs/architecture/function-map.yml",
+    mutate: (source) => source.replace("  - commit_request_success\n", ""),
+    diagnostic: /must declare the success commit commit_request_success/u,
+  },
+  {
+    name: "V3 resource map drops the success commit writer",
+    path: "docs/architecture/v3-resource-operation-map.yml",
+    mutate: (source) =>
+      source.replace(
+        ", V3RequestIdCounter::commit_request_success]",
+        "]",
+      ),
+    diagnostic: /must allow the success commit writer V3RequestIdCounter::commit_request_success/u,
+  },
+  {
+    name: "V3 count verification map allows allocation to increment counts",
+    path: "docs/architecture/v3-verification-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "  - totalCount and windowCount increment only when the allocated identity commits one success terminal.",
+        "  - totalCount and windowCount increment during identity allocation.",
+      ),
+    diagnostic: /must require that counts increment only on a success commit/u,
+  },
+  {
+    name: "V3 count verification map allows error terminal increments",
+    path: "docs/architecture/v3-verification-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "  - Error terminals (admission rejection, error frame, provider exhaustion, SSE failure or disconnect) must never increment totalCount or windowCount.",
+        "  - Error terminals may increment totalCount or windowCount.",
+      ),
+    diagnostic: /must forbid count increments on error terminals/u,
+  },
+  {
+    name: "V3 count verification map allows double-committing one request",
+    path: "docs/architecture/v3-verification-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "  - Provider retries, provider switches, continuation frames, and a repeated completion must not commit the same request twice.",
+        "  - Provider retries, provider switches, continuation frames, and a repeated completion may commit the same request twice.",
+      ),
+    diagnostic: /must forbid double-committing one request/u,
+  },
+  {
+    name: "V3 count verification map allows SSE drop to count",
+    path: "docs/architecture/v3-verification-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "  - Relay and Direct SSE lanes commit the success count only when the committed stream reaches its completion terminal, so a dropped or disconnected stream never counts.",
+        "  - Relay and Direct SSE lanes commit the success count when the stream is handed to the client, including a dropped or disconnected stream.",
+      ),
+    diagnostic:
+      /must require that SSE lanes commit only at the stream completion terminal/u,
+  },
+  {
+    name: "anthropic relay SSE emitter commits before the stream terminal",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source.replace(
+        "                relay_output.stream_observation.is_none(),\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+        "                true,\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+      ),
+    diagnostic:
+      /streaming console emitter must pass stream_observation\.is_none\(\) as include_usage/u,
   },
 ];
 

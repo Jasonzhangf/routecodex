@@ -1577,10 +1577,24 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                         &output.node_trace,
                         &console_observability,
                         started_at,
-                        true,
+                        output.stream_observation.is_none(),
                     );
                 }
             }
+            let stream_console_finalizer = match (
+                output.stream_observation.clone(),
+                output.observability.clone(),
+            ) {
+                (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {
+                    context: console_context.clone(),
+                    status: output.status,
+                    node_trace: output.node_trace.clone(),
+                    observability,
+                    stream_observation,
+                    started_at,
+                }),
+                _ => None,
+            };
             let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(
                 &state,
                 entry_protocol,
@@ -1588,7 +1602,8 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                 &request_id,
                 &output,
             );
-            let response = anthropic_relay_output_response(output, requested_stream);
+            let response =
+                anthropic_relay_output_response(output, stream_console_finalizer, requested_stream);
             return match client_response_capture {
                 Some(capture) => capture.defer_into(response),
                 None => response,

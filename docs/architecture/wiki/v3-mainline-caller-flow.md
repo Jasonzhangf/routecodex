@@ -2437,7 +2437,7 @@ flowchart TD
 
 ## v3.console_request_count_visibility.mainline
 
-One aggregate-owned request counter handle is shared by every listener, and one atomic V3 request identity allocation carries total and local-day counts into both human request and terminal response headlines.
+One aggregate-owned request counter handle is shared by every listener; one atomic V3 request identity allocation reserves the monotonic sequence with predicted total and local-day counts, and only a confirmed success terminal commits those counts into both human request and terminal response headlines.
 
 Owner feature: `v3.console_request_count_visibility`
 Manifest: `docs/architecture/manifests/v3.console_request_count_visibility.mainline.yml`

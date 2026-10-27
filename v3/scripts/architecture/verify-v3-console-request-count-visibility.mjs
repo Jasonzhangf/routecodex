@@ -162,6 +162,112 @@ for (const [source, collection, label] of [
   }
 }
 
+// Success-only count contract: allocation reserves the sequence and only the
+// success commit may write totalCount/windowCount. Error terminals never count.
+for (const [source, collection, label, builders] of [
+  [functionMap, "owners", "global function map", ["commit_request_success"]],
+  [
+    v3FunctionMap,
+    "features",
+    "V3 function map",
+    ["V3RequestIdCounter::commit_request_success"],
+  ],
+]) {
+  const parsed = parseYaml(source, label);
+  const feature = (parsed[collection] ?? []).find(
+    (candidate) => candidate?.feature_id === "v3.console_request_count_visibility",
+  );
+  const declared = [
+    ...(Array.isArray(feature?.canonical_builders) ? feature.canonical_builders : []),
+    ...(Array.isArray(feature?.entry_symbols) ? feature.entry_symbols : []),
+  ];
+  for (const builder of builders) {
+    if (!declared.includes(builder)) {
+      failures.push(`${label} must declare the success commit ${builder}`);
+    }
+  }
+}
+
+for (const [source, collection, label] of [
+  [v3ResourceMap, "resources", "V3 resource map"],
+  [resourceMap, "resources", "global resource map"],
+]) {
+  const parsed = parseYaml(source, label);
+  const resource = (parsed[collection] ?? []).find(
+    (candidate) => candidate?.resource_id === "v3.server.request_identity",
+  );
+  const writers = Array.isArray(resource?.allowed_writers)
+    ? resource.allowed_writers
+    : [];
+  if (!writers.includes("V3RequestIdCounter::commit_request_success")) {
+    failures.push(
+      `${label} request identity must allow the success commit writer V3RequestIdCounter::commit_request_success`,
+    );
+  }
+}
+
+for (const [source, collection, label] of [
+  [verificationMap, "verification", "global verification map"],
+  [v3VerificationMap, "features", "V3 verification map"],
+]) {
+  const parsed = parseYaml(source, label);
+  const feature = (parsed[collection] ?? []).find(
+    (candidate) => candidate?.feature_id === "v3.console_request_count_visibility",
+  );
+  const positive = (Array.isArray(feature?.required_positive)
+    ? feature.required_positive
+    : []
+  ).join("\n");
+  const negative = (Array.isArray(feature?.required_negative)
+    ? feature.required_negative
+    : []
+  ).join("\n");
+  if (!/only when the allocated identity commits/u.test(positive)) {
+    failures.push(
+      `${label} must require that counts increment only on a success commit`,
+    );
+  }
+  if (
+    !/SSE lanes commit the success count only when the committed stream reaches its completion terminal/u.test(
+      positive,
+    )
+  ) {
+    failures.push(
+      `${label} must require that SSE lanes commit only at the stream completion terminal`,
+    );
+  }
+  if (!/Error terminals[^.]*never increment/u.test(negative)) {
+    failures.push(`${label} must forbid count increments on error terminals`);
+  }
+  if (!/must not commit the same request twice/u.test(negative)) {
+    failures.push(`${label} must forbid double-committing one request`);
+  }
+}
+
+// Source anchor: every console emitter that can front a streaming relay lane
+// must gate the success commit on the absent stream observation, so the commit
+// moves to the stream terminal instead of running before the first SSE byte.
+for (const source of [
+  readRequired("v3/crates/routecodex-v3-server/src/executors.rs"),
+  readRequired("v3/crates/routecodex-v3-server/src/endpoint_handlers.rs"),
+]) {
+  const pattern = /emit_v3_observability_console_lines\(([\s\S]*?)\n\s*\);/gu;
+  for (const match of source.matchAll(pattern)) {
+    const includeUsage = (match[1].split("\n").filter((line) => line.trim()).pop() ?? "")
+      .trim()
+      .replace(/,$/u, "");
+    if (
+      includeUsage !== "output.stream_observation.is_none()" &&
+      includeUsage !== "relay_output.stream_observation.is_none()" &&
+      includeUsage !== "!is_sse"
+    ) {
+      failures.push(
+        `streaming console emitter must pass stream_observation.is_none() as include_usage, got "${includeUsage}"`,
+      );
+    }
+  }
+}
+
 if (failures.length > 0) {
   console.error("[verify:v3-console-request-count-visibility] FAIL");
   for (const failure of failures) console.error(`- ${failure}`);

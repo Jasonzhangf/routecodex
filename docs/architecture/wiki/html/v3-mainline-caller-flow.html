@@ -4049,7 +4049,7 @@ flowchart TD
         <span class="summary-sub">4 edges · <code>v3.console_request_count_visibility.mainline</code> · V3RequestCounter01AggregateOwned → V3ConsoleResp03HumanBlock</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">One aggregate-owned request counter handle is shared by every listener, and one atomic V3 request identity allocation carries total and local-day counts into both human request and terminal response headlines.</p>
+        <p class="chain-summary">One aggregate-owned request counter handle is shared by every listener; one atomic V3 request identity allocation reserves the monotonic sequence with predicted total and local-day counts, and only a confirmed success terminal commits those counts into both human request and terminal response headlines.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.console_request_count_visibility</code></span>
           <span>modules: <code>v3-server</code></span>

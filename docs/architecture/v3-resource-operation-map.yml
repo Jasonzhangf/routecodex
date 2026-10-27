@@ -1891,8 +1891,8 @@ resources:
     owner_feature_id: v3.console_request_count_visibility
     owner_crate: routecodex-v3-server
     owner_node: V3RequestCounter01AggregateOwned
-    allowed_readers: [next_v3_console_request_identity, render_v3_request_console_block, render_v3_response_console_block, format_v3_console_request_count]
-    allowed_writers: [spawn_v3_server_aggregate, V3RequestIdCounter::next_request_identity]
+    allowed_readers: [next_v3_console_request_identity, commit_v3_console_request_success, render_v3_request_console_block, render_v3_response_console_block, format_v3_console_request_count]
+    allowed_writers: [spawn_v3_server_aggregate, V3RequestIdCounter::next_request_identity, V3RequestIdCounter::commit_request_success]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-target, routecodex-v3-virtual-router, routecodex-v3-provider-responses, provider_runtime.observation, request.normal_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
