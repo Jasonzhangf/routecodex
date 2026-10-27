@@ -1379,8 +1379,8 @@ allowed_transports = ["json", "sse"]
 type = "responses"
 base_url = "http://127.0.0.1:1/v1"
 default_model = "gpt-test"
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }}
-auth = {{ type = "api_key", entries = [{{ alias = "key1", env = "ROUTECODEX_V3_PLAN_RESUME_KEY" }}] }}
+concurrency = { max_in_flight = 1, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_PLAN_RESUME_KEY" }] }
 [providers.r05_busy.models.gpt-test]
 wire_name = "gpt-test"
 capabilities = ["text"]
@@ -1388,7 +1388,7 @@ capabilities = ["text"]
 type = "responses"
 base_url = "http://127.0.0.1:1/v1"
 default_model = "gpt-test"
-auth = {{ type = "api_key", entries = [{{ alias = "key1", env = "ROUTECODEX_V3_PLAN_RESUME_KEY" }}] }}
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_PLAN_RESUME_KEY" }] }
 [providers.r05_cooled.models.gpt-test]
 wire_name = "gpt-test"
 capabilities = ["text"]
@@ -1396,16 +1396,16 @@ capabilities = ["text"]
 type = "responses"
 base_url = "http://127.0.0.1:1/v1"
 default_model = "gpt-test"
-auth = {{ type = "api_key", entries = [{{ alias = "key1", env = "ROUTECODEX_V3_PLAN_RESUME_KEY" }}] }}
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_PLAN_RESUME_KEY" }] }
 [providers.r05_later.models.gpt-test]
 wire_name = "gpt-test"
 capabilities = ["text"]
 [route_groups.default.pools.default]
-selection = {{ strategy = "priority" }}
+selection = { strategy = "priority" }
 targets = [
-  {{ kind = "provider_model", provider = "r05_busy", model = "gpt-test", key = "key1", priority = 1 }},
-  {{ kind = "provider_model", provider = "r05_cooled", model = "gpt-test", key = "key1", priority = 2 }},
-  {{ kind = "provider_model", provider = "r05_later", model = "gpt-test", key = "key1", priority = 3 }},
+  { kind = "provider_model", provider = "r05_busy", model = "gpt-test", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "r05_cooled", model = "gpt-test", key = "key1", priority = 2 },
+  { kind = "provider_model", provider = "r05_later", model = "gpt-test", key = "key1", priority = 3 },
 ]
 "#,
         )
