@@ -494,9 +494,10 @@ function enclosingFunction(masked, blocks, functions, index) {
 //   B. the enclosing function name mentions anthropic;
 //   C. an enclosing block guard selects the "anthropic" entry protocol;
 //   D. the enclosing function body references the "anthropic" entry protocol as
-//      a string literal, and that function is not a multi-protocol dispatcher
-//      (no other protocol guard shares its body) — so renaming the function or
-//      the binding still leaves the lane branded inside its own body.
+//      a string literal, and no guard enclosing this emit selects a different
+//      protocol — so renaming the function or the binding still leaves the lane
+//      branded inside its own body. The exclusion is per-emit, not per-body: a
+//      decoy guard elsewhere in the function must not suppress it.
 // Returns the evidence label, or null when the lane is not anthropic.
 function anthropicLaneEvidenceAt(masked, source, codeText, emitIndex, blocks, functions, bindingIndexes) {
   for (const bindingIndex of bindingIndexes) {
@@ -519,11 +520,17 @@ function anthropicLaneEvidenceAt(masked, source, codeText, emitIndex, blocks, fu
     }
   }
   // Evidence D: the function body names the anthropic lane as a string literal,
-  // and the body is not shared with other protocols (otherwise every emit in a
-  // multi-protocol dispatcher would inherit the brand).
+  // and no guard enclosing this emit selects a different protocol. A shared
+  // multi-protocol dispatcher is excluded per emit, so a decoy guard placed
+  // elsewhere in the body cannot silence this evidence.
   const body = codeText.slice(fn.open, fn.close + 1);
-  const ownsOtherProtocol = /entry_protocol\s*==\s*"(gemini|openai_chat|openai|responses)"/u.test(body);
-  if (!ownsOtherProtocol && /"anthropic"/u.test(body)) {
+  const enclosingGuards = blocks
+    .filter((block) => emitIndex > block.open && emitIndex < block.close)
+    .map((block) => blockGuardText(masked, codeText, block.open));
+  const otherProtocolGuard = enclosingGuards.some((guard) =>
+    /entry_protocol\s*==\s*"(gemini|openai_chat|openai|responses)"/u.test(guard),
+  );
+  if (!otherProtocolGuard && /"anthropic"/u.test(body)) {
     return 'enclosing function body references the "anthropic" entry protocol';
   }
   return null;

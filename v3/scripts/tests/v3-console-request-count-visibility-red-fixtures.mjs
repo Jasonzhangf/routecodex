@@ -468,6 +468,29 @@ pub(crate) fn probe_new_lane(
       ),
     expectPass: true,
   },
+  {
+    // A decoy guard for another protocol placed elsewhere in the same function
+    // must not suppress the function-body evidence. A per-body exclusion would
+    // let an attacker plant an unrelated gemini guard and restore this escape.
+    name: "a decoy guard elsewhere cannot silence the function-body evidence",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source
+        .replace(
+          "        let client_body_is_sse = relay_output.client_body.is_sse();\n        let stream_console_finalizer = if client_body_is_sse {",
+          '        if entry_protocol == "gemini" {\n            // no-op suppression decoy\n        }\n        let stream_console_finalizer = if relay_output.client_body.is_sse() {',
+        )
+        .replace(
+          "                started_at,\n                !client_body_is_sse,\n            );",
+          "                started_at,\n                relay_output.stream_observation.is_none(),\n            );",
+        )
+        .replace(
+          "execute_v3_anthropic_direct_server_outcome",
+          "execute_v3_same_protocol_direct_server_outcome",
+        ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
 ];
 
 const failures = [];
