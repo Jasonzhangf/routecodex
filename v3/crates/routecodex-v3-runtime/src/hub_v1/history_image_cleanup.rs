@@ -5,8 +5,10 @@
 //   （relay_request.rs::govern_chat_request_at_req04）调用；ReqInbound 保持
 //   lossless，不执行 payload 重写。Direct 沿用已注册的 request
 //   standardization/hook 入口，并在这些入口内复用同一纯函数。
-// - 仅清理最后一条图片载体之前的图片；最后一条消息/工具结果中的图片全部保留。
-//   后续纯文本提醒不改变图片边界；保留的图片驱动 multimodal 路由。
+// - 仅清理当前轮起点之前的图片；当前轮（最后一个 user run 及其后的工具段）
+//   内的所有用户图片与工具图片完整保留，多个同轮载体不得只保留最后一个。
+//   当前轮边界复用 route-classifier 的 typed current-turn 投影，与路由事实
+//   保持同一语义；后续纯文本提醒不改变图片边界。
 // - 历史图片 part 原位替换为统一固定文本占位符 {"type":"text","text":"[Image]"}
 //   （chat wire）/ {"type":"input_text","text":"[Image]"}（responses wire）；
 //   无编号、无前缀、不随图片数量/位置变化 —— 同位置永远同 token。
@@ -15,7 +17,10 @@
 // - cache 规则：固定占位符 -> 同会话同位置 token 逐字节一致 -> provider
 //   prefix cache 可命中（首次替换后稳定命中）；图片位置之后首次 miss、之后
 //   稳定命中；图片位置之前不受影响。
-use routecodex_v3_route_classifier::is_v3_inline_image_reference;
+use routecodex_v3_route_classifier::{
+    is_v3_inline_image_reference, project_v3_current_turn_entries_from_value, ChatTurnRole,
+    GeminiTurnRole, ResponsesTurnKind, ResponsesTurnRole, V3CurrentTurnEntries,
+};
 use serde_json::Value;
 
 /// 统一占位符文本（chat wire 与 responses wire 共用同一字符串，保证确定性）。
@@ -97,9 +102,11 @@ fn count_v3_image_refs(value: &Value) -> usize {
 /// 禁止在调用点/其他文件零散补丁）。
 ///
 /// ## 边界（历史轮定义，统一）
-/// - 最后一条包含图片的消息/input item 之前的图片属于历史，清洗为占位符；
-/// - 最后图片载体内的所有图片保留，包括刚返回的工具结果；
-/// - 时间提醒、模型切换提示等后续纯文本消息不改变图片边界。
+/// - 当前轮起点（最后一个 user run 的起点，及其后的工具段）之前的图片属于历史，
+///   清洗为占位符；
+/// - 当前轮内的所有图片保留，包括同一轮的多个用户图片载体和多个工具图片载体；
+/// - 起点直接复用 route-classifier 的 typed current-turn 投影，禁止在本文件另行
+///   定义一套分类边界；时间提醒、模型切换提示等后续纯文本消息不改变图片边界。
 ///
 /// ## 形态（全部覆盖）
 /// - messages[]：content 数组的 image_url/data/file_id part + tool 消息字符串
@@ -113,22 +120,27 @@ fn count_v3_image_refs(value: &Value) -> usize {
 /// `{"type":"input_text","text":"[Image]"}`——字节级确定性（任意 base64 →
 /// 相同占位符 → 历史 wire 稳定 → provider 前缀缓存命中）。
 pub(crate) fn normalize_v3_history_image_placeholders(body: &mut Value) {
+    let entries = project_v3_current_turn_entries_from_value(body);
     if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-        let history_end = messages
-            .iter()
-            .rposition(|message| count_v3_item_image_refs(message) > 0)
-            .unwrap_or(0);
-        for message in messages.iter_mut().take(history_end) {
+        let current_turn_start = chat_current_turn_start(&entries).unwrap_or_else(|| {
+            messages
+                .iter()
+                .rposition(|message| count_v3_item_image_refs(message) > 0)
+                .unwrap_or(0)
+        });
+        for message in messages.iter_mut().take(current_turn_start) {
             normalize_chat_content_parts(message);
         }
         return;
     }
     if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
-        let history_end = input
-            .iter()
-            .rposition(|item| count_v3_item_image_refs(item) > 0)
-            .unwrap_or(0);
-        for item in input.iter_mut().take(history_end) {
+        let current_turn_start = responses_current_turn_start(&entries).unwrap_or_else(|| {
+            input
+                .iter()
+                .rposition(|item| count_v3_item_image_refs(item) > 0)
+                .unwrap_or(0)
+        });
+        for item in input.iter_mut().take(current_turn_start) {
             normalize_responses_content_parts(item);
             normalize_responses_output_parts(item);
             if is_top_level_input_image(item) {
@@ -140,14 +152,81 @@ pub(crate) fn normalize_v3_history_image_placeholders(body: &mut Value) {
         return;
     }
     if let Some(contents) = body.get_mut("contents").and_then(Value::as_array_mut) {
-        let current_turn_index = contents
-            .iter()
-            .rposition(|content| count_v3_item_image_refs(content) > 0)
-            .unwrap_or(0);
-        for content in contents.iter_mut().take(current_turn_index) {
+        let current_turn_start = gemini_current_turn_start(&entries).unwrap_or_else(|| {
+            contents
+                .iter()
+                .rposition(|content| count_v3_item_image_refs(content) > 0)
+                .unwrap_or(0)
+        });
+        for content in contents.iter_mut().take(current_turn_start) {
             normalize_gemini_content_parts(content);
         }
     }
+}
+
+/// Chat current-turn start: the first item of the trailing consecutive user
+/// run. Mirrors the route-classifier typed boundary so the cleanup and the
+/// routing fact see the same turn. `None` keeps the legacy last-carrier
+/// boundary for payloads without a typed current-turn user.
+fn chat_current_turn_start(entries: &V3CurrentTurnEntries) -> Option<usize> {
+    let V3CurrentTurnEntries::Chat(entries) = entries else {
+        return None;
+    };
+    let mut start = entries
+        .iter()
+        .rposition(|entry| matches!(entry.role, ChatTurnRole::User))?;
+    while start > 0 && matches!(entries[start - 1].role, ChatTurnRole::User) {
+        start -= 1;
+    }
+    Some(start)
+}
+
+/// Responses current-turn start: the first item of the trailing consecutive
+/// user run, including a trailing explicit message item. Mirrors the
+/// route-classifier typed boundary. `None` keeps the legacy last-carrier
+/// boundary for payloads without a typed current-turn user.
+fn responses_current_turn_start(entries: &V3CurrentTurnEntries) -> Option<usize> {
+    let V3CurrentTurnEntries::Responses(entries) = entries else {
+        return None;
+    };
+    let mut start = entries
+        .iter()
+        .rposition(|entry| matches!(entry.role, ResponsesTurnRole::User))?;
+    if matches!(entries[start].kind, ResponsesTurnKind::Other) {
+        return Some(
+            if entries[..start]
+                .iter()
+                .any(|entry| matches!(entry.role, ResponsesTurnRole::User))
+            {
+                start
+            } else {
+                0
+            },
+        );
+    }
+    while start > 0 {
+        let previous = &entries[start - 1];
+        if !matches!(previous.role, ResponsesTurnRole::User)
+            || matches!(previous.kind, ResponsesTurnKind::Other)
+        {
+            break;
+        }
+        start -= 1;
+    }
+    Some(start)
+}
+
+/// Gemini current-turn start: the last user content index, keeping that
+/// content and every following tool/model content in the current turn.
+/// `None` keeps the legacy last-carrier boundary for payloads without a
+/// typed current-turn user.
+fn gemini_current_turn_start(entries: &V3CurrentTurnEntries) -> Option<usize> {
+    let V3CurrentTurnEntries::Gemini(entries) = entries else {
+        return None;
+    };
+    entries
+        .iter()
+        .rposition(|entry| matches!(entry.role, GeminiTurnRole::User))
 }
 
 fn is_top_level_input_image(item: &Value) -> bool {
@@ -413,34 +492,81 @@ mod tests {
 
     #[test]
     fn historical_placeholders_preserve_top_level_and_nested_opaque_fields() {
-        for (collection, parts, image, expected) in [
-            (
-                "messages",
-                "content",
-                json!({"type":"image_url","image_url":{"url":"https://example.test/old.png","future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
-                json!({"type":"text","text":"[Image]","image_url":{"future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
-            ),
-            (
-                "input",
-                "content",
-                json!({"type":"input_image","image_url":"https://example.test/old.png","source":{"type":"url","url":"https://example.test/old.png","future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
-                json!({"type":"input_text","text":"[Image]","source":{"future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
-            ),
-            (
-                "contents",
-                "parts",
-                json!({"inline_data":{"mime_type":"image/png","data":"OLD","future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
-                json!({"text":"[Image]","inline_data":{"future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
-            ),
-        ] {
-            let mut body = json!({collection:[{parts:[image.clone()]},{parts:[image.clone()]}]});
-            normalize_v3_history_image_placeholders(&mut body);
-            assert_eq!(body[collection][0][parts][0], expected, "{collection}");
-            assert_eq!(body[collection][1][parts][0], image, "latest {collection}");
-        }
+        let mut body = json!({
+            "messages": [
+                {"role": "user", "content": [
+                    {"type":"image_url","image_url":{"url":"https://example.test/old.png","future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}
+                ]},
+                {"role": "assistant", "content": [{"type":"text","text":"ok"}]},
+                {"role": "user", "content": [
+                    {"type":"image_url","image_url":{"url":"https://example.test/latest.png"}}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            json!({"type":"text","text":"[Image]","image_url":{"future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
+            "messages history image keeps opaque sibling/nested fields"
+        );
+        assert_eq!(
+            body["messages"][2]["content"][0]["image_url"]["url"],
+            "https://example.test/latest.png"
+        );
+
+        let mut body = json!({
+            "input": [
+                {"type":"message","role":"user","content":[
+                    {"type":"input_image","image_url":"https://example.test/old.png","source":{"type":"url","url":"https://example.test/old.png","future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}
+                ]},
+                {"type":"message","role":"assistant","content":[
+                    {"type":"output_text","text":"ok"}
+                ]},
+                {"type":"message","role":"user","content":[
+                    {"type":"input_text","text":"latest"},
+                    {"type":"input_image","image_url":"https://example.test/latest.png"}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["input"][0]["content"][0],
+            json!({"type":"input_text","text":"[Image]","source":{"future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
+            "input history image keeps opaque sibling/nested fields"
+        );
+        assert_eq!(
+            body["input"][2]["content"][1]["image_url"],
+            "https://example.test/latest.png"
+        );
+
+        let mut body = json!({
+            "contents": [
+                {"role":"user","parts":[
+                    {"inline_data":{"mime_type":"image/png","data":"OLD","future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}
+                ]},
+                {"role":"model","parts":[{"text":"ok"}]},
+                {"role":"user","parts":[
+                    {"inline_data":{"mime_type":"image/png","data":"LATEST"}}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["contents"][0]["parts"][0],
+            json!({"text":"[Image]","inline_data":{"future_nested":{"keep":[1,2]}},"future_sibling":{"occurrence":1}}),
+            "gemini history image keeps opaque sibling/nested fields"
+        );
+        assert_eq!(
+            body["contents"][2]["parts"][0]["inline_data"]["data"],
+            "LATEST"
+        );
+
         let mut body = json!({"input":[
             {"type":"input_image","image_url":"https://example.test/old.png","future_sibling":{"occurrence":2}},
-            {"type":"input_image","image_url":"https://example.test/latest.png"}
+            {"type":"message","role":"user","content":[
+                {"type":"input_text","text":"current"},
+                {"type":"input_image","image_url":"https://example.test/latest.png"}
+            ]}
         ]});
         normalize_v3_history_image_placeholders(&mut body);
         assert_eq!(
@@ -473,6 +599,31 @@ mod tests {
         assert_eq!(
             body["messages"][2]["content"][1]["type"], "image_url",
             "current turn image must be preserved"
+        );
+    }
+
+    #[test]
+    fn payload_without_user_turn_keeps_legacy_last_carrier_boundary() {
+        // 无可识别当前轮 user 的 payload 不采用 typed 边界，保留旧行为：
+        // 仍只清理最后图片载体之前的部分，避免 context 膨胀回归。
+        let mut body = json!({
+            "messages": [
+                {"role": "system", "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,OLD"}}
+                ]},
+                {"role": "assistant", "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,LATEST"}}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            json!({"type":"text","text":"[Image]"})
+        );
+        assert_eq!(
+            body["messages"][1]["content"][0]["image_url"]["url"],
+            "data:image/png;base64,LATEST"
         );
     }
 
@@ -559,6 +710,7 @@ mod tests {
                         {"type": "text", "text": "between"},
                         {"type": "image_url", "image_url": {"url": "data:image/png;base64,B"}}
                     ]},
+                    {"role": "assistant", "content": "ok"},
                     {"role": "user", "content": [
                         {"type":"text","text":"current text"},
                         {"type":"image_url","image_url":{"url":"data:image/png;base64,LATEST"}}
@@ -660,6 +812,7 @@ mod tests {
                 {"role": "user", "content": [
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64,A"}}
                 ]},
+                {"role": "assistant", "content": "reply"},
                 {"role": "user", "content": [
                     {"type":"image_url","image_url":{"url":"data:image/png;base64,LATEST"}}
                 ]}
@@ -671,10 +824,11 @@ mod tests {
                 {"role": "user", "content": [
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64,A"}}
                 ]},
+                {"role": "assistant", "content": "reply"},
                 {"role": "user", "content": [
                     {"type":"image_url","image_url":{"url":"data:image/png;base64,LATEST"}}
                 ]},
-                {"role": "assistant", "content": "reply"},
+                {"role": "assistant", "content": "second reply"},
                 {"role": "user", "content": "third turn"}
             ]
         });
@@ -682,6 +836,10 @@ mod tests {
         assert_eq!(
             earlier["messages"][0]["content"], later["messages"][0]["content"],
             "earlier history prefix must normalize identically across requests"
+        );
+        assert_eq!(
+            earlier["messages"][1]["content"], later["messages"][1]["content"],
+            "unchanged assistant separator must remain identical"
         );
     }
 
@@ -691,6 +849,9 @@ mod tests {
         // 历史轮必须清洗，否则 base64 图片原样进 wire → provider context 膨胀 400。
         let mut body = json!({
             "input": [
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "history question"}
+                ]},
                 {"type": "function_call_output", "call_id": "call_1", "output": [
                     {"type": "input_image", "detail": "original", "image_url": "data:image/png;base64,AAAA"}
                 ]},
@@ -702,9 +863,13 @@ mod tests {
         });
         normalize_v3_history_image_placeholders(&mut body);
         assert_eq!(
-            body["input"][0]["output"][0],
+            body["input"][1]["output"][0],
             json!({"type": "input_text", "text": V3_HISTORY_IMAGE_PLACEHOLDER}),
             "history function_call_output.output image must become placeholder"
+        );
+        assert_eq!(
+            body["input"][2]["content"][1]["image_url"], "data:image/png;base64,LATEST",
+            "current-turn user image must be preserved"
         );
     }
 
@@ -737,6 +902,9 @@ mod tests {
         // 只靠 type 匹配会漏，必须按 image_url/data/file_id 判定。
         let mut body = json!({
             "input": [
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "history question"}
+                ]},
                 {"type": "function_call_output", "call_id": "call_1", "output": [
                     {"detail": "original", "image_url": "data:image/png;base64,CCCC"}
                 ]},
@@ -748,9 +916,13 @@ mod tests {
         });
         normalize_v3_history_image_placeholders(&mut body);
         assert_eq!(
-            body["input"][0]["output"][0],
+            body["input"][1]["output"][0],
             json!({"type": "input_text", "text": V3_HISTORY_IMAGE_PLACEHOLDER}),
             "image part without type field must become placeholder"
+        );
+        assert_eq!(
+            body["input"][2]["content"][1]["image_url"], "data:image/png;base64,LATEST",
+            "current-turn user image must be preserved"
         );
     }
 
@@ -810,6 +982,9 @@ mod tests {
         let build = |b64: &str| {
             let mut body = json!({
                 "input": [
+                    {"type": "message", "role": "user", "content": [
+                        {"type": "input_text", "text": "history question"}
+                    ]},
                     {"type": "function_call_output", "call_id": "call_1", "output": [
                         {"detail": "original", "image_url": b64}
                     ]},
@@ -885,6 +1060,126 @@ mod tests {
         assert!(
             tool_content.contains(V3_HISTORY_IMAGE_PLACEHOLDER),
             "tool string content must contain placeholder: {tool_content}"
+        );
+    }
+
+    #[test]
+    fn chat_current_turn_multiple_user_image_carriers_all_preserved() {
+        // finding 2：同一当前轮的多个用户图片载体都必须完整保留，不能只保留
+        // 最后一条图片、把前面的当前轮图片误替换为 [Image]。
+        let mut body = json!({
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,OLD"}}
+                ]},
+                {"role": "assistant", "content": "ok"},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "first carrier"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,FIRST"}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,SECOND"}}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            json!({"type":"text","text":"[Image]"}),
+            "image before the current user run must become placeholder"
+        );
+        assert_eq!(
+            body["messages"][2]["content"][1]["type"], "image_url",
+            "first current-turn user image carrier must be preserved"
+        );
+        assert_eq!(
+            body["messages"][2]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,FIRST"
+        );
+        assert_eq!(
+            body["messages"][3]["content"][0]["image_url"]["url"], "data:image/png;base64,SECOND",
+            "last current-turn user image carrier must be preserved"
+        );
+    }
+
+    #[test]
+    fn responses_current_turn_multiple_tool_image_carriers_all_preserved() {
+        // finding 2：同一当前轮多次工具返回的图片载体必须全部保留，工具图片
+        // 不能因为后面还有工具输出而替换为占位符。
+        let mut body = json!({
+            "input": [
+                {"role": "user", "content": [
+                    {"type": "input_text", "text": "history question"}
+                ]},
+                {"type": "function_call", "call_id": "old", "name": "read_image", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "old", "output": [
+                    {"type": "input_image", "image_url": "data:image/png;base64,OLD"}
+                ]},
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "inspect both results"}
+                ]},
+                {"type": "function_call", "call_id": "one", "name": "read_image", "arguments": "{}"},
+                {"type": "function_call", "call_id": "two", "name": "read_image", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "one", "output": [
+                    {"type": "input_image", "image_url": "data:image/png;base64,TOOL_ONE"}
+                ]},
+                {"type": "function_call_output", "call_id": "two", "output": [
+                    {"type": "input_image", "image_url": "data:image/png;base64,TOOL_TWO"}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["input"][2]["output"][0],
+            json!({"type":"input_text","text":"[Image]"}),
+            "image from the earlier turn must become placeholder"
+        );
+        assert_eq!(
+            body["input"][6]["output"][0]["image_url"], "data:image/png;base64,TOOL_ONE",
+            "first current-turn tool image carrier must be preserved"
+        );
+        assert_eq!(
+            body["input"][7]["output"][0]["image_url"], "data:image/png;base64,TOOL_TWO",
+            "last current-turn tool image carrier must be preserved"
+        );
+    }
+
+    #[test]
+    fn chat_current_turn_user_and_tool_image_pair_both_preserved() {
+        // finding 2：当前轮的用户图片与后续工具返回图片属于同一轮配对，二者
+        // 都必须保留；只有当前轮之前的图片才替换为占位符。
+        let mut body = json!({
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,OLD"}}
+                ]},
+                {"role": "assistant", "content": "ok"},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,USER_CURRENT"}}
+                ]},
+                {"role": "assistant", "content": null, "tool_calls": [
+                    {"id": "call_r", "type": "function", "function": {"name": "read_image", "arguments": "{}"}}
+                ]},
+                {"role": "tool", "tool_call_id": "call_r", "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,TOOL_CURRENT"}}
+                ]}
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            json!({"type":"text","text":"[Image]"}),
+            "earlier-turn image must become placeholder"
+        );
+        assert_eq!(
+            body["messages"][2]["content"][0]["image_url"]["url"],
+            "data:image/png;base64,USER_CURRENT",
+            "current-turn user image must be preserved"
+        );
+        assert_eq!(
+            body["messages"][4]["content"][0]["image_url"]["url"],
+            "data:image/png;base64,TOOL_CURRENT",
+            "paired current-turn tool image must be preserved"
         );
     }
 

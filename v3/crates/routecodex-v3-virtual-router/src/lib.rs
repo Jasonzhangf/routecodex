@@ -3,7 +3,7 @@ use routecodex_v3_config::{
     V3RoutePoolMatchManifest, V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
 };
 pub use routecodex_v3_route_classifier::RouteClassification;
-use routecodex_v3_route_classifier::{DEFAULT_ROUTE, ROUTE_PRIORITY};
+use routecodex_v3_route_classifier::DEFAULT_ROUTE;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -319,57 +319,15 @@ impl V3VirtualRouter {
             }
         }
 
-        let mut tiers = Vec::new();
-        let mut selected_pool_ids = BTreeSet::new();
-        if !is_compaction {
-            if let Some(client_model) = classified.facts.client_model.as_deref() {
-                if let Some(pool) = select_best_matching_pool(
-                    &classified.routing_group_id,
-                    &group.pools,
-                    &classified.facts,
-                    None,
-                    |pool_id, rule| {
-                        !pool_has_route_signal(pool_id, rule)
-                            && rule.models.iter().any(|model| model == client_model)
-                    },
-                )? {
-                    append_route_pool_tier(
-                        &classified.routing_group_id,
-                        pool,
-                        &mut selected_pool_ids,
-                        &mut tiers,
-                    )?;
-                }
-            }
-        }
-        // candidates（请求意图）驱动能力池：web_search 优先级最高（gpt 这类
-        // 原生 hosted web search），multimodal 次之——候选迭代 web_search 先于
-        // multimodal；无显式池时构建隐式能力池（RoundRobin 轮询）。
-        let mut ordered_candidates: Vec<&str> = Vec::new();
-        for signal in ["web_search", "multimodal"] {
-            if classified
-                .facts
-                .route_classification
-                .candidates
-                .iter()
-                .any(|candidate| candidate == signal)
-            {
-                ordered_candidates.push(signal);
-            }
-        }
-        ordered_candidates.extend(
-            classified
-                .facts
-                .route_classification
-                .candidates
-                .iter()
-                .filter(|candidate| {
-                    candidate.as_str() != "web_search" && candidate.as_str() != "multimodal"
-                })
-                .map(|candidate| candidate.as_str()),
-        );
-        let mut implicit_tiers = Vec::new();
-        for candidate in ordered_candidates {
+        // Ordinary request. The classifier hands over its current-turn
+        // candidate signals in the fixed order (hosted web_search >
+        // multimodal > longcontext > coding > thinking > search > tools >
+        // default). Take the first candidate that maps to a configured,
+        // non-empty classification pool and hand off exactly that one pool. Do
+        // not synthesize implicit capability pools and do not append default or
+        // any other pool after a hit.
+        let mut selected_pool: Option<&V3RoutePoolManifest> = None;
+        for candidate in &classified.facts.route_classification.candidates {
             if candidate == DEFAULT_ROUTE {
                 continue;
             }
@@ -380,68 +338,20 @@ impl V3VirtualRouter {
                 Some(candidate),
                 |pool_id, rule| pool_route_signal_matches(pool_id, rule, candidate),
             )? {
-                append_route_pool_tier(
-                    &classified.routing_group_id,
-                    pool,
-                    &mut selected_pool_ids,
-                    &mut tiers,
-                )?;
-            } else if let Some(tier) = build_implicit_capability_pool_tier(
-                manifest,
-                candidate,
-                classified.facts.client_model.as_deref(),
-            ) {
-                // 无显式能力池时，从 manifest 推断具备该能力的模型构建
-                // 隐式能力池（RoundRobin 轮询）——配置简化：能力声明即路由。
-                implicit_tiers.push((format!("implicit:{candidate}"), tier));
+                selected_pool = Some(pool);
+                break;
             }
         }
-        for signal in capability_route_pool_signals(&classified.facts) {
-            if let Some(pool) = select_best_matching_pool(
-                &classified.routing_group_id,
-                &group.pools,
-                &classified.facts,
-                Some(signal),
-                |pool_id, rule| pool_route_signal_matches(pool_id, rule, signal),
-            )? {
-                append_route_pool_tier(
-                    &classified.routing_group_id,
-                    pool,
-                    &mut selected_pool_ids,
-                    &mut tiers,
-                )?;
-            }
-        }
-        if tiers.is_empty() {
-            for (implicit_pool_id, tier) in implicit_tiers {
-                if selected_pool_ids.insert(implicit_pool_id) {
-                    tiers.push(tier);
-                }
-            }
-        }
-        if tiers.is_empty() {
-            if let Some(pool) = select_best_matching_pool(
-                &classified.routing_group_id,
-                &group.pools,
-                &classified.facts,
-                None,
-                |pool_id, rule| !pool_has_route_signal(pool_id, rule),
-            )? {
-                append_route_pool_tier(
-                    &classified.routing_group_id,
-                    pool,
-                    &mut selected_pool_ids,
-                    &mut tiers,
-                )?;
-            }
-        }
-        tiers.push(build_plan_tier(default_pool));
+        // Default is the unconditional floor: when no other pool is
+        // configured, is empty, or does not satisfy the candidate signal, the
+        // request is served by the required non-empty default pool.
+        let selected_pool = selected_pool.unwrap_or(default_pool);
 
         Ok(V3Router06RoutePoolResolved {
             server_id: classified.server_id,
             routing_group_id: classified.routing_group_id,
             facts: classified.facts,
-            tiers,
+            tiers: vec![build_plan_tier(selected_pool)],
         })
     }
 
@@ -504,23 +414,7 @@ impl V3VirtualRouter {
                     interface: target.interface.clone(),
                     priority: target.priority.unwrap_or(0),
                     weight: target.weight.unwrap_or(1),
-                    direct_provider_model: tier.direct_provider_model.clone().or_else(|| {
-                        // 隐式能力池（implicit:*）是 synthetic pool，无 manifest
-                        // 池声明；Target 展开时必须直接按 provider/model 解析，
-                        // 否则 expand 查 group.pools 找不到 implicit:* 池。
-                        if tier.pool_id.starts_with("implicit:")
-                            && target.kind == V3RouteTargetKind::ProviderModel
-                        {
-                            match (&target.provider, &target.model) {
-                                (Some(provider), Some(model)) => {
-                                    Some((provider.clone(), model.clone()))
-                                }
-                                _ => None,
-                            }
-                        } else {
-                            None
-                        }
-                    }),
+                    direct_provider_model: tier.direct_provider_model.clone(),
                 });
             }
         }
@@ -553,48 +447,6 @@ fn build_plan_tier(pool: &V3RoutePoolManifest) -> V3Router06SelectionPlanTier {
     }
 }
 
-/// 构建隐式能力池 tier（无显式池时）：消费 Config 层预计算的能力 →
-/// 模型候选索引（opaque，不解释 provider internals）。client_model 指定时
-/// 只保留匹配该模型的 target（尊重显式指定）；未指定时全量能力模型参与
-/// RoundRobin 轮询（同优先级负载均衡）。返回 None 表示无能力模型。
-fn build_implicit_capability_pool_tier(
-    manifest: &V3Config05ManifestPublished,
-    signal: &str,
-    client_model: Option<&str>,
-) -> Option<V3Router06SelectionPlanTier> {
-    let candidates = manifest.capability_model_candidates();
-    let models = candidates.get(signal)?;
-    let mut targets = Vec::new();
-    for candidate in models {
-        if let Some(client) = client_model {
-            let matches =
-                candidate.model == client || candidate.aliases.iter().any(|alias| alias == client);
-            if !matches {
-                continue;
-            }
-        }
-        targets.push(V3RoutePoolTargetManifest {
-            kind: V3RouteTargetKind::ProviderModel,
-            id: None,
-            provider: Some(candidate.provider.clone()),
-            model: Some(candidate.model.clone()),
-            key: None,
-            interface: None,
-            priority: Some(1),
-            weight: Some(1),
-        });
-    }
-    if targets.is_empty() {
-        return None;
-    }
-    Some(V3Router06SelectionPlanTier {
-        pool_id: format!("implicit:{signal}"),
-        selection: V3SelectionStrategy::RoundRobin,
-        targets,
-        direct_provider_model: None,
-    })
-}
-
 fn select_best_matching_pool<'a, F>(
     group_id: &str,
     pools: &'a BTreeMap<String, V3RoutePoolManifest>,
@@ -608,7 +460,7 @@ where
     let mut matches = pools
         .iter()
         .filter_map(|(pool_id, pool)| {
-            if pool_id == DEFAULT_ROUTE {
+            if pool_id == DEFAULT_ROUTE || pool.targets.is_empty() {
                 return None;
             }
             let rule = pool.match_rule.as_ref()?;
@@ -632,25 +484,6 @@ where
         });
     }
     Ok(Some(best_pool))
-}
-
-fn append_route_pool_tier(
-    group_id: &str,
-    pool: &V3RoutePoolManifest,
-    selected_pool_ids: &mut BTreeSet<String>,
-    tiers: &mut Vec<V3Router06SelectionPlanTier>,
-) -> Result<(), V3VirtualRouterError> {
-    if !selected_pool_ids.insert(pool.id.clone()) {
-        return Ok(());
-    }
-    if pool.targets.is_empty() {
-        return Err(V3VirtualRouterError::PoolEmpty {
-            group_id: group_id.to_string(),
-            pool_id: pool.id.clone(),
-        });
-    }
-    tiers.push(build_plan_tier(pool));
-    Ok(())
 }
 
 /// `provider.model` direct routing, matching the V2 engine semantics: when the
@@ -724,11 +557,6 @@ fn pool_matches(
     rule.entry_protocol
         .as_ref()
         .is_none_or(|protocol| protocol == &facts.entry_protocol)
-        && (rule.models.is_empty()
-            || facts
-                .client_model
-                .as_ref()
-                .is_some_and(|model| rule.models.contains(model)))
         // The classifier already selected the request route. A route label
         // repeated in required_capabilities is a pool selector, not a second
         // request-capability gate (e.g. 7777 thinking/search/tools pools).
@@ -750,36 +578,6 @@ fn pool_route_signal_matches(pool_id: &str, rule: &V3RoutePoolMatchManifest, sig
             .required_capabilities
             .iter()
             .any(|capability| capability == signal)
-}
-
-fn pool_has_route_signal(pool_id: &str, rule: &V3RoutePoolMatchManifest) -> bool {
-    is_hard_capability_pool_signal(pool_id)
-        || rule
-            .required_capabilities
-            .iter()
-            .any(|capability| is_hard_capability_pool_signal(capability))
-        || ROUTE_PRIORITY.iter().any(|signal| {
-            *signal != DEFAULT_ROUTE && pool_route_signal_matches(pool_id, rule, signal)
-        })
-}
-
-fn capability_route_pool_signals(facts: &V3RouterRequestFacts) -> Vec<&str> {
-    // 仅非 hard 能力信号（longcontext 等）。web_search / multimodal 是
-    // hard 能力池信号，必须由 route_classification 的候选（请求意图）驱动
-    // （candidates 循环 + 隐式能力池），不能仅凭模型 capabilities 声明
-    // 触发——否则具备 web_search 能力的模型（如 gpt 系）会在普通请求上
-    // 被错误路由到 web_search 池。
-    ROUTE_PRIORITY
-        .iter()
-        .copied()
-        .filter(|signal| *signal != DEFAULT_ROUTE)
-        .filter(|signal| !is_hard_capability_pool_signal(signal))
-        .filter(|signal| facts.capabilities.contains(*signal))
-        .collect()
-}
-
-fn is_hard_capability_pool_signal(signal: &str) -> bool {
-    matches!(signal, "web_search" | "search" | "vision" | "multimodal")
 }
 
 #[allow(clippy::too_many_arguments)]

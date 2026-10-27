@@ -149,15 +149,6 @@ pub fn evaluate_v3_route_policies(
     observation: V3RouteTurnObservation,
     history: &V3RouteHistoryWindow,
 ) -> Result<Option<V3RoutePolicyAction>, V3RoutePolicyEvaluationError> {
-    if observation.route_pool == "thinking"
-        && observation.tool_name.is_some()
-        && history.facts(history.turns.len()).consecutive_tool_calls >= 5
-    {
-        return Ok(Some(V3RoutePolicyAction {
-            policy_id: "same-tool-consecutive-switch".to_string(),
-            route_pool: "coding".to_string(),
-        }));
-    }
     let mut matched = policies
         .iter()
         .filter(|policy| policy.condition.matches(&observation, history))
@@ -314,7 +305,10 @@ mod tests {
     }
 
     #[test]
-    fn fifth_consecutive_same_tool_switches_thinking_to_coding() {
+    fn same_tool_consecutive_history_does_not_change_pool() {
+        // Ordinary routing must not let cross-request tool history change the
+        // selected route pool (for example five identical thinking turns must
+        // not silently promote the request into `coding`).
         let mut history = V3RouteHistoryWindow::new(8);
         for _ in 0..4 {
             history.record_turn(V3RouteTurnObservation {
@@ -330,31 +324,29 @@ mod tests {
         };
         let mut with_current = history.clone();
         with_current.record_turn(current.clone());
-        let action = evaluate_v3_route_policies(&[], current, &with_current)
-            .expect("same-tool policy")
-            .expect("fifth call switches route");
-        assert_eq!(action.route_pool, "coding");
+        assert!(
+            evaluate_v3_route_policies(&[], current, &with_current)
+                .expect("evaluation")
+                .is_none(),
+            "repeated same-tool history must not override the route pool"
+        );
     }
 
     #[test]
-    fn different_tool_breaks_consecutive_switch() {
+    fn repeated_tool_name_is_committed_history_not_a_pool_signal() {
+        // The cross-request consecutive-tool signal is committed history only.
+        // It remains observable to facts callers (the window still records tool
+        // names), but ordinary routing must never convert it into a pool switch.
         let mut history = V3RouteHistoryWindow::new(8);
-        for _ in 0..4 {
+        for _ in 0..5 {
             history.record_turn(V3RouteTurnObservation {
                 tool_name: Some("read_file".into()),
                 route_pool: "thinking".into(),
                 ..Default::default()
             });
         }
-        let current = V3RouteTurnObservation {
-            tool_name: Some("view_file".into()),
-            route_pool: "thinking".into(),
-            ..Default::default()
-        };
-        let mut with_current = history.clone();
-        with_current.record_turn(current.clone());
-        assert!(evaluate_v3_route_policies(&[], current, &with_current)
-            .expect("same-tool policy")
-            .is_none());
+        let facts = history.facts(8);
+        assert_eq!(facts.consecutive_tool_name.as_deref(), Some("read_file"));
+        assert_eq!(facts.consecutive_tool_calls, 5);
     }
 }

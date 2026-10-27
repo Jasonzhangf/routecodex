@@ -703,4 +703,37 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
                 .expect("compact action");
         assert_eq!(action.route_pool, "compact");
     }
+
+    #[test]
+    fn ordinary_repeated_same_tool_turns_do_not_override_route_pool() {
+        // Ordinary routing must stay independent per request: a run of
+        // identical-tool thinking turns must not promote the request into
+        // another pool (previously the fifth call switched thinking -> coding).
+        let state = V3RoutePolicyRuntimeState::default();
+        let manifest = manifest();
+        let scope = scope();
+        let policies = compile_route_policies(&manifest, "test").expect("policies");
+        let observation = V3RouteTurnObservation {
+            tool_name: Some("read_file".into()),
+            route_pool: "thinking".into(),
+            ..Default::default()
+        };
+        for request in 0..5u64 {
+            let (classified, pending) = state
+                .evaluate_request(
+                    &manifest,
+                    classified(),
+                    scope.clone(),
+                    &format!("same-tool-{request}"),
+                    observation.clone(),
+                    request,
+                )
+                .expect("evaluate");
+            assert_eq!(
+                classified.route_policy_pool, None,
+                "cross-request history must not change the ordinary route pool"
+            );
+            pending.commit(&policies, request).expect("commit");
+        }
+    }
 }
