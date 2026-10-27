@@ -227,12 +227,21 @@ fn rewrite_v3_direct_thinking_attempt_inner(
     // governed continuation subtracts it from the item's full visible text so a
     // delivered delta is never re-emitted.
     let delivered = delivered_thinking_visible_text(frames, flushed, &plans, &wire_items);
-    // A governed visible value must continue the text the client already
-    // received. The delivered frames are append-only, so a value that cannot
-    // start with them can never be projected without contradicting the client
-    // channel. That is a governance failure, not an absent transformation: the
-    // caller must end the committed transport instead of sealing the
-    // ungoverned tail.
+    // The governed terminal value must be the same value produced by the
+    // attempt's streamed carriers. A provider terminal that invents or drops
+    // text relative to its deltas cannot be reconciled with any client prefix.
+    // This is a governance failure, not an absent transformation: the caller
+    // must end the committed transport instead of sealing the inconsistent
+    // tail.
+    let has_complete_tools = original_output
+        .iter()
+        .any(crate::shared_direct_thinking_compat::output_item_has_complete_tool);
+    let streamed = delivered_thinking_visible_text(
+        frames,
+        terminal_position,
+        &plans,
+        &wire_items,
+    );
     for ((output_index, content_index), delivered_text) in &delivered {
         if delivered_text.is_empty() {
             continue;
@@ -245,6 +254,18 @@ fn rewrite_v3_direct_thinking_attempt_inner(
             continue;
         };
         if !visible.starts_with(delivered_text.as_str()) {
+            *governed_prefix_incompatible = true;
+            return None;
+        }
+        let Some(streamed_text) = streamed.get(&(*output_index, *content_index)) else {
+            continue;
+        };
+        let projection =
+            crate::shared_direct_thinking_compat::project_v3_thinking_tag_text_with_tools(
+                streamed_text,
+                has_complete_tools,
+            );
+        if projection.tag_observed && projection.visible.as_str() != visible.as_str() {
             *governed_prefix_incompatible = true;
             return None;
         }
