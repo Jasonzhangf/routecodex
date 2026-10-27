@@ -28,7 +28,7 @@ fn source(kind: V3ErrorSourceKind, code: &str, status: u16) -> V3Error01SourceRa
 }
 
 #[test]
-fn no_first_failure_default_counts_real_failure_and_success_resets_exact_identity() {
+fn no_first_failure_rate_limit_holds_exact_identity_until_success() {
     let mut manifest = global_pool_alive_manifest("no_first_failure_counted");
     normalize_global_pool_priorities(&mut manifest);
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
@@ -36,32 +36,9 @@ fn no_first_failure_default_counts_real_failure_and_success_resets_exact_identit
         test_provider_failure_scope("no_first_failure_counted", "no_first_failure_counted", "s")
             .unwrap();
     let failure = source(V3ErrorSourceKind::ProviderFailure, "provider_http_429", 429);
-    let first_failure = health
-        .record_provider_failure_record_from_source(
-            &scope,
-            "first",
-            Some("key1"),
-            Some("gpt-test"),
-            &failure,
-            100,
-        )
-        .unwrap();
-    assert_eq!(first_failure.failure_count, 1);
-    health
-        .store()
-        .record_provider_key_success("first", "key1", "gpt-test", 101)
-        .unwrap();
-    health
-        .store()
-        .record_provider_success_in_session(&scope, "first", Some("key1"), Some("gpt-test"), 101)
-        .unwrap();
-    assert!(
-        health
-            .availability("first", Some("key1"), Some("gpt-test"), 101)
-            .available,
-        "a business success before any cooldown must leave the exact identity eligible"
-    );
-    for now_ms in 102..=104 {
+    // HTTP 429 latches a bounded hold: the exact identity is excluded during
+    // the ~1 minute window and scheduled for a recovery probe.
+    for now_ms in 100..106 {
         let record = health
             .record_provider_failure_record_from_source(
                 &scope,
@@ -72,83 +49,47 @@ fn no_first_failure_default_counts_real_failure_and_success_resets_exact_identit
                 now_ms,
             )
             .unwrap();
-        assert_eq!(record.failure_count, (now_ms - 101) as u32);
-        assert_eq!(
-            health
+        assert_eq!(record.failure_count, (now_ms - 99) as u32);
+        assert!(
+            !health
                 .availability("first", Some("key1"), Some("gpt-test"), now_ms)
                 .available,
-            now_ms < 104
+            "a 429 must hold the exact identity during its window; attempt={now_ms}"
         );
     }
     assert!(
-        !health
-            .availability("first", Some("key1"), Some("gpt-test"), 102)
-            .available
-    );
-    assert!(
-        health
-            .availability("first", Some("key2"), Some("gpt-test"), 102)
-            .available
-    );
-    assert!(
-        health
-            .availability("first", Some("key1"), Some("other"), 102)
-            .available
-    );
-    assert!(
-        health
-            .availability("second", Some("key1"), Some("gpt-test"), 102)
-            .available
-    );
-    assert!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(5_104)
+            .provider_cooldown_probe_keys_due(u64::MAX)
             .unwrap()
-            .iter()
-            .any(|(provider, key, model)| {
-                provider == "first"
-                    && key.as_deref() == Some("key1")
-                    && model.as_deref() == Some("gpt-test")
-            }),
-        "an existing cooldown must remain recoverable by an exact-identity semantic probe"
+            .contains(&("first".into(), Some("key1".into()), Some("gpt-test".into()))),
+        "a 429 hold must schedule a recovery probe for the held identity"
     );
-    assert!(
-        !health
-            .availability("first", Some("key1"), Some("gpt-test"), 104)
-            .available
-    );
-    let permit = health
+    // Identity isolation still holds: siblings were never touched.
+    for (provider, key, model) in [
+        ("first", "key2", "gpt-test"),
+        ("first", "key1", "other"),
+        ("second", "key1", "gpt-test"),
+    ] {
+        assert!(
+            health
+                .availability(provider, Some(key), Some(model), 105)
+                .available,
+            "sibling {provider}.{key}.{model} must stay eligible"
+        );
+    }
+    // Business success releases the exact hold immediately.
+    let success = health
         .store()
-        .acquire_provider_cooldown_probe_if_due("first", Some("key1"), Some("gpt-test"), 5_104)
-        .unwrap()
-        .expect("matching due semantic probe");
-    health
-        .store()
-        .complete_provider_cooldown_probe_success_with_permit(&permit, 5_105)
+        .record_provider_key_success("first", "key1", "gpt-test", 106)
         .unwrap();
-    assert!(
+    assert!(success.available);
+    assert_eq!(success.success_streak, 1, "one real success counts once");
+    assert_eq!(
         health
-            .availability("first", Some("key1"), Some("gpt-test"), 5_105)
-            .available
-    );
-    let after_recovery = health
-        .record_provider_failure_record_from_source(
-            &scope,
-            "first",
-            Some("key1"),
-            Some("gpt-test"),
-            &failure,
-            5_106,
-        )
-        .unwrap();
-    // This source wrapper returns session bookkeeping. Semantic recovery
-    // resets the global health streak, while retaining the session history.
-    assert_eq!(after_recovery.failure_count, 4);
-    assert!(
-        health
-            .availability("first", Some("key1"), Some("gpt-test"), 5_106)
-            .available
+            .availability("first", Some("key1"), Some("gpt-test"), 106)
+            .available,
+        true
     );
 }
 
@@ -246,7 +187,7 @@ fn no_first_failure_irrecoverable_quota_and_auth_keep_immediate_boundary() {
 }
 
 #[test]
-fn quota_429_waits_for_three_failures_then_business_success_recovers() {
+fn quota_429_enters_a_bounded_hold_and_releases_on_success() {
     let store = V3ProviderHealthStore::default();
     let failure = source(
         V3ErrorSourceKind::ProviderFailure,
@@ -260,20 +201,22 @@ fn quota_429_waits_for_three_failures_then_business_success_recovers() {
         429,
         "insufficient_quota",
     );
+    // A 429 latches a bounded recoverable hold with a ~1 minute window.
     assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-    assert_eq!(action.failure_threshold, 3);
-    for time in 100..103 {
-        assert_eq!(
-            store
-                .record_provider_failure_action("p", "k", "m", &action, time)
-                .unwrap()
-                .cooldown,
-            time == 102
+    assert_eq!(action.failure_threshold, 1);
+    assert_eq!(action.cooldown_ms, 60_000);
+    for time in 100..106 {
+        let projection = store
+            .record_provider_failure_action("p", "k", "m", &action, time)
+            .unwrap();
+        assert!(
+            !projection.available,
+            "a 429 must hold the exact identity during its window; attempt={time}"
         );
     }
     assert!(
         store
-            .record_provider_key_success("p", "k", "m", 103)
+            .record_provider_key_success("p", "k", "m", 106)
             .unwrap()
             .available
     );

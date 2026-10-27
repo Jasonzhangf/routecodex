@@ -1166,6 +1166,7 @@ fn direct_protocol_plan_uses_exact_identity_cooldown_across_sessions() {
                     max_probe_interval_ms: None,
                     long_probe_backoff: false,
                     until_restart: false,
+                    advisory_probe: false,
                     cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
                 }),
             )

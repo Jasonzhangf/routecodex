@@ -430,6 +430,7 @@ impl V3ProviderFailureRuntimeHealth {
                     max_probe_interval_ms: None,
                     long_probe_backoff: false,
                     until_restart: false,
+                    advisory_probe: false,
                     cooldown_scope: V3ProviderFailureCooldownScope::Session,
                 }),
             )
@@ -535,7 +536,8 @@ impl V3ProviderFailureRuntimeHealth {
         }
         // 统一错误模型：任何 provider 失败（含 400/invalid_request）都按
         // internal 全局策略表盖章阈值后计入全局健康；连续达到阈值即进入
-        // 全局冷却，由后台探活或真实成功恢复，不再按状态码豁免。
+        // 全局冷却，由后台探活或真实成功恢复。HTTP 429 进入有界的 hold 冷却
+        // （约 1 分钟）：期内该身份出现真实成功即放行，到期自动放行。
         let action = apply_v3_internal_provider_failure_policy(
             build_v3_provider_failure_action_from_v3_error_02(&classified),
             source_stage,
