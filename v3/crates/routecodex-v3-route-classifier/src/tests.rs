@@ -106,6 +106,47 @@ fn chat_historical_web_search_does_not_activate_current_turn() {
 }
 
 #[test]
+fn chat_consecutive_user_messages_merge_current_turn_text() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "messages": [
+            {"role":"user","content":"请搜索今天的新闻"},
+            {"role":"user","content":"并结合这张图回答"}
+        ]
+    }));
+    assert!(signals.latest_message_from_user);
+    assert!(
+        signals.current_user_text.contains("请搜索今天的新闻"),
+        "earlier contiguous user text must stay in the current turn: {:?}",
+        signals.current_user_text
+    );
+    assert!(signals.current_user_text.contains("并结合这张图回答"));
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_eq!(route.route_name, "web_search");
+}
+
+#[test]
+fn chat_consecutive_user_run_stops_at_assistant_history_boundary() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "messages": [
+            {"role":"user","content":[
+                {"type":"text","text":"请搜索今天的新闻"},
+                {"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgo="}}
+            ]},
+            {"role":"assistant","content":"已经找到"},
+            {"role":"user","content":"继续实现"}
+        ]
+    }));
+    assert!(signals.latest_message_from_user);
+    assert_eq!(signals.current_user_text, "继续实现");
+    assert!(!signals.has_current_turn_web_search);
+    assert!(
+        !signals.has_current_turn_image,
+        "image before the assistant boundary is history, not the current turn: {:?}",
+        signals
+    );
+}
+
+#[test]
 fn responses_historical_web_search_does_not_activate_current_turn() {
     let request = json!({
         "input": [
@@ -636,6 +677,127 @@ fn responses_history_user_text_does_not_leak_into_current_turn() {
     assert!(!signals.has_current_turn_web_search);
     let route = classify_route(&route_facts_from_current_signals(&signals));
     assert_ne!(route.route_name, "web_search");
+}
+
+#[test]
+fn responses_consecutive_user_messages_merge_into_one_current_turn() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "请搜索今天的新闻"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="}
+                ]
+            },
+            {
+                "role": "user",
+                "content": "并结合这张图回答"
+            }
+        ]
+    }));
+    assert!(signals.latest_message_from_user);
+    assert!(
+        signals.current_user_text.contains("请搜索今天的新闻"),
+        "search intent from the earlier user carrier must stay in the current turn: {:?}",
+        signals.current_user_text
+    );
+    assert!(
+        signals.has_current_turn_image,
+        "image from the same current user run must be preserved: {:?}",
+        signals
+    );
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_eq!(route.route_name, "web_search");
+    assert!(route
+        .candidates
+        .iter()
+        .any(|candidate| candidate == "multimodal"));
+}
+
+#[test]
+fn responses_consecutive_user_messages_merge_also_when_image_precedes_search_text() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="}
+                ]
+            },
+            {
+                "role": "user",
+                "content": "请搜索今天的新闻并说明"
+            }
+        ]
+    }));
+    assert!(signals.latest_message_from_user);
+    assert!(
+        signals.current_user_text.contains("请搜索今天的新闻"),
+        "search text after an image must stay in the same current turn: {:?}",
+        signals.current_user_text
+    );
+    assert!(signals.has_current_turn_image);
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_eq!(route.route_name, "web_search");
+    assert!(route
+        .candidates
+        .iter()
+        .any(|candidate| candidate == "multimodal"));
+}
+
+#[test]
+fn responses_consecutive_user_messages_merge_also_when_earlier_is_plain_text() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "input": [
+            {"role": "user", "content": "请搜索今天的新闻"},
+            {"role": "user", "content": "再结合图"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "最后总结"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="}
+                ]
+            }
+        ]
+    }));
+    assert!(signals.latest_message_from_user);
+    assert!(
+        signals.current_user_text.contains("请搜索今天的新闻"),
+        "all consecutive user texts must aggregate: {:?}",
+        signals.current_user_text
+    );
+    assert!(signals.has_current_turn_image);
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_eq!(route.route_name, "web_search");
+}
+
+#[test]
+fn responses_consecutive_user_run_stops_at_assistant_history_boundary() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "请搜索今天的新闻"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="}
+                ]
+            },
+            {"role": "assistant", "content": "已经找到"},
+            {"role": "user", "content": "继续实现"}
+        ]
+    }));
+    assert!(signals.latest_message_from_user);
+    assert_eq!(signals.current_user_text, "继续实现");
+    assert!(!signals.has_current_turn_web_search);
+    assert!(
+        !signals.has_current_turn_image,
+        "image before the assistant boundary is history, not the current turn: {:?}",
+        signals
+    );
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_ne!(route.route_name, "web_search");
+    assert_ne!(route.route_name, "multimodal");
 }
 
 #[test]
@@ -1217,6 +1379,20 @@ fn current_user_and_tool_images_activate_only_their_own_turn() {
     }));
     assert!(current_tool.has_current_turn_image);
     assert!(current_tool.has_current_turn_tool_output);
+}
+
+#[test]
+fn gemini_consecutive_users_include_all_current_turn_parts() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "contents": [
+            {"role":"user","parts":[{"text":"请搜索今天的新闻"},{"inlineData":{"mimeType":"image/png","data":"AAAA"}},{"text":"最新"}]},
+            {"role":"user","parts":[{"text":"并结合这张图回答"}]}
+        ]
+    }));
+    assert!(signals.has_current_turn_image);
+    assert!(signals.current_user_text.contains("请搜索今天的新闻"));
+    assert!(signals.current_user_text.contains("最新"));
+    assert!(signals.current_user_text.contains("并结合这张图回答"));
 }
 
 #[test]

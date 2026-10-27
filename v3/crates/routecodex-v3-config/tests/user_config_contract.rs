@@ -34,6 +34,19 @@ fn catalogue() -> BTreeMap<String, BTreeSet<String>> {
     BTreeMap::from([(String::from("cc"), BTreeSet::from([String::from("model")]))])
 }
 
+#[test]
+fn builtin_classification_pools_do_not_restrict_client_protocol() {
+    let authoring = routecodex_v3_config::internal::v3_internal_user_config_authoring();
+    let group = &authoring.route_groups["routecodex_v3_4444"];
+    for pool_id in ["thinking", "coding", "search"] {
+        let rule = group.pools[pool_id].match_rule.as_ref().unwrap();
+        assert!(
+            rule.entry_protocol.is_none(),
+            "{pool_id} must accept every client protocol"
+        );
+    }
+}
+
 fn project(routes: &str) -> routecodex_v3_config::V3Config02AuthoringParsed {
     project_v3_user_config_03_authoring(
         parse_v3_user_config_02_routing(&user_config(routes)).unwrap(),

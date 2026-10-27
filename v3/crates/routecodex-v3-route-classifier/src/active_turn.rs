@@ -213,12 +213,13 @@ fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
     }
     let current_user_text = latest_user_index
         .map(|index| {
-            entries[chat_current_user_run_start(entries, index)..=index]
+            let start = chat_current_user_run_start(entries, index);
+            entries[start..=index]
                 .iter()
-                .rev()
                 .map(extract_chat_user_text)
-                .find(|text| !text.is_empty())
-                .unwrap_or_default()
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n")
         })
         .unwrap_or_default();
     V3CurrentTurnSignals {
@@ -331,8 +332,12 @@ fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
     let latest_user_index = entries
         .iter()
         .rposition(|entry| matches!(entry.role, GeminiTurnRole::User));
-    let current_turn_start = latest_user_index.unwrap_or(0);
-    let latest_user = latest_user_index.and_then(|index| entries.get(index));
+    let mut current_turn_start = latest_user_index.unwrap_or(0);
+    while current_turn_start > 0
+        && matches!(entries[current_turn_start - 1].role, GeminiTurnRole::User)
+    {
+        current_turn_start -= 1;
+    }
     let mut has_current_turn_image = false;
     let mut has_current_turn_tool_output = false;
     let mut has_current_turn_web_search = false;
@@ -368,14 +373,15 @@ fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
         has_current_turn_image,
         last_assistant_tool,
         current_turn_tool_categories,
-        current_user_text: latest_user
-            .map(|entry| {
-                entry
-                    .parts
+        current_user_text: latest_user_index
+            .map(|end| {
+                entries[current_turn_start..=end]
                     .iter()
-                    .find(|part| part.kind == TurnPartKind::Text)
-                    .map(|part| part.text.clone())
-                    .unwrap_or_default()
+                    .flat_map(|entry| &entry.parts)
+                    .filter(|part| part.kind == TurnPartKind::Text)
+                    .map(|part| part.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
             })
             .unwrap_or_default(),
         ..Default::default()
@@ -394,25 +400,12 @@ fn responses_current_user_run_start(
     entries: &[ResponsesTurnEntry],
     latest_user_index: usize,
 ) -> usize {
-    // An explicit message is the current-turn boundary when an earlier user
-    // carrier exists. Its nested content is already represented by the message
-    // entry; never inherit image facts from preceding history/tool output.
-    if entries[latest_user_index].kind == ResponsesTurnKind::Other {
-        return if entries[..latest_user_index]
-            .iter()
-            .any(|entry| entry.role == ResponsesTurnRole::User)
-        {
-            latest_user_index
-        } else {
-            0
-        };
-    }
+    // Responses `input` has no turn id. Consecutive user carriers, whether bare
+    // `role:user`, an explicit `message`, or content parts, belong to one
+    // current turn; only an assistant/tool/system entry opens a new turn. This
+    // mirrors the Chat boundary so the whole trailing user run is aggregated.
     let mut start = latest_user_index;
-    while start > 0 {
-        let previous = &entries[start - 1];
-        if previous.role != ResponsesTurnRole::User || previous.kind == ResponsesTurnKind::Other {
-            break;
-        }
+    while start > 0 && entries[start - 1].role == ResponsesTurnRole::User {
         start -= 1;
     }
     start
@@ -422,9 +415,11 @@ fn extract_chat_user_text(entry: &ChatTurnEntry) -> String {
     entry
         .parts
         .iter()
-        .find(|part| part.kind == TurnPartKind::Text)
-        .map(|part| part.text.clone())
-        .unwrap_or_default()
+        .filter(|part| part.kind == TurnPartKind::Text)
+        .map(|part| part.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn classify_category(category: &str) -> Option<RouteToolCallClassification> {

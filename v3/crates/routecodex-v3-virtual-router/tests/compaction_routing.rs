@@ -166,6 +166,7 @@ fn compact_pool_precedes_dotted_direct_model() {
                 client_model: Some("prov.model-x".into()),
                 capabilities: BTreeSet::from(["text".into()]),
                 input_tokens: 1,
+                current_turn_input_tokens: 1,
                 route_classification: RouteClassification {
                     route_name: "compact".into(),
                     reasoning: "compact:registered-ingress".into(),

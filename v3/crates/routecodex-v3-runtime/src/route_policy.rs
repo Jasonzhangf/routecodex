@@ -43,7 +43,6 @@ impl V3RoutePolicyScope {
         self.conversation_id = conversation_id.into();
         self
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -276,7 +275,6 @@ impl V3RoutePolicyRuntimeState {
         }
         Ok(())
     }
-
 }
 
 pub fn compile_route_policies(
@@ -373,6 +371,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
                 client_model: None,
                 capabilities: BTreeSet::new(),
                 input_tokens: 0,
+                current_turn_input_tokens: 0,
                 route_classification: RouteClassification::default(),
             },
             route_policy_pool: None,
@@ -395,7 +394,9 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
                 classified(),
                 scope,
                 "compact-1",
-                V3RouteTurnObservation { is_compaction: true },
+                V3RouteTurnObservation {
+                    is_compaction: true,
+                },
                 1,
             )
             .expect("evaluate");

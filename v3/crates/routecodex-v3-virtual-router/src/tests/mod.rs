@@ -106,6 +106,7 @@ fn matching_facts() -> V3RouterRequestFacts {
         client_model: Some("client-model".into()),
         capabilities: BTreeSet::from(["tools".into()]),
         input_tokens: 10,
+        current_turn_input_tokens: 10,
         route_classification: test_route("tools", &["tools", "default"]),
     }
 }
@@ -200,6 +201,7 @@ fn classified_route_hits_pool_without_reclassifying_as_capability() {
                 client_model: None,
                 capabilities: BTreeSet::from(["text".into(), "tools".into()]),
                 input_tokens: 1,
+                current_turn_input_tokens: 1,
                 route_classification: test_route("thinking", &["thinking", "default"]),
             },
         )
@@ -287,6 +289,7 @@ fn direct_facts(model: &str, capabilities: BTreeSet<String>) -> V3RouterRequestF
         client_model: Some(model.into()),
         capabilities,
         input_tokens: 10,
+        current_turn_input_tokens: 10,
         route_classification: RouteClassification::default(),
     }
 }
@@ -351,6 +354,7 @@ fn compact_route_signal_uses_configured_independent_route_object_pool() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::new(),
                 input_tokens: 1,
+                current_turn_input_tokens: 1,
                 route_classification: test_route("compact", &["compact"]),
             },
         )
@@ -512,6 +516,7 @@ fn tools_capability_without_current_turn_signal_stays_default() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("default", &["default"]),
             },
         )
@@ -542,6 +547,7 @@ fn no_match_uses_default_and_only_equal_best_precedence_is_ambiguous() {
                 client_model: Some("different-model".into()),
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 // Declared capabilities alone are not a current-turn signal.
                 route_classification: test_route("default", &["default"]),
             },
@@ -616,6 +622,7 @@ fn entry_protocol_uses_generic_route_signal_pool() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("tools", &["tools", "default"]),
             },
         )
@@ -703,6 +710,7 @@ fn classifier_candidates_select_pool_regardless_of_declared_capabilities() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["tools".into(), "web_search".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("tools", &["tools", "default"]),
             },
         )
@@ -737,6 +745,7 @@ fn web_search_capability_pool_is_not_generic_route_fallback() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["web_search".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("thinking", &["thinking", "default"]),
             },
         )
@@ -767,6 +776,7 @@ fn candidate_order_hosted_websearch_precedes_multimodal() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["web_search".into(), "multimodal".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route(
                     "web_search",
                     &["web_search", "multimodal", "default"],
@@ -811,6 +821,7 @@ fn candidate_order_coding_precedes_thinking_and_websearch_precedes_all() {
                     "web_search".into(),
                 ]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route(
                     "coding",
                     &["coding", "thinking", "tools", "default"],
@@ -836,6 +847,7 @@ fn candidate_order_coding_precedes_thinking_and_websearch_precedes_all() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["thinking".into(), "tools".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("thinking", &["thinking", "tools", "default"]),
             },
         )
@@ -866,6 +878,7 @@ fn longcontext_candidate_selects_configured_pool() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["multimodal".into()]),
                 input_tokens: 1_000,
+                current_turn_input_tokens: 1_000,
                 route_classification: test_route(
                     "longcontext",
                     &["longcontext", "multimodal", "default"],
@@ -878,6 +891,107 @@ fn longcontext_candidate_selects_configured_pool() {
         .unwrap();
     assert_eq!(plan.tiers.len(), 1);
     assert_eq!(plan.tiers[0].pool_id, "longcontext");
+}
+
+#[test]
+fn pool_min_max_matches_current_turn_tokens_not_full_request() {
+    // 红测（Review finding 4）：池的 min/max_input_tokens 只看当前轮 token，
+    // 已完成历史不得把请求推入有上下界的池。完整 input_tokens 仍保留给
+    // Target 做容量估计。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_match_pool(
+        &mut manifest,
+        "longcontext",
+        10,
+        vec!["longcontext"],
+        Some(1_000),
+    );
+
+    // 当前轮很小（1 token），但完整请求很大（5_000）。因当前轮未越过
+    // 下限，longcontext 池不得命中，落入 default。
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 5_000,
+                current_turn_input_tokens: 1,
+                route_classification: test_route("longcontext", &["longcontext", "default"]),
+            },
+        )
+        .unwrap();
+    let hit = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap()
+        .tiers;
+    assert_eq!(hit.last().expect("default tier").pool_id, "default");
+
+    // 当前轮越过下限时，longcontext 池命中；此时完整 input_tokens 仍保留。
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 5_000,
+                current_turn_input_tokens: 2_000,
+                route_classification: test_route("longcontext", &["longcontext", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(plan.tiers[0].pool_id, "longcontext");
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    // Target 仍收到完整请求 token 做容量估计。
+    assert_eq!(hit.request_input_tokens, 5_000);
+}
+
+#[test]
+fn pool_min_max_bounds_exclude_when_current_turn_below_min() {
+    // 绿测反例：下限只看当前轮；历史再长也不能让低于下限的当前轮命中。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_match_pool(
+        &mut manifest,
+        "longcontext",
+        10,
+        vec!["longcontext"],
+        Some(1_000),
+    );
+
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 1_000,
+                current_turn_input_tokens: 10,
+                route_classification: test_route("longcontext", &["longcontext", "default"]),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap()
+            .tiers[0]
+            .pool_id,
+        "default"
+    );
 }
 
 #[test]
@@ -933,6 +1047,7 @@ fn candidate_priority_skips_absent_or_empty_pools() {
                     client_model: Some("client-model".into()),
                     capabilities: ordered.iter().map(|signal| (*signal).to_string()).collect(),
                     input_tokens: 10,
+                    current_turn_input_tokens: 10,
                     route_classification: test_route(expected, &candidates),
                 },
             )
@@ -969,6 +1084,7 @@ fn model_match_pool_does_not_preempt_candidate_signal() {
                 client_model: Some("client-test".into()),
                 capabilities: BTreeSet::from(["thinking".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("thinking", &["thinking", "default"]),
             },
         )
@@ -1020,6 +1136,7 @@ fn virtual_alias_and_auto_share_the_current_turn_classification_pool() {
                     client_model: Some(model.into()),
                     capabilities: BTreeSet::new(),
                     input_tokens: 10,
+                    current_turn_input_tokens: 10,
                     route_classification: test_route("thinking", &["thinking", "default"]),
                 },
             )
@@ -1084,6 +1201,7 @@ fn model_match_pool_is_not_an_inbound_route() {
                 client_model: Some("client-test".into()),
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("default", &["default"]),
             },
         )
@@ -1113,6 +1231,7 @@ fn model_match_pool_without_signal_uses_default_pool() {
                 client_model: Some("client-test".into()),
                 capabilities: BTreeSet::new(),
                 input_tokens: 1,
+                current_turn_input_tokens: 1,
                 route_classification: test_route("default", &["default"]),
             },
         )
@@ -1183,6 +1302,7 @@ fn missing_non_default_match_and_invalid_protocol_facts_fail_explicitly() {
                 client_model: None,
                 capabilities: BTreeSet::new(),
                 input_tokens: 0,
+                current_turn_input_tokens: 0,
                 route_classification: RouteClassification::default(),
             },
         ),
@@ -1521,6 +1641,7 @@ fn no_implicit_capability_pool_without_configured_pool() {
                 client_model: Some("MiniMax-M3".into()),
                 capabilities: BTreeSet::from(["multimodal".into(), "web_search".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route(
                     "web_search",
                     &["web_search", "multimodal", "default"],
@@ -1568,6 +1689,7 @@ fn candidate_order_selects_first_configured_non_empty_pool() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route(
                     "coding",
                     &["coding", "thinking", "tools", "default"],
@@ -1608,6 +1730,7 @@ fn empty_configured_pool_is_skipped_for_next_candidate() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["multimodal".into(), "coding".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route(
                     "multimodal",
                     &["multimodal", "coding", "default"],
@@ -1637,6 +1760,7 @@ fn absent_non_default_pool_falls_through_to_default() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["multimodal".into(), "coding".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route(
                     "multimodal",
                     &["multimodal", "coding", "default"],
@@ -1667,6 +1791,7 @@ fn explicit_direct_model_ignores_classification_candidates() {
                 client_model: Some("prov.model-x".into()),
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("multimodal", &["multimodal", "default"]),
             },
         )

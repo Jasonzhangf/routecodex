@@ -1973,7 +1973,7 @@ features:
   - current-turn typed facts classify deterministically.
   - Current-turn images classify multimodal; an image from an earlier user turn followed
     by a later text-only user turn does not classify multimodal, and historical
-    placeholders never create multimodal facts.
+    images preserved as business history never create multimodal facts.
   - business text and tool arguments cannot create routing/control state.
   required_reverse:
   - changing only earlier image carriers leaves current-turn route classification unchanged,
@@ -3315,12 +3315,17 @@ features:
   completion_rule:
     source: protocol_tables unit tests and architecture CI pass; tables fail-fast on schema violation and never enter provider/client payload.
 - feature_id: v3.history_image_cleanup
-  status: active_latest_image_preservation
+  status: retired_for_ordinary_classification
   change_risk: medium
-  owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: history_image_cleanup owns the stateless latest-carrier image normalization rule. Relay invokes it from Chat Process Req04 in relay_request.rs; Inbound remains lossless and does not rewrite payload. Direct reaches it only through its existing registered request standardization/hook path. ProviderReqCompat06 preserves representable latest images and paired tool receipts independently of target capability metadata.
+  owner_kind: retired_v3_runtime_chat_process_gate
+  owner_scope: Ordinary request classification no longer depends on destructive
+    historical-image rewriting. The earlier latest-carrier placeholder rule must
+    not be used to keep historical images out of current-turn classification or
+    to drop business history. If a target protocol cannot represent an image, the
+    projection stays at the adjacent ProviderReqCompat owner and keeps complete
+    opaque data. Current-turn image detection is owned by the route-classifier
+    current-turn fact builder.
   owner_modules:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   required_gates:
@@ -3331,7 +3336,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib transient_stage_code_classifier
   completion_rule:
-    source: Runtime tests and public HTTP image_input_blackbox cases pass for Chat, Responses and Anthropic; latest images and tool identity survive even when multimodal metadata is absent or its route is cooled, and older images are placeholders. Live 7777 blind-image tool write/read/follow-up cases match hidden visual ground truth, while the no-image control returns NO_IMAGE.
+    source: Runtime tests and public HTTP image_input_blackbox cases pass for Chat, Responses and Anthropic; complete original history images and paired tool receipts survive standardization and reach the selected provider without placeholder rewriting, while current-turn image detection stays independent in the typed route facts. ProviderReqCompat preserves representable images and paired tool receipts independently of target capability metadata.
 - feature_id: v3.direct_runtime_kernel_core
   status: active_skeleton
   change_risk: critical
@@ -4141,7 +4146,7 @@ features:
   - candidate behavior is13of20 scoped; remaining7 are inverse projection and all6globalError nodes. Whole-graph execution, Native Direct payload migration, independent review, and main merge are not inferred
   - every inbound direction_bindings source names a path in that protocol's raw source inventory; outbound Chat sources are not constrained to wire inventory paths
   - Responses request.input[].type is read per input array item, and the selected request branch remains paired with that same request's typed inverse provenance for the response projection
-  - the target request design assigns historical image placeholders to Chat Process request governance after lossless normalization, retaining current-turn images and stable historical placeholders for tool-only replay
+  - the target request design keeps complete historical image bytes and paired tool receipts intact through Chat Process request governance after lossless normalization; current-turn image routing remains typed current-turn facts and no placeholder rule drops business history
   - this SDK migration leaves Anthropic/Gemini Direct behavior with its existing owners
   negative_assertions:
   - a protocol profile cannot authorize a field path absent from the source inventory
