@@ -117,11 +117,13 @@ impl V3ProviderFailureRuntimeHealth {
         action: &V3ProviderFailureAction,
         now_ms: u64,
     ) -> Result<Option<V3ProviderKeyHealthProjection>, String> {
+        let rate_limit_observation = action.failure_fingerprint.as_ref()
+            .is_some_and(|fingerprint| fingerprint.http_status == 429);
         if matches!(
             action.recovery,
             V3ProviderRecoveryKind::NotProviderHealth
                 | V3ProviderRecoveryKind::HealthNeutralTransient
-        ) {
+        ) && !rate_limit_observation {
             return Ok(None);
         }
         let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) else {

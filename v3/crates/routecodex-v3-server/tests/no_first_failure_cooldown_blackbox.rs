@@ -35,6 +35,9 @@ async fn independent_provider(
     State(state): State<Arc<Upstream>>,
     Json(body): Json<Value>,
 ) -> Response<Body> {
+    if body["input"].to_string().contains("ping; reply pong") {
+        return controlled_failure(StatusCode::SERVICE_UNAVAILABLE, "probe_unavailable");
+    }
     let input = body["input"].as_str().unwrap_or("");
     *state
         .receipts
@@ -234,17 +237,21 @@ async fn wait_for_cooldown_count(
     base: &str,
     expected: usize,
 ) -> Vec<Value> {
-    timeout(Duration::from_secs(4), async {
+    let mut last = Vec::new();
+    let outcome = timeout(Duration::from_secs(4), async {
         loop {
             let entries = pool(client, base).await;
             if entries.len() == expected {
                 return entries;
             }
+            last = entries;
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
-    .await
-    .expect("failed observation must commit the eligible exact cooldown")
+    .await;
+    outcome.unwrap_or_else(|error| {
+        panic!("expected {expected} exact cooldowns: {error}; last={last:?}")
+    })
 }
 
 async fn receipt(state: &Upstream, marker: &str) {
