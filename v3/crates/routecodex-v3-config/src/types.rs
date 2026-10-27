@@ -788,15 +788,6 @@ pub struct V3RoutePolicyAuthoringConfig {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum V3RouteConditionAuthoringConfig {
     CurrentCompaction,
-    SearchPoolTurnRatioAtLeast {
-        window_turns: usize,
-        numerator: usize,
-        denominator: usize,
-    },
-    ToolExecutionErrorTurnsAtLeast {
-        window_turns: usize,
-        count: usize,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

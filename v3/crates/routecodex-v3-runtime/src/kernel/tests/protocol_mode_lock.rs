@@ -725,11 +725,6 @@ id = "compact-purpose"
 precedence = 10
 condition = { kind = "current_compaction" }
 action = { select_route_pool = "compact" }
-[[route_groups.default.route_policies]]
-id = "search-history"
-precedence = 20
-condition = { kind = "search_pool_turn_ratio_at_least", window_turns = 10, numerator = 8, denominator = 10 }
-action = { select_route_pool = "thinking" }
 [route_groups.default.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "primary", model = "primary-model", key = "key", priority = 1 }]
@@ -737,10 +732,6 @@ targets = [{ kind = "provider_model", provider = "primary", model = "primary-mod
 route_object = "compact"
 selection = { strategy = "priority" }
 match = { precedence = 5, entry_protocol = "responses" }
-targets = [{ kind = "provider_model", provider = "primary", model = "primary-model", key = "key", priority = 1 }]
-[route_groups.default.pools.thinking]
-selection = { strategy = "priority" }
-match = { precedence = 6, entry_protocol = "responses" }
 targets = [{ kind = "provider_model", provider = "primary", model = "primary-model", key = "key", priority = 1 }]
 "#,
     )

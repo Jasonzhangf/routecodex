@@ -639,7 +639,7 @@ where
 }
 
 fn append_route_pool_tier(
-    group_id: &str,
+    _group_id: &str,
     pool: &V3RoutePoolManifest,
     selected_pool_ids: &mut BTreeSet<String>,
     tiers: &mut Vec<V3Router06SelectionPlanTier>,
@@ -648,10 +648,10 @@ fn append_route_pool_tier(
         return Ok(());
     }
     if pool.targets.is_empty() {
-        return Err(V3VirtualRouterError::PoolEmpty {
-            group_id: group_id.to_string(),
-            pool_id: pool.id.clone(),
-        });
+        // A non-default signal pool may be declared but empty. It is skipped
+        // so the next declared pool still gets a chance; the explicit default
+        // pool remains the last tier of the plan.
+        return Ok(());
     }
     tiers.push(build_plan_tier(pool));
     Ok(())
