@@ -3330,7 +3330,7 @@ fn sticky_pool_rolls_to_standby_when_primary_cools_and_does_not_pull_back() {
 }
 
 #[test]
-fn request_scoped_candidate_shrink_does_not_evict_the_session_binding() {
+fn sticky_binding_survives_request_scoped_candidate_shrink() {
     // A client model filter can shrink one request's candidate set to a subset
     // of the pool. The sticky universe is the pool's declared members, so the
     // session's remembered provider must survive that narrow request.
