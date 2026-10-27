@@ -21,7 +21,10 @@ const copied = [
   "docs/architecture/v3-mainline-call-map.yml",
   "docs/architecture/v3-resource-operation-map.yml",
   "docs/architecture/v3-verification-map.yml",
+  "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
+  "v3/crates/routecodex-v3-server/src/endpoint_handlers.rs",
   "v3/crates/routecodex-v3-server/src/executors.rs",
+  "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
 ];
 const cases = [
   {
@@ -191,7 +194,7 @@ const cases = [
         "                true,\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
       ),
     diagnostic:
-      /streaming console emitter must pass the client response body stream judgment/u,
+      /console emitter must pass the client response body stream judgment/u,
   },
   {
     name: "anthropic relay emitter regresses to stream_observation presence (the JSON closeout regression)",
@@ -202,7 +205,32 @@ const cases = [
         "                relay_output.stream_observation.is_none(),\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
       ),
     diagnostic:
-      /streaming console emitter must pass the client response body stream judgment/u,
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // File-scope blind spot: the responses relay lane lives in live_snapshot.rs,
+    // so an anchor limited to the two executors would never see this regression.
+    name: "responses relay emitter commits before the stream terminal (live_snapshot.rs)",
+    path: "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
+    mutate: (source) =>
+      source.replace(
+        "            started_at,\n            output.stream_observation.is_none(),\n        );\n    }\n    let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_responses_relay(",
+        "            started_at,\n            true,\n        );\n    }\n    let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_responses_relay(",
+      ),
+    diagnostic:
+      /console emitter must pass the client response body stream judgment/u,
+  },
+  {
+    // File-scope blind spot: the direct lane emitter lives in impl_bulk.rs.
+    name: "direct lane emitter commits before the stream terminal (impl_bulk.rs)",
+    path: "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
+    mutate: (source) =>
+      source.replace(
+        "        &observability,\n        started_at,\n        !is_sse,\n    );",
+        "        &observability,\n        started_at,\n        true,\n    );",
+      ),
+    diagnostic:
+      /console emitter must pass the client response body stream judgment/u,
   },
 ];
 

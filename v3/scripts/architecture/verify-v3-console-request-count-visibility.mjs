@@ -244,41 +244,68 @@ for (const [source, collection, label] of [
   }
 }
 
-// Source anchor: every console emitter that can front a streaming relay lane
-// must gate the success commit on whether the client response body is a stream,
-// so the commit moves to the stream terminal instead of running before the first
-// SSE byte. Lanes whose stream_observation is absent only for a JSON closeout
-// use stream_observation.is_none(); the Anthropic lane populates it for both
-// closeouts, so its emitters must judge the typed client_body.is_sse().
-for (const source of [
-  readRequired("v3/crates/routecodex-v3-server/src/executors.rs"),
-  readRequired("v3/crates/routecodex-v3-server/src/endpoint_handlers.rs"),
-]) {
+// Source anchor: every console emitter that can front a client response body
+// must gate the success commit on whether that body is a stream, so the commit
+// moves to the stream terminal instead of running before the first SSE byte.
+// The scanned set is every product source file that calls the emitter, so a
+// newly added lane cannot escape the guard by living in another file.
+const emitterSources = [
+  "v3/crates/routecodex-v3-server/src/executors.rs",
+  "v3/crates/routecodex-v3-server/src/endpoint_handlers.rs",
+  "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
+  "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
+];
+// Emitter call sites accept any of the declared client-body stream judgments:
+// the typed client_body.is_sse() form for lanes that populate stream_observation
+// for both closeouts, and stream_observation.is_none() / !is_sse for the rest.
+const allowedIncludeUsage = [
+  "!client_body_is_sse",
+  "!output.client_body.is_sse()",
+  "!relay_output.client_body.is_sse()",
+  "output.stream_observation.is_none()",
+  "relay_output.stream_observation.is_none()",
+  "!is_sse",
+];
+// The Anthropic relay lane must never judge its client body by the presence of a
+// stream observation: it populates that observation for the JSON closeout too,
+// so is_none() is always false there and a JSON success would neither commit the
+// count nor write its request.completed terminal. A lane owns the emitter that
+// hands its output to that lane's own response constructor; this anchor is the
+// lane's real projection point, unlike a swappable neighbour helper.
+const laneResponseConstructor = /(?<lane>\w+)_relay_output_response\(/u;
+for (const relative of emitterSources) {
+  const source = readRequired(relative);
+  // Call sites close with `);` and a definition signature opens with `fn ...(`.
+  // The body of the definition also contains `);`-terminated calls, so the
+  // definition itself must be skipped explicitly or it captures its own body.
   const pattern = /emit_v3_observability_console_lines\(([\s\S]*?)\n\s*\);/gu;
   for (const match of source.matchAll(pattern)) {
+    const linePrefix = source.slice(source.lastIndexOf("\n", match.index) + 1, match.index);
+    if (/\bfn\s*$/u.test(linePrefix)) {
+      continue;
+    }
     const includeUsage = (match[1].split("\n").filter((line) => line.trim()).pop() ?? "")
       .trim()
       .replace(/,$/u, "");
-    // The Anthropic relay emitter is the one whose response capture follows the
-    // emit; only that lane may (and must) judge client_body.is_sse(), because
-    // its stream_observation is Some for the JSON closeout too.
-    const after = source.slice(match.index + match[0].length);
-    const capture = after.match(/from_(anthropic|openai_chat|gemini)_relay\(/u);
-    const isAnthropic = capture?.[1] === "anthropic";
-    const valid = isAnthropic
-      ? [
-          "!client_body_is_sse",
-          "!output.client_body.is_sse()",
-          "!relay_output.client_body.is_sse()",
-        ]
-      : [
-          "output.stream_observation.is_none()",
-          "relay_output.stream_observation.is_none()",
-          "!is_sse",
-        ];
-    if (!valid.includes(includeUsage)) {
+    if (!allowedIncludeUsage.includes(includeUsage)) {
       failures.push(
-        `streaming console emitter must pass the client response body stream judgment (client_body.is_sse() on the Anthropic lane, stream_observation.is_none() elsewhere) as include_usage, got "${includeUsage}"`,
+        `${relative} console emitter must pass the client response body stream judgment (client_body.is_sse() or stream_observation.is_none()) as include_usage, got "${includeUsage}"`,
+      );
+      continue;
+    }
+    // The lane this emitter belongs to is the first response constructor after
+    // it; an emitter that no lane constructor follows (the direct lane) has no
+    // lane-specific requirement beyond the allowlist above.
+    const after = source.slice(match.index + match[0].length);
+    const lane = after.match(laneResponseConstructor)?.groups?.lane;
+    if (
+      lane === "anthropic" &&
+      includeUsage !== "!client_body_is_sse" &&
+      includeUsage !== "!output.client_body.is_sse()" &&
+      includeUsage !== "!relay_output.client_body.is_sse()"
+    ) {
+      failures.push(
+        `${relative} anthropic relay console emitter must judge the client response body (client_body.is_sse()), not the stream observation; got "${includeUsage}"`,
       );
     }
   }
