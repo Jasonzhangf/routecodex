@@ -512,7 +512,8 @@ async fn client_disconnect_releases_activity_without_provider_cooldown() {
 }
 
 #[tokio::test]
-async fn committed_first_frame_then_residence_deadline_breaks_transport_without_backup_dispatch() {
+async fn responses_whole_attempt_hold_then_residence_deadline_breaks_transport_without_backup_dispatch(
+) {
     let _guard = TEST_LOCK.lock().await;
     let mut entry = start_with(250, 5000, true, true).await;
 
@@ -520,7 +521,7 @@ async fn committed_first_frame_then_residence_deadline_breaks_transport_without_
     let wire_text = String::from_utf8_lossy(&wire);
 
     eprintln!(
-        "e041a3b-committed elapsed_ms={} wire_bytes={} wire={} ended={ended:?}",
+        "e041a3b-responses-hold elapsed_ms={} wire_bytes={} wire={} ended={ended:?}",
         elapsed.as_millis(),
         wire.len(),
         wire_text
@@ -540,8 +541,8 @@ async fn committed_first_frame_then_residence_deadline_breaks_transport_without_
     );
     assert_eq!(
         wire_text.matches("committed-business-delta").count(),
-        1,
-        "client must receive the certified committed business delta exactly once: {wire_text}"
+        0,
+        "the Responses whole-attempt owner must hold the business delta until terminal governance: {wire_text}"
     );
     assert!(
         !wire_text.contains("response.completed")
@@ -570,7 +571,7 @@ async fn committed_first_frame_then_residence_deadline_breaks_transport_without_
     );
     assert!(
         entry.captures.try_recv().is_err(),
-        "committed first frame dispatched backup after the client channel committed"
+        "the held Responses attempt dispatched a backup candidate before exhaustion"
     );
 
     let client = reqwest::Client::builder()

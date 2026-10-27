@@ -12,7 +12,9 @@ where
         .build()
         .expect("image input blackbox runtime");
     runtime.block_on(async move {
-        tokio::spawn(future).await.expect("image input blackbox task");
+        tokio::spawn(future)
+            .await
+            .expect("image input blackbox task");
     });
 }
 
@@ -564,8 +566,7 @@ async fn run_case_shape(
             );
             let first = &vision_attempts[0];
             assert_eq!(
-                first["model"],
-                "vision-wire",
+                first["model"], "vision-wire",
                 "the higher-priority vision tier must run first: {path} {protocol}"
             );
             let mut first_refs = Vec::new();
@@ -665,9 +666,9 @@ async fn run_case_shape(
                 let parts = messages[first]["content"].as_array().unwrap();
                 assert!(
                     !parts.is_empty()
-                        && parts.iter().all(|part| {
-                            part["type"] == "text" && part["text"] == "[Image]"
-                        }),
+                        && parts
+                            .iter()
+                            .all(|part| { part["type"] == "text" && part["text"] == "[Image]" }),
                     "image-only tool results must project history image placeholders: {wire_text}"
                 );
             }

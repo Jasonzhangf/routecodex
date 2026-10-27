@@ -349,6 +349,14 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
     let declared_tools = response_hook
         .as_ref()
         .is_some_and(|(_, context)| !context.has_no_declared_tools());
+    // D1=B (issue 5daee8a): the registered complete-response hook rewrites the
+    // whole attempt for Responses wire only; both of its owners (thinking and
+    // DSML) parse `response.*` frames. Such an attempt must not commit any
+    // provider business frame before that hook, deliverability, and the single
+    // seal. Chat and Gemini wire attempts are untouched by that hook and keep
+    // first-frame commit. Hook presence alone is not the whole-attempt scope.
+    let responses_whole_attempt_governed =
+        response_hook.is_some() && provider_protocol == V3HubProviderWireProtocol::Responses;
     let mut commit_probe =
         crate::direct_response_hooks::V3DirectPrefixCommitProbe::new_with_declared_tools(
             provider_protocol,
@@ -444,7 +452,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                 error.to_string(),
             )
         })?;
-        if !client_committed && commit_probe.is_committable() {
+        if !client_committed && !responses_whole_attempt_governed && commit_probe.is_committable() {
             if let Some(sink) = client_frames.clone() {
                 // Defer the terminal frame past the acceptance boundary. The
                 // release immediately before sealing delivers it only after

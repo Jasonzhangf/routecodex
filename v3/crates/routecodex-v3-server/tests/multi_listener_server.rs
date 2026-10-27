@@ -9755,7 +9755,12 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
         loop {
             match response.chunk().await {
                 Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
-                Ok(None) => panic!("committed failure must not complete its SSE transport"),
+                // D1=B (issue 5daee8a): a Responses-wire attempt governed by the
+                // complete-response hook buffers the whole attempt, so the
+                // thinking rewrite seals a normal completion instead of a
+                // truncated stream. The transport completes; only the secret
+                // tag must not reach the client.
+                Ok(None) => break,
                 Err(_) => break,
             }
         }
@@ -9790,19 +9795,41 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
     if let Some((status, response_body)) = business_response {
         assert_eq!(status, 200, "unexpected response body: {response_body}");
         if committed_failure {
+            // D1=B: the complete-response thinking hook rewrites the whole
+            // buffered attempt, so the visible business prefix seals a normal
+            // completion instead of a truncated stream. The raw provider
+            // `<thinking>` marker must never reach the wire, and the thinking
+            // body must not surface as visible assistant text. The protocol
+            // is a transparent pass-through: the rewritten thinking may still
+            // live in the provider-owned reasoning summary frame, matching the
+            // buffered-thinking unit contract
+            // (`first_frame_commit_matches_buffered_thinking_governance`).
             assert!(
                 response_body.contains("committed-prefix"),
                 "{response_body}"
             );
-            for forbidden in [
-                "<thinking>",
-                "secret",
-                "response.completed",
-                "response.failed",
-                "[DONE]",
-            ] {
+            assert_eq!(
+                response_body.matches("event: response.completed").count(),
+                1,
+                "{response_body}"
+            );
+            for forbidden in ["<thinking>", "response.failed", "[DONE]"] {
                 assert!(!response_body.contains(forbidden), "{response_body}");
             }
+            let visible_text: String = response_body
+                .lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter(|data| *data != "[DONE]")
+                .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+                .filter(|event| event["type"] == "response.output_item.done")
+                .filter_map(|event| event["item"]["content"].as_array().cloned())
+                .flatten()
+                .filter_map(|part| part["text"].as_str().map(str::to_owned))
+                .collect::<String>();
+            assert!(
+                !visible_text.contains("secret"),
+                "the thinking body must not surface as visible assistant text: {response_body}"
+            );
         } else if stream {
             assert_eq!(
                 response_body.matches("event: response.completed").count(),
@@ -9828,7 +9855,7 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
             Some("Bearer secret-direct-final")
         );
         assert_eq!(capture.body["model"], "wire-direct-final");
-        if !final_relay && !committed_failure {
+        if !final_relay && !exhausted {
             let refill = timeout(Duration::from_secs(1), captures.recv())
                 .await
                 .expect("the native completion must trigger the real default refill")
@@ -9898,7 +9925,7 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
         } else {
             "V3Transport13ResponsesHttpRequest"
         });
-        if !final_relay && !exhausted && !committed_failure {
+        if !final_relay && !exhausted {
             expected_sends.push("V3Transport13ResponsesHttpRequest");
         }
         assert_eq!(
