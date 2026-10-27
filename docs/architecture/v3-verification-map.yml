@@ -233,6 +233,7 @@ features:
   required_positive:
   - Ordered outer tiers compile to deterministic descending internal priority values (`N..1`), because current V3 Target selects the maximum numeric priority.
   - Omitted weights in one multi-member tier compile to equal weights.
+  - A pool may declare `selection = { strategy = "sticky" }`; it parses, projects into the Manifest pool selection, and round-trips while the default priority selection stays omitted from serialized output.
   - Different TOML table ordering and explicit equal weights produce the same normalized authoring and Manifest output.
   - The projected authoring enters the existing Config03, Config04, and Config05 functions without a second compiler.
   - Exact basename config.toml selects V3UserConfigStore once in the Config owner and server status consumes its loaded snapshot.
@@ -1544,8 +1545,10 @@ features:
   - A provider model may declare a timezone-aligned availability window with guarded edges; outside it the candidate is excluded from Target10 selection as a hard admission input with an availability_inactive diagnostic, never as a fallback tier, and the exclusion never mutates provider health
   - One shared admission basis decides selection, the direct send gate, remaining-candidate accounting and recovery probes, so a candidate that Target10 admitted is never refused at send and a window-inactive sibling never counts as an alternative or inflates the single-candidate automatic-cooldown exemption
   - A recovery or periodic probe is never sent outside the target model's declared availability window, and a pool whose every candidate is outside its window reaches exhaustion without waiting for the window
+  - A pool may declare selection strategy sticky: Target10 then keeps one primary and one standby provider per server+routingGroup+sessionId+pool binding, keyed by providerId+authAlias+modelId. The same session keeps its primary across attempts, uses the standby only when the primary is unusable, and rolls primary/standby only on a health or cooldown exclusion, never on a request-local provider failure; recovery is lazy and never pulls the session back. A fresh session takes the least-held primary in that pool so different sessions spread instead of stacking on the heaviest member, and a single-member pool keeps an empty standby. Sticky state is process-lifetime in-memory per pool with no cross-pool association, and a request without a client control session id creates no binding and keeps the previous selection behavior. Sticky only orders candidates the unchanged health/cooldown/availability/priority rules already admitted, inside the same eligible route tier.
   required_gates:
   - npm run test:v3-p5-router-target
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target sticky -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target multi_interface_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test provider_multi_interface_controlled -- --nocapture

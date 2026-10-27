@@ -3649,3 +3649,303 @@ fn multi_interface_missing_or_disabled_pin_is_typed_interface_error() {
         } if provider_id == "multi" && interface_id == "chat"
     ));
 }
+
+/// Two-member sticky pool: `a` (priority 1) and `b` (priority 1, lower weight),
+/// so both sit in the same tier and sticky ordering decides between them.
+fn sticky_pool_manifest() -> V3Config05ManifestPublished {
+    let mut manifest = manifest();
+    manifest.providers.insert("b".into(), {
+        let mut provider = manifest.providers.get("a").unwrap().clone();
+        provider.id = "b".into();
+        provider.base_url = "http://b.invalid/v1".into();
+        provider.auth.entries[0].alias = "kb".into();
+        provider.auth.entries[0].env = Some("KEY_B".into());
+        provider
+    });
+    let pool = manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap();
+    pool.selection.strategy = V3SelectionStrategy::Sticky;
+    pool.targets = vec![
+        V3RoutePoolTargetManifest {
+            kind: V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("a".into()),
+            model: Some("m".into()),
+            key: Some("ka".into()),
+            interface: None,
+            priority: Some(1),
+            weight: Some(2),
+        },
+        V3RoutePoolTargetManifest {
+            kind: V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("b".into()),
+            model: Some("m".into()),
+            key: Some("kb".into()),
+            interface: None,
+            priority: Some(1),
+            weight: Some(1),
+        },
+    ];
+    manifest
+}
+
+struct AlwaysHealthy;
+impl V3ProviderSchedulingReader for AlwaysHealthy {
+    fn scheduling_projection(
+        &self,
+        provider_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+        priority: i32,
+        base_weight: u32,
+        _now_ms: u64,
+    ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+        routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
+            provider_id,
+            "default",
+            auth_alias,
+            model_id,
+            priority,
+            1_000,
+            base_weight,
+        )
+    }
+}
+
+#[test]
+fn sticky_pool_keeps_one_provider_per_session_across_attempts() {
+    let manifest = sticky_pool_manifest();
+    let target = V3TargetInterpreter::default();
+    let scope = V3StickySelectionScope::new("sticky-keeps-srv", "g", "sticky-keeps-session");
+    let scheduling = AlwaysHealthy;
+
+    let first = target
+        .select_available_with_health_sticky(
+            expanded_with(&manifest, &target, 0),
+            &scheduling,
+            0,
+            0,
+            &scope,
+        )
+        .unwrap();
+    // Walk through every deterministic sample; a sticky session must not drift
+    // to the sibling provider just because the sample changed.
+    for sample in [1_u64, 7, 99, 1_000] {
+        let again = target
+            .select_available_with_health_sticky(
+                expanded_with(&manifest, &target, sample),
+                &scheduling,
+                0,
+                sample,
+                &scope,
+            )
+            .unwrap();
+        assert_eq!(
+            again.candidate.provider_id, first.candidate.provider_id,
+            "a sticky session must keep its provider across attempts (sample {sample})"
+        );
+    }
+}
+
+#[test]
+fn different_sticky_sessions_spread_over_the_pool() {
+    let manifest = sticky_pool_manifest();
+    let target = V3TargetInterpreter::default();
+    let scheduling = AlwaysHealthy;
+    let first = target
+        .select_available_with_health_sticky(
+            expanded_with(&manifest, &target, 0),
+            &scheduling,
+            0,
+            0,
+            &V3StickySelectionScope::new("sticky-spread-srv", "g", "spread-session-1"),
+        )
+        .unwrap();
+    let second = target
+        .select_available_with_health_sticky(
+            expanded_with(&manifest, &target, 0),
+            &scheduling,
+            0,
+            0,
+            &V3StickySelectionScope::new("sticky-spread-srv", "g", "spread-session-2"),
+        )
+        .unwrap();
+    assert_ne!(
+        first.candidate.provider_id, second.candidate.provider_id,
+        "different sessions must spread by hold count, not pile onto the heaviest member"
+    );
+}
+
+#[test]
+fn sticky_pool_rolls_to_standby_when_primary_cools_and_does_not_pull_back() {
+    let manifest = sticky_pool_manifest();
+    let target = V3TargetInterpreter::default();
+    let scope = V3StickySelectionScope::new("sticky-roll-srv", "g", "roll-session");
+    let healthy = AlwaysHealthy;
+
+    struct ACooled;
+    impl V3ProviderSchedulingReader for ACooled {
+        fn scheduling_projection(
+            &self,
+            provider_id: &str,
+            auth_alias: &str,
+            model_id: &str,
+            priority: i32,
+            base_weight: u32,
+            _now_ms: u64,
+        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+            let mut projection =
+                routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
+                    provider_id,
+                    "default",
+                    auth_alias,
+                    model_id,
+                    priority,
+                    1_000,
+                    base_weight,
+                );
+            if provider_id == "a" {
+                projection.available = false;
+                projection.blocked_scopes = vec!["provider_key_health_cooldown".to_string()];
+            }
+            projection
+        }
+    }
+
+    let first = target
+        .select_available_with_health_sticky(
+            expanded_with(&manifest, &target, 0),
+            &healthy,
+            0,
+            0,
+            &scope,
+        )
+        .unwrap();
+    assert_eq!(first.candidate.provider_id, "a");
+
+    let rolled = target
+        .select_available_with_health_sticky(
+            expanded_with(&manifest, &target, 0),
+            &ACooled,
+            0,
+            0,
+            &scope,
+        )
+        .unwrap();
+    assert_eq!(
+        rolled.candidate.provider_id, "b",
+        "cooldown must roll to the standby"
+    );
+
+    // Provider a recovers. Recovery is lazy: the session stays on b.
+    let after = target
+        .select_available_with_health_sticky(
+            expanded_with(&manifest, &target, 0),
+            &healthy,
+            0,
+            0,
+            &scope,
+        )
+        .unwrap();
+    assert_eq!(
+        after.candidate.provider_id, "b",
+        "primary recovery must not pull the session back"
+    );
+}
+
+#[test]
+fn sticky_binding_survives_request_scoped_candidate_shrink() {
+    // A client model filter can shrink one request's candidate set to a subset
+    // of the pool. The sticky universe is the pool's declared members, so the
+    // session's remembered provider must survive that narrow request.
+    let manifest = sticky_pool_manifest();
+    let target = V3TargetInterpreter::default();
+    let scope = V3StickySelectionScope::new("sticky-shrink-srv", "g", "sticky-shrink-session");
+    let scheduling = AlwaysHealthy;
+
+    let first = target
+        .select_available_with_health_sticky(
+            expanded_with(&manifest, &target, 0),
+            &scheduling,
+            0,
+            0,
+            &scope,
+        )
+        .unwrap();
+    assert_eq!(first.candidate.provider_id, "a");
+
+    // Simulate the request-scoped filter: only provider b's candidate remains
+    // expandable for this one request, while the pool still declares both.
+    let mut narrowed = expanded_with(&manifest, &target, 0);
+    narrowed
+        .candidates
+        .retain(|candidate| candidate.provider_id != "a");
+    let narrowed_selection = target
+        .select_available_with_health_sticky(narrowed, &scheduling, 0, 0, &scope)
+        .unwrap();
+    assert_eq!(
+        narrowed_selection.candidate.provider_id, "b",
+        "the only eligible member serves the narrow request"
+    );
+
+    // The next normal request must return to the session's own provider.
+    let after = target
+        .select_available_with_health_sticky(
+            expanded_with(&manifest, &target, 0),
+            &scheduling,
+            0,
+            0,
+            &scope,
+        )
+        .unwrap();
+    assert_eq!(
+        after.candidate.provider_id, "a",
+        "a narrow request must not evict the session's remembered provider"
+    );
+}
+
+#[test]
+fn non_sticky_pool_keeps_weighted_sampling_and_ignores_the_scope() {
+    // Control for the sticky tests: the same manifest without the sticky
+    // strategy must keep changing with the deterministic sample.
+    let manifest = {
+        let mut manifest = sticky_pool_manifest();
+        manifest
+            .route_groups
+            .get_mut("g")
+            .unwrap()
+            .pools
+            .get_mut("default")
+            .unwrap()
+            .selection
+            .strategy = V3SelectionStrategy::Weighted;
+        manifest
+    };
+    let target = V3TargetInterpreter::default();
+    let scope = V3StickySelectionScope::new("sticky-weighted-srv", "g", "weighted-control-session");
+    let scheduling = AlwaysHealthy;
+    let mut seen = BTreeSet::new();
+    for sample in [0_u64, 1, 2] {
+        let selected = target
+            .select_available_with_health_sticky(
+                expanded_with(&manifest, &target, sample),
+                &scheduling,
+                0,
+                sample,
+                &scope,
+            )
+            .unwrap();
+        seen.insert(selected.candidate.provider_id);
+    }
+    assert_eq!(
+        seen.len(),
+        2,
+        "a non-sticky pool must keep weighted sampling over all members"
+    );
+}

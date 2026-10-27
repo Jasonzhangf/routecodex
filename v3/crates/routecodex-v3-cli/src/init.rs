@@ -205,6 +205,7 @@ fn minimal_user_config(
                 routes: BTreeMap::from([(
                     "default".to_string(),
                     V3UserRoutePool {
+                        selection: Default::default(),
                         tiers: vec![vec![V3UserRouteMember::new(provider, model, None)]],
                     },
                 )]),

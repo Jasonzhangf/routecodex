@@ -861,6 +861,16 @@ pub struct V3SelectionPolicy {
     pub strategy: V3SelectionStrategy,
 }
 
+impl V3SelectionPolicy {
+    pub fn is_sticky(&self) -> bool {
+        matches!(self.strategy, V3SelectionStrategy::Sticky)
+    }
+
+    pub fn is_default(&self) -> bool {
+        self.strategy == V3SelectionStrategy::Priority
+    }
+}
+
 impl Default for V3SelectionPolicy {
     fn default() -> Self {
         Self {
@@ -875,6 +885,7 @@ pub enum V3SelectionStrategy {
     Priority,
     Weighted,
     RoundRobin,
+    Sticky,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -156,7 +156,7 @@ pub fn apply_user_route_group_view(
 /// `new_default_pool_view` 在 user routing 侧的等价构造：空 tiers 即默认 priority pool。
 /// 这是 user routing 侧 default pool 的唯一构造点。
 fn new_default_user_route_pool() -> V3UserRoutePool {
-    V3UserRoutePool { tiers: Vec::new() }
+    V3UserRoutePool::default()
 }
 
 /// 一次 user routing 成员绑定的结果；所有字段反映写入后的最终状态。

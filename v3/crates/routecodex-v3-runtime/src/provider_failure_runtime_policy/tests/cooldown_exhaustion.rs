@@ -1381,6 +1381,7 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
             interface: None,
             priority: 1,
             weight: 1,
+            session_sticky: false,
             direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),
         },
     );
@@ -1394,6 +1395,7 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
             interface: None,
             priority: 1,
             weight: 1,
+            session_sticky: false,
             direct_provider_model: Some(("third".to_string(), "gpt-test".to_string())),
         },
     );
@@ -1572,6 +1574,7 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
             interface: None,
             priority: 1,
             weight: 1,
+            session_sticky: false,
             direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),
         },
     );
@@ -1857,6 +1860,7 @@ async fn busy_preferred_candidate_reselects_later_tier_without_capacity_wait() {
             interface: None,
             priority: 1,
             weight: 1,
+            session_sticky: false,
             direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),
         },
     );
