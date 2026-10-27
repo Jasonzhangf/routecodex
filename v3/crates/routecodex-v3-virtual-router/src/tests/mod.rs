@@ -142,6 +142,32 @@ fn empty_signal_pool_is_skipped_and_default_stays_last_tier() {
 }
 
 #[test]
+fn empty_explicit_default_pool_skips_to_remaining_lower_tiers_when_signal_pools_exist() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .targets
+        .clear();
+    let classified = router
+        .classify_request_with_facts(&manifest, "s", "/v1/responses", matching_facts())
+        .expect("classify");
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .expect("an empty default pool is skipped while a lower non-empty pool remains");
+    assert_eq!(
+        plan.tiers.last().expect("remaining tier").pool_id,
+        "tools",
+        "the remaining lower non-empty pool becomes the last tier instead of failing"
+    );
+}
+
+#[test]
 fn classified_route_hits_pool_without_reclassifying_as_capability() {
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
