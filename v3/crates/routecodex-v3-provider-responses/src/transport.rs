@@ -14,7 +14,9 @@ pub use crate::transport_admission::build_v3_transport_13_responses_http_request
 use crate::transport_admission::{
     provider_admission_error, take_or_acquire_provider_admission, V3PreAcquiredProviderAdmission,
 };
-use crate::transport_handoff::V3ProviderTransportAttemptState;
+use crate::transport_handoff::{
+    V3ProviderTransportAttemptControl, V3ProviderTransportAttemptState,
+};
 use crate::wire::{
     V3Provider12ResponsesWirePayload, V3ProviderAuthHandle, V3ResponsesStreamIntent,
 };
@@ -128,6 +130,7 @@ pub struct V3Transport13ResponsesRequest {
     _sealed: (),
     pub(crate) kind: V3Transport13ResponsesRequestKind,
     handoff_scope: Option<crate::transport_handoff::V3ProviderTransportHandoffScope>,
+    transport_attempt_control: Option<V3ProviderTransportAttemptControl>,
     pre_acquired_admission: V3PreAcquiredProviderAdmission,
     auth_carrier: V3ProviderHttpAuthCarrier,
 }
@@ -148,6 +151,14 @@ impl V3Transport13ResponsesRequest {
         }
         self.handoff_scope = Some(scope);
         Ok(self)
+    }
+
+    fn with_transport_attempt_control(
+        mut self,
+        control: V3ProviderTransportAttemptControl,
+    ) -> Self {
+        self.transport_attempt_control = Some(control);
+        self
     }
 
     pub fn with_pre_acquired_admission(mut self, admission: V3AdaptiveConcurrencyLease) -> Self {
@@ -392,6 +403,7 @@ pub(crate) fn v3_transport_13_request(
         _sealed: (),
         kind,
         handoff_scope: None,
+        transport_attempt_control: None,
         pre_acquired_admission: V3PreAcquiredProviderAdmission::empty(),
         auth_carrier: V3ProviderHttpAuthCarrier::ExistingBearer,
     }
@@ -643,6 +655,30 @@ pub trait ResponsesTransport: Send + Sync {
         &self,
         request: V3Transport13ResponsesRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError>;
+
+    /// Start one broker-owned attempt before Runtime enters its outer timeout.
+    /// Transports without transport-handoff state return None.
+    fn begin_transport_attempt(
+        &self,
+        _request: &V3Transport13ResponsesRequest,
+    ) -> Result<Option<V3ProviderTransportAttemptControl>, V3ProviderError> {
+        Ok(None)
+    }
+
+    /// Attach an already-started attempt control without changing the original
+    /// send result type. ProviderResponsesTransport::send validates ownership
+    /// and consumes the control for phase observation.
+    async fn send_observed(
+        &self,
+        request: V3Transport13ResponsesRequest,
+        attempt_control: Option<V3ProviderTransportAttemptControl>,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let request = match attempt_control {
+            Some(attempt_control) => request.with_transport_attempt_control(attempt_control),
+            None => request,
+        };
+        self.send(request).await
+    }
 }
 
 #[derive(Clone)]
@@ -690,12 +726,46 @@ impl ProviderResponsesTransport {
     ) -> crate::transport_handoff::V3ProviderTransportAttemptBroker {
         self.handoff.clone()
     }
+
+    fn begin_attempt_for_request(
+        &self,
+        request: &V3Transport13ResponsesRequest,
+    ) -> Result<Option<V3ProviderTransportAttemptControl>, V3ProviderError> {
+        let Some(scope) = request.handoff_scope.clone() else {
+            return Ok(None);
+        };
+        let key = self
+            .handoff
+            .begin_next(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                request.transport_kind(),
+                scope,
+            )
+            .map_err(|reason| V3ProviderError::InternalTransport {
+                request_id: request.request_id().to_string(),
+                provider_id: request.provider_id().to_string(),
+                lane: V3ProviderInternalTransportLane::Request,
+                reason,
+            })?;
+        Ok(Some(V3ProviderTransportAttemptControl::new(
+            self.handoff.clone(),
+            key,
+        )))
+    }
 }
 
 #[async_trait]
 impl ResponsesTransport for Arc<dyn ResponsesTransport> {
     fn handoff_handle(&self) -> Option<Arc<dyn ResponsesTransport>> {
         self.as_ref().handoff_handle()
+    }
+
+    fn begin_transport_attempt(
+        &self,
+        request: &V3Transport13ResponsesRequest,
+    ) -> Result<Option<V3ProviderTransportAttemptControl>, V3ProviderError> {
+        self.as_ref().begin_transport_attempt(request)
     }
 
     async fn send(
@@ -714,6 +784,13 @@ impl ResponsesTransport for ProviderResponsesTransport {
         Some(Arc::new(self.clone()))
     }
 
+    fn begin_transport_attempt(
+        &self,
+        request: &V3Transport13ResponsesRequest,
+    ) -> Result<Option<V3ProviderTransportAttemptControl>, V3ProviderError> {
+        self.begin_attempt_for_request(request)
+    }
+
     async fn send(
         &self,
         mut request: V3Transport13ResponsesRequest,
@@ -721,25 +798,44 @@ impl ResponsesTransport for ProviderResponsesTransport {
         let provider_key = request.provider_key();
         let request_id = request.request_id().to_string();
         let provider_id = request.provider_id().to_string();
-        let attempt_key = request
-            .handoff_scope
-            .clone()
-            .map(|scope| {
-                self.handoff
-                    .begin_next(
-                        request_id.clone(),
-                        provider_id.clone(),
-                        request.transport_kind(),
-                        scope,
-                    )
-                    .map_err(|reason| V3ProviderError::InternalTransport {
+        let attempt_control = match request.transport_attempt_control.take() {
+            Some(attempt_control) => {
+                if !attempt_control.is_bound_to(
+                    &self.handoff,
+                    &request_id,
+                    &provider_id,
+                    request.transport_kind(),
+                ) || !attempt_control.claim_for_send()
+                {
+                    return Err(V3ProviderError::InternalTransport {
                         request_id: request_id.clone(),
                         provider_id: provider_id.clone(),
                         lane: V3ProviderInternalTransportLane::Request,
-                        reason,
-                    })
-            })
-            .transpose()?;
+                        reason:
+                            "provider transport attempt control is not bound or already claimed"
+                                .to_string(),
+                    });
+                }
+                Some(attempt_control)
+            }
+            None => {
+                let attempt_control = self.begin_attempt_for_request(&request)?;
+                if let Some(attempt_control) = &attempt_control {
+                    if !attempt_control.claim_for_send() {
+                        return Err(V3ProviderError::InternalTransport {
+                            request_id: request_id.clone(),
+                            provider_id: provider_id.clone(),
+                            lane: V3ProviderInternalTransportLane::Request,
+                            reason: "provider transport attempt was already claimed".to_string(),
+                        });
+                    }
+                }
+                attempt_control
+            }
+        };
+        let attempt_key = attempt_control
+            .as_ref()
+            .map(|attempt_control| attempt_control.key().clone());
         let controller = V3AdaptiveConcurrencyController::process_shared();
         if let Err(reason) =
             controller.ensure_initial_budget(&provider_key, request.initial_concurrency_budget())
@@ -794,6 +890,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     provider_headers,
                     timeout,
                     sse_first_frame_timeout_ms,
+                    attempt_control.as_ref(),
                     cancellation,
                     compatibility_profile,
                 )
@@ -822,6 +919,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     websocket_connection.expect(
                         "WebSocket connection slot is re-acquired after provider admission",
                     ),
+                    attempt_control.as_ref(),
                     cancellation,
                     compatibility_profile,
                 )
@@ -999,6 +1097,22 @@ fn hold_sse_lease(
         .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms)
 }
 
+/// Constructing this future does not mark the phase. Its body runs only when
+/// the wrapped original send future is polled. A cancellation branch that wins
+/// before that poll therefore leaves the attempt as NotSent.
+async fn mark_send_started_when_polled<F>(
+    future: F,
+    attempt_control: Option<&V3ProviderTransportAttemptControl>,
+) -> F::Output
+where
+    F: std::future::Future,
+{
+    if let Some(attempt_control) = attempt_control {
+        attempt_control.mark_send_started();
+    }
+    future.await
+}
+
 impl ProviderResponsesTransport {
     #[allow(clippy::too_many_arguments)]
     async fn send_http_headers(
@@ -1013,6 +1127,7 @@ impl ProviderResponsesTransport {
         provider_headers: Vec<V3ProviderRequestHeader>,
         timeout: Option<Duration>,
         sse_first_frame_timeout_ms: Option<u64>,
+        attempt_control: Option<&V3ProviderTransportAttemptControl>,
         cancellation: Option<V3ProviderCancellation>,
     ) -> Result<reqwest::Response, V3ProviderError> {
         ensure_not_cancelled(request_id, provider_id, cancellation.as_ref())?;
@@ -1048,7 +1163,7 @@ impl ProviderResponsesTransport {
                 request = request.header(header.name(), header.value());
             }
         }
-        let send = request.json(&body).send();
+        let send = mark_send_started_when_polled(request.json(&body).send(), attempt_control);
         send_http_await(
             request_id.to_string(),
             provider_id.to_string(),
@@ -1075,6 +1190,7 @@ impl ProviderResponsesTransport {
         provider_headers: Vec<V3ProviderRequestHeader>,
         timeout: Option<Duration>,
         sse_first_frame_timeout_ms: Option<u64>,
+        attempt_control: Option<&V3ProviderTransportAttemptControl>,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
@@ -1090,6 +1206,7 @@ impl ProviderResponsesTransport {
                 provider_headers,
                 timeout,
                 sse_first_frame_timeout_ms,
+                attempt_control,
                 cancellation.clone(),
             )
             .await?;
@@ -1176,6 +1293,7 @@ impl ProviderResponsesTransport {
         stream_intent: V3ResponsesStreamIntent,
         event: Value,
         mut connection: OwnedMutexGuard<Option<ResponsesWebSocket>>,
+        attempt_control: Option<&V3ProviderTransportAttemptControl>,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
@@ -1216,7 +1334,8 @@ impl ProviderResponsesTransport {
             .expect("WebSocket connection initialized");
         let encoded = serde_json::to_string(&event)
             .map_err(|error| websocket_protocol_error(&request_id, &provider_id, error))?;
-        let send = socket.send(Message::Text(encoded));
+        let send =
+            mark_send_started_when_polled(socket.send(Message::Text(encoded)), attempt_control);
         match cancellation.clone() {
             Some(cancellation) => {
                 tokio::select! {

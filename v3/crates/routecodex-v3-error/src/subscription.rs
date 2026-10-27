@@ -36,6 +36,9 @@ pub struct V3ProviderFailureAction {
     /// Retained as a typed compatibility field; all provider classes now use
     /// the shared aggressive cooldown/probe ladder.
     pub long_probe_backoff: bool,
+    /// Advisory recovery probe. A scheduled or in-flight probe is not an
+    /// availability decision and a probe failure never advances the ladder.
+    pub advisory_probe: bool,
 }
 
 impl V3ProviderFailureAction {
@@ -49,6 +52,7 @@ impl V3ProviderFailureAction {
             failure_threshold: crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
             cooldown_ms: 5_000,
             long_probe_backoff: false,
+            advisory_probe: false,
         }
     }
 
@@ -72,6 +76,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             failure_threshold: 0,
             cooldown_ms: 0,
             long_probe_backoff: false,
+            advisory_probe: false,
         };
     }
     let status = classified
@@ -80,8 +85,12 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .as_ref()
         .and_then(|error| error.status);
     let failure_fingerprint = build_v3_provider_failure_identity_from_classified(classified);
-    // Real recoverable failures count toward the shared repeat threshold.
-    // Authentication/account failures retain their immediate typed boundary.
+    // HTTP 429 latches a bounded rate-limit hold for the exact provider key:
+    // the identity is held out of selection for about one minute and released
+    // early by the first real success (business 200 or 2xx probe). It stays a
+    // recoverable counted failure so the hold is bounded and never pins the key
+    // for the long failure ladder. Authentication/account failures retain their
+    // immediate typed boundary.
     if status != Some(429)
         && (matches!(status, Some(401..=403))
             || is_irrecoverable_provider_failure_code(&classified.source.code))
@@ -96,6 +105,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             failure_threshold: 0,
             cooldown_ms,
             long_probe_backoff: matches!(status, Some(401..=403)),
+            advisory_probe: false,
         };
     }
     let mut action = V3ProviderFailureAction::recoverable(&classified.source.code);
@@ -181,9 +191,12 @@ pub fn build_v3_provider_global_error_fingerprint(
 /// Provider health policy per upstream status.
 ///
 /// Account/billing classes (`401..=403`) are the typed irrecoverable group and
-/// still cool on their first occurrence. Ordinary 429 requires three consecutive
-/// failures; other recoverable classes use the shared threshold. Every streak
-/// and cooldown belongs to the exact provider + auth_alias + model identity.
+/// still cool on their first occurrence. HTTP 429 latches a bounded hold: the
+/// first 429 of the exact provider + auth_alias + model identity holds it out
+/// of selection for about one minute (`cooldown_ms`), released early by the
+/// first real success (business 200 or 2xx probe). Other recoverable classes
+/// use the shared threshold. Every streak and cooldown belongs to the exact
+/// provider + auth_alias + model identity.
 pub fn build_v3_provider_global_failure_policy(
     status: u16,
 ) -> Option<V3ProviderGlobalFailurePolicy> {
@@ -194,8 +207,8 @@ pub fn build_v3_provider_global_failure_policy(
             probe_interval_ms: 5_000,
         }),
         429 => Some(V3ProviderGlobalFailurePolicy {
-            failure_threshold: 3,
-            cooldown_ms: 5_000,
+            failure_threshold: 1,
+            cooldown_ms: 60_000,
             probe_interval_ms: 5_000,
         }),
         500..=599 => Some(V3ProviderGlobalFailurePolicy {
@@ -335,13 +348,29 @@ mod tests {
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
         assert_eq!(action.failure_threshold, 0);
 
-        let quota = build_v3_provider_failure_action_from_v3_error_02(&classified(
-            "V3ProviderReqOutbound09TransportRequest",
-            "insufficient_quota",
-            429,
-        ));
-        assert_eq!(quota.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(quota.failure_threshold, 3);
+        // HTTP 429 latches a bounded hold for the exact identity: it stays a
+        // recoverable counted failure so the first 429 holds the key out of
+        // selection for about one minute, released early by real success.
+        for code in ["insufficient_quota", "rate_limit_error"] {
+            let rate_limited = build_v3_provider_failure_action_from_v3_error_02(&classified(
+                "V3ProviderReqOutbound09TransportRequest",
+                code,
+                429,
+            ));
+            assert_eq!(
+                rate_limited.recovery,
+                V3ProviderRecoveryKind::RecoverableCounted,
+                "{code}: 429 must be a recoverable counted hold"
+            );
+            assert_eq!(rate_limited.scope, V3ProviderHealthScope::GlobalProviderKey);
+            assert_eq!(rate_limited.failure_threshold, 1);
+            assert_eq!(rate_limited.cooldown_ms, 60_000);
+            assert_eq!(rate_limited.score_delta_milli, -5);
+        }
+        let hold_policy =
+            build_v3_provider_global_failure_policy(429).expect("429 must own a hold policy");
+        assert_eq!(hold_policy.failure_threshold, 1);
+        assert_eq!(hold_policy.cooldown_ms, 60_000);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",
@@ -372,16 +401,6 @@ mod tests {
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
         assert_eq!(action.failure_threshold, 1);
-        assert_eq!(action.score_delta_milli, -5);
-
-        let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
-            "V3ProviderReqOutbound09TransportRequest",
-            "rate_limit_error",
-            429,
-        ));
-        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(

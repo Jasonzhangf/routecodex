@@ -452,6 +452,7 @@ mod tests {
                     visible_model_ids: vec!["gemini-client".to_string()],
                     model_capabilities: vec!["text".to_string()],
                     web_search_execution_mode: V3WebSearchExecutionMode::None,
+                    model_availability: None,
                     max_context_tokens: None,
                     max_tokens: None,
                     context_token_estimate_scale_bps: 10_000,

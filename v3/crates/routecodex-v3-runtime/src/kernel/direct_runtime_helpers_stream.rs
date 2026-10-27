@@ -2770,6 +2770,7 @@ pub(crate) fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
     candidates: &[V3TargetCandidate],
     availability: &R,
     failed_candidates: &BTreeSet<String>,
+    now_ms: u64,
 ) -> usize {
     let attempt_availability = V3RuntimeAttemptAvailability {
         base: availability,
@@ -2778,15 +2779,18 @@ pub(crate) fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
     candidates
         .iter()
         .filter(|candidate| {
-            attempt_availability
-                .availability_for_interface(
-                    &candidate.provider_id,
-                    &candidate.interface_id,
-                    Some(&candidate.auth_alias),
-                    Some(&candidate.model_id),
-                    0,
-                )
-                .available
+            // A window-inactive or capability-mismatched sibling cannot take
+            // this request, so it is not a remaining candidate.
+            routecodex_v3_target::V3TargetInterpreter::candidate_admitted(candidate, now_ms)
+                && attempt_availability
+                    .availability_for_interface(
+                        &candidate.provider_id,
+                        &candidate.interface_id,
+                        Some(&candidate.auth_alias),
+                        Some(&candidate.model_id),
+                        0,
+                    )
+                    .available
         })
         .count()
 }
@@ -2795,6 +2799,7 @@ pub(crate) fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityR
     candidates: &[V3TargetCandidate],
     availability: &R,
     failed_candidates: &BTreeSet<String>,
+    now_ms: u64,
 ) -> Option<String> {
     let attempt_availability = V3RuntimeAttemptAvailability {
         base: availability,
@@ -2803,15 +2808,16 @@ pub(crate) fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityR
     candidates
         .iter()
         .find(|candidate| {
-            attempt_availability
-                .availability_for_interface(
-                    &candidate.provider_id,
-                    &candidate.interface_id,
-                    Some(&candidate.auth_alias),
-                    Some(&candidate.model_id),
-                    0,
-                )
-                .available
+            routecodex_v3_target::V3TargetInterpreter::candidate_admitted(candidate, now_ms)
+                && attempt_availability
+                    .availability_for_interface(
+                        &candidate.provider_id,
+                        &candidate.interface_id,
+                        Some(&candidate.auth_alias),
+                        Some(&candidate.model_id),
+                        0,
+                    )
+                    .available
         })
         .map(candidate_key)
 }

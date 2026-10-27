@@ -45,6 +45,111 @@ pub struct V3ProviderPriorityScheduleEntryAuthoringConfig {
     pub off_peak_tier: usize,
 }
 
+/// Provider-model availability declaration.
+///
+/// Owned by the provider model config. When `periods` is empty the model is
+/// available at any time. `guard_minutes` shrinks every period on both edges so
+/// routing never starts a request outside the declared window; a window the
+/// guard would empty is rejected by `validate`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V3ProviderModelAvailabilityAuthoringConfig {
+    #[serde(default = "default_provider_priority_timezone")]
+    pub timezone: String,
+    #[serde(default)]
+    pub guard_minutes: u16,
+    #[serde(default)]
+    pub periods: Vec<V3DailyTimeWindowAuthoringConfig>,
+}
+
+impl Default for V3ProviderModelAvailabilityAuthoringConfig {
+    fn default() -> Self {
+        Self {
+            timezone: default_provider_priority_timezone(),
+            guard_minutes: 0,
+            periods: Vec::new(),
+        }
+    }
+}
+
+impl V3ProviderModelAvailabilityAuthoringConfig {
+    pub fn validate(&self, context: &str) -> Result<(), String> {
+        self.timezone.parse::<Tz>().map_err(|_| {
+            format!(
+                "{context} availability timezone must be a valid IANA timezone, got {:?}",
+                self.timezone
+            )
+        })?;
+        // A guard of 720 minutes can never leave a usable window: the longest
+        // representable period is 1439 minutes, which is already not longer
+        // than twice 720. Reject it at the boundary instead of accepting a
+        // value that no period can satisfy.
+        if self.guard_minutes > 719 {
+            return Err(format!(
+                "{context} availability guard_minutes must be between 0 and 719"
+            ));
+        }
+        for (index, period) in self.periods.iter().enumerate() {
+            let start = parse_priority_schedule_minutes(&period.start).ok_or_else(|| {
+                format!("{context} availability periods[{index}].start must use HH:MM")
+            })?;
+            let end = parse_priority_schedule_minutes(&period.end).ok_or_else(|| {
+                format!("{context} availability periods[{index}].end must use HH:MM")
+            })?;
+            if start == end {
+                return Err(format!(
+                    "{context} availability periods[{index}] start and end must differ"
+                ));
+            }
+            let window_minutes = (u32::from(end) + 1440 - u32::from(start)) % 1440;
+            if window_minutes <= u32::from(self.guard_minutes).saturating_mul(2) {
+                return Err(format!(
+                    "{context} availability periods[{index}] window of {window_minutes} minutes must be longer than twice guard_minutes {}",
+                    self.guard_minutes
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn is_available_at(&self, now_ms: u64) -> bool {
+        if self.periods.is_empty() {
+            return true;
+        }
+        let Ok(timezone) = self.timezone.parse::<Tz>() else {
+            return false;
+        };
+        let Ok(timestamp_ms) = i64::try_from(now_ms) else {
+            return false;
+        };
+        let Some(utc) = DateTime::<Utc>::from_timestamp_millis(timestamp_ms) else {
+            return false;
+        };
+        let local = utc.with_timezone(&timezone);
+        let minute = local.hour() * 60 + local.minute();
+        self.periods.iter().any(|period| {
+            let Some(start) = parse_priority_schedule_minutes(&period.start) else {
+                return false;
+            };
+            let Some(end) = parse_priority_schedule_minutes(&period.end) else {
+                return false;
+            };
+            let guard = u32::from(self.guard_minutes);
+            let window_minutes = (u32::from(end) + 1440 - u32::from(start)) % 1440;
+            if window_minutes <= guard.saturating_mul(2) {
+                return false;
+            }
+            let guarded_start = (u32::from(start) + guard) % 1440;
+            let guarded_end = (u32::from(end) + 1440 - guard) % 1440;
+            if guarded_start < guarded_end {
+                minute >= guarded_start && minute < guarded_end
+            } else {
+                minute >= guarded_start || minute < guarded_end
+            }
+        })
+    }
+}
+
 impl V3ProviderPriorityScheduleAuthoringConfig {
     pub fn is_default(&self) -> bool {
         self == &Self::default()
@@ -303,4 +408,91 @@ fn parse_priority_schedule_minutes(value: &str) -> Option<u16> {
     let hour = value.get(0..2)?.parse::<u16>().ok()?;
     let minute = value.get(3..5)?.parse::<u16>().ok()?;
     (hour < 24 && minute < 60).then_some(hour * 60 + minute)
+}
+
+#[cfg(test)]
+mod provider_model_availability_tests {
+    use super::*;
+
+    const SHANGHAI_2026_01_01_0000_MS: u64 = 1_767_196_800_000;
+
+    fn at(hour: u64, minute: u64) -> u64 {
+        SHANGHAI_2026_01_01_0000_MS + (hour * 60 + minute) * 60_000
+    }
+
+    fn night_window(guard_minutes: u16) -> V3ProviderModelAvailabilityAuthoringConfig {
+        V3ProviderModelAvailabilityAuthoringConfig {
+            timezone: "Asia/Shanghai".into(),
+            guard_minutes,
+            periods: vec![V3DailyTimeWindowAuthoringConfig {
+                start: "22:00".into(),
+                end: "08:00".into(),
+            }],
+        }
+    }
+
+    #[test]
+    fn overnight_window_edges_are_start_inclusive_end_exclusive() {
+        let availability = night_window(0);
+        assert!(!availability.is_available_at(at(21, 59)));
+        assert!(availability.is_available_at(at(22, 0)));
+        assert!(availability.is_available_at(at(23, 59)));
+        assert!(availability.is_available_at(at(0, 0)));
+        assert!(availability.is_available_at(at(7, 59)));
+        assert!(!availability.is_available_at(at(8, 0)));
+        assert!(!availability.is_available_at(at(12, 0)));
+    }
+
+    #[test]
+    fn guard_shrinks_both_edges_so_no_paid_minute_is_used() {
+        let availability = night_window(10);
+        assert!(!availability.is_available_at(at(22, 9)));
+        assert!(availability.is_available_at(at(22, 10)));
+        assert!(availability.is_available_at(at(7, 49)));
+        assert!(!availability.is_available_at(at(7, 50)));
+    }
+
+    #[test]
+    fn empty_periods_keep_the_model_available_at_any_time() {
+        let availability = V3ProviderModelAvailabilityAuthoringConfig::default();
+        assert!(availability.is_available_at(at(3, 0)));
+        assert!(availability.is_available_at(at(12, 0)));
+    }
+
+    #[test]
+    fn validate_rejects_invalid_timezone_guard_and_periods() {
+        let mut availability = night_window(0);
+        availability.timezone = "Mars/Olympus".into();
+        assert!(availability.validate("provider p model m").is_err());
+
+        let availability = night_window(721);
+        assert!(availability.validate("provider p model m").is_err());
+
+        // 720 is the largest value that still passes the range check but can
+        // never leave a usable window, so it is rejected as well. 719 stays
+        // reachable with the longest representable period.
+        let availability = night_window(720);
+        assert!(availability.validate("provider p model m").is_err());
+        let mut availability = night_window(719);
+        availability.periods[0].start = "00:00".into();
+        availability.periods[0].end = "23:59".into();
+        assert!(availability.validate("provider p model m").is_ok());
+
+        let mut availability = night_window(0);
+        availability.periods[0].start = "24:00".into();
+        assert!(availability.validate("provider p model m").is_err());
+
+        let mut availability = night_window(0);
+        availability.periods[0].start = "08:00".into();
+        availability.periods[0].end = "08:00".into();
+        assert!(availability.validate("provider p model m").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_guard_that_would_empty_the_window() {
+        let availability = night_window(299);
+        assert!(availability.validate("provider p model m").is_ok());
+        let availability = night_window(300);
+        assert!(availability.validate("provider p model m").is_err());
+    }
 }

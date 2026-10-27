@@ -430,6 +430,7 @@ impl V3ProviderFailureRuntimeHealth {
                     max_probe_interval_ms: None,
                     long_probe_backoff: false,
                     until_restart: false,
+                    advisory_probe: false,
                     cooldown_scope: V3ProviderFailureCooldownScope::Session,
                 }),
             )
@@ -535,7 +536,8 @@ impl V3ProviderFailureRuntimeHealth {
         }
         // 统一错误模型：任何 provider 失败（含 400/invalid_request）都按
         // internal 全局策略表盖章阈值后计入全局健康；连续达到阈值即进入
-        // 全局冷却，由后台探活或真实成功恢复，不再按状态码豁免。
+        // 全局冷却，由后台探活或真实成功恢复。HTTP 429 进入有界的 hold 冷却
+        // （约 1 分钟）：期内该身份出现真实成功即放行，到期自动放行。
         let action = apply_v3_internal_provider_failure_policy(
             build_v3_provider_failure_action_from_v3_error_02(&classified),
             source_stage,
@@ -636,14 +638,15 @@ impl V3ProviderFailureRuntimeHealth {
             )?;
         }
         // A completed business 2xx is the recovery counterpart of an observed
-        // 429: it restores one unit of adaptive concurrency budget and clears
-        // the saturation window for the same provider/auth identity.
+        // 429: it restores one unit of adaptive concurrency budget up to the
+        // configured hard maximum and clears the saturation window for the
+        // same provider/auth identity.
         if let Some(auth_alias) = auth_alias {
             V3AdaptiveConcurrencyController::process_shared()
-                .observe_business_success(&v3_provider_concurrency_key_parts(
-                    provider_id,
-                    auth_alias,
-                ))
+                .observe_business_success(
+                    &v3_provider_concurrency_key_parts(provider_id, auth_alias),
+                    now_ms,
+                )
                 .map_err(|error| error.to_string())?;
         }
         self.action_gate

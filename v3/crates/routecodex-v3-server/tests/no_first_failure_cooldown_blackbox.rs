@@ -1,4 +1,8 @@
-//! Public regression: ordinary 429 cools only after three consecutive failures.
+//! Public regression: a single ordinary HTTP 429 latches a bounded hold on the
+//! exact provider.model.key identity. The held key is excluded from later
+//! selection (never retried), sibling models/keys stay eligible, and a real
+//! success on the exact identity later releases it. HTTP 500 and 401 retain
+//! their immediate isolation thresholds on their own identities.
 //! Command: CARGO_NET_OFFLINE=true cargo test --locked --manifest-path v3/Cargo.toml
 //! -p routecodex-v3-server --test no_first_failure_cooldown_blackbox -- --nocapture
 //! Run with an isolated test HOME, as server error sampling uses HOME/.rcc.
@@ -21,6 +25,38 @@ mod hub_v1_fixture;
 #[derive(Default)]
 struct Upstream {
     receipts: Mutex<BTreeMap<String, usize>>,
+    /// Attempts keyed by `<input>@<requested model>`. Reselection may reach a
+    /// different identity for the same request, so per-identity counting keeps
+    /// "never retried the failed identity" provable.
+    identity_receipts: Mutex<BTreeMap<String, usize>>,
+}
+
+/// The fallback candidate always fails. Counting its attempts proves the
+/// runtime reselected another provider instead of retrying the failed identity.
+/// The independent provider mirrors the primary upstream contract on its own
+/// path, so its attempts are attributable without a shared receipt counter.
+async fn independent_provider(
+    State(state): State<Arc<Upstream>>,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    let input = body["input"].as_str().unwrap_or("");
+    *state
+        .receipts
+        .lock()
+        .await
+        .entry(format!("independent:{input}"))
+        .or_default() += 1;
+    upstream_response(input)
+}
+
+async fn fallback_provider(State(state): State<Arc<Upstream>>) -> Response<Body> {
+    *state
+        .receipts
+        .lock()
+        .await
+        .entry("__fallback_attempts".to_string())
+        .or_default() += 1;
+    controlled_failure(StatusCode::SERVICE_UNAVAILABLE, "server_error")
 }
 
 async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
@@ -30,13 +66,26 @@ async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -
     }
     // Startup/recovery probes are distinct from business receipts.
     if input.starts_with("health-test:") {
+        let model = body["model"].as_str().unwrap_or("").to_string();
         *state
             .receipts
             .lock()
             .await
             .entry(input.to_string())
             .or_default() += 1;
+        *state
+            .identity_receipts
+            .lock()
+            .await
+            .entry(format!("{input}@{model}"))
+            .or_default() += 1;
     }
+    upstream_response(input)
+}
+
+/// Shared upstream contract: auth/server/fail inputs are controlled failures,
+/// everything else is a real successful business response.
+fn upstream_response(input: &str) -> Response<Body> {
     if input.starts_with("health-test:fail")
         || input.starts_with("health-test:auth")
         || input.starts_with("health-test:server")
@@ -109,7 +158,7 @@ wire_name = "other"
 supports_streaming = true
 [providers.independent]
 type = "responses"
-base_url = "{upstream}/v1"
+base_url = "{upstream}/independent/v1"
 default_model = "main"
 auth = {{ type = "api_key", entries = [{{ alias = "independent", env = "V3_NO_FIRST_FAILURE_TEST_KEY" }}] }}
 [providers.independent.models.main]
@@ -202,6 +251,16 @@ async fn receipt(state: &Upstream, marker: &str) {
     );
 }
 
+/// Asserts an exact requested model reached upstream exactly once.
+async fn receipt_at(state: &Upstream, input: &str, model: &str) {
+    let key = format!("{input}@{model}");
+    assert_eq!(
+        state.identity_receipts.lock().await.get(&key),
+        Some(&1),
+        "{key}: must reach upstream exactly once for that identity"
+    );
+}
+
 #[tokio::test]
 async fn no_first_failure_cooldown_public_http() {
     std::env::set_var("V3_NO_FIRST_FAILURE_TEST_KEY", "controlled-test-key");
@@ -213,10 +272,8 @@ async fn no_first_failure_cooldown_public_http() {
     let (shutdown, stopped) = oneshot::channel::<()>();
     let app = Router::new()
         .route("/v1/responses", post(provider))
-        .route(
-            "/fallback/v1/responses",
-            post(|| async { controlled_failure(StatusCode::SERVICE_UNAVAILABLE, "server_error") }),
-        )
+        .route("/independent/v1/responses", post(independent_provider))
+        .route("/fallback/v1/responses", post(fallback_provider))
         .with_state(state.clone());
     let upstream = tokio::spawn(async move {
         axum::serve(listener, app)
@@ -237,61 +294,50 @@ async fn no_first_failure_cooldown_public_http() {
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
 
+    // 1. A single ordinary HTTP 429 latches a bounded hold on the exact
+    //    provider/model/key identity; the failed key is never retried, and the
+    //    request reselects the fallback instead.
     request(&client, &base, "main", "health-test:fail-isolated", false).await;
     receipt(&state, "health-test:fail-isolated").await;
-    assert!(
-        pool(&client, &base)
-            .await
-            .iter()
-            .all(|e| e["provider_id"] != "primary"),
-        "first ordinary HTTP 429 must not create global cooldown"
+    let hold_entries = pool(&client, &base).await;
+    let hold = hold_entries
+        .iter()
+        .find(|e| {
+            e["provider_id"] == "primary" && e["auth_alias"] == alias && e["model_id"] == "main"
+        })
+        .unwrap_or_else(|| panic!("a single 429 must hold the exact identity: {hold_entries:?}"));
+    assert_eq!(hold["kind"], "probe", "the hold is a provider probe entry");
+    assert_eq!(
+        hold["state"], "blocked",
+        "the held identity blocks selection"
     );
-    request(&client, &base, "main", "health-test:success-reset", true).await;
-    receipt(&state, "health-test:success-reset").await;
+    assert!(
+        hold["remaining_ms"].as_i64().unwrap_or(0) > 50_000,
+        "the bounded hold lasts about one minute: {hold:?}"
+    );
 
+    // 2. The held identity is not retried: a second request on the same model
+    //    must not reach the cooled key, and its transport still terminates
+    //    without a fabricated success.
     request(
         &client,
         &base,
         "main",
-        "health-test:fail-after-reset",
+        "health-test:held-not-retried",
         false,
     )
     .await;
-    receipt(&state, "health-test:fail-after-reset").await;
-    assert!(
-        pool(&client, &base)
-            .await
-            .iter()
-            .all(|e| e["provider_id"] != "primary"),
-        "a real success must reset the failure streak"
-    );
-    request(&client, &base, "main", "health-test:fail-repeat", false).await;
-    receipt(&state, "health-test:fail-repeat").await;
-    assert!(
-        pool(&client, &base)
-            .await
-            .iter()
-            .all(|e| e["provider_id"] != "primary"),
-        "second consecutive ordinary HTTP 429 must not create global cooldown"
-    );
-    request(&client, &base, "main", "health-test:fail-third", false).await;
-    receipt(&state, "health-test:fail-third").await;
-    let entries = pool(&client, &base).await;
-    assert!(
-        entries.iter().any(|e| e["provider_id"] == "primary"
-            && e["auth_alias"] == alias
-            && e["model_id"] == "main"),
-        "consecutive third HTTP 429 must cool exact provider/key/model: {entries:?}"
-    );
-    request(&client, &base, "main", "health-test:blocked", false).await;
     assert!(
         !state
             .receipts
             .lock()
             .await
-            .contains_key("health-test:blocked"),
-        "cooled key must not receive another business attempt"
+            .contains_key("health-test:held-not-retried"),
+        "a held provider/model/key must not receive another business attempt"
     );
+
+    // 3. Sibling identities stay eligible: another model, another key and an
+    //    independent provider all keep serving real business traffic.
     request(&client, &base, "other", "health-test:other-model", true).await;
     request(&client, &base, "sibling", "health-test:other-key", true).await;
     request(
@@ -304,7 +350,16 @@ async fn no_first_failure_cooldown_public_http() {
     .await;
     receipt(&state, "health-test:other-model").await;
     receipt(&state, "health-test:other-key").await;
-    receipt(&state, "health-test:independent").await;
+    assert_eq!(
+        state
+            .receipts
+            .lock()
+            .await
+            .get("independent:health-test:independent"),
+        Some(&1),
+        "the independent provider identity must receive its own request exactly once"
+    );
+    // Sibling successes must not release another identity's hold.
     assert!(
         pool(&client, &base)
             .await
@@ -312,9 +367,11 @@ async fn no_first_failure_cooldown_public_http() {
             .any(|e| e["provider_id"] == "primary"
                 && e["auth_alias"] == alias
                 && e["model_id"] == "main"),
-        "sibling success must not reset another identity's streak/cooldown"
+        "a sibling success must not release the exact held identity"
     );
 
+    // 4. HTTP 500 on another model keeps its declared immediate threshold: one
+    //    failure isolates that exact identity only.
     request(
         &client,
         &base,
@@ -323,7 +380,7 @@ async fn no_first_failure_cooldown_public_http() {
         false,
     )
     .await;
-    receipt(&state, "health-test:server-terminal").await;
+    receipt_at(&state, "health-test:server-terminal", "other").await;
     assert!(
         pool(&client, &base)
             .await
@@ -343,6 +400,7 @@ async fn no_first_failure_cooldown_public_http() {
     .await;
     receipt(&state, "health-test:after-server-failure").await;
 
+    // 5. An auth failure keeps immediate isolation on its own identity.
     request(
         &client,
         &base,
@@ -351,7 +409,15 @@ async fn no_first_failure_cooldown_public_http() {
         false,
     )
     .await;
-    receipt(&state, "health-test:auth-terminal").await;
+    assert_eq!(
+        state
+            .receipts
+            .lock()
+            .await
+            .get("independent:health-test:auth-terminal"),
+        Some(&1),
+        "the failed identity must be attempted exactly once, then reselected away"
+    );
     assert!(
         pool(&client, &base)
             .await
@@ -359,6 +425,7 @@ async fn no_first_failure_cooldown_public_http() {
             .any(|e| e["provider_id"] == "independent"),
         "auth failure retains immediate isolation"
     );
+
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     upstream.await.unwrap();

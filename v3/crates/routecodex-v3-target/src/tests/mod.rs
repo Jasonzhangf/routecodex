@@ -388,6 +388,271 @@ fn provider_priority_schedule_excludes_synthetic_implicit_pools() {
     );
 }
 
+fn provider_model_availability_manifest(
+    availability: Option<routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig>,
+) -> V3Config05ManifestPublished {
+    let mut manifest = provider_priority_schedule_manifest();
+    manifest
+        .servers
+        .get_mut("s")
+        .unwrap()
+        .provider_priority_schedule
+        .providers
+        .clear();
+    manifest
+        .providers
+        .get_mut("a")
+        .unwrap()
+        .models
+        .get_mut("m")
+        .unwrap()
+        .availability = availability;
+    manifest
+}
+
+fn free_window_availability(
+    guard_minutes: u16,
+) -> routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+    routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+        timezone: "Asia/Shanghai".into(),
+        guard_minutes,
+        periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
+            start: "00:00".into(),
+            end: "08:00".into(),
+        }],
+    }
+}
+
+#[test]
+fn provider_model_availability_excludes_candidate_outside_window() {
+    let manifest = provider_model_availability_manifest(Some(free_window_availability(0)));
+    let target = V3TargetInterpreter::default();
+    let available = Availability {
+        blocked: BTreeSet::new(),
+    };
+    // 10:00 Asia/Shanghai is outside 00:00-08:00, so provider a must not win.
+    let selected = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_232_800_000,
+        )
+        .unwrap();
+    assert_eq!(selected.candidate.provider_id, "b");
+}
+
+#[test]
+fn provider_model_availability_guard_shrinks_window_edges() {
+    let manifest = provider_model_availability_manifest(Some(free_window_availability(10)));
+    let target = V3TargetInterpreter::default();
+    let available = Availability {
+        blocked: BTreeSet::new(),
+    };
+    // 07:45 Asia/Shanghai is inside the guarded 00:10-07:50 sub-window.
+    let guarded = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_224_700_000,
+        )
+        .unwrap();
+    assert_eq!(guarded.candidate.provider_id, "a");
+    // 07:55 Asia/Shanghai is inside the declared window but inside the guard,
+    // so the model must stay unused there and provider b must win.
+    let expired = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_225_300_000,
+        )
+        .unwrap();
+    assert_eq!(expired.candidate.provider_id, "b");
+}
+
+#[test]
+fn provider_model_availability_outside_window_records_reason_and_keeps_health() {
+    let manifest = provider_model_availability_manifest(Some(free_window_availability(0)));
+    let target = V3TargetInterpreter::default();
+    let available = Availability {
+        blocked: BTreeSet::new(),
+    };
+    let expanded = expanded_with(&manifest, &target, 0);
+    let selected = target
+        .select_available(expanded, &available, 1_767_232_800_000)
+        .unwrap();
+    assert_eq!(selected.candidate.provider_id, "b");
+    assert!(
+        selected
+            .unavailable_candidates
+            .iter()
+            .any(|reason| reason.contains(":availability_inactive")),
+        "expected an availability_inactive reason, got {:?}",
+        selected.unavailable_candidates
+    );
+}
+
+#[test]
+fn provider_model_availability_outside_window_and_cooled_stays_unavailable() {
+    // Combination case: a candidate that is both outside its availability
+    // window and reported blocked by the health reader must remain unavailable,
+    // and its exclusion reason must still name the window.
+    let manifest = provider_model_availability_manifest(Some(free_window_availability(0)));
+    let target = V3TargetInterpreter::default();
+    let available = Availability {
+        blocked: BTreeSet::from([
+            "a:default:ka:m".to_string(),
+            "b:default:kb:m".to_string(),
+            "c:default:kc:m".to_string(),
+        ]),
+    };
+    let error = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_232_800_000,
+        )
+        .expect_err("every candidate is either outside its window or cooled");
+    let reasons = format!("{error}");
+    assert!(
+        reasons.contains("availability_inactive") || reasons.contains("provider_key_health"),
+        "expected window or health exclusion reasons, got {reasons}"
+    );
+}
+
+#[test]
+fn provider_model_availability_omitted_keeps_model_available_any_time() {
+    let manifest = provider_model_availability_manifest(None);
+    let target = V3TargetInterpreter::default();
+    let available = Availability {
+        blocked: BTreeSet::new(),
+    };
+    let selected = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_232_800_000,
+        )
+        .unwrap();
+    assert_eq!(selected.candidate.provider_id, "a");
+}
+
+#[test]
+fn provider_model_availability_admitted_count_ignores_window_inactive_siblings() {
+    // The single-candidate automatic-cooldown exemption must count only
+    // candidates admitted by capability and availability. Here provider a is
+    // the only candidate admitted at 10:00 Asia/Shanghai (b and c declare
+    // windows that exclude that instant), so a cooled provider a must still be
+    // exempted: a window-inactive sibling must never inflate the pool size and
+    // suppress the exemption.
+    let mut manifest = provider_priority_schedule_manifest();
+    let window_excluding_ten_am =
+        routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+            timezone: "Asia/Shanghai".into(),
+            guard_minutes: 0,
+            periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
+                start: "00:00".into(),
+                end: "08:00".into(),
+            }],
+        };
+    for provider in ["b", "c"] {
+        manifest
+            .providers
+            .get_mut(provider)
+            .unwrap()
+            .models
+            .get_mut("m")
+            .unwrap()
+            .availability = Some(window_excluding_ten_am.clone());
+    }
+    let target = V3TargetInterpreter::default();
+    let expanded = expanded_with(&manifest, &target, 0);
+    let now_ms = 1_767_232_800_000;
+    assert_eq!(
+        V3TargetInterpreter::admitted_candidate_count(&expanded, now_ms),
+        1,
+        "only provider a is inside its availability window at 10:00 Asia/Shanghai"
+    );
+    struct OnlyProviderACooled;
+    impl V3ProviderSchedulingReader for OnlyProviderACooled {
+        fn scheduling_projection(
+            &self,
+            provider_id: &str,
+            auth_alias: &str,
+            model_id: &str,
+            priority: i32,
+            base_weight: u32,
+            _now_ms: u64,
+        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+            let mut projection =
+                routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
+                    provider_id,
+                    "default",
+                    auth_alias,
+                    model_id,
+                    priority,
+                    1_000,
+                    base_weight,
+                );
+            if provider_id == "a" {
+                projection.available = false;
+                projection.blocked_scopes = vec!["provider_key_health_cooldown".to_string()];
+            }
+            projection
+        }
+    }
+    let selected = target
+        .select_available_with_health(expanded, &OnlyProviderACooled, now_ms, 0)
+        .expect("a must stay usable as the only admitted candidate");
+    assert_eq!(selected.candidate.provider_id, "a");
+}
+
+#[test]
+fn provider_model_availability_sibling_in_window_keeps_automatic_cooldown() {
+    // Control for the exemption test: once a sibling is genuinely admitted the
+    // pool is no longer a singleton, so the cooled candidate stays excluded and
+    // the healthy sibling wins.
+    let manifest = provider_model_availability_manifest(None);
+    let target = V3TargetInterpreter::default();
+    let expanded = expanded_with(&manifest, &target, 0);
+    let now_ms = 1_767_232_800_000;
+    assert_eq!(
+        V3TargetInterpreter::admitted_candidate_count(&expanded, now_ms),
+        expanded.candidates.len()
+    );
+    struct ProviderACooled;
+    impl V3ProviderSchedulingReader for ProviderACooled {
+        fn scheduling_projection(
+            &self,
+            provider_id: &str,
+            auth_alias: &str,
+            model_id: &str,
+            priority: i32,
+            base_weight: u32,
+            _now_ms: u64,
+        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+            let mut projection =
+                routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
+                    provider_id,
+                    "default",
+                    auth_alias,
+                    model_id,
+                    priority,
+                    1_000,
+                    base_weight,
+                );
+            if provider_id == "a" {
+                projection.available = false;
+                projection.blocked_scopes = vec!["provider_key_health_cooldown".to_string()];
+            }
+            projection
+        }
+    }
+    let selected = target
+        .select_available_with_health(expanded, &ProviderACooled, now_ms, 0)
+        .expect("the healthy sibling must remain selectable");
+    assert_ne!(selected.candidate.provider_id, "a");
+}
+
 #[test]
 fn weighted_forwarder_advances_to_lower_priority_only_after_higher_tier_exhausts() {
     let manifest = weighted_priority_forwarder_manifest();
@@ -809,6 +1074,25 @@ targets = [{ kind = "forwarder", id = "client", priority = 1 }]
         expanded.candidates[0].visible_model_ids,
         vec!["client-model", "wire-model"]
     );
+}
+
+#[test]
+fn unconfigured_provider_concurrency_defaults_to_forty_as_the_hard_maximum() {
+    // The declared static `maxInFlight` is only the hard ceiling for the
+    // adaptive budget; a provider that omits it gets the documented default of
+    // forty, not the retired default of eight.
+    let expanded = expanded();
+    assert!(
+        !expanded.candidates.is_empty(),
+        "default manifest must expand at least one candidate"
+    );
+    for candidate in &expanded.candidates {
+        assert_eq!(
+            candidate.initial_concurrency_budget, 40,
+            "provider {} must default to a static hard maximum of 40",
+            candidate.provider_id
+        );
+    }
 }
 
 #[test]

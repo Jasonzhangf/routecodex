@@ -66,7 +66,9 @@ async fn recovery_peer(
     let attempt = peer
         .business
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    if attempt < 3 {
+    // The first business attempt is refused with a real rate limit; every later
+    // attempt answers normally. One 429 is enough to hold the exact identity.
+    if attempt == 0 {
         return (
             StatusCode::TOO_MANY_REQUESTS,
             Json(json!({"error":{"type":"rate_limit_error","message":"rate limit"}})),
@@ -77,7 +79,7 @@ async fn recovery_peer(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
+async fn zen_429_hold_and_http_2xx_streaming_recovery_public() {
     let _guard = TEST_LOCK.lock().await;
     let _counter = CounterEnvironment::new();
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -129,43 +131,85 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
         .unwrap();
     let mut routed_request = request(false);
     routed_request["model"] = json!("router");
-    for number in 1..=3 {
-        let reply = client
-            .post(format!("{base}/v1/responses"))
-            .json(&routed_request)
-            .send()
-            .await;
-        if let Ok(reply) = reply {
-            assert!(!reply.status().is_success());
+
+    // The first business attempt is refused with a real 429; that single
+    // failure latches a bounded hold on the exact provider/key/model identity.
+    // The fallback account must serve the retry while the exact key is held.
+    match client
+        .post(format!("{base}/v1/responses"))
+        .json(&routed_request)
+        .send()
+        .await
+    {
+        Ok(reply) => {
+            assert!(
+                !reply.status().is_success(),
+                "the refused attempt must not fabricate success"
+            );
             let _ = reply.bytes().await;
         }
-        let pool: Value = client
-            .get(format!("{base}/_routecodex/health/cooldown-pool"))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        if number < 3 {
-            assert_eq!(pool["entries"], json!([]), "429 {number} must not cool");
-        } else {
-            assert_eq!(pool["entries"].as_array().unwrap().len(), 1);
-            assert!(pool["entries"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|entry| entry["provider_id"] == "poolpeer"
-                    && entry["auth_alias"] == "pool-key-01"
-                    && entry["model_id"] == "model"));
+        Err(_) => {
+            // Both eligible identities failed, so the transport terminates
+            // without a fabricated success or a client error response.
         }
     }
-    assert_eq!(business.load(std::sync::atomic::Ordering::SeqCst), 3);
+    let pool: Value = client
+        .get(format!("{base}/_routecodex/health/cooldown-pool"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(pool["entries"].as_array().unwrap().len(), 1);
+    assert!(
+        pool["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["provider_id"] == "poolpeer"
+                && entry["auth_alias"] == "pool-key-01"
+                && entry["model_id"] == "model"),
+        "the first 429 must hold the exact identity: {pool:?}"
+    );
+    assert_eq!(business.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert_eq!(
         sibling_business.load(std::sync::atomic::Ordering::SeqCst),
-        3
+        1
     );
-    // Recovery is scheduled automatically after the third business 429.
+    // A later business request on the same model must not retry the held
+    // account: it reselects the fallback account (which is itself down here),
+    // so the request still terminates without a fabricated success.
+    if let Ok(reply) = client
+        .post(format!("{base}/v1/responses"))
+        .json(&routed_request)
+        .send()
+        .await
+    {
+        assert!(!reply.status().is_success());
+        let _ = reply.bytes().await;
+    }
+    assert_eq!(
+        business.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "a held exact identity must not receive another business attempt"
+    );
+    assert_eq!(
+        sibling_business.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the retry must reselect the sibling account instead of the held key"
+    );
+    assert!(
+        pool["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["provider_id"] == "poolpeer"
+                && entry["auth_alias"] == "pool-key-01"
+                && entry["model_id"] == "model"),
+        "the hold must persist until a real success or a matching 2xx probe: {pool:?}"
+    );
+    // Recovery is scheduled automatically after the first business 429.
     // A nonterminal 2xx SSE response is sufficient, regardless of its body.
     tokio::time::timeout(Duration::from_secs(15), rx.recv())
         .await
@@ -200,10 +244,15 @@ async fn zen_429_three_failures_and_http_2xx_streaming_recovery_public() {
         "restored account must serve business request"
     );
     assert_eq!(reply.json::<Value>().await.unwrap()["status"], "completed");
-    assert_eq!(business.load(std::sync::atomic::Ordering::SeqCst), 4);
+    assert_eq!(
+        business.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the released identity must serve the business request itself"
+    );
     assert_eq!(
         sibling_business.load(std::sync::atomic::Ordering::SeqCst),
-        3
+        2,
+        "the released identity must win over the lower-priority sibling"
     );
     server.shutdown().await;
     peer_task.abort();

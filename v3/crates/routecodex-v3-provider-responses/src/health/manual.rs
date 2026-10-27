@@ -61,7 +61,7 @@ fn upsert_manual_probe_cooldown(
     state.provider_cooldown_probes.insert(
         key,
         V3ProviderCooldownProbeState {
-            cooldown_cause: None,
+            cooldown_cause: existing.as_ref().and_then(|probe| probe.cooldown_cause),
             blocked_until_ms: Some(blocked_until_ms),
             next_probe_at_ms: Some(next_probe_at_ms),
             probe_interval_ms: existing
@@ -90,6 +90,7 @@ fn upsert_manual_probe_cooldown(
             rescue_probe_attempted: existing
                 .as_ref()
                 .is_some_and(|probe| probe.rescue_probe_attempted),
+            advisory_probe: existing.as_ref().is_some_and(|probe| probe.advisory_probe),
         },
     );
     blocked_until_ms

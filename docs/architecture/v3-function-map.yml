@@ -1104,6 +1104,8 @@ features:
   - V3TargetInterpreter::provider_priority_schedule_priority
   - V3ProviderPriorityScheduleAuthoringConfig::validate
   - V3ProviderPriorityScheduleAuthoringConfig::priority_for_provider
+  - V3ProviderModelAvailabilityAuthoringConfig::validate
+  - V3ProviderModelAvailabilityAuthoringConfig::is_available_at
   - candidate_context_admission
   - select_v3_target_with_session_then_global
   - select_v3_preplanned_direct_target
@@ -4892,6 +4894,14 @@ features:
   - V3RuntimeProviderAdmission::drop
   - V3PreAcquiredProviderAdmission::release
   - V3AdaptiveConcurrencyPermitGuard::drop
+  - V3AdaptiveConcurrencyController::observe_rate_limit
+  - V3AdaptiveConcurrencyController::observe_business_success
+  - V3AdaptiveConcurrencyController::complete_probe
+  - V3AdaptiveConcurrencyController::process_shared
+  - V3AdaptiveConcurrencyController::snapshot
+  - V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS
+  - V3_DEFAULT_PROVIDER_MAX_IN_FLIGHT
+  - V3AdaptiveConcurrencyRateLimitSample
   - V3ProviderResponsesTransport::send
   - ProviderResponsesTransport::send_probe
   - execute_v3_anthropic_relay_runtime_inner

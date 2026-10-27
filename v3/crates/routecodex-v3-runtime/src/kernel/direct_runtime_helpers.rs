@@ -59,6 +59,12 @@ fn v3_direct_selected_available_for_send(
     now_epoch_ms: u64,
 ) -> bool {
     let selected_key = candidate_key(&selected.candidate);
+    // The send gate must use the same admission basis as Target10 selection,
+    // otherwise a candidate admitted there is refused here and the failure
+    // policy cools a provider that was never contacted.
+    let admitted_candidate_count = expanded.map_or(1, |target| {
+        routecodex_v3_target::V3TargetInterpreter::admitted_candidate_count(target, now_epoch_ms)
+    });
     let selected_projection = session_availability.availability_for_interface(
         &selected.candidate.provider_id,
         &selected.candidate.interface_id,
@@ -69,13 +75,17 @@ fn v3_direct_selected_available_for_send(
     let selected_available_in_session = selected_projection.available
         || (!failed_candidates.contains(&selected_key)
             && routecodex_v3_target::V3TargetInterpreter::ignores_single_candidate_automatic_cooldown(
-                expanded.map_or(1, |target| target.candidates.len()),
+                admitted_candidate_count,
                 &selected_projection.blocked_scopes,
             ));
     let session_alternative_available = expanded.is_some_and(|expanded| {
         expanded.candidates.iter().any(|candidate| {
             let key = candidate_key(candidate);
             key != selected_key
+                && routecodex_v3_target::V3TargetInterpreter::candidate_admitted(
+                    candidate,
+                    now_epoch_ms,
+                )
                 && !failed_candidates.contains(&key)
                 && session_availability
                     .availability_for_interface(
@@ -89,7 +99,7 @@ fn v3_direct_selected_available_for_send(
         })
     });
     selected_available_in_session
-        || (expanded.is_some_and(|expanded| expanded.candidates.len() > 1)
+        || (expanded.is_some_and(|_| admitted_candidate_count > 1)
             && !session_alternative_available
             && !failed_candidates.contains(&selected_key)
             && provider_health
@@ -547,6 +557,299 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test-model", 
     }
 }
 
+#[cfg(test)]
+mod provider_model_availability_send_gate_tests {
+    use super::*;
+    use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+
+    /// Provider `a` is always available; provider `b` declares a window that
+    /// excludes 10:00 Asia/Shanghai. The pool therefore has two configured
+    /// candidates but only one admitted at that instant.
+    fn manifest_b_window_excludes_ten_am() -> V3Config05ManifestPublished {
+        let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.a]
+type = "responses"
+base_url = "http://a.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "ka", env = "KEY_A" }] }
+[providers.a.models.m]
+capabilities = ["text"]
+[providers.b]
+type = "responses"
+base_url = "http://b.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "kb", env = "KEY_B" }] }
+[providers.b.models.m]
+capabilities = ["text"]
+availability = { timezone = "Asia/Shanghai", guard_minutes = 0, periods = [{ start = "00:00", end = "08:00" }] }
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "a", model = "m", key = "ka", priority = 2 },
+  { kind = "provider_model", provider = "b", model = "m", key = "kb", priority = 1 },
+]
+"#;
+        compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(source).expect("availability authoring"),
+        )
+        .expect("availability manifest")
+    }
+
+    fn expanded_candidates(
+        manifest: &V3Config05ManifestPublished,
+    ) -> routecodex_v3_target::V3Target09CandidateSetExpanded {
+        let hit = crate::provider_failure_runtime_policy::resolve_v3_relay_opaque_target_once(
+            manifest,
+            "s",
+            "responses",
+            "/v1/responses",
+            &json!({"model": "m", "input": "hi"}),
+            0,
+        )
+        .expect("opaque hit");
+        crate::provider_failure_runtime_policy::expand_v3_relay_target_candidates_from_opaque_hit(
+            manifest, hit, 0,
+        )
+        .expect("expanded candidates")
+    }
+
+    /// Session availability that cools provider `a` with the automatic
+    /// key-health scope and leaves everyone else available.
+    struct CooledA;
+    impl V3ProviderAvailabilityReader for CooledA {
+        fn availability_for_interface(
+            &self,
+            provider_id: &str,
+            interface_id: &str,
+            auth_alias: Option<&str>,
+            model_id: Option<&str>,
+            _now_ms: u64,
+        ) -> V3ProviderAvailabilityProjection {
+            let cooled = provider_id == "a";
+            V3ProviderAvailabilityProjection {
+                provider_id: provider_id.to_string(),
+                interface_id: interface_id.to_string(),
+                auth_alias: auth_alias.map(ToOwned::to_owned),
+                model_id: model_id.map(ToOwned::to_owned),
+                available: !cooled,
+                blocked_scopes: if cooled {
+                    vec!["provider_key_health_cooldown".to_string()]
+                } else {
+                    Vec::new()
+                },
+            }
+        }
+
+        fn availability(
+            &self,
+            provider_id: &str,
+            auth_alias: Option<&str>,
+            model_id: Option<&str>,
+            now_ms: u64,
+        ) -> V3ProviderAvailabilityProjection {
+            self.availability_for_interface(
+                provider_id,
+                "default",
+                auth_alias,
+                model_id,
+                now_ms,
+            )
+        }
+    }
+
+    #[test]
+    fn send_gate_exempts_cooled_candidate_when_only_window_active_one_remains() {
+        let manifest = manifest_b_window_excludes_ten_am();
+        let now_ms = 1_767_232_800_000; // 10:00 Asia/Shanghai
+        let expanded = expanded_candidates(&manifest);
+        assert!(
+            expanded.candidates.len() > 1,
+            "the pool must still configure more than one candidate"
+        );
+        assert_eq!(
+            routecodex_v3_target::V3TargetInterpreter::admitted_candidate_count(&expanded, now_ms),
+            1,
+            "provider b is outside its declared window, so only a is admitted"
+        );
+        let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
+            route: expanded.route.clone(),
+            candidate: expanded
+                .candidates
+                .iter()
+                .find(|candidate| candidate.provider_id == "a")
+                .expect("provider a candidate")
+                .clone(),
+            candidate_count: 1,
+            unavailable_candidates: Vec::new(),
+            attempts: 1,
+            default_floor_protected: false,
+        };
+        let provider_health = crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(
+            &manifest,
+        );
+        // Cool provider a in the real health store as well, so the gate has no
+        // healthy fallback: only a shared admission basis can admit it.
+        provider_health
+            .store()
+            .record_provider_cooldown_failure_for_interface(
+                routecodex_v3_provider_responses::V3ProviderInterfaceIdentity::new("a", "default"),
+                Some("ka"),
+                Some("m"),
+                "test cooldown",
+                now_ms,
+                600_000,
+            )
+            .expect("cooldown");
+        // The send gate must agree with Target10: the only admitted candidate is
+        // exempt from an automatic key-health cooldown, so the request is not
+        // refused and a never-contacted provider is not cooled.
+        assert!(
+            v3_direct_selected_available_for_send(
+                &selected,
+                Some(&expanded),
+                &CooledA,
+                &provider_health,
+                &BTreeSet::new(),
+                now_ms,
+            ),
+            "the only admitted candidate must be sent even though it is cooled"
+        );
+    }
+
+    #[test]
+    fn send_gate_refuses_cooled_candidate_when_window_active_sibling_remains() {
+        // Control: with provider b also admitted (both inside their windows),
+        // the pool is not a singleton, so the cooled provider a must be refused
+        // at the send gate and the healthy sibling must remain available.
+        // Rebuild the same pool with provider b always available for this
+        // control case.
+        let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.a]
+type = "responses"
+base_url = "http://a.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "ka", env = "KEY_A" }] }
+[providers.a.models.m]
+capabilities = ["text"]
+[providers.b]
+type = "responses"
+base_url = "http://b.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "kb", env = "KEY_B" }] }
+[providers.b.models.m]
+capabilities = ["text"]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "a", model = "m", key = "ka", priority = 2 },
+  { kind = "provider_model", provider = "b", model = "m", key = "kb", priority = 1 },
+]
+"#;
+        let manifest = compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(source).expect("always-available authoring"),
+        )
+        .expect("always-available manifest");
+        let now_ms = 1_767_232_800_000;
+        let expanded = expanded_candidates(&manifest);
+        assert_eq!(
+            routecodex_v3_target::V3TargetInterpreter::admitted_candidate_count(&expanded, now_ms),
+            expanded.candidates.len(),
+            "both providers are always available, so the pool is a true multi-candidate pool"
+        );
+        let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
+            route: expanded.route.clone(),
+            candidate: expanded
+                .candidates
+                .iter()
+                .find(|candidate| candidate.provider_id == "a")
+                .expect("provider a candidate")
+                .clone(),
+            candidate_count: expanded.candidates.len(),
+            unavailable_candidates: Vec::new(),
+            attempts: 1,
+            default_floor_protected: false,
+        };
+        let provider_health = crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(
+            &manifest,
+        );
+        provider_health
+            .store()
+            .record_provider_cooldown_failure_for_interface(
+                routecodex_v3_provider_responses::V3ProviderInterfaceIdentity::new("a", "default"),
+                Some("ka"),
+                Some("m"),
+                "test cooldown",
+                now_ms,
+                600_000,
+            )
+            .expect("cooldown");
+        // The session availability reader reports provider a cooled but b
+        // healthy, so b is the session alternative; the cooled a must be refused.
+        struct CooledAOnly;
+        impl V3ProviderAvailabilityReader for CooledAOnly {
+            fn availability_for_interface(
+                &self,
+                provider_id: &str,
+                interface_id: &str,
+                auth_alias: Option<&str>,
+                model_id: Option<&str>,
+                _now_ms: u64,
+            ) -> V3ProviderAvailabilityProjection {
+                let cooled = provider_id == "a";
+                V3ProviderAvailabilityProjection {
+                    provider_id: provider_id.to_string(),
+                    interface_id: interface_id.to_string(),
+                    auth_alias: auth_alias.map(ToOwned::to_owned),
+                    model_id: model_id.map(ToOwned::to_owned),
+                    available: !cooled,
+                    blocked_scopes: if cooled {
+                        vec!["provider_key_health_cooldown".to_string()]
+                    } else {
+                        Vec::new()
+                    },
+                }
+            }
+
+            fn availability(
+                &self,
+                provider_id: &str,
+                auth_alias: Option<&str>,
+                model_id: Option<&str>,
+                now_ms: u64,
+            ) -> V3ProviderAvailabilityProjection {
+                self.availability_for_interface(
+                    provider_id,
+                    "default",
+                    auth_alias,
+                    model_id,
+                    now_ms,
+                )
+            }
+        }
+        assert!(
+            !v3_direct_selected_available_for_send(
+                &selected,
+                Some(&expanded),
+                &CooledAOnly,
+                &provider_health,
+                &BTreeSet::new(),
+                now_ms,
+            ),
+            "a multi-candidate pool must not exempt a cooled provider from the send gate"
+        );
+    }
+}
+
 pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
     context: &V3DirectProviderFailurePolicyContext<'_, R>,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
@@ -610,6 +913,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             expanded_candidates,
             context.availability,
             &failed_with_current,
+            context.now_epoch_ms,
         )
     });
     let mut next_provider_key = expanded_candidates.and_then(|expanded_candidates| {
@@ -617,6 +921,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             expanded_candidates,
             context.availability,
             &failed_with_current,
+            context.now_epoch_ms,
         )
     });
     if remaining == 0 {
@@ -627,6 +932,10 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                     .filter(|candidate| {
                         let key = candidate_key(candidate);
                         !failed_with_current.contains(&key)
+                            && routecodex_v3_target::V3TargetInterpreter::candidate_admitted(
+                                candidate,
+                                context.now_epoch_ms,
+                            )
                             && context
                                 .provider_health
                                 .availability_for_interface(
@@ -643,6 +952,10 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                     next_provider_key = candidates.iter().find_map(|candidate| {
                         let key = candidate_key(candidate);
                         (!failed_with_current.contains(&key)
+                            && routecodex_v3_target::V3TargetInterpreter::candidate_admitted(
+                                candidate,
+                                context.now_epoch_ms,
+                            )
                             && context
                                 .provider_health
                                 .availability_for_interface(

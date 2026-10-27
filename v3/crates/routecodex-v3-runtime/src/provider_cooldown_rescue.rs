@@ -93,6 +93,14 @@ pub(crate) async fn initiate_v3_target_pre_exhaustion_rescue_probes(
         if !identities.insert(v3_relay_provider_candidate_key(candidate)) {
             continue;
         }
+        // Never send a real provider probe outside a declared availability
+        // window: a cooled model whose free window has closed must not be
+        // billed by a rescue probe.
+        if !routecodex_v3_target::V3TargetInterpreter::candidate_in_availability_window(
+            candidate, now_ms,
+        ) {
+            continue;
+        }
         match provider_health
             .initiate_cooldown_rescue_probe(manifest, candidate, now_ms)
             .await
@@ -515,6 +523,13 @@ impl V3ProviderFailureRuntimeHealth {
                 &candidate.model_id,
             );
             if !identities.insert(identity) {
+                continue;
+            }
+            // A cooled model whose availability window has closed must not be
+            // reached by a real rescue probe outside its free window.
+            if !routecodex_v3_target::V3TargetInterpreter::candidate_in_availability_window(
+                candidate, now_ms,
+            ) {
                 continue;
             }
             let rescue_permit = self

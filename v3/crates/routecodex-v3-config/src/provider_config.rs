@@ -151,7 +151,7 @@ pub(crate) fn compile_provider_directory(
                 responses,
                 concurrency: provider.concurrency.map(|concurrency| {
                     V3ProviderConcurrencyAuthoringConfig {
-                        max_in_flight: concurrency.max_in_flight.unwrap_or(8),
+                        max_in_flight: concurrency.max_in_flight.unwrap_or(40),
                         acquire_timeout_ms: concurrency.acquire_timeout_ms.unwrap_or(60000),
                         stale_lease_ms: concurrency.stale_lease_ms.unwrap_or(300000),
                     }
@@ -439,6 +439,7 @@ fn compile_v2_provider_models(
                         .or(model.max_context),
                     context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                     features: model.features,
+                    availability: model.availability,
                 },
             )
         })
@@ -597,6 +598,10 @@ pub struct V2ProviderModelConfig {
     pub web_search_backend: Option<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+    /// Optional daily availability windows. Omitted means the model is always
+    /// available.
+    #[serde(default)]
+    pub availability: Option<crate::V3ProviderModelAvailabilityAuthoringConfig>,
 }
 
 fn default_context_token_estimate_scale_bps() -> u64 {

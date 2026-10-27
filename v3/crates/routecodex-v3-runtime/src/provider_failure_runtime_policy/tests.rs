@@ -358,9 +358,10 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let mut manifest = global_pool_alive_manifest("global_status_policy");
     normalize_global_pool_priorities(&mut manifest);
     // Account/billing classes (401/403) are typed irrecoverable and cool on their
-    // first failure. Ordinary 429 keeps a three-failure threshold; other typed
-    // recoverable classes currently use the shared threshold of one.
-    let cases = [(401, 1), (403, 1), (429, 3), (500, 1), (502, 1), (599, 1)];
+    // first failure. Other typed recoverable classes use the shared threshold of
+    // one. HTTP 429 latches its own bounded hold instead of the shared ladder, so
+    // it is asserted separately below.
+    let cases = [(401, 1), (403, 1), (500, 1), (502, 1), (599, 1)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = test_provider_failure_scope(
@@ -420,6 +421,49 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
             "status {status} must block after {threshold} consecutive failures"
         );
     }
+
+    // HTTP 429 latches a bounded hold: the exact identity is unavailable during
+    // the ~1 minute window and auto-releases once the window passes.
+    let rate_limited = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let rate_limited_scope = test_provider_failure_scope(
+        "global_status_policy",
+        "global_status_policy",
+        "runtime-policy-429",
+    )
+    .expect("failure session scope");
+    for attempt in 0..6 {
+        let now_ms = 10_000 + attempt as u64;
+        let record = rate_limited
+            .record_provider_failure_record_with_policy(
+                None,
+                &manifest,
+                &rate_limited_scope,
+                "first",
+                Some("responses"),
+                Some("key1"),
+                Some("gpt-test"),
+                Some("provider status failure"),
+                "V3ProviderRespInbound01Raw",
+                429,
+                Some("provider_http_error"),
+                "upstream status",
+                now_ms,
+            )
+            .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
+        assert_eq!(record.state, "cooldown", "429 must report the hold state");
+        assert!(
+            !rate_limited
+                .availability("first", Some("key1"), Some("gpt-test"), now_ms)
+                .available,
+            "a 429 must hold the exact identity during its window; attempt={attempt}"
+        );
+    }
+    assert!(
+        rate_limited
+            .availability("first", Some("key1"), Some("gpt-test"), 10_000 + 5 + 60_001)
+            .available,
+        "a 429 hold must auto-release after its bounded window"
+    );
 
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let scope = test_provider_failure_scope(
@@ -760,6 +804,7 @@ fn incomplete_key_identity_fails_before_provider_cooldown_write() {
         failure_threshold: 1,
         cooldown_ms: 60 * 60_000,
         long_probe_backoff: false,
+        advisory_probe: false,
     };
     let scope = test_provider_failure_scope(
         "incomplete_key_identity",

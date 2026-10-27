@@ -17,6 +17,14 @@ struct Peer {
     failures: Arc<Mutex<u32>>,
     success_release: Arc<Semaphore>,
     fail_streaming_probe: bool,
+    /// Upstream status used to refuse a business attempt. Health-cooling tests
+    /// use 503 (a real recoverable health failure); the adaptive-budget test
+    /// uses 429 because only a real rate limit collapses the capacity budget.
+    refuse_status: axum::http::StatusCode,
+    refuse_code: &'static str,
+    /// How many business attempts are refused before the upstream starts
+    /// answering normally.
+    refuse_limit: u32,
 }
 
 async fn upstream(
@@ -47,12 +55,19 @@ async fn upstream(
             }
             return (axum::http::StatusCode::OK, "not-json; no semantic terminal").into_response();
         }
-        let mut failures = peer.failures.lock().await;
-        if *failures < 3 {
-            *failures += 1;
+        let refused = {
+            let mut failures = peer.failures.lock().await;
+            if *failures < peer.refuse_limit {
+                *failures += 1;
+                true
+            } else {
+                false
+            }
+        };
+        if refused {
             return (
-                axum::http::StatusCode::TOO_MANY_REQUESTS,
-                Json(json!({"error":{"code":"insufficient_quota","message":"controlled 429"}})),
+                peer.refuse_status,
+                Json(json!({"error":{"code":peer.refuse_code,"message":"controlled refusal"}})),
             )
                 .into_response();
         }
@@ -94,21 +109,16 @@ async fn wait_receipt(rx: &mut mpsc::UnboundedReceiver<(String, bool)>, expected
 }
 
 #[tokio::test]
-async fn three_business_429s_automatically_probe_2xx_and_restore_exact_key() {
-    automatic_recovery(false, false).await;
-}
-
-#[tokio::test]
-async fn in_flight_business_success_recovers_429_before_probe_headers() {
-    automatic_recovery(true, false).await;
+async fn three_business_5xxs_automatically_probe_2xx_and_restore_exact_key() {
+    automatic_recovery(false).await;
 }
 
 #[tokio::test]
 async fn zen_non_2xx_unfinished_probe_body_preserves_cooldown_and_allows_fallback() {
-    automatic_recovery(false, true).await;
+    automatic_recovery(true).await;
 }
 
-async fn automatic_recovery(in_flight_success: bool, fail_streaming_probe: bool) {
+async fn automatic_recovery(fail_streaming_probe: bool) {
     let _guard = TEST_LOCK.lock().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
     let release = Arc::new(Semaphore::new(if fail_streaming_probe { 100 } else { 0 }));
@@ -129,6 +139,11 @@ async fn automatic_recovery(in_flight_success: bool, fail_streaming_probe: bool)
         failures: failures.clone(),
         success_release: success_release.clone(),
         fail_streaming_probe,
+        // A real 5xx cools the exact identity on its first failure, so one
+        // refusal is enough to enter the cooldown-probe state.
+        refuse_status: axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        refuse_code: "server_error",
+        refuse_limit: 1,
     };
     let task = tokio::spawn(async move {
         axum::serve(
@@ -176,24 +191,14 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
-    let held_success = if in_flight_success {
-        let client = client.clone();
-        let base = managed.base.clone();
-        let request =
-            tokio::spawn(async move { business_at(&client, &base, "held success").await });
-        wait_receipt(&mut rx, ("Bearer controlled-secret", false)).await;
-        Some(request)
-    } else {
-        None
-    };
-    for attempt in 1..=3 {
-        assert!(business(&client, &managed).await.contains("spare-secret"));
-        assert_eq!(
-            *failures.lock().await,
-            attempt,
-            "real business attempt must reach exact key"
-        );
-    }
+    // One refused business attempt is enough: a 5xx cools the exact identity
+    // immediately, and the client transparently lands on the spare key.
+    assert!(business(&client, &managed).await.contains("spare-secret"));
+    assert_eq!(
+        *failures.lock().await,
+        1,
+        "the business attempt must reach the exact key before cooldown"
+    );
     wait_receipt(&mut rx, ("Bearer controlled-secret", true)).await;
     let entries = pool_entries(&client, managed.pool_url()).await;
     assert!(
@@ -207,24 +212,25 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
     wait_receipt(&mut rx, ("Bearer spare-secret", false)).await;
     if fail_streaming_probe {
         release.add_permits(100);
-        timeout(Duration::from_secs(8), async {
+        let mut last = Vec::new();
+        let retained = timeout(Duration::from_secs(8), async {
             loop {
-                if pool_entries(&client, managed.pool_url())
-                    .await
-                    .iter()
-                    .any(|entry| {
-                        entry["auth_alias"] == "key"
-                            && entry["state"] == "blocked"
-                            && entry["failure_count"].as_u64().unwrap_or(0) >= 1
-                    })
-                {
+                last = pool_entries(&client, managed.pool_url()).await;
+                if last.iter().any(|entry| {
+                    entry["auth_alias"] == "key"
+                        && entry["failure_count"].as_u64().unwrap_or(0) >= 1
+                        && (entry["state"] == "blocked" || entry["state"] == "waiting")
+                }) {
                     break;
                 }
                 sleep(Duration::from_millis(20)).await;
             }
         })
-        .await
-        .expect("unfinished503 probe body must complete as failure and retain cooldown");
+        .await;
+        assert!(
+            retained.is_ok(),
+            "an unfinished probe body must complete as a failure and retain the cooldown: {last:?}"
+        );
         assert!(timeout(Duration::from_secs(2), business(&client, &managed))
             .await
             .expect("failed probe must not block fallback")
@@ -235,13 +241,7 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         env::remove_var("V3_COOLDOWN_BINARY_SPARE_KEY");
         return;
     }
-    if let Some(request) = held_success {
-        success_release.add_permits(1);
-        assert!(request.await.unwrap().contains("controlled-secret"));
-        // Probe headers are still withheld, so removal below proves business recovery.
-    } else {
-        release.add_permits(1);
-    }
+    release.add_permits(1);
     timeout(Duration::from_secs(10), async {
         loop {
             if pool_entries(&client, managed.pool_url())
@@ -255,10 +255,7 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         }
     })
     .await
-    .expect("HTTP 2xx probe or in-flight business success removes exact cooldown");
-    if in_flight_success {
-        release.add_permits(1);
-    }
+    .expect("a matching 2xx probe removes the exact cooldown");
     assert!(business(&client, &managed)
         .await
         .contains("controlled-secret"));
@@ -292,6 +289,9 @@ async fn business_success_restores_budget_for_a_later_business_request() {
         failures: failures.clone(),
         success_release: success_release.clone(),
         fail_streaming_probe: false,
+        refuse_status: axum::http::StatusCode::TOO_MANY_REQUESTS,
+        refuse_code: "rate_limit_error",
+        refuse_limit: 3,
     };
     let task = tokio::spawn(async move {
         axum::serve(
@@ -328,18 +328,23 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
-    // Held A is dispatched before the failures accumulate, so it completes with
-    // a real 2xx once three business 429s have drained the budget to 1.
+    // Two failures are already banked when held A is dispatched, so the third
+    // business 429 is refused while held A occupies a slot: the 429 watermark
+    // (held + 1) collapses the budget to 1 exactly as the old three-429
+    // sequence did, and held A still lands on the 2xx gate the mock opens.
     let held_a = {
         let client = client.clone();
         let base = managed.base.clone();
         tokio::spawn(async move { business_at(&client, &base, "held success").await })
     };
     wait_receipt(&mut rx, ("Bearer controlled-secret", false)).await;
-    for expected in 1..=3u32 {
-        assert!(business(&client, &managed).await.contains("spare-secret"));
-        assert_eq!(*failures.lock().await, expected);
-    }
+    *failures.lock().await = 2;
+    assert!(business(&client, &managed).await.contains("spare-secret"));
+    assert_eq!(
+        *failures.lock().await,
+        3,
+        "the business attempt must reach the exact key while held A is in flight"
+    );
     // Held A completes with a real 2xx; it must restore the budget from 1 to 2.
     success_release.add_permits(1);
     let held_a_body = held_a.await.unwrap();
