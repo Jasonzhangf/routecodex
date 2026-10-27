@@ -654,14 +654,20 @@ fn projected_delta_text(wire: &[u8]) -> String {
 }
 
 fn assert_no_client_error(text: &str) {
-    assert!(
-        !text.contains("\"error\"")
-            && !text.contains("network_error")
-            && !text.contains("598")
-            && !text.contains("599")
-            && !text.contains("502"),
-        "client received a provider/proxy error payload: {text}"
-    );
+    for event in text
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:").map(str::trim))
+        .filter(|data| *data != "[DONE]")
+        .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+    {
+        assert!(
+            !matches!(
+                event["type"].as_str(),
+                Some("error" | "response.failed" | "response.error")
+            ) && event.get("error").is_none(),
+            "client received a provider/proxy error event: {event}"
+        );
+    }
 }
 
 #[tokio::test]
