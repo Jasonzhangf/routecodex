@@ -176,6 +176,34 @@ async fn upstream_chat(Json(body): Json<Value>) -> Response<Body> {
         .unwrap()
 }
 
+/// Anthropic-protocol upstream for the Direct lane. It answers the Anthropic
+/// Messages wire contract, so a same-protocol Anthropic entry can stay Direct
+/// instead of being projected through the OpenAI Chat relay.
+async fn upstream_anthropic(Json(body): Json<Value>) -> Response<Body> {
+    let model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("direct-wire-model")
+        .to_string();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({
+                "id": "msg_direct_success",
+                "type": "message",
+                "role": "assistant",
+                "model": model,
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "stop_sequence": null,
+                "usage": {"input_tokens": 1, "output_tokens": 1}
+            })
+            .to_string(),
+        ))
+        .unwrap()
+}
+
 fn manifest(
     server_port: u16,
     upstream_port: u16,
@@ -222,10 +250,67 @@ targets = [{{ kind = "provider_model", provider = "count", model = "wire-model",
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
+/// Direct-lane manifest: the Anthropic entry protocol targets an Anthropic
+/// provider, so the same-protocol target stays Direct instead of Relay. The
+/// relay manifests above deliberately target an OpenAI Chat provider to force
+/// Relay, so this lane needs its own provider declaration.
+///
+/// The entry protocol binding must also declare `direct`: the server reads
+/// `execution_mode` from that binding and only the Responses entry recomputes
+/// it from the runtime plan. Every entry protocol accepts Direct, and
+/// `runtime_owner_symbol` is checked only for non-emptiness, so declaring the
+/// real Direct owner is enough.
+fn anthropic_direct_manifest(
+    server_port: u16,
+    upstream_port: u16,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let declaration = hub_v1_fixture::hub_v1_test_declaration().replace(
+        r#"{ entry_protocol = "anthropic", endpoint_patterns = ["/v1/messages"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Anthropic Messages endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_anthropic_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs" }"#,
+        r#"{ entry_protocol = "anthropic", endpoint_patterns = ["/v1/messages"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Anthropic Messages endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_anthropic_direct_server_outcome", runtime_owner_path = "v3/crates/routecodex-v3-server/src/executors.rs" }"#,
+    );
+    let execution = hub_v1_fixture::hub_v1_server_execution("count");
+    let source = format!(
+        r#"
+version = 3
+{declaration}
+[servers.count]
+bind = "127.0.0.1"
+port = {server_port}
+routing_group = "count"
+endpoints = ["responses", "anthropic"]
+{execution}
+[providers.count_anthropic]
+type = "anthropic"
+base_url = "http://127.0.0.1:{upstream_port}"
+default_model = "direct-wire-model"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_REQUEST_COUNT_SUCCESS_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.count_anthropic.models.direct-wire-model]
+wire_name = "direct-wire-model"
+aliases = ["count-direct-client"]
+capabilities = ["text"]
+supports_streaming = true
+[debug]
+log_console = false
+[route_groups.count.pools.client]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "responses", models = ["count-direct-client"] }}
+targets = [{{ kind = "provider_model", provider = "count_anthropic", model = "direct-wire-model", key = "key", priority = 1 }}]
+[route_groups.count.pools.anthropic]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "anthropic", models = ["count-direct-client"] }}
+targets = [{{ kind = "provider_model", provider = "count_anthropic", model = "direct-wire-model", key = "key", priority = 1 }}]
+[route_groups.count.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "count_anthropic", model = "direct-wire-model", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
 fn read_counter(file: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap()
 }
-
 /// The success commit runs on the terminal console path, so a blackbox reads
 /// the persisted file through a bounded wait instead of assuming the write
 /// already happened when the client body ended.
@@ -641,6 +726,103 @@ async fn request_count_anthropic_relay_json_counts_and_writes_completed_terminal
         !rows.iter().any(|row| row["event_type"] == "request.failed"),
         "a delivered non-stream success must not also write a failed terminal: {rows:#?}"
     );
+
+    assert!(handle.shutdown().await.is_empty());
+    let _ = shutdown_tx.send(());
+    std::env::remove_var(PROVIDER_KEY_ENV);
+}
+
+/// The Anthropic Direct lane is the same-protocol path: an Anthropic client
+/// request targets an Anthropic provider, so the runtime selects Direct instead
+/// of relay. A delivered JSON message must still commit exactly one success
+/// count and publish its `request.completed` terminal. This lane was previously
+/// only guarded statically, so a regression that made the Direct closeout judge
+/// the stream observation would be invisible here.
+#[tokio::test]
+async fn request_count_anthropic_direct_json_counts_and_writes_completed_terminal() {
+    let counter_environment = CounterEnvironment::new();
+    std::env::set_var(PROVIDER_KEY_ENV, "fixture-key");
+    let counter_file = counter_environment.counter_file();
+    let home = counter_environment.directory.clone();
+
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        axum::serve(
+            upstream,
+            Router::new().route("/v1/messages", post(upstream_anthropic)),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .unwrap();
+    });
+
+    let handle = spawn_v3_server_aggregate(anthropic_direct_manifest(
+        test_ports::free_port(),
+        upstream_addr.port(),
+    ))
+    .await
+    .unwrap();
+    let port = handle.listeners[0].addr.port();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+
+    let response = client
+        .post(format!("{base}/v1/messages"))
+        .json(&json!({
+            "model": "count-direct-client",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "hello direct"}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        200,
+        "a same-protocol Anthropic Direct success must complete: {response:?}"
+    );
+    let body = response.text().await.unwrap();
+    assert!(
+        body.contains("\"type\":\"message\"") && body.contains("\"ok\""),
+        "an Anthropic Direct success must deliver the projected message: {body}"
+    );
+
+    let after_success = wait_for_total(&counter_file, 1).await;
+    assert_eq!(after_success["windowCount"], json!(1));
+    assert_eq!(after_success["sequence"], json!(1));
+    assert_eq!(after_success["version"], json!(2));
+
+    let records_path = request_records_path(&home, port);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let rows = loop {
+        let rows = read_request_record_rows(&records_path);
+        if rows
+            .iter()
+            .any(|row| row["event_type"] == "request.completed")
+            || tokio::time::Instant::now() >= deadline
+        {
+            break rows;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    let completed_rows: Vec<&Value> = rows
+        .iter()
+        .filter(|row| row["event_type"] == "request.completed")
+        .collect();
+    assert_eq!(
+        completed_rows.len(),
+        1,
+        "an Anthropic Direct success must write exactly one request.completed terminal: {rows:#?}"
+    );
+    assert_eq!(completed_rows[0]["result"], "success", "{rows:#?}");
 
     assert!(handle.shutdown().await.is_empty());
     let _ = shutdown_tx.send(());

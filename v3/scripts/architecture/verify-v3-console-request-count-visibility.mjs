@@ -437,24 +437,68 @@ function innermostBlockContaining(blocks, index) {
   return best;
 }
 
-// A binding `let client_body_is_sse = <expr>.client_body.is_sse();` is the
-// anthropic lane's intrinsic evidence. It is in scope at an emit iff it is
-// declared before the emit and its innermost enclosing block also encloses the
-// emit. This is Rust's own scoping rule, so renaming the response constructor
-// or inserting a comment between the emit and the constructor cannot move it.
-function anthropicBindingInScopeAt(masked, emitIndex) {
-  const { blocks, balanced } = braceBlocks(masked);
-  if (!balanced) return { inScope: false, ambiguous: true };
-  const binding = /\blet\s+client_body_is_sse\s*=\s*[^;]*\.client_body\s*\.\s*is_sse\s*\(\s*\)\s*;/gu;
-  for (const match of masked.matchAll(binding)) {
-    if (match.index > emitIndex) break;
-    const block = innermostBlockContaining(blocks, match.index);
-    if (block === null) continue;
-    if (emitIndex > block.open && emitIndex < block.close) {
-      return { inScope: true, ambiguous: false };
+// The text immediately before a block's opening brace, up to the previous
+// statement boundary. Read from the unmasked source so string literals inside a
+// guard (`entry_protocol == "anthropic"`) stay visible.
+function blockGuardText(masked, source, openIndex) {
+  let i = openIndex - 1;
+  let depth = 0;
+  while (i >= 0) {
+    const ch = masked[i];
+    if (ch === ")" || ch === "]") depth += 1;
+    else if (ch === "(" || ch === "[") {
+      if (depth > 0) depth -= 1;
+    } else if (depth === 0 && (ch === ";" || ch === "}" || ch === "{")) break;
+    i -= 1;
+  }
+  return source.slice(i + 1, openIndex);
+}
+
+// The innermost function whose body encloses `index`, or null.
+function enclosingFunctionName(masked, blocks, functions, index) {
+  let best = null;
+  for (const fn of functions) {
+    if (fn.index >= index) break;
+    const open = masked.indexOf("{", fn.index);
+    if (open < 0 || open > index) continue;
+    const block = blocks.find((candidate) => candidate.open === open);
+    if (block === undefined) continue;
+    if (index > block.open && index < block.close) {
+      if (best === null || open > best.open) best = { name: fn.name, open };
     }
   }
-  return { inScope: false, ambiguous: false };
+  return best === null ? null : best.name;
+}
+
+// The anthropic lane must judge its client body with the typed is_sse() call,
+// never with the presence of a stream observation. Ownership is proven by any
+// one of three independent evidences, so a reverted or renamed lane must break
+// three unrelated things instead of one identifier:
+//   A. an in-scope `let <ident>[: <type>] = <expr>.client_body.is_sse();`
+//      binding — the identifier and an optional type annotation are free;
+//   B. the enclosing function name mentions anthropic;
+//   C. an enclosing block guard mentions the "anthropic" entry protocol.
+// Returns the evidence label, or null when the lane is not anthropic.
+function anthropicLaneEvidenceAt(masked, source, emitIndex, blocks, functions, bindingIndexes) {
+  for (const bindingIndex of bindingIndexes) {
+    if (bindingIndex > emitIndex) break;
+    const block = innermostBlockContaining(blocks, bindingIndex);
+    if (block !== null && emitIndex > block.open && emitIndex < block.close) {
+      return "in-scope client_body.is_sse() binding";
+    }
+  }
+  const functionName = enclosingFunctionName(masked, blocks, functions, emitIndex);
+  if (functionName !== null && /anthropic/iu.test(functionName)) {
+    return `enclosing function ${functionName} names the anthropic lane`;
+  }
+  for (const block of blocks) {
+    if (emitIndex > block.open && emitIndex < block.close) {
+      if (/"anthropic"/u.test(blockGuardText(masked, source, block.open))) {
+        return 'enclosing guard selects the "anthropic" entry protocol';
+      }
+    }
+  }
+  return null;
 }
 
 // Parse the argument list of one emitter call by paren balancing. Returns the
@@ -521,21 +565,25 @@ for (const relative of emitterSources) {
     failures.push(`${relative} has an unterminated comment or string literal`);
     continue;
   }
-  const { balanced } = braceBlocks(masked);
+  const { blocks, balanced } = braceBlocks(masked);
   if (!balanced) {
     failures.push(`${relative} has unbalanced braces; scope inference would be unreliable`);
     continue;
   }
-  let definitionsSkipped = 0;
-  let callSitesInspected = 0;
+  const functions = [];
+  for (const match of masked.matchAll(/\bfn\s+([A-Za-z_]\w*)/gu)) {
+    functions.push({ name: match[1], index: match.index });
+  }
+  const bindingIndexes = [];
+  for (const match of masked.matchAll(
+    /\blet\s+\w+\s*(:\s*[^;=]+)?\s*=\s*[^;]*\.client_body\s*\.\s*is_sse\s*\(\s*\)\s*;/gu,
+  )) {
+    bindingIndexes.push(match.index);
+  }
   const occurrence = new RegExp(`${emitterName}\\s*\\(`, "gu");
   for (const match of masked.matchAll(occurrence)) {
     const linePrefix = masked.slice(masked.lastIndexOf("\n", match.index) + 1, match.index);
-    if (/\bfn\s*$/u.test(linePrefix)) {
-      definitionsSkipped += 1;
-      continue;
-    }
-    callSitesInspected += 1;
+    if (/\bfn\s*$/u.test(linePrefix)) continue;
     const line = source.slice(0, match.index).split("\n").length;
     const parsed = parseEmitterCallArgs(masked, match.index);
     if (parsed.error !== null) {
@@ -551,31 +599,24 @@ for (const relative of emitterSources) {
       );
       continue;
     }
-    const { inScope, ambiguous } = anthropicBindingInScopeAt(masked, match.index);
-    if (ambiguous) {
-      failures.push(`${relative}:${line} cannot determine the emitter lane; refusing to pass`);
-      continue;
-    }
+    const evidence = anthropicLaneEvidenceAt(
+      masked,
+      source,
+      match.index,
+      blocks,
+      functions,
+      bindingIndexes,
+    );
     if (
-      inScope &&
+      evidence !== null &&
       includeUsage !== "!client_body_is_sse" &&
       includeUsage !== "!output.client_body.is_sse()" &&
       includeUsage !== "!relay_output.client_body.is_sse()"
     ) {
       failures.push(
-        `${relative}:${line} anthropic relay console emitter must judge the client response body (client_body.is_sse()), not the stream observation; got "${includeUsage}"`,
+        `${relative}:${line} anthropic relay console emitter must judge the client response body (client_body.is_sse()), not the stream observation (lane evidence: ${evidence}); got "${includeUsage}"`,
       );
     }
-  }
-  // Self-exporting consistency: every call-shaped occurrence of the emitter in
-  // code (comments and strings already blanked) must be accounted for as either
-  // a definition or an inspected call site. A `use` import of the function is
-  // not a call, so it must not trip this check.
-  const totalOccurrences = (masked.match(new RegExp(`${emitterName}\\s*\\(`, "g")) ?? []).length;
-  if (totalOccurrences !== definitionsSkipped + callSitesInspected) {
-    failures.push(
-      `${relative} emitter scan may be incomplete: found ${totalOccurrences} occurrences of ${emitterName}(, accounted for ${definitionsSkipped + callSitesInspected} (${definitionsSkipped} definitions skipped, ${callSitesInspected} call sites inspected)`,
-    );
   }
 }
 

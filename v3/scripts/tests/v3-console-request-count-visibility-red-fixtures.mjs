@@ -335,6 +335,101 @@ pub(crate) fn probe_new_lane(
     },
     diagnostic: /new_lane\.rs console emitter must pass the client response body stream judgment/u,
   },
+  {
+    // E1: reverting the fix wholesale — the pre-fix emit predicate together with
+    // the pre-fix unconditional finalizer — must never pass. This is exactly the
+    // state the product code was in before a23987f22, and it is the highest-risk
+    // escape because no identifier is renamed and nothing looks suspicious.
+    name: "anthropic lane fully reverted to the pre-fix shape",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source
+        .replace(
+          "        // include_usage answers \"is the client response body not a stream\". This\n        // lane populates stream_observation for both the JSON and the SSE\n        // closeout, so is_none() is not the client-body truth; the typed\n        // client_body.is_sse() is.\n        let client_body_is_sse = relay_output.client_body.is_sse();\n        let stream_console_finalizer = if client_body_is_sse {\n            match (\n                relay_output.stream_observation.clone(),\n                relay_output.observability.clone(),\n            ) {\n                (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {\n                    context: console_context.clone(),\n                    status: relay_output.status,\n                    node_trace: relay_output.node_trace.clone(),\n                    observability,\n                    stream_observation,\n                    started_at,\n                }),\n                _ => None,\n            }\n        } else {\n            None\n        };",
+          "        let stream_console_finalizer = match (\n            relay_output.stream_observation.clone(),\n            relay_output.observability.clone(),\n        ) {\n            (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {\n                context: console_context.clone(),\n                status: relay_output.status,\n                node_trace: relay_output.node_trace.clone(),\n                observability,\n                stream_observation,\n                started_at,\n            }),\n            _ => None,\n        };",
+        )
+        .replace(
+          "                started_at,\n                !client_body_is_sse,\n            );",
+          "                started_at,\n                relay_output.stream_observation.is_none(),\n            );",
+        ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // E2: a type annotation on the binding made the old exact-text anchor vanish,
+    // so the lane check was skipped entirely. Evidence must tolerate `: bool`.
+    name: "anthropic lane regresses behind a type-annotated binding",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source
+        .replace(
+          "        let client_body_is_sse = relay_output.client_body.is_sse();",
+          "        let client_body_is_sse: bool = relay_output.client_body.is_sse();",
+        )
+        .replace(
+          "                started_at,\n                !client_body_is_sse,\n            );",
+          "                started_at,\n                relay_output.stream_observation.is_none(),\n            );",
+        ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // E3: renaming the binding made the old exact-text anchor vanish too. Lane
+    // ownership must not depend on the binding identifier name.
+    name: "anthropic lane regresses behind a renamed binding",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source
+        .replace(
+          "        let client_body_is_sse = relay_output.client_body.is_sse();\n        let stream_console_finalizer = if client_body_is_sse {",
+          "        let client_body_streaming = relay_output.client_body.is_sse();\n        let stream_console_finalizer = if client_body_streaming {",
+        )
+        .replace(
+          "                started_at,\n                !client_body_is_sse,\n            );",
+          "                started_at,\n                relay_output.stream_observation.is_none(),\n            );",
+        ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // E4: the second anthropic emitter lives in endpoint_handlers.rs, inside a
+    // function whose name does not mention the lane and which also emits for
+    // openai_chat and gemini. Only the in-scope binding identifies it there, so
+    // the same regression must be caught on that file too.
+    name: "endpoint_handlers anthropic emitter regresses behind its binding",
+    path: "v3/crates/routecodex-v3-server/src/endpoint_handlers.rs",
+    mutate: (source) =>
+      source.replace(
+        "                        started_at,\n                        !client_body_is_sse,\n                    );",
+        "                        started_at,\n                        output.stream_observation.is_none(),\n                    );",
+      ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // E5: deleting the binding must not disable the lane check. Even with the
+    // in-scope binding gone, the enclosing `entry_protocol == "anthropic"` guard
+    // still proves the lane, so a regression that relies on the binding alone
+    // stays rejected by the fallback evidence.
+    name: "anthropic binding deleted but the entry-protocol guard still proves the lane",
+    path: "v3/crates/routecodex-v3-server/src/endpoint_handlers.rs",
+    mutate: (source) =>
+      source
+        .replace(
+          "            let client_body_is_sse = output.client_body.is_sse();\n",
+          "",
+        )
+        .replace(
+          "                        started_at,\n                        !client_body_is_sse,\n                    );",
+          "                        started_at,\n                        output.stream_observation.is_none(),\n                    );",
+        )
+        .replace(
+          "            let stream_console_finalizer = if client_body_is_sse {",
+          "            let stream_console_finalizer = if output.client_body.is_sse() {",
+        ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
 ];
 
 const failures = [];
