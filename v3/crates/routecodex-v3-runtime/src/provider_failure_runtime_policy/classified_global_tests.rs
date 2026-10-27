@@ -8,7 +8,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::V3ProviderRecoveryKind;
 
 #[test]
-fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure() {
+fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
     let mut manifest = global_pool_alive_manifest("global_status_policy_classified");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -27,8 +27,7 @@ fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure
     let recoverable_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let classified =
         classified_provider_error("V3ProviderRespInbound01Raw", "provider_http_error", 429);
-    // A 429 latches a bounded hold: the exact identity is unavailable during
-    // the ~1 minute window and auto-releases once the window passes.
+    // An early 429 is capacity backpressure, not a health exclusion.
     recoverable_health
         .record_provider_global_health_for_classified_error(
             &scope,
@@ -41,25 +40,25 @@ fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure
         )
         .expect("classified 429 failure should record");
     assert!(
-        !recoverable_health
+        recoverable_health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000)
             .available,
-        "a 429 must hold the exact identity during its window"
+        "early 429 must leave health routable"
     );
-    // Business success releases the hold immediately.
+    // Business success resets this unresolved episode.
     recoverable_health
         .store()
         .record_provider_key_success("first", "key1", "gpt-test", 10_001)
-        .expect("business success should release the 429 hold");
+        .expect("business success resets the early episode");
     assert!(
         recoverable_health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_001)
             .available,
-        "business success must release the 429 hold"
+        "business success preserves health availability"
     );
-    // A fresh 429 hold auto-releases once its window passes without a probe.
+    // A new episode requires another actual 429 across the full window.
     recoverable_health
         .record_provider_global_health_for_classified_error(
             &scope,
@@ -70,13 +69,13 @@ fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure
             &classified,
             20_000,
         )
-        .expect("second classified 429 failure should re-hold");
+        .expect("second classified 429 failure should record");
     assert!(
-        !recoverable_health
+        recoverable_health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_000)
             .available,
-        "a second 429 must re-hold the exact identity"
+        "a fresh early episode must remain health-neutral"
     );
     assert!(
         recoverable_health
@@ -89,7 +88,30 @@ fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure
                 20_000 + 60_001,
             )
             .available,
-        "a 429 hold must auto-release after its bounded window"
+        "time alone cannot upgrade the episode"
+    );
+    recoverable_health
+        .record_provider_global_health_for_classified_error(
+            &scope,
+            "first",
+            "default",
+            Some("key1"),
+            Some("gpt-test"),
+            &classified,
+            140_000,
+        )
+        .expect("new actual 429 across two minutes");
+    assert!(
+        !recoverable_health
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 140_000,)
+            .available
+    );
+    assert!(
+        recoverable_health
+            .store()
+            .availability_for_session(&scope, "first", Some("key2"), Some("gpt-test"), 140_000,)
+            .available
     );
 
     let unrecoverable_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -195,7 +217,7 @@ fn classified_provider_error(
 }
 
 #[test]
-fn recoverable_http_429_holds_the_exact_global_identity_until_release() {
+fn early_http_429_does_not_enter_global_cooldown() {
     let mut manifest = global_pool_alive_manifest("recoverable_http_429_global_threshold");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -216,8 +238,7 @@ fn recoverable_http_429_holds_the_exact_global_identity_until_release() {
         .scheduling_projection("first", "key1", "gpt-test", 100, 1, 0)
         .expect("initial health projection");
 
-    // HTTP 429 latches a bounded hold: the exact identity is held out of
-    // selection during the ~1 minute window and scheduled for recovery probing.
+    // Repeated actual429 responses inside the window stay health-neutral.
     for attempt in 0..6 {
         let now_ms = 10_000 + attempt as u64;
         health
@@ -241,9 +262,10 @@ fn recoverable_http_429_holds_the_exact_global_identity_until_release() {
             .store()
             .scheduling_projection("first", "key1", "gpt-test", 100, 1, now_ms)
             .expect("health projection");
+        let available = projection.available;
         assert!(
-            !projection.available,
-            "a 429 must hold the exact identity during its window; attempt={attempt}"
+            available,
+            "429 must not cool provider health; attempt={attempt}"
         );
     }
     assert!(
@@ -251,16 +273,16 @@ fn recoverable_http_429_holds_the_exact_global_identity_until_release() {
             .store()
             .provider_cooldown_probe_keys_due(u64::MAX)
             .expect("probe keys")
-            .contains(&("first".into(), Some("key1".into()), Some("gpt-test".into()))),
-        "a 429 hold must schedule a recovery probe for the held identity"
+            .is_empty(),
+        "an early429 must not create a health recovery probe"
     );
-    // The hold auto-releases once its bounded window passes even without a probe.
+    // The passage of time without a new provider response cannot cool health.
     let projection = health
         .store()
         .scheduling_projection("first", "key1", "gpt-test", 100, 1, 10_000 + 5 + 60_001)
         .expect("post-window projection");
     assert!(
         projection.available,
-        "a 429 hold must auto-release after its bounded window"
+        "an unchanged early episode remains routable"
     );
 }

@@ -310,6 +310,15 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         .expect("test server execution policy")
         .attempt_store
         .request_max_attempts = 1;
+    manifest
+        .servers
+        .get_mut("test")
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .residence_timeout_ms = 300;
     let request_execution_control =
         crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
             .expect("request execution control");
@@ -317,6 +326,14 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         .attempt_budget()
         .admit_transport_attempt()
         .expect("Direct attempt before Relay handoff");
+    let rejection = request_execution_control
+        .attempt_budget()
+        .admit_transport_attempt();
+    assert!(
+        matches!(&rejection, Err(V3AttemptStoreError::TransportAttemptsExhausted(message))
+        if message.contains("limit 1")),
+        "the original attempt ceiling applies before handoff: {rejection:?}"
+    );
     let transport = RecordingChatTransport {
         provider_ids: Mutex::new(Vec::new()),
     };
@@ -370,11 +387,11 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         1,
         "the handoff must retain the first attempt and reject the second"
     );
-    assert!(matches!(
-        request_execution_control.attempt_budget().admit_transport_attempt(),
-        Err(V3AttemptStoreError::LocalResourceExhausted(message))
-            if message.contains("limit 1")
-    ));
+    let rejection = request_execution_control
+        .attempt_budget()
+        .admit_transport_attempt();
+    assert!(matches!(&rejection, Err(V3AttemptStoreError::ResidenceDeadlineExceeded(_))),
+        "after pending reaches the original residence deadline it takes precedence over the exhausted attempt ceiling: {rejection:?}");
 }
 
 #[test]

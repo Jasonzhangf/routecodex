@@ -460,7 +460,20 @@ targets = [{{ kind = "provider_model", provider = "sse", model = "{WIRE_MODEL}",
 "#,
         server_execution = hub_v1_fixture::hub_v1_server_execution("sse"),
     );
-    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+    let mut manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    // The failed last identity remains protected while the original request
+    // waits. Declare this fixture's budget instead of relying on early close.
+    manifest
+        .servers
+        .get_mut("sse")
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .residence_timeout_ms = 3000;
+    manifest
 }
 
 fn http_client() -> reqwest::Client {
@@ -680,6 +693,7 @@ async fn gemini_sse_complete_attempt_buffering_and_late_error_public() {
 
     // 2. A typed late provider error after candidate 0 already terminated must
     // reach the typed Error chain before any client success commitment.
+    let late_error_started = std::time::Instant::now();
     match send_sse(&client, &endpoint, &streaming_request("late error control")).await {
         Ok((status, text)) => {
             eprintln!("EVIDENCE_gemini_SSE_LATE_ERROR_CLIENT={text}");
@@ -702,6 +716,10 @@ async fn gemini_sse_complete_attempt_buffering_and_late_error_public() {
             eprintln!("EVIDENCE_gemini_SSE_LATE_ERROR_CLIENT_TERMINATED={error}");
         }
     }
+    assert!(
+        late_error_started.elapsed() >= Duration::from_millis(2500),
+        "the failed last attempt cannot bypass its original recovery budget"
+    );
     for capture in capture_all(&mut captures).await {
         violations.extend(captured_violations(&capture));
     }

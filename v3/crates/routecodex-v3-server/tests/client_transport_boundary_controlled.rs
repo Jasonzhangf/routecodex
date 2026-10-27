@@ -71,10 +71,10 @@ async fn controlled_gated_openai_chat_upstream(
     if stream_requested && content == "fail-slow" {
         // A real provider terminal whose raw body must never reach the client.
         return Response::builder()
-            .status(StatusCode::TOO_MANY_REQUESTS)
+            .status(StatusCode::UNAUTHORIZED)
             .header("content-type", "application/json")
             .body(Body::from(
-                r#"{"error":{"type":"rate_limit_error","message":"raw provider secret detail"}}"#,
+                r#"{"error":{"type":"invalid_api_key","message":"raw provider secret detail"}}"#,
             ))
             .unwrap();
     }
@@ -160,6 +160,13 @@ async fn start_controlled_entry() -> ControlledEntry {
 }
 
 async fn start_controlled_entry_with_timeout(request_timeout_ms: Option<u64>) -> ControlledEntry {
+    start_controlled_entry_with_timeout_and_budget(request_timeout_ms, None).await
+}
+
+async fn start_controlled_entry_with_timeout_and_budget(
+    request_timeout_ms: Option<u64>,
+    residence_timeout_ms: Option<u64>,
+) -> ControlledEntry {
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_addr = upstream.local_addr().unwrap();
     let (captures_tx, captures_rx) = mpsc::unbounded_channel();
@@ -183,6 +190,16 @@ async fn start_controlled_entry_with_timeout(request_timeout_ms: Option<u64>) ->
             .unwrap();
     });
     let mut manifest = manifest(free_port(), upstream_addr.port());
+    if let Some(residence_timeout_ms) = residence_timeout_ms {
+        for server in manifest.servers.values_mut() {
+            server
+                .execution
+                .as_mut()
+                .unwrap()
+                .attempt_store
+                .residence_timeout_ms = residence_timeout_ms;
+        }
+    }
     if let Some(timeout_ms) = request_timeout_ms {
         manifest
             .providers
@@ -324,7 +341,10 @@ async fn chat_json_client_still_waits_for_the_runtime_outcome() {
 #[tokio::test]
 async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client() {
     let _guard = TEST_LOCK.lock().await;
-    let mut entry = start_controlled_entry().await;
+    // A failed last identity waits the original declared recovery budget. It
+    // does not end the client channel immediately after the provider error.
+    let mut entry = start_controlled_entry_with_timeout_and_budget(None, Some(1800)).await;
+    let started = std::time::Instant::now();
     let client = reqwest::Client::new();
 
     let response = tokio::time::timeout(
@@ -370,6 +390,10 @@ async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client()
     assert!(
         aborted,
         "a provider terminal must stay an explicit client transport failure, not a clean end"
+    );
+    assert!(
+        started.elapsed() >= Duration::from_millis(1500),
+        "provider failure must not shortcut the declared request recovery budget"
     );
     let received = String::from_utf8_lossy(&received).to_string();
     assert!(
@@ -558,7 +582,7 @@ async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_ter
         mut captures,
         release: _release,
         upstream_shutdown,
-    } = start_controlled_entry_with_timeout(Some(1200)).await;
+    } = start_controlled_entry_with_timeout_and_budget(Some(1200), Some(3000)).await;
     let client = reqwest::Client::new();
     let response = tokio::time::timeout(
         Duration::from_secs(5),
@@ -592,8 +616,8 @@ async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_ter
         .expect("exec preparation must never wait forever for an in-flight response");
     let elapsed = started.elapsed();
     assert!(
-        elapsed >= Duration::from_millis(700) && elapsed < Duration::from_secs(10),
-        "exec preparation must wait for the actual provider request deadline, waited {elapsed:?}"
+        elapsed >= Duration::from_millis(2500) && elapsed < Duration::from_secs(10),
+        "exec preparation must preserve the original recovery budget after the provider timeout, waited {elapsed:?}"
     );
 
     let mut received = Vec::new();

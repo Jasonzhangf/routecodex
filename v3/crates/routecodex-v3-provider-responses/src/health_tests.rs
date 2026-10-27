@@ -564,7 +564,7 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
             .available
     );
     store
-        .record_provider_key_success("provider-a", "key-a", "gpt-5.5", 103)
+        .record_provider_key_success("provider-a", "key-a", "other-model", 103)
         .unwrap();
     assert!(
         !store

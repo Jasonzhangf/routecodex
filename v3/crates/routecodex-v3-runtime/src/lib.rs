@@ -54,16 +54,18 @@ pub use kernel::{
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
     plan_v3_responses_protocol_execution_with_provider_health,
-    project_v3_protocol_execution_plan_failure, V3AnthropicDirectCodec, V3ChatDirectCodec,
-    V3DirectProtocolCodec, V3GeminiDirectCodec, V3ResponsesDirectRuntimeOutput,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesProtocolExecutionPlan,
-    V3ResponsesProtocolExecutionPlanFailure, V3ResponsesProtocolRelayHandoff,
+    plan_v3_responses_protocol_execution_with_recovery, project_v3_protocol_execution_plan_failure,
+    V3AnthropicDirectCodec, V3ChatDirectCodec, V3DirectProtocolCodec, V3GeminiDirectCodec,
+    V3ResponsesDirectRuntimeOutput, V3ResponsesDirectRuntimeSharedState,
+    V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure,
+    V3ResponsesProtocolRelayHandoff,
 };
 pub use nodes::*;
 pub use provider_action_gate::*;
 pub use provider_failure_runtime_policy::{
     build_v3_provider_global_probe_target, probe_v3_provider_global_target,
-    V3ProviderFailureRuntimeHealth, V3ProviderHealthProbeFailure, V3RelayErrorOperatorFault,
+    V3ProviderFailureRuntimeHealth, V3ProviderHealthObservationClock, V3ProviderHealthProbeFailure,
+    V3RelayErrorOperatorFault,
 };
 pub use route_policy::*;
 pub use routecodex_v3_provider_responses::V3ProviderHealthListenerScope;

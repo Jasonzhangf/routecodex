@@ -7,38 +7,168 @@ mod provider_probe_fairness_tests;
 
 #[derive(Debug)]
 enum V3ProbeCompletion {
+    Superseded,
     Recovered,
     ProviderFailed,
     CapacityUnavailable,
 }
 
+// A probe is an observation, never a business attempt. Keep its real HTTP
+// head separate from transport failures and classify through the same Error
+// operators before the health owner consumes the observation.
+fn classify_provider_probe_failure(
+    error: V3ProviderError,
+) -> Result<(Option<u16>, V3ProviderFailureAction), String> {
+    let http = match &error {
+        V3ProviderError::HttpStatus { response } => {
+            Some((response.status, response.provider_id.clone()))
+        }
+        V3ProviderError::UnexpectedContentType {
+            status,
+            provider_id,
+            ..
+        }
+        | V3ProviderError::ResponseBodyUnreadable {
+            status,
+            provider_id,
+            ..
+        } => Some((*status, provider_id.clone())),
+        _ => None,
+    };
+    let status = http.as_ref().map(|(status, _)| *status);
+    let source = if let Some((status, provider_id)) = http {
+        let code = crate::hooks::source_code_for_external_provider_error(&error);
+        let message = format!("{error:?}");
+        raise_v3_source_via_err01(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            code.clone(),
+            message.clone(),
+            V3Err01SourceInput::External(V3ExternalErrorLink {
+                kind: V3ExternalErrorKind::Provider,
+                status: Some(status),
+                code: Some(code),
+                provider_id: Some(provider_id),
+                upstream_request_id: None,
+                message: Some(message),
+            }),
+        )
+        .map(|(_, source)| source)
+    } else {
+        crate::hooks::build_v3_provider_error_source("V3ProviderResp14Raw", error)
+    }
+    .map_err(|error| format!("provider probe Error01 failed: {error:?}"))?;
+    let projection = serde_json::to_value(&source).map_err(|error| error.to_string())?;
+    let classified = classify_v3_provider_health_source_via_err02(projection, source)
+        .map_err(|error| format!("provider probe Error02 failed: {error:?}"))?;
+    eprintln!("provider health probe error chain: {classified:?}");
+    let action = apply_v3_internal_provider_failure_policy(
+        build_v3_provider_failure_action_from_v3_error_02(&classified),
+        "V3ProviderResp14Raw",
+        status.unwrap_or(502),
+        "provider_probe_failure",
+    );
+    Ok((status, action))
+}
+
+#[cfg(test)]
+mod probe_error_chain_tests {
+    use super::*;
+
+    #[test]
+    fn probe_without_http_head_cannot_supply_non429_recovery_observation() {
+        let (status, _) = classify_provider_probe_failure(V3ProviderError::Transport {
+            request_id: "probe-no-head".into(),
+            provider_id: "p".into(),
+            reason: "connection closed before response head".into(),
+        }).unwrap();
+        assert_eq!(status, None, "a transport classification is not an upstream HTTP status");
+    }
+
+    #[test]
+    fn probe_unreadable_error_body_retains_real429_head_in_error_chain() {
+        let (status, action) = classify_provider_probe_failure(V3ProviderError::ResponseBodyUnreadable {
+            request_id: "probe-unfinished-429".into(),
+            provider_id: "p".into(),
+            status: 429,
+            headers: Vec::new(),
+            reason: "body disconnected after real429 head".into(),
+        }).unwrap();
+        assert_eq!(status, Some(429));
+        assert_eq!(action.failure_fingerprint.unwrap().http_status, 429,
+            "a real error head cannot be rewritten as transport502 or a non429 recovery");
+    }
+}
+
 fn complete_v3_provider_health_probe(
     cancellation: &V3ProviderProbeCancellationGuard,
+    action_gate: &V3ProviderActionGate,
     result: Result<(), V3ProviderHealthProbeFailure>,
     now_ms: u64,
 ) -> Result<V3ProbeCompletion, String> {
     match result {
         Ok(()) => {
-            cancellation
+            let recovered = cancellation
                 .store
-                .complete_provider_cooldown_probe_success_with_permit(&cancellation.permit, now_ms)
+                .complete_provider_cooldown_probe_success_if_current_with_permit(
+                    &cancellation.permit,
+                    now_ms,
+                )
                 .map_err(|error| error.to_string())?;
-            Ok(V3ProbeCompletion::Recovered)
+            let permit = &cancellation.permit;
+            if let (Some(auth), Some(model)) = (permit.auth_alias(), permit.model_id()) {
+                if recovered {
+                    action_gate.record_provider_success(
+                        &V3ProviderActionProviderScope::rate_limit_identity(
+                            v3_relay_provider_candidate_key_parts(
+                                permit.provider_id(),
+                                Some(permit.interface_id()),
+                                Some(auth),
+                                Some(model),
+                            ),
+                        ),
+                    )?;
+                    return Ok(V3ProbeCompletion::Recovered);
+                }
+            }
+            // A real2xx can still be inside the committed quota minimum or
+            // superseded by a newer failure. It must not reopen admission.
+            Ok(V3ProbeCompletion::Superseded)
         }
         Err(V3ProviderHealthProbeFailure::ConcurrencyBusy) => {
             Ok(V3ProbeCompletion::CapacityUnavailable)
         }
         Err(error) => {
+            if let V3ProviderHealthProbeFailure::Provider(error) = error {
+                let (status, action) = classify_provider_probe_failure(error)?;
+                if let Some(status) = status {
+                    let disposition = cancellation
+                        .store
+                        .record_provider_rate_limit_probe_status_with_permit(
+                            &cancellation.permit,
+                            status,
+                            &action,
+                            now_ms,
+                        )?;
+                    if disposition == routecodex_v3_provider_responses::V3ProviderRateLimitProbeDisposition::Superseded {
+                        return Ok(V3ProbeCompletion::Superseded);
+                    }
+                }
+                cancellation
+                    .store
+                    .complete_provider_cooldown_probe_failure_with_permit(
+                        &cancellation.permit,
+                        now_ms,
+                    )
+                    .map_err(|error| error.to_string())?;
+                return Ok(V3ProbeCompletion::ProviderFailed);
+            }
             cancellation
                 .store
                 .complete_provider_cooldown_probe_failure_with_permit(&cancellation.permit, now_ms)
                 .map_err(|error| error.to_string())?;
             match error {
-                V3ProviderHealthProbeFailure::Provider(error) => {
-                    eprintln!("provider health probe failed: provider={} interface={} auth_alias={:?} model={:?} error={error}",
-                        cancellation.permit.provider_id(), cancellation.permit.interface_id(), cancellation.permit.auth_alias(), cancellation.permit.model_id());
-                    Ok(V3ProbeCompletion::ProviderFailed)
-                }
+                V3ProviderHealthProbeFailure::Provider(_) => unreachable!(),
                 V3ProviderHealthProbeFailure::Internal(error) => Err(error),
                 V3ProviderHealthProbeFailure::ConcurrencyBusy => unreachable!(),
             }
@@ -127,10 +257,17 @@ impl V3ProviderFailureRuntimeHealth {
                             Ok(now_ms) => now_ms,
                             Err(error) => { eprintln!("provider probe clock failed: {error}"); continue; }
                         };
+                        let now_ms = health.observation_now_ms(now_ms);
                         let mut keys = match health.store.provider_cooldown_probe_keys_with_interface(now_ms, startup) {
                             Ok(keys) => keys,
                             Err(error) => { eprintln!("provider probe scheduling failed: {error}"); continue; }
                         };
+                        match health.precool_probe_keys() {
+                            Ok(observations) => keys.extend(observations),
+                            Err(error) => eprintln!("provider observation scheduling failed: {error}"),
+                        }
+                        keys.sort();
+                        keys.dedup();
                         startup = false;
                         if let Some(last) = &last_considered {
                             let next = keys.partition_point(|key| key <= last);
@@ -142,6 +279,19 @@ impl V3ProviderFailureRuntimeHealth {
                             // capacity leaves this cursor at the last considered key.
                             last_considered = Some(key.clone());
                             let (provider_id, interface_id, auth_alias, model_id) = key;
+                            let identity = precool_identity(&provider_id, &interface_id, auth_alias.as_deref(), model_id.as_deref());
+                            let observing = match health.precool.lock() {
+                                Ok(actions) => actions.contains_key(&identity),
+                                Err(error) => { eprintln!("provider observation state failed: {error}"); continue; }
+                            };
+                            if observing {
+                                match health.managed_precool_probe(&manifest, identity, slot) {
+                                    Ok(Some(probe)) => pending.push(probe),
+                                    Ok(None) => {},
+                                    Err(error) => eprintln!("provider observation acquisition failed: {error}"),
+                                }
+                                continue;
+                            }
                             match health.store.acquire_provider_cooldown_probe_for_interface(
                                 &provider_id, &interface_id, auth_alias.as_deref(), model_id.as_deref(),
                             ) {
@@ -184,11 +334,12 @@ impl V3ProviderFailureRuntimeHealth {
                     }
                 }
             });
+        let health = self.clone();
         Box::pin(async move {
             let _slot = slot;
             let (cancellation, result) = execution.await;
-            let now_ms = v3_relay_provider_policy_now_epoch_ms()?;
-            complete_v3_provider_health_probe(&cancellation, result, now_ms)
+            let now_ms = health.observation_now_ms(v3_relay_provider_policy_now_epoch_ms()?);
+            complete_v3_provider_health_probe(&cancellation, &health.action_gate, result, now_ms)
         })
     }
 

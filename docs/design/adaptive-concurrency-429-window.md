@@ -5,6 +5,11 @@
 把 `provider.concurrency.maxInFlight` 从"静态预算"改为"静态硬上限（默认 40）"，
 动态预算由过去一小时 429 观测样本平滑得出。
 
+44cc3af 组合修订：动态预算、429 样本和探测状态按完整
+`provider/interface/model/key` 隔离。`providerId:authAlias` 只保留共享硬上限。
+一个模型的 429 不得降低其他模型或接口的容量。下述水位指该完整身份自己的
+在途数量，包含被拒绝请求自己的凭证，不包含兄弟身份的在途请求。
+
 用户需求原文：
 1. 429 时看当时 inflight 有多少并发，作为基准进行调节
 2. 用过去一个小时的 429 的 inflight 做平滑
@@ -32,11 +37,18 @@ Config: provider.concurrency.maxInFlight (默认 8)
 ```
 Config: provider.concurrency.maxInFlight (默认 40)  = 硬上限 hard_max
 Target.initial_concurrency_budget = hard_max        = 初始预算（也是恢复上限）
-   └─> V3AdaptiveConcurrencyController (每 providerId:authAlias 一份 state)
+   └─> V3AdaptiveConcurrencyController (同一 Mutex 内每 providerId:authAlias + interface/model 一份动态 state)
          state = { budget, hard_max, in_flight, saturated, probe_in_flight,
                    next_probe_at_ms,
                    rate_limit_samples: VecDeque<(epoch_ms, in_flight_at_429)> }   ← 新增
+        shared_in_flight = 同一 providerId:authAlias 所有身份的 in_flight 之和
+        admission = shared_in_flight < hard_max AND identity.in_flight < identity.budget
 ```
+
+完整身份来自已选 Target 或其类型化传输目标，由容量凭证和传输请求携带并核对。
+禁止从业务 body.model、URL、日志或 opaque metadata 重建身份。
+原始 transport consumer 可显式使用 `with_identity_scope`；未声明身份的旧 API
+只使用独立 unscoped 桶，其预算不参与具名模型的准入。共享硬上限仍适用于两者。
 
 ### 429 采样
 
@@ -46,7 +58,7 @@ Target.initial_concurrency_budget = hard_max        = 初始预算（也是恢�
 samples.push_back((now_ms, state.in_flight))   // 当时的并发水位
 ```
 
-`state.in_flight` 此时包含本次 429 请求自己的 lease（permit guard 在 429 分支里最后才 drop），
+`state.in_flight` 是该接口和模型的在途数量，此时包含本次 429 请求自己的 lease（permit guard 在 429 分支里最后才 drop），
 所以样本值就是"触发限流时的实际并发"。
 
 ### 一小时滑动窗口 + 平滑
@@ -73,7 +85,7 @@ samples.push_back((now_ms, state.in_flight))   // 当时的并发水位
 - `observe_rate_limit`：采样 + 剪窗后，`budget = min(budget_current, smoothed)`，
   并置 `saturated = true`、`next_probe_at_ms = now + 10min`。
   取 min 保证 429 只会收紧，不会因为窗口里旧样本较大反而放宽。
-- `observe_business_success`：`budget = min(budget + 1, hard_max)`，清 saturated / next_probe。
+- `observe_business_success_scoped`：由已有的真实业务完成记录者执行 `budget = min(budget + 1, hard_max)`，清本身份 saturated / next_probe；HTTP 响应头不触发业务恢复。
   成功仍然一次 +1 渐进恢复，只受静态硬上限约束；一小时内无 429 就一路回到 hard_max。
 - `complete_probe(Accepted)`：同 success 语义（`min(budget+1, hard_max)`）。
 - `complete_probe(RateLimited)`：同 observe_rate_limit 语义（采样 + `min(budget, smoothed)`）。
@@ -89,43 +101,15 @@ samples.push_back((now_ms, state.in_flight))   // 当时的并发水位
 | 429 当次 `budget <= smoothed` | 一小时内出现 429 后，本次下调不超过平滑上限（只收紧，不放宽） |
 | 采样值 = 429 时刻 inflight | 记录在 permit 释放之前 |
 | 窗口严格 1 小时 | 超窗样本必须剪除，保证"过去一小时"语义 |
-| 采样与剪窗只影响本身份 | `providerId:authAlias` 隔离，不触及其他 key |
+| 采样与剪窗只影响本身份 | `providerId:authAlias:interfaceId:modelId` 隔离，不触及其他模型、接口或 key |
+| 共享容量不放大 | 所有具名和 unscoped 桶的在途总和不超过同一 providerId:authAlias 的配置硬上限 |
 
 ## 数据流 DAG
 
-```mermaid
-flowchart TD
-  subgraph Config
-    C1["provider.concurrency.maxInFlight<br/>默认 40 = hard_max"]
-  end
-
-  subgraph Target
-    T1["Target.initial_concurrency_budget<br/>= hard_max"]
-  end
-
-  subgraph "Controller (per providerId:authAlias)"
-    S["state<br/>budget / hard_max / in_flight<br/>rate_limit_samples VecDeque"]
-    ACQ["try_acquire_business<br/>in_flight < budget && < hard_max"]
-    O429["observe_rate_limit(now)<br/>1 采样 (now, in_flight)<br/>2 剪 >1h 样本<br/>3 budget = min(budget, smoothed)"]
-    OOK["observe_business_success<br/>budget = min(budget+1, hard_max)<br/>（不受 smoothed 封顶）"]
-    PROBE["complete_probe<br/>Accepted -> 同 OOK<br/>RateLimited -> 同 O429"]
-    SMOOTH["smoothed_budget<br/>空->hard_max / 单->s-1 / 多->median-1<br/>clamp [1, hard_max]"]
-  end
-
-  subgraph Transport
-    TR["transport.send / send_probe<br/>ensure_initial_budget + 占用 lease"]
-    E429["provider 返回 429<br/>is_rate_limited"]
-    E2XX["provider 返回业务 2xx"]
-  end
-
-  C1 --> T1 --> TR
-  TR --> ACQ --> S
-  E429 --> O429 --> SMOOTH --> S
-  E2XX --> OOK --> S
-  PROBE -->|RateLimited| SMOOTH
-  PROBE -->|Accepted| OOK
-  S --> ACQ
-```
+完整的单入口、单出口容量凭证流程统一见
+[44cc3af 组合 DAG](v3-recovery-wait-44cc3af.md#pr489-combination-exact-dynamic-identity-and-shared-hard-ceiling)。
+共享硬上限、精确身份采样、取消释放和匹配成功恢复都由该图覆盖。
+重试属于原 Runtime 状态机的新一轮执行，不在静态 DAG 中增加回边。
 
 ## 改动清单（唯一 owner）
 
@@ -153,10 +137,15 @@ flowchart TD
 4. 默认 40：不配置 concurrency 时 target 预算 = 40。
 5. 预算永不超 hard_max、永不小于 1。
 6. 不同 provider:key 样本互不影响。
+7. 同一 provider:key 的兄弟模型和接口不受另一身份 429 收缩影响；它们合计仍不超过共享硬上限。
+8. 取消或身份不匹配恰好释放原凭证一次，并唤醒同一共享容量的等待者。
 
 公共入口黑盒：
-- 通过真实 `ReqwestResponsesTransport::send` 访问受控上游，让两个并发请求同时被 429 拒绝，
-  断言过程共享控制器 `budget` 落到观测水位（2）以下即 1、样本数 2、`saturated` 为真，
+- 通过真实 `ReqwestResponsesTransport::send` 访问受控上游，让同一完整身份的两个并发请求同时被 429 拒绝，
+  通过显式身份 snapshot 断言其 `budget` 落到观测水位（2）以下即 1、样本数 2、`saturated` 为真，
   且静态 `maxInFlight`（8）只是 `hard_max_in_flight`。见
   `v3/crates/routecodex-v3-provider-responses/tests/general_provider.rs` 的
   `upstream_429_collapses_adaptive_budget_below_the_refused_watermark`。
+- Direct 与 Relay 公开入口同时断言真实业务 429 留下动态样本，以及兄弟模型的 8 个配置槽仍并行可用。
+  匹配业务成功后重试闸立即解除，学习预算按既定规则从 1 恢复为 2；持住两个 A 响应时，
+  另两个请求须立即走健康 B，不能靠提前完成的额外成功掩盖动态上限或让其他请求排队。

@@ -21,10 +21,10 @@ struct DirectTransportFailureWithoutResponse {
 const HANDOFF_DIRECT_PROVIDER: &str = "first_handoff_busy_r5";
 const HANDOFF_RELAY_PROVIDER: &str = "chat_handoff_busy_r5";
 
-fn mixed_protocol_capacity_handoff_manifest(
-    routing_group: &str,
-) -> V3Config05ManifestPublished {
+fn mixed_protocol_capacity_handoff_manifest(routing_group: &str) -> V3Config05ManifestPublished {
     let mut manifest = mixed_protocol_reselection_manifest();
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 2000;
     let mut direct = manifest
         .providers
         .remove("first")
@@ -43,6 +43,15 @@ fn mixed_protocol_capacity_handoff_manifest(
     manifest
         .providers
         .insert(HANDOFF_RELAY_PROVIDER.to_string(), relay);
+    for provider_id in [HANDOFF_DIRECT_PROVIDER, HANDOFF_RELAY_PROVIDER] {
+        manifest.providers.get_mut(provider_id).unwrap().concurrency = Some(
+            routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
+                max_in_flight: 1,
+                acquire_timeout_ms: 200,
+                stale_lease_ms: 10_000,
+            },
+        );
+    }
     for target in &mut manifest
         .forwarders
         .get_mut("mixed")
@@ -56,6 +65,23 @@ fn mixed_protocol_capacity_handoff_manifest(
         }
     }
     scoped_test_manifest(manifest, routing_group)
+}
+
+fn saturate_handoff_capacity(provider_key: &str) -> Vec<V3AdaptiveConcurrencyLease> {
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    let scope = routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+        interface_id: "default".into(),
+        model_id: "test".into(),
+    };
+    controller.ensure_initial_budget(provider_key, 1).unwrap();
+    let held = controller.try_acquire_business_scoped(provider_key, Some(&scope))
+        .expect("one real scoped business lease fills the declared maxInFlight=1");
+    let snapshot = controller.snapshot_for_scope(provider_key, Some(&scope)).unwrap();
+    assert_eq!(snapshot.hard_max_in_flight, 1);
+    assert_eq!(snapshot.in_flight, 1);
+    assert_eq!(snapshot.rate_limit_samples, 0, "capacity fixture does not invent a429");
+    assert!(controller.try_acquire_business_scoped(provider_key, Some(&scope)).is_none());
+    vec![held]
 }
 
 #[async_trait]
@@ -172,16 +198,16 @@ async fn direct_busy_cross_protocol_handoff(
     let handoff = output
         .protocol_relay_handoff
         .expect("Direct busy admission must hand off the Chat candidate");
-    assert_eq!(
-        handoff.target.candidate.provider_id,
-        HANDOFF_RELAY_PROVIDER
-    );
+    assert_eq!(handoff.target.candidate.provider_id, HANDOFF_RELAY_PROVIDER);
     assert!(
         handoff
-            .request_local_excluded_candidates
+            .request_local_busy_candidates
             .contains(&format!("{HANDOFF_DIRECT_PROVIDER}:default:key:test")),
-        "busy A must cross the typed handoff: {handoff:?}"
+        "temporary busy A must cross the typed handoff in its classified resource: {handoff:?}"
     );
+    assert!(!handoff.request_local_excluded_candidates
+        .contains(&format!("{HANDOFF_DIRECT_PROVIDER}:default:key:test")),
+        "temporary capacity cannot become a permanent request-shape exclusion");
     handoff
 }
 
@@ -201,26 +227,25 @@ async fn exhaust_handoff_at_relay(
     };
     let expanded = handoff.expanded;
     let excluded = handoff.request_local_excluded_candidates;
-    let output =
-        crate::execute_v3_responses_relay_runtime_with_default_transport_health(
-            manifest,
-            crate::V3ResponsesRelayRuntimeInput {
-                server_id: "test".to_string(),
-                failure_session_scope: test_failure_session_scope(routing_group),
-                request_id: request_id.to_string(),
-                payload: json!({"model": "client-model", "input": "hello"}),
-            },
-            relay_health,
-            crate::V3ResponsesRelayProviderSnapshotCapture::new(true, true),
-            None,
-            None,
-            selected_target,
-            Some(expanded),
-            excluded,
-            relay_seeds,
-        )
-        .await
-        .expect("Relay handoff exhaustion must return typed runtime output");
+    let output = crate::execute_v3_responses_relay_runtime_with_default_transport_health(
+        manifest,
+        crate::V3ResponsesRelayRuntimeInput {
+            server_id: "test".to_string(),
+            failure_session_scope: test_failure_session_scope(routing_group),
+            request_id: request_id.to_string(),
+            payload: json!({"model": "client-model", "input": "hello"}),
+        },
+        relay_health,
+        crate::V3ResponsesRelayProviderSnapshotCapture::new(true, true),
+        None,
+        None,
+        selected_target,
+        Some(expanded),
+        excluded,
+        relay_seeds,
+    )
+    .await
+    .expect("Relay handoff exhaustion must return typed runtime output");
     output
 }
 
@@ -233,10 +258,10 @@ async fn direct_to_relay_handoff_preserves_capacity_busy_exhaustion_source() {
     let relay_health =
         crate::V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
 
-    let held_first = saturate_capacity_key(&first_capacity_key);
+    let held_first = saturate_handoff_capacity(&first_capacity_key);
     let handoff =
         direct_busy_cross_protocol_handoff(&manifest, routing_group, "req-handoff-busy-r5").await;
-    let held_second = saturate_capacity_key(&second_capacity_key);
+    let held_second = saturate_handoff_capacity(&second_capacity_key);
     let output = exhaust_handoff_at_relay(
         &manifest,
         handoff,
@@ -283,7 +308,7 @@ async fn direct_to_relay_handoff_preserves_capacity_busy_exhaustion_source() {
     assert_eq!(observability.entry_protocol, "responses");
     assert_eq!(observability.execution_mode, "relay");
 
-    let held_first = saturate_capacity_key(&first_capacity_key);
+    let held_first = saturate_handoff_capacity(&first_capacity_key);
     let mut handoff =
         direct_busy_cross_protocol_handoff(&manifest, routing_group, "req-handoff-mixed-r5").await;
     let relay_busy_key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
@@ -390,7 +415,8 @@ async fn direct_generic_provider_http_400_reselects_untried_sibling_model() {
 #[tokio::test]
 async fn direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_wait() {
     let routing_group = "direct_provider_compat_terminal";
-    let manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
+    let mut manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap().attempt_store.residence_timeout_ms = 300;
     let raw = V3Server03HttpRequestRaw {
         request_purpose: V3RequestPurpose::Conversation,
         port: Some(7777),
@@ -416,24 +442,33 @@ async fn direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_w
     assert_eq!(plan.decision.target.candidate.provider_id, "first");
     assert_eq!(plan.decision.target.candidate.model_id, "test");
 
-    let output = execute_v3_responses_direct_runtime_kernel_core(
+    let execution = execute_v3_responses_direct_runtime_kernel_core(
         V3ResponsesDirectRuntimeCoreState::new().with_initial_plan(&plan),
         &manifest,
         raw,
         crate::register_responses_direct_hooks(),
         &transport,
-    )
-    .await;
+    );
+    tokio::pin!(execution);
+    assert!(tokio::time::timeout(Duration::from_millis(50), &mut execution).await.is_err(),
+        "last HTTP400 remains pending inside its original residence budget");
+    assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
+    assert_eq!(V3AdaptiveConcurrencyController::process_shared()
+        .snapshot("first:key").unwrap().total_provider_in_flight, 0,
+        "pending request releases its failed business lease");
+    let output = tokio::time::timeout(Duration::from_secs(3), execution).await
+        .expect("original residence ends only this request");
 
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
         1,
         "generic provider HTTP 400 must not retry the same candidate: {output:?}"
     );
-    assert!(
-        output.node_trace.contains(&"V3Error06ClientProjected"),
-        "generic provider HTTP 400 exhaustion must project terminal: {output:?}"
-    );
+    assert_eq!(output.observability.as_ref().and_then(|value| value.attempts), Some(1),
+        "exhaustion must preserve its completed provider attempt: {output:?}");
+    assert!(matches!(output.terminal_disposition, Some(V3ProviderTerminalDisposition::ExternalHttp(ref witness))
+        if witness.status() == 400 && String::from_utf8_lossy(witness.body()).contains("prompt is too long")),
+        "original provider400 stays in the typed terminal witness, not the client wire: {output:?}");
     assert!(
         output.error_chain.is_some(),
         "generic provider HTTP 400 exhaustion must retain its internal error: {output:?}"
@@ -441,6 +476,7 @@ async fn direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_w
     let observation = output
         .observability
         .expect("generic provider failure must publish observability");
+    assert!(observation.timing.is_some(), "exhaustion must finish the original Runtime timing");
     let failure = observation
         .provider_failure_events
         .first()
@@ -448,7 +484,7 @@ async fn direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_w
     assert_eq!(failure.error_type.as_deref(), Some("provider_http_400"));
     assert_eq!(failure.health_state, "last_candidate_terminal");
     assert_eq!(failure.failure_count, 0);
-    assert_eq!(failure.wait_ms, None);
+    assert_eq!(failure.wait_ms, Some(0), "the failure event records the immediate re-evaluation; the original request budget owns subsequent waiting");
     assert!(
         !observation
             .unavailable_candidates
@@ -460,7 +496,9 @@ async fn direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_w
 #[tokio::test]
 async fn direct_transport_failure_without_response_keeps_last_candidate_health_neutral() {
     let routing_group = "direct_transport_last_candidate";
-    let manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
+    let mut manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 300;
     let raw = V3Server03HttpRequestRaw {
         request_purpose: V3RequestPurpose::Conversation,
         port: Some(7777),
@@ -524,6 +562,7 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
     };
     let routing_group = "cross_protocol_reselection";
     let manifest = scoped_test_manifest(mixed_protocol_reselection_manifest(), routing_group);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let raw = V3Server03HttpRequestRaw {
         request_purpose: V3RequestPurpose::Conversation,
         port: Some(7777),
@@ -536,10 +575,11 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
         path: "/v1/responses".to_string(),
         body: json!({"model":"client-model","input":"hello"}),
     };
+    let continuation_request = raw.clone();
     let plan = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
         raw.clone(),
-        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        health.clone(),
         0,
     )
     .expect("protocol plan");
@@ -553,7 +593,9 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
     assert!(!plan.protocol_candidate_keys.contains("chat:key:test"));
 
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::new().with_initial_plan(&plan),
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(health.clone())
+            .with_initial_plan(&plan),
         &manifest,
         raw,
         crate::register_responses_direct_hooks(),
@@ -589,12 +631,17 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
         .candidates
         .iter()
         .any(|candidate| candidate.provider_id == "chat"));
-    assert!(
-        handoff
-            .request_local_excluded_candidates
-            .contains("first:default:key:test"),
-        "Relay must inherit the request-local Direct failure exclusion"
-    );
+    let continued = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        continuation_request,
+        health,
+        0,
+    ).expect("the shared typed health owner must survive protocol handoff");
+    assert_eq!(continued.decision.target.candidate.provider_id, "chat",
+        "pending failure must remain excluded when Relay selects from the same captured identities");
+    assert_eq!(handoff.provider_failure_events.len(), 1);
+    assert_eq!(handoff.provider_failure_events[0].health_state, "pre_cool_observation",
+        "recoverable exclusion stays in the exact health owner instead of becoming a permanent request-shape exclusion");
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
         1,

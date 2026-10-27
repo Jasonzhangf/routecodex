@@ -107,7 +107,8 @@ async fn bug_705d624_real_http_429_never_reaches_the_client() {
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
 
-    // The provider pool is exhausted, so both client lanes observe a transport break.
+    // The declared recovery budget expires while all candidates keep returning 429,
+    // so both client lanes eventually observe a transport break after waiting.
     // The real upstream 429 stays in the typed Error chain: the client never receives
     // the provider status, a provider header, or a provider error body.
     assert_no_front_http_headers(ports.exhausted, false).await;
@@ -332,7 +333,9 @@ async fn assert_front_sse_transport_break(port: u16) {
         "streaming no-response must frame the break as an incomplete chunked body: {text:?}"
     );
     assert!(
-        text.contains(":\n\n") && !text.contains("provider") && !text.contains("transport break"),
+        (text.contains(":\n\n") || text.contains(": keepalive\n\n"))
+            && !text.contains("provider")
+            && !text.contains("transport break"),
         "streaming no-response must flush neutral SSE framing without control facts: {text:?}"
     );
     assert!(
@@ -1194,7 +1197,11 @@ targets = [{{ kind = "forwarder", id = "h2_exhausted", priority = 1 }}]
             hub_v1_declaration = hub_v1_test_declaration(),
             success_execution = hub_v1_server_execution("h2_success"),
             reselect_execution = hub_v1_server_execution("h2_reselect"),
-            exhausted_execution = hub_v1_server_execution("h2_exhausted"),
+            // This fixture tests terminal transport privacy, including permanent
+            // 429. Declare a finite recovery budget rather than relying on the
+            // retired immediate-exhaustion behavior. Six seconds permits the
+            // declared five-second cross-provider action gate to reach B once.
+            exhausted_execution = format!("{}\n[servers.h2_exhausted.execution.attempt_store]\nresidence_timeout_ms = 6000\n", hub_v1_server_execution("h2_exhausted")),
         ),
     )
     .unwrap();

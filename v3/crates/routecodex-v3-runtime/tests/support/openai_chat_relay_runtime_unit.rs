@@ -451,7 +451,9 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
     async fn execution_control_payload_architecture_openai_chat_relay_handoff_does_not_reset_attempt_budget(
     ) {
         std::env::set_var("ROUTECODEX_V3_TEST_KEY", "test-secret");
-        let manifest = test_relay_manifest();
+        let mut manifest = test_relay_manifest();
+        manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+            .attempt_store.residence_timeout_ms = 300;
         let request_execution_control =
             crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
                 .expect("request execution control");
@@ -459,6 +461,9 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             .attempt_budget()
             .admit_transport_attempt()
             .expect("Direct attempt before Relay handoff");
+        assert!(matches!(request_execution_control.attempt_budget().admit_transport_attempt(),
+            Err(crate::execution_control::V3AttemptStoreError::TransportAttemptsExhausted(message))
+                if message.contains("limit 1")));
         let transport = ExecutionControlRejectingTransport {
             sends: std::sync::atomic::AtomicUsize::new(0),
         };
@@ -496,9 +501,9 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             .await
             .protocol_relay_handoff
             .expect("cross-protocol Direct producer returns the full handoff");
-        handoff.request_execution_control = request_execution_control;
+        handoff.request_execution_control = request_execution_control.clone();
 
-        let error = execute_v3_openai_chat_relay_runtime_inner(
+        let execution = execute_v3_openai_chat_relay_runtime_inner(
             &manifest,
             V3OpenAiChatRelayRuntimeInput {
                 server_id: "test".to_string(),
@@ -515,8 +520,12 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             V3RelayProviderFailureRetryPolicy::default(),
             V3HubExecutionMode::Relay,
             Some(handoff),
-        )
-        .await
+        );
+        tokio::pin!(execution);
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(50), &mut execution).await.is_err(),
+            "exhausted shared budget must stay pending inside the original residence");
+        let error = tokio::time::timeout(std::time::Duration::from_secs(3), execution)
+        .await.expect("the original short test residence must end this request")
         .expect_err("Relay must reject the next transport attempt from the shared budget");
 
         assert!(
@@ -527,5 +536,8 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             transport.sends.load(std::sync::atomic::Ordering::Acquire),
             0
         );
+        assert_eq!(request_execution_control.transport_attempts(), 1);
+        assert!(matches!(request_execution_control.attempt_budget().admit_transport_attempt(),
+            Err(crate::execution_control::V3AttemptStoreError::ResidenceDeadlineExceeded(_))));
     }
 }

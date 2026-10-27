@@ -41,47 +41,17 @@ const copied = [
 ];
 const cases = [
   {
-    name: "conversation conflict is removed",
+    name: "session business mutex is reintroduced",
     path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
     mutate: (source) =>
-      source.replace(
-        "                    || same_present_identity(&active.conversation_id, &scope.conversation_id))",
-        ")",
-      ),
-    diagnostic: /Waiting contention must match either the explicit session or explicit conversation/u,
+      `${source}\nstruct V3ResponsesSessionAdmissionGate;\n`,
+    diagnostic: /must not regain a session\/conversation business mutex/u,
   },
   {
-    name: "permit releases every active request",
+    name: "successful EOF releases activity before front flush",
     path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
-    mutate: (source) => source.replace(".remove(&token);", ".clear();"),
-    diagnostic: /Permit drop must remove only its exact token and wake every predicate waiter/u,
-  },
-  {
-    name: "server caller regains nonblocking admission",
-    path: "v3/crates/routecodex-v3-server/src/lib.rs",
-    mutate: (source) =>
-      source.replace(
-        ".admit(V3ResponsesSessionAdmissionScope {",
-        ".try_admit(V3ResponsesSessionAdmissionScope {",
-      ),
-    diagnostic: /caller must await the gate owner instead of projecting overlap|must not convert admission contention into request_in_flight/u,
-  },
-  {
-    name: "permit release wakes only one unrelated waiter",
-    path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
-    mutate: (source) =>
-      source.replace("self.notify.notify_waiters();", "self.notify.notify_one();"),
-    diagnostic: /wake every predicate waiter/u,
-  },
-  {
-    name: "admission waiter is not registered before predicate check",
-    path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
-    mutate: (source) =>
-      source.replace(
-        "            notified.as_mut().enable();\n            match self.try_admit(scope.clone())? {",
-        "            match self.try_admit(scope.clone())? {",
-      ),
-    diagnostic: /lost-wakeup-safe notification ordering/u,
+    mutate: (source) => source.replace("front.hold_activity_until_flush(permit);", "drop(permit);"),
+    diagnostic: /Request-local activity must retain body and front-flush custody/u,
   },
   {
     name: "exec drain waiter is not registered before the quiescence check",
@@ -109,16 +79,6 @@ const cases = [
     mutate: (source) =>
       source.replaceAll("        run: npm --prefix v3 run verify:ci\n", ""),
     diagnostic: /CI must dispatch the canonical V3 verification stack/u,
-  },
-  {
-    name: "function map claims a fake inherent Drop symbol",
-    path: "docs/architecture/v3-function-map.yml",
-    mutate: (source) =>
-      source.replace(
-        "<V3ResponsesSessionAdmissionPermit as Drop>::drop",
-        "V3ResponsesSessionAdmissionPermit::drop",
-      ),
-    diagnostic: /real Drop trait implementation symbol|nonexistent inherent permit drop/u,
   },
   {
     name: "keepalive edge hides its typed config read",
@@ -161,14 +121,14 @@ const cases = [
     diagnostic: /server-owned feature/u,
   },
   {
-    name: "same-scope wait-then-200 HTTP blackbox is removed",
+    name: "same-scope independent HTTP blackbox is removed",
     path: "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
     mutate: (source) =>
       source.replace(
-        "async fn responses_same_listener_same_session_waits_for_release_then_returns_ok()",
-        "async fn removed_same_scope_wait_then_ok_blackbox()",
+        "async fn responses_same_listener_same_session_admits_independent_requests()",
+        "async fn removed_same_scope_independence_blackbox()",
       ),
-    diagnostic: /wait-then-200 blackbox must exist/u,
+    diagnostic: /same-session independence blackbox must exist/u,
   },
   {
     name: "different-scope concurrency HTTP blackbox is removed",
@@ -181,14 +141,14 @@ const cases = [
     diagnostic: /different-scope concurrency blackbox must exist/u,
   },
   {
-    name: "behavior gate omits the same-scope wait-then-200 blackbox",
+    name: "behavior gate omits the same-scope independent blackbox",
     path: "v3/package.json",
     mutate: (source) =>
       source.replace(
-        " && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_same_listener_same_session_waits_for_release_then_returns_ok -- --exact --nocapture",
+        " && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_same_listener_same_session_admits_independent_requests -- --exact --nocapture",
         "",
       ),
-    diagnostic: /must execute the same-scope wait-then-200 blackbox/u,
+    diagnostic: /must execute the same-scope independence blackbox/u,
   },
   {
     name: "behavior gate omits the different-scope concurrency blackbox",
@@ -215,7 +175,7 @@ const cases = [
     path: "docs/architecture/wiki/v3-responses-session-admission.md",
     mutate: (source) =>
       source.replace(
-        "does not return an overlap error to the client",
+        "Matching session, conversation or both never creates a business mutex",
         "returns HTTP 409 request_in_flight to the client",
       ),
     diagnostic: /must not retain the retired HTTP 409 overlap path/u,
