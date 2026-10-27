@@ -1,9 +1,11 @@
 include!("../../tests/support/kernel_unit.rs");
 
-#[tokio::test]
-async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
+async fn assert_first_byte_timeout_excludes_same_provider_siblings(
+    source_stage: &'static str,
+    code: &'static str,
+) {
     use crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth;
-    use routecodex_v3_error::{V3Error05ExecutionAction, V3_TRANSIENT_TRANSPORT_HANG_CODE};
+    use routecodex_v3_error::V3Error05ExecutionAction;
 
     let manifest = provider_concurrency_two_key_then_other_provider_manifest(
         "hang_sibling_a",
@@ -44,22 +46,22 @@ async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
     let availability = health.session_bound_availability(&scope);
     let source = crate::shared::direct_external_error(
         V3ErrorSourceKind::ProviderFailure,
-        "V3Transport13ResponsesHttpRequest",
-        V3_TRANSIENT_TRANSPORT_HANG_CODE,
-        "provider did not return response headers within configured SSE first-frame timeout",
+        source_stage,
+        code,
+        "provider did not produce a first byte within the configured first-frame timeout",
         V3ExternalErrorLink {
             kind: V3ExternalErrorKind::Provider,
             status: None,
-            code: Some(V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string()),
+            code: Some(code.to_string()),
             provider_id: Some("hang_sibling_a".to_string()),
             upstream_request_id: None,
             message: Some(
-                "provider did not return response headers within configured SSE first-frame timeout"
+                "provider did not produce a first byte within the configured first-frame timeout"
                     .to_string(),
             ),
         },
     )
-    .expect("typed transport hang source");
+    .expect("typed first-byte timeout source");
     let mut failed_candidates = BTreeSet::new();
     let mut retries = std::collections::BTreeMap::new();
     let mut trace = Vec::new();
@@ -82,7 +84,7 @@ async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
         },
     )
     .await
-    .expect("transport hang policy");
+    .expect("first-byte timeout policy");
     let matches_reselect = matches!(
         result.decision.action,
         V3Error05ExecutionAction::WaitThenReselect { .. }
@@ -90,18 +92,18 @@ async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
     );
     if !matches_reselect {
         panic!(
-            "transport hang must reselect away from the failed provider: {:?}",
-            result.decision.action
+            "{code} must reselect away from the failed provider: {:?}",
+            result.decision.action,
         );
     }
     let retry_key = result
         .event
         .as_ref()
         .and_then(|event| event.next_provider_key.clone())
-        .expect("transport hang must publish the concrete next candidate");
+        .expect("first-byte timeout must publish the concrete next candidate");
     assert_eq!(
         retry_key, other_provider_key,
-        "a first-frame transport hang must skip the same provider's sibling auth key"
+        "{code} must skip the same provider's sibling auth key"
     );
     assert!(
         failed_candidates.contains(&selected_key),
@@ -115,6 +117,24 @@ async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
         !failed_candidates.contains(&other_provider_key),
         "another provider stays eligible for this request"
     );
+}
+
+#[tokio::test]
+async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
+    assert_first_byte_timeout_excludes_same_provider_siblings(
+        "V3Transport13ResponsesHttpRequest",
+        routecodex_v3_error::V3_TRANSIENT_TRANSPORT_HANG_CODE,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn sse_first_event_timeout_excludes_same_provider_sibling_keys_for_the_request() {
+    assert_first_byte_timeout_excludes_same_provider_siblings(
+        "V3ProviderResp14Raw",
+        "provider_response_sse_first_event_timeout",
+    )
+    .await;
 }
 
 #[tokio::test]
