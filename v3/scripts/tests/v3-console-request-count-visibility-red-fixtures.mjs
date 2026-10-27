@@ -187,11 +187,22 @@ const cases = [
     path: "v3/crates/routecodex-v3-server/src/executors.rs",
     mutate: (source) =>
       source.replace(
-        "                relay_output.stream_observation.is_none(),\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+        "                !client_body_is_sse,\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
         "                true,\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
       ),
     diagnostic:
-      /streaming console emitter must pass stream_observation\.is_none\(\) as include_usage/u,
+      /streaming console emitter must pass the client response body stream judgment/u,
+  },
+  {
+    name: "anthropic relay emitter regresses to stream_observation presence (the JSON closeout regression)",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source.replace(
+        "                !client_body_is_sse,\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+        "                relay_output.stream_observation.is_none(),\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+      ),
+    diagnostic:
+      /streaming console emitter must pass the client response body stream judgment/u,
   },
 ];
 

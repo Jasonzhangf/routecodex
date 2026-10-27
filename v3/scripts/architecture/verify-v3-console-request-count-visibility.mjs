@@ -245,8 +245,11 @@ for (const [source, collection, label] of [
 }
 
 // Source anchor: every console emitter that can front a streaming relay lane
-// must gate the success commit on the absent stream observation, so the commit
-// moves to the stream terminal instead of running before the first SSE byte.
+// must gate the success commit on whether the client response body is a stream,
+// so the commit moves to the stream terminal instead of running before the first
+// SSE byte. Lanes whose stream_observation is absent only for a JSON closeout
+// use stream_observation.is_none(); the Anthropic lane populates it for both
+// closeouts, so its emitters must judge the typed client_body.is_sse().
 for (const source of [
   readRequired("v3/crates/routecodex-v3-server/src/executors.rs"),
   readRequired("v3/crates/routecodex-v3-server/src/endpoint_handlers.rs"),
@@ -256,13 +259,26 @@ for (const source of [
     const includeUsage = (match[1].split("\n").filter((line) => line.trim()).pop() ?? "")
       .trim()
       .replace(/,$/u, "");
-    if (
-      includeUsage !== "output.stream_observation.is_none()" &&
-      includeUsage !== "relay_output.stream_observation.is_none()" &&
-      includeUsage !== "!is_sse"
-    ) {
+    // The Anthropic relay emitter is the one whose response capture follows the
+    // emit; only that lane may (and must) judge client_body.is_sse(), because
+    // its stream_observation is Some for the JSON closeout too.
+    const after = source.slice(match.index + match[0].length);
+    const capture = after.match(/from_(anthropic|openai_chat|gemini)_relay\(/u);
+    const isAnthropic = capture?.[1] === "anthropic";
+    const valid = isAnthropic
+      ? [
+          "!client_body_is_sse",
+          "!output.client_body.is_sse()",
+          "!relay_output.client_body.is_sse()",
+        ]
+      : [
+          "output.stream_observation.is_none()",
+          "relay_output.stream_observation.is_none()",
+          "!is_sse",
+        ];
+    if (!valid.includes(includeUsage)) {
       failures.push(
-        `streaming console emitter must pass stream_observation.is_none() as include_usage, got "${includeUsage}"`,
+        `streaming console emitter must pass the client response body stream judgment (client_body.is_sse() on the Anthropic lane, stream_observation.is_none() elsewhere) as include_usage, got "${includeUsage}"`,
       );
     }
   }

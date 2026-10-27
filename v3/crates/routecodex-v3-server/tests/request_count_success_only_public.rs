@@ -250,6 +250,24 @@ async fn wait_for_total(file: &Path, expected: u64) -> Value {
     }
 }
 
+/// The persisted WebUI/observability store the live-mock matrix correlates to:
+/// a `request.completed` row in this file is the delivered success terminal.
+fn request_records_path(home: &Path, port: u16) -> PathBuf {
+    home.join(".rcc")
+        .join("logs")
+        .join(format!("server-v3-{port}.request-records.jsonl"))
+}
+
+fn read_request_record_rows(path: &Path) -> Vec<Value> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter_map(|line| line.get("row").cloned())
+        .collect()
+}
+
 async fn spawn_server(upstream_port: u16) -> (V3ServerAggregateHandle, String) {
     let handle = spawn_v3_server_aggregate(manifest(test_ports::free_port(), upstream_port))
         .await
@@ -522,6 +540,109 @@ async fn request_count_success_only_public_blackbox() {
     assert_eq!(after_restart["version"], json!(2));
 
     assert!(restarted.shutdown().await.is_empty());
+    let _ = shutdown_tx.send(());
+    std::env::remove_var(PROVIDER_KEY_ENV);
+}
+
+/// An Anthropic relay lane answers JSON as well as SSE. Both closeouts carry a
+/// runtime stream observation, so the success count and the delivered
+/// `request.completed` terminal must follow the client body shape, not the
+/// presence of that observation. A JSON closeout that stays uncounted is
+/// invisible to the SSE-only test and was a real regression: the live-mock
+/// matrix correlates a case through this terminal row.
+#[tokio::test]
+async fn request_count_anthropic_relay_json_counts_and_writes_completed_terminal() {
+    let counter_environment = CounterEnvironment::new();
+    std::env::set_var(PROVIDER_KEY_ENV, "fixture-key");
+    let counter_file = counter_environment.counter_file();
+    let home = counter_environment.directory.clone();
+
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        axum::serve(
+            upstream,
+            Router::new().route("/v1/chat/completions", post(upstream_chat)),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .unwrap();
+    });
+
+    let handle = spawn_v3_server_aggregate(manifest(test_ports::free_port(), upstream_addr.port()))
+        .await
+        .unwrap();
+    let port = handle.listeners[0].addr.port();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+
+    let response = client
+        .post(format!("{base}/v1/messages"))
+        .json(&json!({
+            "model": "count-client",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "hello"}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        200,
+        "a non-stream Anthropic relay success must complete: {response:?}"
+    );
+    let body = response.text().await.unwrap();
+    assert!(
+        body.contains("\"type\":\"message\"") || body.contains("\"content\""),
+        "a non-stream Anthropic response must carry the projected message: {body}"
+    );
+
+    // The count commits exactly once for a non-stream success.
+    let after_success = wait_for_total(&counter_file, 1).await;
+    assert_eq!(after_success["windowCount"], json!(1));
+    assert_eq!(after_success["sequence"], json!(1));
+    assert_eq!(after_success["version"], json!(2));
+
+    // The same success must also publish its delivered terminal row, because the
+    // live-mock matrix correlates a relay case through `request.completed`. A
+    // count without the terminal would count a response the reviewer cannot see
+    // as delivered.
+    let records_path = request_records_path(&home, port);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let rows = loop {
+        let rows = read_request_record_rows(&records_path);
+        if rows
+            .iter()
+            .any(|row| row["event_type"] == "request.completed")
+            || tokio::time::Instant::now() >= deadline
+        {
+            break rows;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    let completed_rows: Vec<&Value> = rows
+        .iter()
+        .filter(|row| row["event_type"] == "request.completed")
+        .collect();
+    assert_eq!(
+        completed_rows.len(),
+        1,
+        "a non-stream Anthropic relay success must write exactly one request.completed terminal: {rows:#?}"
+    );
+    assert_eq!(completed_rows[0]["result"], "success", "{rows:#?}");
+    assert!(
+        !rows.iter().any(|row| row["event_type"] == "request.failed"),
+        "a delivered non-stream success must not also write a failed terminal: {rows:#?}"
+    );
+
+    assert!(handle.shutdown().await.is_empty());
     let _ = shutdown_tx.send(());
     std::env::remove_var(PROVIDER_KEY_ENV);
 }
