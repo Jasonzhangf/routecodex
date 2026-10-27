@@ -864,6 +864,10 @@ targets = [
     }
 }
 
+fn is_direct_first_byte_timeout_code(code: &str) -> bool {
+    code == V3_TRANSIENT_TRANSPORT_HANG_CODE || code == "provider_response_sse_first_event_timeout"
+}
+
 pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
     context: &V3DirectProviderFailurePolicyContext<'_, R>,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
@@ -919,8 +923,8 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             ))
         }
     };
-    let provider_transport_hang = source.code == V3_TRANSIENT_TRANSPORT_HANG_CODE;
-    let request_local_excluded = if provider_transport_hang {
+    let provider_first_byte_hang = is_direct_first_byte_timeout_code(&source.code);
+    let request_local_excluded = if provider_first_byte_hang {
         let mut excluded = BTreeSet::from([failed_key.clone()]);
         if let Some(candidates) = expanded_candidates {
             excluded.extend(
@@ -1022,7 +1026,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             .as_ref()
             .map(|alternative| candidate_key(&alternative.candidate));
     }
-    if provider_transport_hang {
+    if provider_first_byte_hang {
         state
             .failed_candidates
             .extend(request_local_excluded.iter().cloned());
