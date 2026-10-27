@@ -232,6 +232,17 @@ const cases = [
     diagnostic:
       /console emitter must pass the client response body stream judgment/u,
   },
+  {
+    // The scan itself is the guard's weak point: an emit call written in a shape
+    // the pattern cannot match (here a closing paren without a semicolon) leaves
+    // an occurrence uncounted. The consistency assertion turns that silent gap
+    // into an explicit failure instead of letting the emitter escape inspection.
+    name: "emitter call shape escapes the scan (live_snapshot.rs)",
+    path: "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
+    mutate: (source) =>
+      `${source}\n#[allow(dead_code)]\nfn probe_unscannable_emit(\n    console_context: &V3ConsoleEmissionContext,\n    observability: &V3RuntimeObservability,\n    started_at: std::time::Instant,\n) {\n    emit_v3_observability_console_lines(\n        console_context,\n        200,\n        &[],\n        observability,\n        started_at,\n        observability.stream_observation.is_none()\n    )\n}\n`,
+    diagnostic: /emitter scan may be incomplete/u,
+  },
 ];
 
 const failures = [];

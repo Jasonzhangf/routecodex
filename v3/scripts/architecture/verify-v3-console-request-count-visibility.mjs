@@ -279,11 +279,15 @@ for (const relative of emitterSources) {
   // The body of the definition also contains `);`-terminated calls, so the
   // definition itself must be skipped explicitly or it captures its own body.
   const pattern = /emit_v3_observability_console_lines\(([\s\S]*?)\n\s*\);/gu;
+  let definitionsSkipped = 0;
+  let callSitesInspected = 0;
   for (const match of source.matchAll(pattern)) {
     const linePrefix = source.slice(source.lastIndexOf("\n", match.index) + 1, match.index);
     if (/\bfn\s*$/u.test(linePrefix)) {
+      definitionsSkipped += 1;
       continue;
     }
+    callSitesInspected += 1;
     const includeUsage = (match[1].split("\n").filter((line) => line.trim()).pop() ?? "")
       .trim()
       .replace(/,$/u, "");
@@ -308,6 +312,18 @@ for (const relative of emitterSources) {
         `${relative} anthropic relay console emitter must judge the client response body (client_body.is_sse()), not the stream observation; got "${includeUsage}"`,
       );
     }
+  }
+  // Self-exporting consistency: every textual occurrence of the emitter name
+  // must be accounted for as either a definition (fn prefix) or a call site the
+  // pattern inspected. A call written in a shape the pattern cannot match (for
+  // example a closing `)` followed by a line break instead of `);`) would leave
+  // an occurrence uncounted, so the mismatch fails loudly instead of silently
+  // letting the emitter escape the allowlist check.
+  const totalOccurrences = source.split("emit_v3_observability_console_lines(").length - 1;
+  if (totalOccurrences !== definitionsSkipped + callSitesInspected) {
+    failures.push(
+      `${relative} emitter scan may be incomplete: found ${totalOccurrences} occurrences of emit_v3_observability_console_lines(, accounted for ${definitionsSkipped + callSitesInspected} (${definitionsSkipped} definitions skipped, ${callSitesInspected} call sites inspected)`,
+    );
   }
 }
 
