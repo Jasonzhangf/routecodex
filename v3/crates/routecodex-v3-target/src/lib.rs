@@ -1,9 +1,8 @@
 use routecodex_v3_config::{
-    internal::is_v3_builtin_catalog_model, V3Config05ManifestPublished,
-    V3ForwarderTargetManifest, V3ProviderManifest, V3ProviderModelManifest,
-    V3ProviderRequestCleanupAuthoringConfig, V3ReasoningEffort, V3ResponsesTransportKind,
-    V3RouteGroupManifest, V3RoutePoolManifest, V3RoutePoolTargetManifest, V3RouteTargetKind,
-    V3SelectionStrategy, V3WebSearchExecutionMode,
+    internal::is_v3_builtin_catalog_model, V3Config05ManifestPublished, V3ForwarderTargetManifest,
+    V3ProviderManifest, V3ProviderModelManifest, V3ProviderRequestCleanupAuthoringConfig,
+    V3ReasoningEffort, V3ResponsesTransportKind, V3RouteGroupManifest, V3RoutePoolManifest,
+    V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy, V3WebSearchExecutionMode,
 };
 use routecodex_v3_provider_responses::{V3ProviderAvailabilityReader, V3ProviderSchedulingReader};
 use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTargetHitOnce};
@@ -406,12 +405,7 @@ impl V3TargetInterpreter {
             .target_plan
             .iter()
             .filter(|entry| entry.session_sticky)
-            .filter_map(|entry| {
-                group
-                    .pools
-                    .get(&entry.pool_id)
-                    .map(|pool| (entry, pool))
-            })
+            .filter_map(|entry| group.pools.get(&entry.pool_id).map(|pool| (entry, pool)))
         {
             let mut visited = BTreeSet::new();
             for target in &pool.targets {
