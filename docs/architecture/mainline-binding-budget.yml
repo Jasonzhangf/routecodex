@@ -227,12 +227,12 @@ chains:
       Transport remains protocol-neutral and may not own business termination,
       continuation, tool, or servertool semantics.
   - chain_id: stage_a.p0_rust_migration.mainline
-    expected_total_edges: 6
-    min_anchored_edges: 6
+    expected_total_edges: 5
+    min_anchored_edges: 5
     max_partial_edges: 0
     max_binding_pending_edges: 0
     note: >
       Stage A P0 Rust migration owner-boundary chain is fully anchored to the
-      Rust/native owners for servertool outcome planning, Anthropic conversion,
-      Responses continuation storage, Responses/OpenAI conversion, and
-      request/response Chat Process tool governance.
+      Rust/native owners for Anthropic conversion, Responses continuation
+      storage, Responses/OpenAI conversion, and request/response Chat Process
+      tool governance.

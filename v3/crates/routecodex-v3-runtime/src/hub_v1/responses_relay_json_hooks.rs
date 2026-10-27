@@ -89,7 +89,7 @@ pub(crate) fn run_json_response_hooks_with_invocation_source(
     // payload first. Two later stages can synthesize Responses-shaped
     // `output[].reasoning.summary[].text` that the provider never sent: the
     // Chat -> Responses conversion below maps `reasoning_content` into summary
-    // text, and `govern` can synthesize RCC reasoning/toolreason summary
+    // text, and `govern` can synthesize RCC reasoning summary
     // content. Neither may suppress the bounded refill decision.
     let has_source_summary =
         super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
@@ -113,7 +113,6 @@ pub(crate) fn run_json_response_hooks_with_invocation_source(
         input.request_id,
         input.retain_response_cipher,
         input.tool_thinking_enabled,
-        input.expected_model_id,
         input.tool_thinking_turn_context,
     );
     let response_hook_profile = response_hook_profile
@@ -223,18 +222,10 @@ pub(crate) fn responses_relay_response_hook_profile(
     request_id: &str,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
-    expected_model_id: &str,
     tool_thinking_turn_context: &V3ToolThinkingTurnContext,
 ) -> V3HubRelayResponseHookProfile {
-    let toolreason_client_projection =
-        v3_toolreason_client_projection_enabled_for_server(manifest, server_id);
-    let profile = V3HubRelayResponseHookProfile::empty()
+    V3HubRelayResponseHookProfile::empty()
         .with_retain_response_cipher(retain_response_cipher)
         .with_tool_thinking_enabled(tool_thinking_enabled)
         .with_tool_thinking_turn_context(tool_thinking_turn_context)
-        .with_toolreason_expected_model_id(expected_model_id)
-        .with_toolreason_client_projection(toolreason_client_projection);
-    let profile = profile.with_toolreason_observation_request_id(request_id);
-    let profile = profile.with_toolreason_observation_session_id(session_id);
-    profile
 }

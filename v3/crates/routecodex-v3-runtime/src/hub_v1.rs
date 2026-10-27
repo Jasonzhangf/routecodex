@@ -1,8 +1,7 @@
 mod common;
 pub(crate) use common::{
-    v3_feature_enabled_for_server, v3_tool_thinking_enabled_for_server,
-    v3_toolreason_client_projection_enabled_for_server, V3HubOpaquePayload, V3HubResponsePayload,
-    V3HubResponseToolCall,
+    v3_feature_enabled_for_server, v3_tool_thinking_enabled_for_server, V3HubOpaquePayload,
+    V3HubResponsePayload, V3HubResponseToolCall,
 };
 pub use common::{
     V3HubEntryProtocol, V3HubInvocationSource, V3HubRelayToolKind, V3HubRequestSemanticProtocol,

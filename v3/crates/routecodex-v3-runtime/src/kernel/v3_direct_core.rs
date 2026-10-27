@@ -1061,11 +1061,6 @@ where
                 C::policy_target(&policy),
                 namespace_identities,
                 tool_thinking_enabled,
-                crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
-                    manifest,
-                    C::server_id(&standardized),
-                ),
-                direct_failure_session_scope.session_id(),
                 C::tool_thinking_turn_context(&standardized).clone(),
                 custom_tool_function_binding.clone(),
             ) {
@@ -1273,14 +1268,7 @@ where
                         .clone(),
                     crate::hooks::register_responses_direct_hooks().direct_sse_typed_hooks(),
                     tool_thinking_enabled,
-                    crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
-                        manifest,
-                        C::server_id(&standardized),
-                    ),
-                    Some(direct_failure_session_scope.session_id().to_owned()),
                     Some(C::request_id(&standardized).to_owned()),
-                    Some(C::policy_target(&policy).candidate.model_id.clone()),
-                    true,
                     direct_namespace_tool_identities,
                 );
                 let response_hooks = crate::hooks::register_responses_direct_hooks();

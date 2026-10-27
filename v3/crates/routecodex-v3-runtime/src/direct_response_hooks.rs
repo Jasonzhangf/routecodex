@@ -239,8 +239,6 @@ pub struct V3DirectResponseCompatContext {
     pub model_capabilities: Vec<String>,
     pub compatibility_profile: Option<String>,
     pub tool_thinking_enabled: bool,
-    pub toolreason_client_projection: bool,
-    pub toolreason_observation_session_id: Option<String>,
     pub tool_thinking_turn_context: V3ToolThinkingTurnContext,
     pub custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
     /// Request-local declared tool identity inverse (provider wire name ->

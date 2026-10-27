@@ -340,11 +340,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/server/runtime/http-server/servertool-admin-state.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/server/runtime/http-server/stats-manager.ts",
       "textContains": ""
     },
@@ -366,16 +361,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "src/server/runtime/http-server/executor/retry-payload-snapshot.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/server/runtime/http-server/executor/servertool-followup-metadata.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/server/runtime/http-server/executor/servertool-runtime-log.ts",
       "textContains": ""
     },
     {
@@ -626,11 +611,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "sharedmodule/llmswitch-core/src/shared/common-utils.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts",
       "textContains": ""
     },
     {
@@ -1265,11 +1245,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-parsers.ts",
       "textContains": ""
     },
@@ -1301,11 +1276,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-rcc-fence-semantics.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.ts",
       "textContains": ""
     },
     {

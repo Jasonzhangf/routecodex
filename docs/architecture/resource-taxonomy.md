@@ -164,14 +164,6 @@ Client-visible stream frames after semantic response projection.
 - Canonical writer: SSE projection/transport owners.
 - Forbidden: schema judgment, continuation save/restore, provider response repair.
 
-### `servertool.followup_state`
-
-Servertool hook state and client-visible CLI projection state.
-
-- Identity: Chat Process lifecycle, request scope, flow ID.
-- Canonical writer: servertool Chat Process owners.
-- Forbidden: provider runtime, SSE transport, handler post-projection repair.
-
 ## Resource Operation Rules
 
 - Every resource operation must bind to a `feature_id`.

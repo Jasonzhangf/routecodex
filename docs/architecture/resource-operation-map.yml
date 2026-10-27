@@ -459,7 +459,6 @@ resources:
   allowed_readers:
   - HubRespOutbound04ClientSemantic
   - continuation.scope_state
-  - servertool.followup_state
   allowed_writers:
   - HubRespInbound02Parsed
   - HubRespChatProcess03Governed
@@ -501,7 +500,6 @@ resources:
   - HubReqChatProcess03Governed
   - VrRoute04SelectedTarget
   - provider_runtime.observation
-  - servertool.followup_state
   allowed_writers:
   - MetaReq04RuntimeControlBound
   forbidden_writers:
@@ -1543,279 +1541,6 @@ resources:
   may_enter_provider_body: false
   may_enter_client_body: false
   required_gates: []
-- resource_id: servertool.followup_state
-  resource_kind: side_channel
-  lifecycle: v3.servertool_center.skeleton
-  identity:
-  - requestId
-  - flowId
-  - toolName
-  owner_feature_id: v3.servertool_center_skeleton
-  owner_node: HubRespChatProcess03Governed
-  allowed_readers:
-  - HubReqChatProcess03Governed
-  - continuation.scope_state
-  allowed_writers:
-  - HubRespChatProcess03Governed
-  - HubReqChatProcess03Governed
-  forbidden_writers:
-  - provider.wire_payload
-  - sse.transport_frame
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates:
-  - npm run verify:servertool-rust-only
-- resource_id: servertool.engine_selection_plan
-  resource_kind: side_channel
-  lifecycle: servertool.engine_contract.mainline
-  identity:
-  - requestId
-  - flowId
-  - selectionPhase
-  - primaryAutoHookSet
-  owner_feature_id: hub.servertool_engine_selection
-  owner_node: ServertoolEngineSelectionPlan
-  allowed_readers:
-  - ServertoolEngineActionPlan
-  - ServertoolExecutionContractPlan
-  allowed_writers:
-  - EngineSelectionStartPlan
-  - EngineSelectionAfterRunPlan
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - ServerRespOutbound05ClientFrame
-  - sse.transport_frame
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates:
-  - npm run verify:servertool-rust-only
-- resource_id: servertool.engine_action_plan
-  resource_kind: side_channel
-  lifecycle: servertool.engine_contract.mainline
-  identity:
-  - requestId
-  - flowId
-  - actionKind
-  - triggerKind
-  owner_feature_id: hub.servertool_engine_runtime_action_contract
-  owner_node: ServertoolEngineRuntimeActionPlan
-  allowed_readers:
-  - ServertoolExecutionContractPlan
-  - ServertoolResponseStageRuntimeActionPlan
-  allowed_writers:
-  - ServertoolEnginePreflightPlan
-  - ServertoolEngineRuntimeActionPlan
-  - ServertoolEnginePrepassActionPlan
-  - ServertoolEngineSkipPlan
-  - ServertoolEntryPreflightPlan
-  - ServertoolResponseStageRuntimeActionPlan
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - sse.transport_frame
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates:
-  - npm run verify:servertool-rust-only
-- resource_id: servertool.auto_hook_execution_plan
-  resource_kind: side_channel
-  lifecycle: servertool.engine_contract.mainline
-  identity:
-  - requestId
-  - flowId
-  - hookId
-  - attemptIndex
-  owner_feature_id: hub.servertool_auto_hook_execution
-  owner_node: AutoHookRuntimeAttemptPlan
-  allowed_readers:
-  - ServertoolEngineSelectionPlan
-  - ServertoolExecutionContractPlan
-  allowed_writers:
-  - AutoHookRuntimeAttemptPlan
-  - AutoHookCallerFinalizationPlan
-  - AutoHookTraceEventPlan
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - sse.transport_frame
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates:
-  - npm run verify:servertool-rust-only
-- resource_id: servertool.execution_contract_plan
-  resource_kind: side_channel
-  lifecycle: servertool.engine_contract.mainline
-  identity:
-  - requestId
-  - flowId
-  - toolName
-  - executionStep
-  owner_feature_id: hub.servertool_execution_branch_contract
-  owner_node: ServertoolExecutionContractPlan
-  allowed_readers:
-  - ServertoolExecutionLoopEffectPlan
-  - ServertoolExecutionOutcomeRuntimeActionPlan
-  - servertool.followup_state
-  allowed_writers:
-  - ServertoolExecutionBranchPlan
-  - ServertoolDispatchErrorPlan
-  - ServertoolHandlerMaterializationPlan
-  - ServertoolExecutionLoopEffectPlan
-  - ServertoolExecutionLoopRuntimeActionPlan
-  - ServertoolExecutionOutcomeRuntimeActionPlan
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - sse.transport_frame
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates:
-  - npm run verify:servertool-rust-only
-- resource_id: servertool.execution_state
-  resource_kind: side_channel
-  lifecycle: servertool.engine_contract.mainline
-  identity:
-  - requestId
-  - flowId
-  - executedRecordIndex
-  owner_feature_id: hub.servertool_execution_state_contract
-  owner_node: ServertoolExecutionLoopStateValue
-  allowed_readers:
-  - ServertoolExecutionLoopEffectPlan
-  - ServertoolExecutionOutcomeRuntimeActionPlan
-  allowed_writers:
-  - ServertoolExecutionLoopStateValue
-  - ServertoolAppendExecutedRecordInput
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - sse.transport_frame
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates:
-  - npm run verify:servertool-rust-only
-- resource_id: servertool.registry_projection
-  resource_kind: side_channel
-  lifecycle: servertool.engine_contract.mainline
-  identity:
-  - requestId
-  - flowId
-  - toolName
-  - registrySource
-  owner_feature_id: hub.servertool_registry_contract
-  owner_node: ServertoolRegistryProjectionPlan
-  allowed_readers:
-  - ServertoolEngineSelectionPlan
-  - ServertoolExecutionBranchPlan
-  - ServertoolCliProjection01Planned
-  allowed_writers:
-  - ServertoolRegistryLookupActionPlan
-  - ServertoolRegistryAutoHookDescriptorPlan
-  - ServertoolRegistryProjectionPlan
-  - ServertoolRegistrySourceProjectionPlan
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - sse.transport_frame
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates:
-  - npm run verify:servertool-rust-only
-- resource_id: servertool.cli_projection_plan
-  resource_kind: normal_payload
-  lifecycle: servertool.engine_contract.mainline
-  identity:
-  - requestId
-  - flowId
-  - publicToolAlias
-  - projectionKind
-  owner_feature_id: hub.servertool_cli_projection
-  owner_node: ServertoolCliProjection01Planned
-  allowed_readers:
-  - ServerRespOutbound05ClientFrame
-  allowed_writers:
-  - ServertoolCliProjection01Planned
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - route.selection
-  - metadata.request_truth
-  may_enter_provider_body: false
-  may_enter_client_body: true
-  required_gates:
-  - npm run verify:servertool-rust-only
-- resource_id: servertool.flow_presentation
-  resource_kind: diagnostic
-  lifecycle: servertool.engine_contract.mainline
-  identity:
-  - flowId
-  - progressStage
-  - toolName
-  owner_feature_id: hub.servertool_flow_presentation
-  owner_node: ServertoolProgressPresentationDecision
-  allowed_readers:
-  - ServertoolCliProjection01Planned
-  - debug.artifact
-  allowed_writers:
-  - ServertoolProgressPresentationDecision
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - route.selection
-  may_enter_provider_body: false
-  may_enter_client_body: true
-  required_gates:
-  - npm run verify:servertool-rust-only
-- resource_id: servertool.hook_closeout_contract
-  resource_kind: side_channel
-  lifecycle: servertool.engine_contract.mainline
-  identity:
-  - hookName
-  - hookPhase
-  - closeoutGate
-  owner_feature_id: hub.servertool_rust_only_closeout
-  owner_node: ServertoolHookSkeletonContract
-  allowed_readers:
-  - ServertoolHookSchedulerInput
-  - ServertoolHookEffectPlan
-  allowed_writers:
-  - ServertoolHookSpec
-  - ServertoolHookProjection
-  - ServertoolHookEffectPlan
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - sse.transport_frame
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates:
-  - npm run verify:servertool-rust-only
-- resource_id: servertool.orchestration_policy
-  resource_kind: side_channel
-  lifecycle: servertool.engine_contract.mainline
-  identity:
-  - requestId
-  - flowId
-  - policyKind
-  owner_feature_id: hub.servertool_orchestration_policy
-  owner_node: ServertoolOrchestrationPolicyPlan
-  allowed_readers:
-  - ServertoolEngineActionPlan
-  - ServertoolExecutionContractPlan
-  - ErrorErr06ClientProjected
-  allowed_writers:
-  - ServertoolTimeoutWatcherPlan
-  - ServertoolClientDisconnectWatcherPlan
-  - ServertoolErrorPlan
-  - ServertoolClientInjectTextInput
-  - ServertoolProviderKeyInput
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - sse.transport_frame
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates:
-  - npm run verify:servertool-rust-only
 - resource_id: config.authoring_surface
   resource_kind: config_authoring
   lifecycle: config.user_config_materialization.mainline
@@ -2261,7 +1986,6 @@ resources:
   allowed_readers:
   - HubRespInbound02Parsed
   - HubRespChatProcess03Governed
-  - ServertoolFollowupDispatch
   allowed_writers:
   - convertProviderResponseIfNeeded
   forbidden_writers:
@@ -2886,28 +2610,6 @@ resources:
   may_enter_client_body: true
   required_gates:
   - npm run verify:sse-architecture-boundary
-- resource_id: stage_a.servertool_outcome_plan
-  resource_kind: side_channel
-  lifecycle: stage_a.p0_rust_migration.mainline
-  identity:
-  - requestId
-  - flowId
-  - ownerFeatureId
-  owner_feature_id: servertool.followup_orchestration
-  owner_node: ServertoolOutcome
-  allowed_readers:
-  - servertool.followup_state
-  - HubRespOutbound04ClientSemantic
-  allowed_writers:
-  - ServertoolOutcome
-  forbidden_writers:
-  - ProviderReqOutbound06WirePayload
-  - response.client_payload
-  - sse.transport_frame
-  may_enter_provider_body: false
-  may_enter_client_body: false
-  required_gates:
-  - npm run verify:servertool-rust-only
 - resource_id: stage_a.protocol_canonical
   resource_kind: normal_payload
   lifecycle: stage_a.p0_rust_migration.mainline
@@ -2969,8 +2671,7 @@ resources:
   - sse.transport_frame
   may_enter_provider_body: true
   may_enter_client_body: false
-  required_gates:
-  - npm run verify:servertool-rust-only
+  required_gates: []
 - resource_id: stage_a.resp_tool_governance_state
   resource_kind: normal_payload
   lifecycle: stage_a.p0_rust_migration.mainline
@@ -2982,7 +2683,6 @@ resources:
   owner_node: HubRespChatProcess03Governed
   allowed_readers:
   - HubRespOutbound04ClientSemantic
-  - servertool.followup_state
   allowed_writers:
   - HubRespChatProcess03Governed
   forbidden_writers:
@@ -2991,8 +2691,7 @@ resources:
   - sse.transport_frame
   may_enter_provider_body: false
   may_enter_client_body: true
-  required_gates:
-  - npm run verify:servertool-rust-only
+  required_gates: []
 - resource_id: protocol.openai_chat_history_compat
   resource_kind: normal_payload
   lifecycle: protocol.compat_surface.mainline
@@ -3332,20 +3031,16 @@ mainline_resource_flows:
   - continuation.scope_state
   produces:
   - request.normal_payload
-  - servertool.followup_state
   side_channel_reads:
   - continuation.scope_state
-  side_channel_writes:
-  - servertool.followup_state
+  side_channel_writes: []
 - chain_id: responses.continuation.mainline
   step_id: rct-04
   consumes:
   - request.normal_payload
-  - servertool.followup_state
   produces:
   - request.normal_payload
-  side_channel_reads:
-  - servertool.followup_state
+  side_channel_reads: []
   side_channel_writes: []
 - chain_id: responses.continuation.mainline
   step_id: rct-05
@@ -3919,17 +3614,6 @@ mainline_resource_flows:
   - response.hub_semantic
   side_channel_reads: []
   side_channel_writes: []
-- chain_id: stage_a.p0_rust_migration.mainline
-  step_id: stage-a-p0-01
-  consumes:
-  - response.hub_semantic
-  - servertool.followup_state
-  produces:
-  - stage_a.servertool_outcome_plan
-  side_channel_reads:
-  - servertool.followup_state
-  side_channel_writes:
-  - stage_a.servertool_outcome_plan
 - chain_id: stage_a.p0_rust_migration.mainline
   step_id: stage-a-p0-02
   consumes:

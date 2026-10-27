@@ -391,7 +391,6 @@ async fn anthropic_relay_selected_anthropic_provider_uses_anthropic_messages_wir
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            toolreason_observation_session_id: None,
             request_id: "req-anthropic-anthropic-provider-wire".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -470,7 +469,6 @@ async fn anthropic_relay_dynamic_claude_code_packet_reaches_anthropic_provider_r
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            toolreason_observation_session_id: None,
             request_id: "req-anthropic-dynamic-claude-code".into(),
             payload: json!({
                 "model":"claude-fable-5",
@@ -590,7 +588,6 @@ async fn anthropic_relay_stream_request_projects_json_provider_body_as_sse_event
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            toolreason_observation_session_id: None,
             request_id: "req-anthropic-json-body-client-sse".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -630,7 +627,6 @@ async fn anthropic_relay_anthropic_provider_sse_reaches_client_sse_events() {
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            toolreason_observation_session_id: None,
             request_id: "req-anthropic-provider-sse".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -673,7 +669,6 @@ async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() 
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            toolreason_observation_session_id: None,
             request_id: "req-anthropic-provider-sse-eof".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -724,7 +719,6 @@ async fn anthropic_relay_anthropic_provider_sse_eof_reselects_next_candidate() {
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            toolreason_observation_session_id: None,
             request_id: "req-anthropic-provider-sse-eof-reselect".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -789,7 +783,6 @@ async fn anthropic_relay_responses_provider_sse_eof_reselects_next_candidate() {
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            toolreason_observation_session_id: None,
             request_id: "req-anthropic-responses-provider-sse-eof-reselect".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -851,7 +844,6 @@ async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            toolreason_observation_session_id: None,
             request_id: "req-anthropic-provider-tool-missing-name".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -953,7 +945,6 @@ async fn anthropic_relay_cyber_refusal_json_preserves_output_without_reselection
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            toolreason_observation_session_id: None,
             request_id: "req-anthropic-cyber-refusal-json-preserved".into(),
             payload: json!({
                 "model":"MiniMax-M3",

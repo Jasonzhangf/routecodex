@@ -30,11 +30,7 @@ fn wrap_direct_sse_provider_event_json_observation_stream(
         None,
         V3DirectSseTypedHookCatalog::default(),
         false,
-        false,
         None,
-        None,
-        None,
-        false,
         std::collections::HashMap::new(),
     )
 }
@@ -52,11 +48,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
     custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
     typed_hooks: V3DirectSseTypedHookCatalog,
     tool_thinking_enabled: bool,
-    toolreason_client_projection: bool,
-    session_id: Option<String>,
     request_id: Option<String>,
-    expected_model_id: Option<String>,
-    client_responses_projection: bool,
     namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
 ) -> V3SseAttemptStream {
     struct StreamState {
@@ -86,9 +78,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                 retain_response_cipher,
                 strip_client_response_id,
                 deepseek_console_go,
-                session_id,
                 request_id,
-                expected_model_id,
                 stream_observation: Some(stream_observation.clone()),
                 provider_response_compat_profile,
                 namespace_tool_identities,
@@ -96,8 +86,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
             }
             .with_typed_hooks(typed_hooks)
             .with_custom_tool_function_binding(custom_tool_function_binding)
-            .with_tool_thinking(tool_thinking_enabled, toolreason_client_projection)
-            .with_client_responses_projection(client_responses_projection),
+            .with_tool_thinking(tool_thinking_enabled),
             semantic_state: V3DirectSseSemanticState::new(),
             done: false,
         },
@@ -190,13 +179,6 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                         let decoder_result = decoder
                             .finish()
                             .map_err(build_v3_sse_transport_error_source);
-                        if let Err(error) = state.content_consumer.finalize_toolreason_observation()
-                        {
-                            return Some((
-                                Err(runtime_source("V3RuntimeToolreasonObservation", error)),
-                                state,
-                            ));
-                        }
                         match decoder_result {
                             Ok(()) => {
                                 if let Err(error) = state.runtime_timing.finish_external_if_active()
@@ -1349,11 +1331,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
         compat_plan.custom_tool_function_binding.clone(),
         hook_registry.direct_sse_typed_hooks(),
         crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id),
-        crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(manifest, server_id),
-        Some(failure_session_scope.session_id().to_owned()),
         Some(request_id.to_owned()),
-        Some(compat_plan.canonical_model_id.clone()),
-        true,
         namespace_tool_identities,
     );
     collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
@@ -1477,11 +1455,6 @@ fn record_direct_sse_provider_event_json_chunk(
             && frame_disposition == V3SseFrameDisposition::SemanticTerminal
         {
             projected = materialize_direct_responses_terminal_usage(&projected);
-        }
-        let toolreason_reasoning_projection =
-            content_consumer.take_toolreason_reasoning_projection();
-        if let Some(prefix) = toolreason_reasoning_projection {
-            accepted.extend_from_slice(&prefix);
         }
         if projected == original {
             accepted.extend_from_slice(

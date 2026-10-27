@@ -1699,7 +1699,7 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
             "content": [{"type": "text", "text": "调用工具 pwd：确认当前工作目录"}]
         }),
         client_body: V3AnthropicRelayClientBody::Json,
-        node_trace: vec!["V3Resp03ToolReason"],
+        node_trace: vec!["V3HubRespChatProcess03Governed"],
         error_chain: None,
         diagnostic_source: None,
         diagnostic_cause: None,
@@ -1727,7 +1727,7 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
     );
     let response = fs::read_to_string(response_path).unwrap();
     assert!(response.contains("调用工具 pwd：确认当前工作目录"));
-    assert!(response.contains("V3Resp03ToolReason"));
+    assert!(response.contains("V3HubRespChatProcess03Governed"));
 
     sample_runtime.block_on(sample_worker.shutdown());
     fs::remove_dir_all(root).unwrap();
@@ -2988,7 +2988,7 @@ fn console_color_identity_reads_reasonix_root_session_id() {
 }
 
 #[test]
-fn toolreason_observation_identity_matches_console_request_fallback() {
+fn console_identity_matches_request_fallback() {
     let identity = resolve_v3_console_log_identity_from_parts(
         &HeaderMap::new(),
         &serde_json::json!({}),

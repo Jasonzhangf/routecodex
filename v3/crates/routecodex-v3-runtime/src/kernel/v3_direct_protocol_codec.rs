@@ -39,8 +39,6 @@ pub(crate) fn build_direct_response_compat_context(
     target: &V3Target10ConcreteProviderSelected,
     namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
     tool_thinking_enabled: bool,
-    toolreason_client_projection: bool,
-    toolreason_observation_session_id: &str,
     tool_thinking_turn_context: crate::hub_v1::V3ToolThinkingTurnContext,
     custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
 ) -> Result<V3DirectResponseCompatContext, String> {
@@ -52,8 +50,6 @@ pub(crate) fn build_direct_response_compat_context(
         model_capabilities: target.candidate.model_capabilities.clone(),
         compatibility_profile: target.candidate.compatibility_profile.clone(),
         tool_thinking_enabled,
-        toolreason_client_projection,
-        toolreason_observation_session_id: Some(toolreason_observation_session_id.to_owned()),
         tool_thinking_turn_context,
         custom_tool_function_binding,
         namespace_tool_identities,

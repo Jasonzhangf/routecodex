@@ -632,7 +632,6 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
             V3AnthropicRelayRuntimeInput {
                 server_id: state.server.id.clone(), failure_session_scope,
                 request_id: request_id.clone(), payload,
-                toolreason_observation_session_id: None,
             },
             client_headers, state.provider_health.runtime_health(), handoff,
         ).await {

@@ -1196,11 +1196,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             &policy.target,
             ns_tool_identities.clone(),
             crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, &standardized.server_id),
-            crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
-                manifest,
-                &standardized.server_id,
-            ),
-            direct_failure_session_scope.session_id(),
             standardized.tool_thinking_turn_context.clone(),
             custom_tool_function_binding,
         ) {

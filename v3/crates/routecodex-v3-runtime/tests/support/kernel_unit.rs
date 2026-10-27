@@ -81,10 +81,10 @@ impl ResponsesTransport for CaptureTransport {
     }
 }
 
-struct ToolreasonCaptureTransport;
+struct ToolThinkingCaptureTransport;
 
 #[async_trait]
-impl ResponsesTransport for ToolreasonCaptureTransport {
+impl ResponsesTransport for ToolThinkingCaptureTransport {
     async fn send(
         &self,
         request: V3Transport13ResponsesHttpRequest,
@@ -109,7 +109,7 @@ impl ResponsesTransport for ToolreasonCaptureTransport {
                 value: b"application/json".to_vec(),
             }],
             serde_json::to_vec(&json!({
-                "id": "resp_toolreason",
+                "id": "resp_tool_thinking",
                 "status": "completed",
                 "output": [{
                     "type": "function_call",
@@ -131,15 +131,12 @@ async fn direct_response_hook_injects_tool_thinking_but_keeps_client_projection_
         .get_mut("test")
         .expect("test server")
         .features
-        .extend([
-            ("tool_thinking".to_string(), true),
-            ("toolreason_client_projection".to_string(), true),
-        ]);
+        .extend([("tool_thinking".to_string(), true)]);
     assert_eq!(manifest.features.get("tool_thinking"), Some(&false));
     let raw = test_responses_raw(
         "test",
-        "req-toolreason-override",
-        "exec-toolreason-override",
+        "req-tool-thinking-override",
+        "exec-tool-thinking-override",
         json!({
             "model": "client-model",
             "input": "hello",
@@ -163,7 +160,7 @@ async fn direct_response_hook_injects_tool_thinking_but_keeps_client_projection_
         &manifest,
         raw,
         crate::register_responses_direct_hooks(),
-        &ToolreasonCaptureTransport,
+        &ToolThinkingCaptureTransport,
     )
     .await;
     let V3ClientBody::Json(body) = output.client_payload.body else {
