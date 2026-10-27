@@ -62,6 +62,11 @@ pub(crate) fn v3_direct_governed_text_markers() -> Vec<V3GovernedTextMarker> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum V3DirectResponseHookFailure {
     UnharvestableToolMarkup,
+    /// Thinking governance applies to a complete attempt after the client
+    /// channel was committed, but the governed visible text cannot continue
+    /// the prefix the client already received. The held tail cannot be
+    /// projected as business content, so the committed transport must end.
+    GovernedContinuationIncompatible,
 }
 
 pub(crate) fn normalize_v3_direct_complete_json_response(
@@ -82,7 +87,8 @@ pub(crate) fn rewrite_v3_direct_complete_response_attempt(
     let normalized = serialized_tools
         .as_ref()
         .map_or(frames, |(frames, _)| frames.as_slice());
-    Ok(crate::kernel::rewrite_v3_direct_thinking_attempt(normalized, flushed).or(serialized_tools))
+    let thinking = crate::kernel::rewrite_v3_direct_thinking_attempt_checked(normalized, flushed)?;
+    Ok(thinking.or(serialized_tools))
 }
 
 /// The sole Direct response payload hook for protocol-neutral response cleanup.

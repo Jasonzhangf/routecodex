@@ -123,9 +123,44 @@ fn rewrite_v3_direct_thinking_tag_sse_bytes(input: &[u8]) -> Result<Vec<u8>, Str
 /// text instead of re-emitting the whole item. That mirrors the DSML owner's
 /// `flushed` continuation and stops a late marker from turning a delivered
 /// response into a post-commit governance break.
+///
+/// This entry collapses a governed continuation that cannot continue the
+/// delivered prefix into `None`. Callers that can end a committed transport
+/// must use [`rewrite_v3_direct_thinking_attempt_checked`] so that case stays a
+/// typed failure instead of releasing the held tail as business output.
 pub(crate) fn rewrite_v3_direct_thinking_attempt(
     frames: &[Vec<u8>],
     flushed: usize,
+) -> Option<(Vec<Vec<u8>>, usize)> {
+    let mut governed_prefix_incompatible = false;
+    rewrite_v3_direct_thinking_attempt_inner(frames, flushed, &mut governed_prefix_incompatible)
+}
+
+/// Same whole-attempt thinking governance with the post-commit distinction the
+/// registered hook needs: `Ok(None)` means no thinking transformation applies,
+/// while `Err` means governance applies but the governed visible text cannot
+/// continue the prefix already delivered to the client. A prefix mismatch is
+/// only possible after a client commit, because it requires delivered text.
+pub(crate) fn rewrite_v3_direct_thinking_attempt_checked(
+    frames: &[Vec<u8>],
+    flushed: usize,
+) -> Result<Option<(Vec<Vec<u8>>, usize)>, crate::direct_response_hooks::V3DirectResponseHookFailure>
+{
+    let mut governed_prefix_incompatible = false;
+    let rewritten =
+        rewrite_v3_direct_thinking_attempt_inner(frames, flushed, &mut governed_prefix_incompatible);
+    if governed_prefix_incompatible {
+        return Err(
+            crate::direct_response_hooks::V3DirectResponseHookFailure::GovernedContinuationIncompatible,
+        );
+    }
+    Ok(rewritten)
+}
+
+fn rewrite_v3_direct_thinking_attempt_inner(
+    frames: &[Vec<u8>],
+    flushed: usize,
+    governed_prefix_incompatible: &mut bool,
 ) -> Option<(Vec<Vec<u8>>, usize)> {
     let terminal_position = frames.iter().position(|frame| {
         direct_thinking_event_value(frame).is_some_and(|value| {
@@ -192,6 +227,28 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
     // governed continuation subtracts it from the item's full visible text so a
     // delivered delta is never re-emitted.
     let delivered = delivered_thinking_visible_text(frames, flushed, &plans, &wire_items);
+    // A governed visible value must continue the text the client already
+    // received. The delivered frames are append-only, so a value that cannot
+    // start with them can never be projected without contradicting the client
+    // channel. That is a governance failure, not an absent transformation: the
+    // caller must end the committed transport instead of sealing the
+    // ungoverned tail.
+    for ((output_index, content_index), delivered_text) in &delivered {
+        if delivered_text.is_empty() {
+            continue;
+        }
+        let Some(visible) = plans
+            .iter()
+            .find(|plan| plan.output_index == *output_index)
+            .and_then(|plan| plan.visible_parts.get(*content_index))
+        else {
+            continue;
+        };
+        if !visible.starts_with(delivered_text.as_str()) {
+            *governed_prefix_incompatible = true;
+            return None;
+        }
+    }
     let mut rewritten = Vec::with_capacity(frames.len() + plans.len());
     rewritten.extend_from_slice(&frames[..flushed]);
     let mut terminal_index = None;

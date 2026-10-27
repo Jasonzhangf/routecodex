@@ -162,6 +162,17 @@ pub(crate) fn direct_complete_response_hook_failure_source(
                 V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup,
             )
         }
+        // The committed client channel cannot be retracted, so this is the
+        // same typed terminal as the append-only builder rejection: the
+        // transport ends and the held governed tail is never projected.
+        V3DirectResponseHookFailure::GovernedContinuationIncompatible => {
+            crate::shared::direct_plain_error(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ExecutionAttemptPayloadStore",
+                "direct_sse_post_commit_governance_break",
+                "governed provider text arrived after the client channel was committed: the governed visible text cannot continue the delivered client prefix",
+            )
+        }
     }
 }
 

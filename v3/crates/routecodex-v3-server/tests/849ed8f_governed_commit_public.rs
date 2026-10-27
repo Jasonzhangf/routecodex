@@ -157,6 +157,22 @@ fn scenario(input: &str, model: &str) -> Vec<String> {
                 "committed-prefix<thinking>secret</thinking>"
             )])),
         ],
+        // The provider commits the trailing-space delta `hello ` and then
+        // declares an item whose raw terminal text is
+        // `hello<thinking>secret</thinking>tail`. The governed visible text
+        // is `hellotail`, which cannot continue the delivered `hello `
+        // prefix, so the held tail can never be projected append-only. The
+        // owner must fail the attempt explicitly instead of sealing it.
+        // Note the message text drops the space after `</thinking>`; keeping
+        // it (`hello<thinking>secret</thinking> tail`) would produce the
+        // continuable visible `hello tail`, which is the compatible governor
+        // behavior already covered by `post-commit-thinking-governed`.
+        "post-commit-thinking-prefix-incompatible" => vec![
+            delta(0, 0, "hello "),
+            delta(0, 0, "<thinking>secret</thinking> tail"),
+            text_done(0, 0, "hello<thinking>secret</thinking>tail"),
+            completed(json!([message("hello<thinking>secret</thinking>tail")])),
+        ],
         "split-orphan-before-commit" if model != "wire-recover" => {
             let label = dsml_close();
             let (head, tail) = label.split_at(2);
@@ -791,6 +807,48 @@ async fn post_commit_thinking_governance_delivers_governed_tail() {
             .any(|row| row["event_type"] == "request.completed"),
         "a governed post-commit attempt must record request.completed: {terminal_rows:#?}"
     );
+    entry.stop().await;
+}
+
+/// Public proof that a governed terminal visible text which cannot continue the
+/// committed client prefix fails the attempt explicitly. The client already
+/// received `hello ` and the terminal snapshot's governed text is `hellotail`.
+/// Releasing the held tail would either leak the raw wrapper or complete with a
+/// text the client cannot reconcile with the delivered prefix, so the committed
+/// transport must end without the raw marker, the wrapper body, the surviving
+/// tail, `response.completed`, a normal chunked end, or a client error payload.
+#[tokio::test]
+async fn post_commit_thinking_prefix_incompatible_breaks_without_leak() {
+    let _guard = TEST_LOCK.lock().await;
+    let entry = start(false).await;
+    let (wire, _) = raw_request(
+        &entry,
+        "849ed8f-post-commit-thinking-prefix-incompatible",
+        "post-commit-thinking-prefix-incompatible",
+    )
+    .await;
+    let text = wire_text(&wire);
+    eprintln!("849ed8f thinking-prefix-incompatible wire={text}");
+
+    assert!(
+        text.contains("hello "),
+        "the committed prefix must reach the client: {text}"
+    );
+    for leaked in ["<thinking>", "secret", "tail"] {
+        assert!(
+            !text.contains(leaked),
+            "the ungovernable tail {leaked:?} must never reach the client: {text}"
+        );
+    }
+    assert!(
+        !text.contains("response.completed"),
+        "an incompatible governed continuation must not complete: {text}"
+    );
+    assert!(
+        !text.ends_with("0\r\n\r\n"),
+        "normal chunked completion leaked: {text}"
+    );
+    assert_no_client_error(&text);
     entry.stop().await;
 }
 
