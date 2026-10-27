@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -233,15 +240,100 @@ const cases = [
       /console emitter must pass the client response body stream judgment/u,
   },
   {
-    // The scan itself is the guard's weak point: an emit call written in a shape
-    // the pattern cannot match (here a closing paren without a semicolon) leaves
-    // an occurrence uncounted. The consistency assertion turns that silent gap
-    // into an explicit failure instead of letting the emitter escape inspection.
-    name: "emitter call shape escapes the scan (live_snapshot.rs)",
+    // An emitter call whose parentheses never balance cannot be trusted; the
+    // verifier must refuse instead of silently skipping it.
+    name: "emitter call with unbalanced parentheses (live_snapshot.rs)",
     path: "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
     mutate: (source) =>
-      `${source}\n#[allow(dead_code)]\nfn probe_unscannable_emit(\n    console_context: &V3ConsoleEmissionContext,\n    observability: &V3RuntimeObservability,\n    started_at: std::time::Instant,\n) {\n    emit_v3_observability_console_lines(\n        console_context,\n        200,\n        &[],\n        observability,\n        started_at,\n        observability.stream_observation.is_none()\n    )\n}\n`,
-    diagnostic: /emitter scan may be incomplete/u,
+      `${source}\n#[allow(dead_code)]\nfn probe_unscannable_emit(\n    console_context: &V3ConsoleEmissionContext,\n    observability: &V3RuntimeObservability,\n    started_at: std::time::Instant,\n) {\n    emit_v3_observability_console_lines(\n        console_context,\n        200,\n        &[],\n        observability,\n        started_at,\n        true\n    // missing closing paren\n}\n`,
+    diagnostic: /could not be parsed \(unbalanced call parentheses\)/u,
+  },
+  {
+    // The lane anchor must not depend on any nearby text: a comment claiming a
+    // different lane's constructor must not hide the anthropic regression.
+    name: "anthropic regression with a misleading neighbour comment",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source.replace(
+        "                !client_body_is_sse,\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+        "                relay_output.stream_observation.is_none(),\n            );\n        }\n        // same call shape as openai_chat_relay_output_response(\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+      ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // Renaming the anthropic response constructor must not hide the regression:
+    // ownership is the in-scope client_body_is_sse binding, not the constructor.
+    name: "anthropic regression with the response constructor renamed",
+    paths: [
+      "v3/crates/routecodex-v3-server/src/executors.rs",
+      "v3/crates/routecodex-v3-server/src/endpoint_handlers.rs",
+    ],
+    mutate: (source) => {
+      let mutated = source.replaceAll("anthropic_relay_output_response", "anthropic_output_response");
+      mutated = mutated.replace(
+        "                !client_body_is_sse,\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+        "                relay_output.stream_observation.is_none(),\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+      );
+      return mutated;
+    },
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // A single-line call followed by an allowlist-shaped tail must not be
+    // over-scanned: paren balancing must report the real last argument `true`,
+    // not a tail string from some later helper.
+    name: "single-line emitter overshoots into a following helper",
+    path: "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
+    mutate: (source) =>
+      source.replace(
+        "        emit_v3_observability_console_lines(\n            console_context,\n            output.status,\n            &output.node_trace,\n            observability,\n            started_at,\n            output.stream_observation.is_none(),\n        );",
+        "        emit_v3_observability_console_lines(console_context, output.status, &output.node_trace, observability, started_at, true);\n        let _tail = format!(\"output.stream_observation.is_none()\");",
+      ),
+    diagnostic: /got "true"/u,
+  },
+  {
+    // A comment that names the emitter is not an occurrence; the verifier must
+    // not fail on it. This is a non-regression input, so it must PASS.
+    name: "emitter name in a comment must not fail the scan",
+    path: "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
+    mutate: (source) =>
+      source.replace(
+        "fn finalize_v3_responses_relay_server_output(",
+        "// emit_v3_observability_console_lines( is the shared console emitter\nfn finalize_v3_responses_relay_server_output(",
+      ),
+    expectPass: true,
+  },
+  {
+    // A brand new lane in a brand new file must be discovered and its include_usage
+    // checked; living in another file must not let it escape the guard.
+    name: "new lane in a new file escapes the scan (new_lane.rs)",
+    create: {
+      path: "v3/crates/routecodex-v3-server/src/new_lane.rs",
+      content: `use std::time::Instant;
+
+use crate::console::impl_bulk::emit_v3_observability_console_lines;
+use crate::V3ConsoleEmissionContext;
+use crate::V3RuntimeObservability;
+
+pub(crate) fn probe_new_lane(
+    console_context: &V3ConsoleEmissionContext,
+    observability: &V3RuntimeObservability,
+    started_at: Instant,
+) {
+    emit_v3_observability_console_lines(
+        console_context,
+        200,
+        &[],
+        observability,
+        started_at,
+        true,
+    );
+}
+`,
+    },
+    diagnostic: /new_lane\.rs console emitter must pass the client response body stream judgment/u,
   },
 ];
 
@@ -252,20 +344,43 @@ for (const testCase of cases) {
     for (const relative of copied) {
       cpSync(resolve(repo, relative), resolve(root, relative), { recursive: true });
     }
-    const target = resolve(root, testCase.path);
-    const original = readFileSync(target, "utf8");
-    const mutated = testCase.mutate(original);
-    if (mutated === original) {
-      failures.push(`${testCase.name}: mutation did not change ${testCase.path}`);
+    // A case declares what it changes: one file via path+mutate, several files
+    // via paths+mutate (for cross-file renames), or a brand new file via create.
+    const edits = [];
+    if (testCase.path !== undefined) {
+      edits.push({ path: testCase.path, mutate: testCase.mutate });
+    }
+    for (const path of testCase.paths ?? []) {
+      edits.push({ path, mutate: testCase.mutate });
+    }
+    if (testCase.create !== undefined) {
+      edits.push({ path: testCase.create.path, replace: () => testCase.create.content });
+    }
+    let changed = 0;
+    for (const edit of edits) {
+      const target = resolve(root, edit.path);
+      const original = existsSync(target) ? readFileSync(target, "utf8") : "";
+      const mutated = edit.mutate !== undefined ? edit.mutate(original) : edit.replace(original);
+      if (mutated !== original) changed += 1;
+      writeFileSync(target, mutated);
+    }
+    if (changed === 0) {
+      failures.push(`${testCase.name}: mutation did not change any target file`);
       continue;
     }
-    writeFileSync(target, mutated);
     const result = spawnSync(process.execPath, [verifier], {
       cwd: root,
       env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
       encoding: "utf8",
     });
     const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+    if (testCase.expectPass === true) {
+      // A non-regression case: the guard must not fail on this input.
+      if (result.status !== 0) {
+        failures.push(`${testCase.name}: verifier unexpectedly failed: ${output.slice(-1200)}`);
+      }
+      continue;
+    }
     if (result.status === 0) {
       failures.push(`${testCase.name}: verifier unexpectedly passed`);
     } else if (!testCase.diagnostic.test(output)) {
@@ -282,6 +397,8 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
+const rejected = cases.filter((testCase) => testCase.expectPass !== true).length;
+const accepted = cases.length - rejected;
 console.log(
-  `[test:v3-console-request-count-visibility-red-fixtures] PASS (${cases.length} forbidden mutations rejected)`,
+  `[test:v3-console-request-count-visibility-red-fixtures] PASS (${rejected} forbidden mutations rejected, ${accepted} non-regression inputs accepted)`,
 );

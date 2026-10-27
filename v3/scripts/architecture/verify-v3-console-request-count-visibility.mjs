@@ -247,14 +247,10 @@ for (const [source, collection, label] of [
 // Source anchor: every console emitter that can front a client response body
 // must gate the success commit on whether that body is a stream, so the commit
 // moves to the stream terminal instead of running before the first SSE byte.
-// The scanned set is every product source file that calls the emitter, so a
-// newly added lane cannot escape the guard by living in another file.
-const emitterSources = [
-  "v3/crates/routecodex-v3-server/src/executors.rs",
-  "v3/crates/routecodex-v3-server/src/endpoint_handlers.rs",
-  "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
-  "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
-];
+// The scanned set is discovered from the crate's src tree, so a newly added
+// lane cannot escape the guard by living in another file.
+const emitterName = "emit_v3_observability_console_lines";
+
 // Emitter call sites accept any of the declared client-body stream judgments:
 // the typed client_body.is_sse() form for lanes that populate stream_observation
 // for both closeouts, and stream_observation.is_none() / !is_sse for the rest.
@@ -266,63 +262,319 @@ const allowedIncludeUsage = [
   "relay_output.stream_observation.is_none()",
   "!is_sse",
 ];
-// The Anthropic relay lane must never judge its client body by the presence of a
-// stream observation: it populates that observation for the JSON closeout too,
+
+// Replace comment bodies and string/char literal contents with spaces, keeping
+// every offset identical to the original source. This keeps parens, braces and
+// the emitter name inside a comment or a string from being read as code.
+function maskCommentsAndStrings(source) {
+  const out = Array.from(source);
+  const blank = (from, to) => {
+    for (let i = from; i < to; i += 1) {
+      if (out[i] !== "\n") out[i] = " ";
+    }
+  };
+  const blockCommentEnd = (from) => {
+    let depth = 1;
+    let i = from + 2;
+    while (i < source.length - 1) {
+      if (source[i] === "/" && source[i + 1] === "*") {
+        depth += 1;
+        i += 2;
+      } else if (source[i] === "*" && source[i + 1] === "/") {
+        depth -= 1;
+        i += 2;
+        if (depth === 0) return i;
+      } else {
+        i += 1;
+      }
+    }
+    return -1;
+  };
+  // Find the opening quote of a (byte/raw) string literal beginning at `from`.
+  // Returns { open, hashes } when it is a string, or null when `from` is an
+  // identifier such as `b`, `r`, or a raw identifier `r#type`. `open` is the
+  // index of the `"`, `hashes` the number of `#` for raw strings.
+  const stringOpening = (from) => {
+    let i = from;
+    let hashes = 0;
+    if (source[i] === "b") i += 1;
+    if (source[i] === "r") {
+      i += 1;
+      while (source[i] === "#") {
+        hashes += 1;
+        i += 1;
+      }
+    }
+    if (source[i] === '"') return { open: i, hashes };
+    return null;
+  };
+  const stringEnd = (open, hashes) => {
+    let i = open + 1;
+    while (i < source.length) {
+      if (hashes > 0) {
+        if (source[i] === '"' && source.slice(i + 1, i + 1 + hashes) === "#".repeat(hashes)) {
+          return i + hashes;
+        }
+        i += 1;
+      } else if (source[i] === "\\") {
+        i += 2;
+      } else if (source[i] === '"') {
+        return i;
+      } else {
+        i += 1;
+      }
+    }
+    return -1;
+  };
+  const charEnd = (from) => {
+    // A char literal is `'` + (escape | single char) + `'`; a lifetime like
+    // `'static` is not. `from` is the opening quote index.
+    if (source[from + 1] === "\\") {
+      let i = from + 2;
+      while (i < source.length && source[i] !== "'") i += 1;
+      return i < source.length ? i : -1;
+    }
+    return source[from + 2] === "'" ? from + 2 : -1;
+  };
+  let i = 0;
+  while (i < source.length) {
+    const c = source[i];
+    const n = source[i + 1];
+    if (c === "/" && n === "/") {
+      const nl = source.indexOf("\n", i);
+      const end = nl === -1 ? source.length : nl;
+      blank(i, end);
+      i = end;
+    } else if (c === "/" && n === "*") {
+      const end = blockCommentEnd(i);
+      if (end === -1) return { masked: out.join(""), failed: true };
+      blank(i, end);
+      i = end;
+    } else if (c === '"' || c === "b" || c === "r") {
+      const opening = stringOpening(i);
+      if (opening === null) {
+        i += 1;
+        continue;
+      }
+      const end = stringEnd(opening.open, opening.hashes);
+      if (end === -1) return { masked: out.join(""), failed: true };
+      blank(i, end + 1);
+      i = end + 1;
+    } else if (c === "'") {
+      const end = charEnd(i);
+      if (end !== -1) {
+        blank(i, end + 1);
+        i = end + 1;
+      } else {
+        i += 1;
+      }
+    } else {
+      i += 1;
+    }
+  }
+  return { masked: out.join(""), failed: false };
+}
+
+// Discover the source files that reference the emitter, excluding test modules.
+function discoverEmitterSources() {
+  const srcRoot = path.join(root, "v3", "crates", "routecodex-v3-server", "src");
+  if (!fs.existsSync(srcRoot)) {
+    failures.push(`missing crate source tree: ${srcRoot}`);
+    return [];
+  }
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "tests") continue;
+        walk(full);
+      } else if (entry.name.endsWith(".rs")) {
+        const relative = path.relative(root, full).split(path.sep).join("/");
+        const source = readRequired(relative);
+        if (!source.includes(emitterName)) continue;
+        const { masked, failed } = maskCommentsAndStrings(source);
+        if (failed) {
+          failures.push(`${relative} has an unterminated comment or string literal`);
+          continue;
+        }
+        if (masked.includes(`${emitterName}(`)) found.push(relative);
+      }
+    }
+  };
+  walk(srcRoot);
+  found.sort();
+  if (found.length === 0) {
+    failures.push(`no source file under ${srcRoot} references ${emitterName}(`);
+  }
+  return found;
+}
+
+// Return the spans of every balanced `{ ... }` block in the masked source, plus
+// whether the file's braces are balanced at all. Unbalanced input is a hard
+// failure because it would make scope inference unreliable.
+function braceBlocks(masked) {
+  const stack = [];
+  const blocks = [];
+  for (let i = 0; i < masked.length; i += 1) {
+    if (masked[i] === "{") {
+      stack.push(i);
+    } else if (masked[i] === "}") {
+      if (stack.length === 0) return { blocks, balanced: false };
+      blocks.push({ open: stack.pop(), close: i });
+    }
+  }
+  return { blocks, balanced: stack.length === 0 };
+}
+
+function innermostBlockContaining(blocks, index) {
+  let best = null;
+  for (const block of blocks) {
+    if (block.open < index && index < block.close) {
+      if (best === null || block.open > best.open) best = block;
+    }
+  }
+  return best;
+}
+
+// A binding `let client_body_is_sse = <expr>.client_body.is_sse();` is the
+// anthropic lane's intrinsic evidence. It is in scope at an emit iff it is
+// declared before the emit and its innermost enclosing block also encloses the
+// emit. This is Rust's own scoping rule, so renaming the response constructor
+// or inserting a comment between the emit and the constructor cannot move it.
+function anthropicBindingInScopeAt(masked, emitIndex) {
+  const { blocks, balanced } = braceBlocks(masked);
+  if (!balanced) return { inScope: false, ambiguous: true };
+  const binding = /\blet\s+client_body_is_sse\s*=\s*[^;]*\.client_body\s*\.\s*is_sse\s*\(\s*\)\s*;/gu;
+  for (const match of masked.matchAll(binding)) {
+    if (match.index > emitIndex) break;
+    const block = innermostBlockContaining(blocks, match.index);
+    if (block === null) continue;
+    if (emitIndex > block.open && emitIndex < block.close) {
+      return { inScope: true, ambiguous: false };
+    }
+  }
+  return { inScope: false, ambiguous: false };
+}
+
+// Parse the argument list of one emitter call by paren balancing. Returns the
+// last argument's trimmed text, or null when the span is unbalanced or contains
+// a nested emitter call (both of which must fail rather than silently pass).
+function parseEmitterCallArgs(masked, nameIndex) {
+  const open = nameIndex + emitterName.length;
+  let depth = 0;
+  let close = -1;
+  for (let i = open; i < masked.length; i += 1) {
+    const ch = masked[i];
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        close = i;
+        break;
+      }
+    }
+  }
+  if (close === -1) return { lastArg: null, error: "unbalanced call parentheses" };
+  const span = masked.slice(open + 1, close);
+  if (span.includes(`${emitterName}(`)) {
+    return { lastArg: null, error: "nested emitter call inside the argument list" };
+  }
+  // Split on top-level commas (depth 0 across (), [], {}).
+  const segments = [];
+  let segStart = 0;
+  let p = 0;
+  let b = 0;
+  let k = 0;
+  for (let i = 0; i < span.length; i += 1) {
+    const ch = span[i];
+    if (ch === "(") p += 1;
+    else if (ch === ")") p -= 1;
+    else if (ch === "[") b += 1;
+    else if (ch === "]") b -= 1;
+    else if (ch === "{") k += 1;
+    else if (ch === "}") k -= 1;
+    else if (ch === "," && p === 0 && b === 0 && k === 0) {
+      segments.push(span.slice(segStart, i));
+      segStart = i + 1;
+    }
+  }
+  segments.push(span.slice(segStart));
+  // A trailing comma leaves an empty final segment; the last real argument is
+  // the one before it.
+  while (segments.length > 0 && segments[segments.length - 1].trim() === "") segments.pop();
+  const last = segments[segments.length - 1] ?? "";
+  const trimmed = last.trim();
+  return { lastArg: trimmed, error: null };
+}
+
+const emitterSources = discoverEmitterSources();
+// The anthropic relay lane must never judge its client body by the presence of
+// a stream observation: it populates that observation for the JSON closeout too,
 // so is_none() is always false there and a JSON success would neither commit the
-// count nor write its request.completed terminal. A lane owns the emitter that
-// hands its output to that lane's own response constructor; this anchor is the
-// lane's real projection point, unlike a swappable neighbour helper.
-const laneResponseConstructor = /(?<lane>\w+)_relay_output_response\(/u;
+// count nor write its request.completed terminal. Ownership is the in-scope
+// client_body_is_sse binding, not any neighbouring function name.
 for (const relative of emitterSources) {
   const source = readRequired(relative);
-  // Call sites close with `);` and a definition signature opens with `fn ...(`.
-  // The body of the definition also contains `);`-terminated calls, so the
-  // definition itself must be skipped explicitly or it captures its own body.
-  const pattern = /emit_v3_observability_console_lines\(([\s\S]*?)\n\s*\);/gu;
+  const { masked, failed } = maskCommentsAndStrings(source);
+  if (failed) {
+    failures.push(`${relative} has an unterminated comment or string literal`);
+    continue;
+  }
+  const { balanced } = braceBlocks(masked);
+  if (!balanced) {
+    failures.push(`${relative} has unbalanced braces; scope inference would be unreliable`);
+    continue;
+  }
   let definitionsSkipped = 0;
   let callSitesInspected = 0;
-  for (const match of source.matchAll(pattern)) {
-    const linePrefix = source.slice(source.lastIndexOf("\n", match.index) + 1, match.index);
+  const occurrence = new RegExp(`${emitterName}\\s*\\(`, "gu");
+  for (const match of masked.matchAll(occurrence)) {
+    const linePrefix = masked.slice(masked.lastIndexOf("\n", match.index) + 1, match.index);
     if (/\bfn\s*$/u.test(linePrefix)) {
       definitionsSkipped += 1;
       continue;
     }
     callSitesInspected += 1;
-    const includeUsage = (match[1].split("\n").filter((line) => line.trim()).pop() ?? "")
-      .trim()
-      .replace(/,$/u, "");
+    const line = source.slice(0, match.index).split("\n").length;
+    const parsed = parseEmitterCallArgs(masked, match.index);
+    if (parsed.error !== null) {
+      failures.push(
+        `${relative}:${line} console emitter call could not be parsed (${parsed.error}); refusing to pass`,
+      );
+      continue;
+    }
+    const includeUsage = parsed.lastArg;
     if (!allowedIncludeUsage.includes(includeUsage)) {
       failures.push(
         `${relative} console emitter must pass the client response body stream judgment (client_body.is_sse() or stream_observation.is_none()) as include_usage, got "${includeUsage}"`,
       );
       continue;
     }
-    // The lane this emitter belongs to is the first response constructor after
-    // it; an emitter that no lane constructor follows (the direct lane) has no
-    // lane-specific requirement beyond the allowlist above.
-    const after = source.slice(match.index + match[0].length);
-    const lane = after.match(laneResponseConstructor)?.groups?.lane;
+    const { inScope, ambiguous } = anthropicBindingInScopeAt(masked, match.index);
+    if (ambiguous) {
+      failures.push(`${relative}:${line} cannot determine the emitter lane; refusing to pass`);
+      continue;
+    }
     if (
-      lane === "anthropic" &&
+      inScope &&
       includeUsage !== "!client_body_is_sse" &&
       includeUsage !== "!output.client_body.is_sse()" &&
       includeUsage !== "!relay_output.client_body.is_sse()"
     ) {
       failures.push(
-        `${relative} anthropic relay console emitter must judge the client response body (client_body.is_sse()), not the stream observation; got "${includeUsage}"`,
+        `${relative}:${line} anthropic relay console emitter must judge the client response body (client_body.is_sse()), not the stream observation; got "${includeUsage}"`,
       );
     }
   }
-  // Self-exporting consistency: every textual occurrence of the emitter name
-  // must be accounted for as either a definition (fn prefix) or a call site the
-  // pattern inspected. A call written in a shape the pattern cannot match (for
-  // example a closing `)` followed by a line break instead of `);`) would leave
-  // an occurrence uncounted, so the mismatch fails loudly instead of silently
-  // letting the emitter escape the allowlist check.
-  const totalOccurrences = source.split("emit_v3_observability_console_lines(").length - 1;
+  // Self-exporting consistency: every call-shaped occurrence of the emitter in
+  // code (comments and strings already blanked) must be accounted for as either
+  // a definition or an inspected call site. A `use` import of the function is
+  // not a call, so it must not trip this check.
+  const totalOccurrences = (masked.match(new RegExp(`${emitterName}\\s*\\(`, "g")) ?? []).length;
   if (totalOccurrences !== definitionsSkipped + callSitesInspected) {
     failures.push(
-      `${relative} emitter scan may be incomplete: found ${totalOccurrences} occurrences of emit_v3_observability_console_lines(, accounted for ${definitionsSkipped + callSitesInspected} (${definitionsSkipped} definitions skipped, ${callSitesInspected} call sites inspected)`,
+      `${relative} emitter scan may be incomplete: found ${totalOccurrences} occurrences of ${emitterName}(, accounted for ${definitionsSkipped + callSitesInspected} (${definitionsSkipped} definitions skipped, ${callSitesInspected} call sites inspected)`,
     );
   }
 }
