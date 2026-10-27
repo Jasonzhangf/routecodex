@@ -328,7 +328,12 @@ for (const [name, source, rel] of [
       `${rel}: ${name} must re-arm the exact retained recovery ticket after provider success releases a queued waiter`,
     );
   }
-  if (!source.includes('V3Error05ExecutionAction')) {
+  // Anthropic delegates provider-failure action execution to the shared relay
+  // helper, which owns the typed Error05 match. Keep the contract bound to the
+  // shared consumer instead of requiring an unused local import.
+  const error05Consumer =
+    name === 'Anthropic Relay' ? `${source}\n${text.relayShared}` : source;
+  if (!error05Consumer.includes('V3Error05ExecutionAction')) {
     failures.push(`${rel}: ${name} must consume typed Error05 actions`);
   }
   requireText(source, rel, 'let mut pending_provider_action_recovery = None;');
