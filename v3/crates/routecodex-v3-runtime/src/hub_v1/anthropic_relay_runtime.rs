@@ -172,7 +172,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_default_transport_client_he
     if output.status < 400 && output.terminal_disposition.is_none() {
         if let Some(pending) = route_policy_pending {
             pending
-                .commit_manifest_now(manifest)
+                .commit::<String>()
                 .map_err(V3AnthropicRelayRuntimeError::Target)?;
         }
     }

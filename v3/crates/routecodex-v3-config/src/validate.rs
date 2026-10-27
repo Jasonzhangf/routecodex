@@ -1283,38 +1283,6 @@ fn compile_route_policies(
                     }
                     V3RouteConditionManifest::CurrentCompaction
                 }
-                V3RouteConditionAuthoringConfig::SearchPoolTurnRatioAtLeast {
-                    window_turns,
-                    numerator,
-                    denominator,
-                } => {
-                    if *window_turns == 0 || *denominator == 0 || numerator > denominator {
-                        return Err(validation(format!(
-                            "route group {group_id} route policy {} has invalid search ratio",
-                            policy.id
-                        )));
-                    }
-                    V3RouteConditionManifest::SearchPoolTurnRatioAtLeast {
-                        window_turns: *window_turns,
-                        numerator: *numerator,
-                        denominator: *denominator,
-                    }
-                }
-                V3RouteConditionAuthoringConfig::ToolExecutionErrorTurnsAtLeast {
-                    window_turns,
-                    count,
-                } => {
-                    if *window_turns == 0 || *count > *window_turns {
-                        return Err(validation(format!(
-                            "route group {group_id} route policy {} has invalid tool error window",
-                            policy.id
-                        )));
-                    }
-                    V3RouteConditionManifest::ToolExecutionErrorTurnsAtLeast {
-                        window_turns: *window_turns,
-                        count: *count,
-                    }
-                }
             };
             Ok(V3RoutePolicyManifest {
                 id: policy.id.clone(),

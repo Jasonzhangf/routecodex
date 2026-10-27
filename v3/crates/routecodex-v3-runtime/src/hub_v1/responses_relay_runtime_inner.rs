@@ -152,9 +152,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         macro_rules! commit_route_policy_if_present {
             () => {{
                 if let Some(pending) = route_policy_pending.as_ref() {
-                    let now = v3_responses_relay_now_epoch_ms()?;
                     pending
-                        .commit_from_manifest(manifest, now)
+                        .commit::<String>()
                         .map_err(V3ResponsesRelayRuntimeError::Target)?;
                 }
             }};

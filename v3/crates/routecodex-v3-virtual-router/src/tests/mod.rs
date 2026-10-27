@@ -111,6 +111,62 @@ fn matching_facts() -> V3RouterRequestFacts {
 }
 
 #[test]
+fn empty_signal_pool_is_skipped_and_default_stays_last_tier() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("tools")
+        .unwrap()
+        .targets
+        .clear();
+    let classified = router
+        .classify_request_with_facts(&manifest, "s", "/v1/responses", matching_facts())
+        .expect("classify");
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .expect("an empty signal pool is skipped instead of failing the request");
+    assert!(
+        plan.tiers.iter().all(|tier| tier.pool_id != "tools"),
+        "empty tools pool must not become a tier: {:?}",
+        plan.tiers
+    );
+    assert_eq!(
+        plan.tiers.last().expect("default tier").pool_id,
+        "default",
+        "the explicit default pool stays the last tier"
+    );
+}
+
+#[test]
+fn empty_explicit_default_pool_fails_even_when_signal_pools_remain() {
+    // 用户规则：default 是必须存在且非空的唯一最低池。非 default 池可空，
+    // 但空 default 是配置错误，即使有其它可命中的池也要显式失败。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .targets
+        .clear();
+    let classified = router
+        .classify_request_with_facts(&manifest, "s", "/v1/responses", matching_facts())
+        .expect("classify");
+    assert_eq!(
+        router.resolve_route_pool_plan(&manifest, classified),
+        Err(V3VirtualRouterError::DefaultPoolEmpty("g".into())),
+        "an empty default pool must fail instead of falling through to another tier"
+    );
+}
+
+#[test]
 fn classified_route_hits_pool_without_reclassifying_as_capability() {
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
