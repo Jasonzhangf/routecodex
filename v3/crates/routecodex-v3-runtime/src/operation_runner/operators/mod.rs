@@ -27,4 +27,5 @@ mod project_standard_provider_request;
 
 pub(crate) use err03_target_local_action::run_v3_error_03_target_local_action_operator;
 pub(crate) use err04_target_exhaustion::run_v3_error_04_target_exhaustion_operator;
+pub(crate) use err04_target_exhaustion::run_v3_error_04_target_exhaustion_operator_with_target_recovery;
 pub(super) use project_standard_provider_request::ProjectStandardProviderRequestOperator;

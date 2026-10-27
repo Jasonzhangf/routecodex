@@ -1,6 +1,7 @@
 use super::{V3ProviderHealthListenerScope, V3ProviderHealthState, V3ProviderHealthStore};
 use crate::global_cooldown::{
     V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass, V3ProviderCooldownKey,
+    V3ProviderRateLimitEpisode,
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
 use sha2::{Digest, Sha256};
@@ -16,10 +17,15 @@ thread_local! {
 const V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY: usize = 32;
 
 type V3ProviderCooldownPersistenceEntries = Vec<(V3ProviderCooldownKey, u64, u64)>;
+type V3ProviderRateLimitPersistenceEntries =
+    Vec<(V3ProviderCooldownKey, V3ProviderRateLimitEpisode)>;
 
 #[derive(Debug)]
 enum V3ProviderHealthPersistenceCommand {
-    Replace(V3ProviderCooldownPersistenceEntries),
+    Replace(
+        V3ProviderCooldownPersistenceEntries,
+        V3ProviderRateLimitPersistenceEntries,
+    ),
     Flush(mpsc::Sender<Result<(), String>>),
 }
 
@@ -33,6 +39,7 @@ pub(super) struct V3ProviderHealthPersistenceWriter {
 struct V3ProviderHealthPersistenceTicket {
     writer: V3ProviderHealthPersistenceWriter,
     entries: V3ProviderCooldownPersistenceEntries,
+    episodes: V3ProviderRateLimitPersistenceEntries,
 }
 
 impl V3ProviderHealthPersistenceTicket {
@@ -40,11 +47,12 @@ impl V3ProviderHealthPersistenceTicket {
         Some(Self {
             writer: state.persistence.clone()?,
             entries: provider_cooldown_persistence_entries(state),
+            episodes: provider_rate_limit_persistence_entries(state),
         })
     }
 
     fn enqueue(self) {
-        self.writer.enqueue(self.entries);
+        self.writer.enqueue(self.entries, self.episodes);
     }
 }
 
@@ -65,9 +73,10 @@ impl V3ProviderHealthPersistenceWriter {
         let writer_alarm = Arc::clone(&alarm);
         let work: Box<dyn FnOnce() + Send + 'static> = Box::new(move || {
             let mut persisted_entries = coordinator.persisted_entries();
+            let mut persisted_episodes = coordinator.persisted_rate_limit_episodes();
             while let Ok(command) = receiver.recv() {
                 match command {
-                    V3ProviderHealthPersistenceCommand::Replace(entries) => {
+                    V3ProviderHealthPersistenceCommand::Replace(entries, episodes) => {
                         let mut merged_entries = persisted_entries
                             .iter()
                             .filter(|(key, _, _)| {
@@ -82,12 +91,16 @@ impl V3ProviderHealthPersistenceWriter {
                             .cloned()
                             .collect::<Vec<_>>();
                         merged_entries.extend(entries);
-                        if merged_entries == persisted_entries {
+                        if merged_entries == persisted_entries && episodes == persisted_episodes {
                             continue;
                         }
-                        match coordinator.replace_entries(merged_entries.clone()) {
+                        match coordinator.replace_entries_and_rate_limit_episodes(
+                            merged_entries.clone(),
+                            episodes.clone(),
+                        ) {
                             Ok(()) => {
                                 persisted_entries = merged_entries;
+                                persisted_episodes = episodes;
                                 if let Ok(mut alarm) = writer_alarm.write() {
                                     *alarm = None;
                                 }
@@ -127,10 +140,16 @@ impl V3ProviderHealthPersistenceWriter {
         Ok(Self { sender, alarm })
     }
 
-    fn enqueue(&self, entries: V3ProviderCooldownPersistenceEntries) {
+    fn enqueue(
+        &self,
+        entries: V3ProviderCooldownPersistenceEntries,
+        episodes: V3ProviderRateLimitPersistenceEntries,
+    ) {
         if let Err(error) = self
             .sender
-            .try_send(V3ProviderHealthPersistenceCommand::Replace(entries))
+            .try_send(V3ProviderHealthPersistenceCommand::Replace(
+                entries, episodes,
+            ))
         {
             set_persistence_alarm(
                 &self.alarm,
@@ -139,9 +158,15 @@ impl V3ProviderHealthPersistenceWriter {
         }
     }
 
-    fn flush_snapshot(&self, entries: V3ProviderCooldownPersistenceEntries) -> Result<(), String> {
+    fn flush_snapshot(
+        &self,
+        entries: V3ProviderCooldownPersistenceEntries,
+        episodes: V3ProviderRateLimitPersistenceEntries,
+    ) -> Result<(), String> {
         self.sender
-            .send(V3ProviderHealthPersistenceCommand::Replace(entries))
+            .send(V3ProviderHealthPersistenceCommand::Replace(
+                entries, episodes,
+            ))
             .map_err(|error| format!("provider health persistence writer unavailable: {error}"))?;
         let (receipt_sender, receipt_receiver) = mpsc::channel();
         self.sender
@@ -193,6 +218,7 @@ pub(super) fn start_provider_health_persistence(
 ) -> Option<(
     V3ProviderHealthPersistenceWriter,
     V3ProviderCooldownPersistenceEntries,
+    V3ProviderRateLimitPersistenceEntries,
 )> {
     let path = persistence_path?;
     let aggregate_legacy = legacy_provider_cooldown_state_path_for_manifest(manifest);
@@ -215,22 +241,26 @@ pub(super) fn start_provider_health_persistence(
                         "provider cooldown persistence load failed: {error}"
                     )),
                     Vec::new(),
+                    Vec::new(),
                 ))
             }
         };
     if let Err(error) = coordinator.reset_probe_schedule_for_startup() {
         let entries = coordinator.persisted_entries();
+        let episodes = coordinator.persisted_rate_limit_episodes();
         return Some((
             disabled_persistence_writer(format!(
                 "provider cooldown startup probe reset failed: {error}"
             )),
             entries,
+            episodes,
         ));
     }
     let entries = coordinator.persisted_entries();
+    let episodes = coordinator.persisted_rate_limit_episodes();
     match V3ProviderHealthPersistenceWriter::start(coordinator) {
-        Ok(writer) => Some((writer, entries)),
-        Err(error) => Some((disabled_persistence_writer(error), entries)),
+        Ok(writer) => Some((writer, entries, episodes)),
+        Err(error) => Some((disabled_persistence_writer(error), entries, episodes)),
     }
 }
 
@@ -347,14 +377,19 @@ fn load_provider_cooldown_coordinator(
                 .filter(|(key, _, _)| manifest_contains_cooldown_key(manifest, key))
                 .collect();
             let mut migrated = V3ProviderCooldownCoordinator::new(path);
-            migrated.replace_entries(entries)?;
+            let episodes = legacy
+                .persisted_rate_limit_episodes()
+                .into_iter()
+                .filter(|(key, _)| manifest_contains_cooldown_key(manifest, key))
+                .collect();
+            migrated.replace_entries_and_rate_limit_episodes(entries, episodes)?;
             return Ok(migrated);
         }
     }
     V3ProviderCooldownCoordinator::load(path)
 }
 
-fn manifest_contains_cooldown_key(
+pub(super) fn manifest_contains_cooldown_key(
     manifest: &V3Config05ManifestPublished,
     key: &V3ProviderCooldownKey,
 ) -> bool {
@@ -585,6 +620,27 @@ fn provider_cooldown_persistence_entries(
         .collect()
 }
 
+fn provider_rate_limit_persistence_entries(
+    state: &V3ProviderHealthState,
+) -> V3ProviderRateLimitPersistenceEntries {
+    state
+        .adaptive_history
+        .iter()
+        .filter_map(|(key, history)| {
+            Some((
+                V3ProviderCooldownKey {
+                    provider_id: key.provider_id.clone(),
+                    interface_id: key.interface_id.clone(),
+                    auth_alias: key.auth_alias.clone(),
+                    model_id: key.model_id.clone(),
+                    failure_class: V3ProviderCooldownFailureClass::RateLimit,
+                },
+                history.rate_limit_episode.clone()?,
+            ))
+        })
+        .collect()
+}
+
 pub(super) fn persist_cooldown_state(state: RwLockWriteGuard<'_, V3ProviderHealthState>) {
     let ticket = V3ProviderHealthPersistenceTicket::from_state(&state);
     drop(state);
@@ -603,7 +659,7 @@ impl V3ProviderHealthStore {
     }
 
     pub fn flush_persistence(&self) -> Result<(), String> {
-        let (writer, entries) = {
+        let (writer, entries, episodes) = {
             let state = self
                 .state
                 .read()
@@ -611,10 +667,11 @@ impl V3ProviderHealthStore {
             (
                 state.persistence.clone(),
                 provider_cooldown_persistence_entries(&state),
+                provider_rate_limit_persistence_entries(&state),
             )
         };
         match writer {
-            Some(writer) => writer.flush_snapshot(entries),
+            Some(writer) => writer.flush_snapshot(entries, episodes),
             None => Ok(()),
         }
     }
@@ -962,7 +1019,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         std::fs::write(&path, contents).expect("write unsupported cooldown state");
         let manifest = manifest("s", "127.0.0.1", 1);
 
-        let (writer, entries) =
+        let (writer, entries, _) =
             start_provider_health_persistence(&manifest, Some(path.clone()), None, None)
                 .expect("an unreadable cooldown state must not stop provider health persistence");
 
@@ -983,8 +1040,8 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         );
         assert_eq!(std::fs::read(&path).expect("read original state"), contents);
 
-        writer.enqueue(Vec::new());
-        assert!(writer.flush_snapshot(Vec::new()).is_err());
+        writer.enqueue(Vec::new(), Vec::new());
+        assert!(writer.flush_snapshot(Vec::new(), Vec::new()).is_err());
         assert_eq!(std::fs::read(path).expect("read original state"), contents);
         assert!(writer
             .alarm()
@@ -1000,7 +1057,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         std::fs::write(&path, contents).expect("write corrupt cooldown state");
         let manifest = manifest("s", "127.0.0.1", 1);
 
-        let (writer, entries) =
+        let (writer, entries, _) =
             start_provider_health_persistence(&manifest, Some(path.clone()), None, None)
                 .expect("a corrupt cooldown state must not stop provider health persistence");
 
@@ -1032,7 +1089,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         TEST_SPAWN_FAILURE
             .with(|failure| failure.set(Some("injected writer start failure".to_string())));
 
-        let (writer, entries) =
+        let (writer, entries, _) =
             start_provider_health_persistence(&manifest, Some(path), None, None)
                 .expect("spawn failure must keep provider health persistence available");
 
@@ -1045,8 +1102,8 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             .alarm()
             .expect("disabled writer must retain the startup failure")
             .contains("provider health persistence writer start failed"));
-        writer.enqueue(Vec::new());
-        assert!(writer.flush_snapshot(Vec::new()).is_err());
+        writer.enqueue(Vec::new(), Vec::new());
+        assert!(writer.flush_snapshot(Vec::new(), Vec::new()).is_err());
         assert!(TEST_SPAWN_FAILURE.with(std::cell::Cell::take).is_none());
     }
 

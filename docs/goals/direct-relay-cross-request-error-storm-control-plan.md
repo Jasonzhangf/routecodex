@@ -126,9 +126,13 @@ by the Error06 builder.
 - Only one request receives an admission permit per gate generation. Waiters must
   re-evaluate policy after wake-up; broadcasting all waiters into provider transport is
   forbidden.
-- A fresh normal request does not inspect or consume an existing recovery lane. The
-  current request enters the gate only after typed Error05 returns
-  `WaitThenRetrySame` or `WaitThenReselect`.
+- A fresh request selected for an identity with an active actual-HTTP-429 lane reads
+  that exact identity's typed recovery witness and enters the existing recovery
+  admission before sending. The identity includes provider, interface, auth key and
+  model. Unrelated identities do not share its backoff. For non-429 failures, a fresh
+  normal request does not inspect or consume another request's recovery lane; it
+  enters only after typed Error05 returns `WaitThenRetrySame` or
+  `WaitThenReselect`.
 - An admitted generation is owned by an explicit Rust permit. Wall-clock time is not
   cancellation evidence: a legal provider action or lazy SSE may exceed five seconds
   while retaining exclusive ownership. Provider success, provider failure, terminal

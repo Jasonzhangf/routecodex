@@ -1,5 +1,28 @@
 use routecodex_v3_provider_responses::V3ProviderHealthStore;
 
+fn real_http_failure_action(
+    status: u16,
+    code: &str,
+) -> routecodex_v3_provider_responses::V3ProviderFailureAction {
+    let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(
+        routecodex_v3_error::build_v3_error_01_source_raised_external(
+            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            code,
+            "controlled provider failure",
+            routecodex_v3_error::V3ExternalErrorLink {
+                kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+                status: Some(status),
+                code: Some(code.into()),
+                provider_id: Some("p".into()),
+                upstream_request_id: None,
+                message: Some("controlled provider failure".into()),
+            },
+        ),
+    );
+    routecodex_v3_error::build_v3_provider_failure_action_from_v3_error_02(&classified)
+}
+
 #[test]
 fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b() {
     for late in ["cancel", "success", "failure"] {
@@ -122,59 +145,46 @@ fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b()
 }
 
 #[test]
-fn a_single_429_latches_a_bounded_hold_released_by_success_or_expiry() {
-    // HTTP 429 latches a bounded rate-limit hold on its exact identity: the first
-    // 429 holds the identity out of selection for the policy window (~1 minute),
-    // a real business success releases it immediately, and the hold also expires
-    // on its own so the key is never pinned to the long ladder.
+fn business_success_resets_early_429_window_without_count_based_cooling() {
     let store = V3ProviderHealthStore::default();
-    let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("429");
-    action.recovery = routecodex_v3_provider_responses::V3ProviderRecoveryKind::RecoverableCounted;
-    action.failure_threshold = 1;
-    action.cooldown_ms = 60_000;
-    action.failure_fingerprint =
-        routecodex_v3_error::build_v3_provider_global_error_fingerprint(429).unwrap();
-    let held = store
-        .record_provider_failure_action("p", "a", "m", &action, 100)
+    let action = real_http_failure_action(429, "rate_limit_error");
+    for time in [100, 101, 102, 60100] {
+        let projection = store
+            .record_provider_failure_action("p", "a", "m", &action, time)
+            .unwrap();
+        assert!(!projection.cooldown, "count alone cannot cool");
+    }
+    let recovered = store
+        .record_provider_key_success("p", "a", "m", 60101)
         .unwrap();
-    assert!(held.cooldown, "the first 429 must latch the bounded hold");
+    assert!(recovered.available);
+    assert!(!recovered.cooldown);
+    assert_eq!(recovered.success_streak, 1, "one real success counts once");
+    for time in [120100, 180100] {
+        assert!(
+            store
+                .record_provider_failure_action("p", "a", "m", &action, time)
+                .unwrap()
+                .available,
+            "matching success starts a new unresolved window"
+        );
+    }
     assert!(
-        !held.available,
-        "the held identity leaves selection during the window"
+        store
+            .record_provider_failure_action("p", "a", "m", &action, 240100)
+            .unwrap()
+            .cooldown
     );
-    let projection = store
-        .scheduling_projection("p", "a", "m", 1, 1, 100 + 59_000)
-        .unwrap();
-    assert!(!projection.available, "still held near the window end");
-    let projection = store
-        .scheduling_projection("p", "a", "m", 1, 1, 100 + 60_000)
-        .unwrap();
-    assert!(
-        projection.available,
-        "the hold auto-releases at window expiry"
-    );
-    // A real business success releases the hold early, before expiry.
-    let released = store
-        .record_provider_key_success("p", "a", "m", 200)
-        .unwrap();
-    assert!(released.available);
-    assert!(!released.cooldown);
 }
 
 #[test]
-fn consecutive_429_codes_share_one_bounded_hold_identity() {
-    // Different 429 provider codes are separate diagnostics of the same
-    // backpressure signal. Each still latches the bounded hold, but the hold is
-    // keyed by the exact provider+key+model identity, not by the diagnostic code.
+fn consecutive_429_codes_share_window_and_post_minimum_success_invalidates_old_probe() {
     let store = V3ProviderHealthStore::default();
     let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("429");
-    action.recovery = routecodex_v3_provider_responses::V3ProviderRecoveryKind::RecoverableCounted;
-    action.failure_threshold = 1;
-    action.cooldown_ms = 60_000;
     for (time, code) in [
         (100, "rate_limit"),
-        (101, "insufficient_quota"),
-        (102, "other"),
+        (60100, "insufficient_quota"),
+        (120100, "other"),
     ] {
         action.failure_fingerprint = Some(
             routecodex_v3_error::V3ProviderErrorFingerprint::new(
@@ -188,62 +198,79 @@ fn consecutive_429_codes_share_one_bounded_hold_identity() {
         let projection = store
             .record_provider_failure_action("p", "a", "m", &action, time)
             .unwrap();
-        assert!(projection.cooldown, "every 429 latches the bounded hold");
-        assert!(!projection.available);
+        assert_eq!(
+            projection.failure_streak, 0,
+            "429 does not penalize transport health"
+        );
+        assert_eq!(projection.cooldown, time == 120100);
+        for (key, model) in [("a", "other-model"), ("sibling", "m")] {
+            assert!(
+                store
+                    .scheduling_projection("p", key, model, 1, 1, time)
+                    .unwrap()
+                    .available
+            );
+        }
     }
-    // Sibling keys/models of the same provider stay healthy and selectable.
+    let permit = store
+        .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
+        .unwrap()
+        .unwrap();
+    let availability_generation = store.availability_generation();
+    store
+        .record_provider_key_success("p", "a", "m", 1920101)
+        .unwrap();
+    assert_ne!(store.availability_generation(), availability_generation);
+    store
+        .complete_provider_cooldown_probe_failure_with_permit(&permit, 1920102)
+        .unwrap();
     assert!(
         store
-            .scheduling_projection("p", "a", "other-model", 1, 1, 102)
+            .scheduling_projection("p", "a", "m", 1, 1, 1920103)
             .unwrap()
             .available
     );
-    assert!(
-        store
-            .scheduling_projection("p", "sibling", "m", 1, 1, 102)
-            .unwrap()
-            .available
-    );
+    assert!(store
+        .provider_cooldown_probe_keys_due(2_000_000)
+        .unwrap()
+        .is_empty());
+    for time in [1920104, 1920105] {
+        assert!(
+            store
+                .record_provider_failure_action("p", "a", "m", &action, time)
+                .unwrap()
+                .available
+        );
+    }
 }
 
 #[test]
-fn a_429_hold_still_ends_on_a_real_success_while_a_health_cooldown_is_outstanding() {
-    // A 429 hold seen while a real 5xx cooldown is outstanding keeps the identity
-    // excluded and re-stamps the bounded rate-limit window. Any real success on
-    // the exact identity still releases the whole exclusion immediately, which is
-    // the declared recovery rule for a rate-limit hold.
+fn early_429_preserves_non429_cooldown_until_matching_business_success() {
     let store = V3ProviderHealthStore::default();
-    let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("503");
+    let mut action = real_http_failure_action(503, "provider_http_503");
     action.failure_threshold = 1;
-    action.failure_fingerprint =
-        routecodex_v3_error::build_v3_provider_global_error_fingerprint(503).unwrap();
     assert!(
         store
             .record_provider_failure_action("p", "a", "m", &action, 100)
             .unwrap()
             .cooldown
     );
-    let mut rate_limited =
-        routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("429");
-    rate_limited.recovery =
-        routecodex_v3_provider_responses::V3ProviderRecoveryKind::RecoverableCounted;
-    rate_limited.failure_threshold = 1;
-    rate_limited.cooldown_ms = 60_000;
-    rate_limited.failure_fingerprint =
-        routecodex_v3_error::build_v3_provider_global_error_fingerprint(429).unwrap();
-    let after_429 = store
-        .record_provider_failure_action("p", "a", "m", &rate_limited, 101)
+    action = real_http_failure_action(429, "rate_limit_error");
+    store
+        .record_provider_failure_action("p", "a", "m", &action, 101)
         .unwrap();
     assert!(
-        after_429.cooldown,
-        "a 429 hold must not clear an outstanding health cooldown"
+        !store
+            .scheduling_projection("p", "a", "m", 1, 1, 101)
+            .unwrap()
+            .available,
+        "a429 diagnostic cannot release the existing503 exclusion"
     );
     assert!(
         store
             .record_provider_key_success("p", "a", "m", 102)
             .unwrap()
-            .available,
-        "a business success releases the whole exclusion"
+            .available
     );
 }
 

@@ -214,8 +214,7 @@ impl V3ResponsesDirectRuntimeCoreState {
         self.initial_expanded = Some(plan.expanded.clone());
         self.initial_request_local_excluded_candidates =
             plan.request_local_excluded_candidates.clone();
-        self.initial_request_local_busy_candidates =
-            plan.request_local_busy_candidates.clone();
+        self.initial_request_local_busy_candidates = plan.request_local_busy_candidates.clone();
         self.initial_route_policy_scope = plan._route_policy_scope.clone();
         self.initial_route_policy_pending = plan._route_policy_pending.clone();
         self.initial_plan_trace = Some(plan.routing_trace_segment());
@@ -339,6 +338,7 @@ pub struct V3ResponsesProtocolExecutionPlanFailure {
     pub source: V3Error01SourceRaised,
     pub node_trace: Vec<&'static str>,
     pub error_operator_fault: Option<crate::V3RelayErrorOperatorFault>,
+    pub(crate) recovery_candidates: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
 }
 
 pub(crate) fn protocol_plan_operator_fault(
@@ -349,6 +349,7 @@ pub(crate) fn protocol_plan_operator_fault(
         source: fault.policy_failure.clone(),
         node_trace,
         error_operator_fault: Some(fault),
+        recovery_candidates: None,
     }
 }
 

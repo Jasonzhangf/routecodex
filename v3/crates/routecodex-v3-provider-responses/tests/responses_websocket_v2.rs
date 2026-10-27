@@ -1385,8 +1385,13 @@ async fn websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admiss
         1
     );
 
+    let scope =
+        routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+            interface_id: selected.interface_id.clone(),
+            model_id: selected.canonical_model_id.clone(),
+        };
     let pre_acquired = V3AdaptiveConcurrencyController::process_shared()
-        .try_acquire_business(provider_key)
+        .try_acquire_business_scoped(provider_key, Some(&scope))
         .expect("runtime-selected second request must reserve the remaining provider slot");
     assert_eq!(
         V3AdaptiveConcurrencyController::process_shared()
@@ -1481,16 +1486,25 @@ async fn websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner
     let provider_key = "ws-provider-admission-order:admission-order";
     let controller = V3AdaptiveConcurrencyController::process_shared();
     controller.ensure_initial_budget(provider_key, 3).unwrap();
-    let held_elsewhere = controller.try_acquire_business(provider_key).unwrap();
-    let pre_acquired = controller.try_acquire_business(provider_key).unwrap();
-    controller
-        .observe_rate_limit(provider_key, u64::MAX - 1_000_000)
-        .unwrap();
     let mut selected = target_with_env(&url, "V3_WS_KEY_ADMISSION_ORDER");
     selected.provider_id = "ws-provider-admission-order".into();
     selected.auth.alias = "admission-order".into();
     selected.initial_concurrency_budget = 3;
     selected.concurrency_acquire_timeout_ms = 1_000;
+    let scope =
+        routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+            interface_id: selected.interface_id.clone(),
+            model_id: selected.canonical_model_id.clone(),
+        };
+    let held_elsewhere = controller
+        .try_acquire_business_scoped(provider_key, Some(&scope))
+        .unwrap();
+    let pre_acquired = controller
+        .try_acquire_business_scoped(provider_key, Some(&scope))
+        .unwrap();
+    controller
+        .observe_rate_limit_scoped(provider_key, Some(&scope), u64::MAX - 1_000_000)
+        .unwrap();
 
     let waiting_wire = build_v3_provider_12_responses_wire_payload(
         "req-ws-admission-order-waiting",
@@ -1510,7 +1524,9 @@ async fn websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner
     let waiting_request =
         build_v3_transport_13_responses_request_from_v3_provider_12(waiting_wire).unwrap();
     assert_eq!(waiting_request.provider_key(), provider_key);
-    let saturated = controller.snapshot(provider_key).unwrap();
+    let saturated = controller
+        .snapshot_for_scope(provider_key, Some(&scope))
+        .unwrap();
     assert_eq!(saturated.budget, 1);
     assert_eq!(saturated.in_flight, 2);
     assert!(saturated.saturated);

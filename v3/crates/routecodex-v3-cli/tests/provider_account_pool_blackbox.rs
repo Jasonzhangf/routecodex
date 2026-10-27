@@ -37,11 +37,7 @@ async fn recovery_peer(
     if headers.get("authorization").unwrap() == "Bearer pool-key-02" {
         peer.sibling_business
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error":{"type":"server_error","message":"eligible sibling unavailable"}})),
-        )
-            .into_response();
+        return success_response(Mode::Relay, body["stream"] == true);
     }
     assert_eq!(headers.get("authorization").unwrap(), "Bearer pool-key-01");
     assert_eq!(body["model"], "wire-pool-model");
@@ -66,8 +62,8 @@ async fn recovery_peer(
     let attempt = peer
         .business
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    // The first business attempt is refused with a real rate limit; every later
-    // attempt answers normally. One 429 is enough to hold the exact identity.
+    // The first business attempt is refused with a real rate limit. A healthy
+    // sibling serves the request; later attempts on the recovered key succeed.
     if attempt == 0 {
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -79,7 +75,7 @@ async fn recovery_peer(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn zen_429_hold_and_http_2xx_streaming_recovery_public() {
+async fn early_429_fallback_and_manual_http_2xx_streaming_recovery_public() {
     let _guard = TEST_LOCK.lock().await;
     let _counter = CounterEnvironment::new();
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -132,27 +128,42 @@ async fn zen_429_hold_and_http_2xx_streaming_recovery_public() {
     let mut routed_request = request(false);
     routed_request["model"] = json!("router");
 
-    // The first business attempt is refused with a real 429; that single
-    // failure latches a bounded hold on the exact provider/key/model identity.
-    // The fallback account must serve the retry while the exact key is held.
-    match client
+    let reply = client
         .post(format!("{base}/v1/responses"))
         .json(&routed_request)
         .send()
         .await
-    {
-        Ok(reply) => {
-            assert!(
-                !reply.status().is_success(),
-                "the refused attempt must not fabricate success"
-            );
-            let _ = reply.bytes().await;
-        }
-        Err(_) => {
-            // Both eligible identities failed, so the transport terminates
-            // without a fabricated success or a client error response.
-        }
-    }
+        .unwrap();
+    assert_eq!(reply.status(), StatusCode::OK);
+    assert_eq!(reply.json::<Value>().await.unwrap()["status"], "completed");
+    let pool: Value = client
+        .get(format!("{base}/_routecodex/health/cooldown-pool"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        pool["entries"],
+        json!([]),
+        "early429 must not create health cooldown: {pool:?}"
+    );
+    assert_eq!(business.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(
+        sibling_business.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    // Seed a separate declared manual recovery test. This is not a429 health
+    // mutation. The real public probe still has to restore the exact account.
+    let seed = client
+        .post(format!("{base}/_routecodex/health/cooldown-pool/add"))
+        .json(&json!({"provider_id":"poolpeer","interface_id":"default",
+            "auth_alias":"pool-key-01","model_id":"model","kind":"probe","duration_ms":1100}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(seed.status(), StatusCode::OK);
     let pool: Value = client
         .get(format!("{base}/_routecodex/health/cooldown-pool"))
         .send()
@@ -162,36 +173,14 @@ async fn zen_429_hold_and_http_2xx_streaming_recovery_public() {
         .await
         .unwrap();
     assert_eq!(pool["entries"].as_array().unwrap().len(), 1);
-    assert!(
-        pool["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|entry| entry["provider_id"] == "poolpeer"
-                && entry["auth_alias"] == "pool-key-01"
-                && entry["model_id"] == "model"),
-        "the first 429 must hold the exact identity: {pool:?}"
-    );
-    assert_eq!(business.load(std::sync::atomic::Ordering::SeqCst), 1);
-    assert_eq!(
-        sibling_business.load(std::sync::atomic::Ordering::SeqCst),
-        1
-    );
-    // A later business request on the same model must not retry the held
-    // account: it reselects the fallback account (which is itself down here),
-    // so the request still terminates without a fabricated success.
-    match client
+    let reply = client
         .post(format!("{base}/v1/responses"))
         .json(&routed_request)
         .send()
         .await
-    {
-        Ok(reply) => {
-            assert!(!reply.status().is_success());
-            let _ = reply.bytes().await;
-        }
-        Err(_) => {}
-    }
+        .unwrap();
+    assert_eq!(reply.status(), StatusCode::OK);
+    assert_eq!(reply.json::<Value>().await.unwrap()["status"], "completed");
     assert_eq!(
         business.load(std::sync::atomic::Ordering::SeqCst),
         1,
@@ -212,8 +201,8 @@ async fn zen_429_hold_and_http_2xx_streaming_recovery_public() {
                 && entry["model_id"] == "model"),
         "the hold must persist until a real success or a matching 2xx probe: {pool:?}"
     );
-    // Recovery is scheduled automatically after the first business 429.
-    // A nonterminal 2xx SSE response is sufficient, regardless of its body.
+    // The manual seed schedules this recovery; early429 does not. A real
+    // nonterminal2xx SSE response qualifies without validating its body.
     tokio::time::timeout(Duration::from_secs(15), rx.recv())
         .await
         .unwrap()

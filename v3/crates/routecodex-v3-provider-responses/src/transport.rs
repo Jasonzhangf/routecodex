@@ -1,6 +1,6 @@
 use crate::adaptive_concurrency::{
     V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease, V3AdaptiveConcurrencyPermitGuard,
-    V3AdaptiveConcurrencyProbeResult,
+    V3AdaptiveConcurrencyProbeResult, V3ConcurrencyIdentityScope,
 };
 use crate::provider_auth::{
     discovery_models_url, extract_discovered_models, resolve_secret, V3DiscoveredModel,
@@ -12,7 +12,8 @@ use crate::shared::{
 };
 pub use crate::transport_admission::build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency;
 use crate::transport_admission::{
-    provider_admission_error, take_or_acquire_provider_admission, V3PreAcquiredProviderAdmission,
+    provider_admission_error, take_or_acquire_provider_admission_scoped,
+    V3PreAcquiredProviderAdmission,
 };
 use crate::transport_handoff::{
     V3ProviderTransportAttemptControl, V3ProviderTransportAttemptState,
@@ -133,6 +134,7 @@ pub struct V3Transport13ResponsesRequest {
     transport_attempt_control: Option<V3ProviderTransportAttemptControl>,
     pre_acquired_admission: V3PreAcquiredProviderAdmission,
     auth_carrier: V3ProviderHttpAuthCarrier,
+    identity_scope: Option<V3ConcurrencyIdentityScope>,
 }
 
 pub type V3Transport13ResponsesHttpRequest = V3Transport13ResponsesRequest;
@@ -162,7 +164,15 @@ impl V3Transport13ResponsesRequest {
     }
 
     pub fn with_pre_acquired_admission(mut self, admission: V3AdaptiveConcurrencyLease) -> Self {
+        if self.identity_scope.is_none() {
+            self.identity_scope = admission.identity_scope().cloned();
+        }
         self.pre_acquired_admission.set(admission);
+        self
+    }
+
+    pub fn with_identity_scope(mut self, scope: V3ConcurrencyIdentityScope) -> Self {
+        self.identity_scope = Some(scope);
         self
     }
 
@@ -406,6 +416,7 @@ pub(crate) fn v3_transport_13_request(
         transport_attempt_control: None,
         pre_acquired_admission: V3PreAcquiredProviderAdmission::empty(),
         auth_carrier: V3ProviderHttpAuthCarrier::ExistingBearer,
+        identity_scope: None,
     }
 }
 
@@ -431,6 +442,10 @@ pub fn build_v3_transport_13_responses_request_from_wire_parts(
     endpoint: crate::V3ResponsesRequestEndpoint,
     body: Value,
 ) -> Result<V3Transport13ResponsesRequest, V3ProviderError> {
+    let identity_scope = V3ConcurrencyIdentityScope {
+        interface_id: target.interface_id.clone(),
+        model_id: target.canonical_model_id.clone(),
+    };
     let provider_id = target.provider_id;
     let request_timeout_ms = target.request_timeout_ms;
     let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
@@ -480,7 +495,7 @@ pub fn build_v3_transport_13_responses_request_from_wire_parts(
                 *timeout_ms = concurrency_acquire_timeout_ms;
                 *request_compatibility_profile = compatibility_profile;
             }
-            Ok(request)
+            Ok(request.with_identity_scope(identity_scope))
         }
         V3ResponsesTransportKind::WebsocketV2 => {
             if endpoint == crate::V3ResponsesRequestEndpoint::Compact {
@@ -510,8 +525,8 @@ pub fn build_v3_transport_13_responses_request_from_wire_parts(
                 "type".to_string(),
                 Value::String("response.create".to_string()),
             );
-            Ok(v3_transport_13_request(
-                V3Transport13ResponsesRequestKind::WebSocketV2 {
+            Ok(
+                v3_transport_13_request(V3Transport13ResponsesRequestKind::WebSocketV2 {
                     request_id,
                     provider_id,
                     canonical_model_id: target.canonical_model_id,
@@ -522,8 +537,9 @@ pub fn build_v3_transport_13_responses_request_from_wire_parts(
                     initial_concurrency_budget,
                     cancellation: None,
                     compatibility_profile,
-                },
-            ))
+                })
+                .with_identity_scope(identity_scope),
+            )
         }
     }
 }
@@ -991,14 +1007,14 @@ impl ResponsesTransport for ProviderResponsesTransport {
                                 .with_probe_result(V3AdaptiveConcurrencyProbeResult::RateLimited),
                         );
                     } else {
-                        controller
-                            .observe_rate_limit(&provider_key, now_ms)
-                            .map_err(|reason| V3ProviderError::InternalTransport {
+                        permit_guard.observe_rate_limit(now_ms).map_err(|reason| {
+                            V3ProviderError::InternalTransport {
                                 request_id: request_id.clone(),
                                 provider_id: provider_id.clone(),
                                 lane: V3ProviderInternalTransportLane::Response,
                                 reason,
-                            })?;
+                            }
+                        })?;
                         drop(permit_guard);
                     }
                 } else {

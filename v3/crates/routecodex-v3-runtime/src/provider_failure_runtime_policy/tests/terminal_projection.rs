@@ -83,7 +83,7 @@ auth = { type = "api_key", entries = [{ alias = "key1", env = "FIRST_KEY" }] }
 [[providers.first.response_error_policy]]
 policy_id = "reselect_then_retry_policy"
 [providers.first.response_error_policy.match]
-http_status = 429
+http_status = 503
 [[providers.first.response_error_policy.path]]
 step = "wait_retry"
 retry_mode = "reselect_before_client_projection"
@@ -134,9 +134,9 @@ targets = [
         &context,
         selected,
         "V3ProviderRespInbound01Raw",
-        429,
-        Some("provider_http_429".to_string()),
-        "provider rate limited and no alternative remains".to_string(),
+        503,
+        Some("provider_http_503".to_string()),
+        "provider unavailable and no alternative remains".to_string(),
         Some(matched_policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
