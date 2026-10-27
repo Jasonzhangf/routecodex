@@ -620,9 +620,63 @@
         "version": 2
       },
       "version": 23
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "最后一个 provider 失败不冷却、不重试，但是不会结束请求；这个是误解",
+          "role": "user",
+          "source": "Direct user correction in current Codex chat 01a16c5e-4fac-7be1-95b4-cb22f6877f39 on 2026-10-26, after the explicit last-provider policy clarification question"
+        },
+        "base_version": 1,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261026-last-provider-pending-without-retry",
+        "requirement_id": "routecodex-last-provider-failure-terminal-policy",
+        "text": "当前请求命中 target 内的单独或最后 eligible provider candidate 失败时，保留原始 typed Error，不因这次最后失败新增该身份的冷却、探测或自动业务重试。但该失败本身不会立即结束客户端请求。原请求交给同一 captured target 的恢复等待，等待期间释放业务容量，不阻塞其他请求或完整身份。此前其他已失败且冷却的身份，只有匹配的真实成功探测或业务成功恢复后，才解除对应的可恢复失败排除并正常准入；不得整批清空排除、解禁本请求最后失败身份或改变 request-shape 排除。没有其他可恢复 peer 时也保持 pending，不重试最后身份，不新建其 probe。客户端取消和原始声明的 residence deadline 始终有效，等待不续期；到期先核查健康、恢复与正常 eligibility，再决定仅该请求的传输处置。此更新仅覆盖旧条目的立即结束请求部分，保留最后身份不冷却、不回退到未授权 target、不自动重试的例外。客户端不得接收 provider 错误正文、代理错误状态/SSE error 或伪造成功。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "最后一个 provider 失败不冷却、不重试，但是不会结束请求；这个是误解",
+          "role": "user",
+          "source": "Direct user correction in current Codex chat 01a16c5e-4fac-7be1-95b4-cb22f6877f39 on 2026-10-26, after the explicit last-provider policy clarification question"
+        },
+        "requirement_id": "routecodex-last-provider-failure-terminal-policy",
+        "status": "active",
+        "text": "当前请求命中 target 内的单独或最后 eligible provider candidate 失败时，保留原始 typed Error，不因这次最后失败新增该身份的冷却、探测或自动业务重试。但该失败本身不会立即结束客户端请求。原请求交给同一 captured target 的恢复等待，等待期间释放业务容量，不阻塞其他请求或完整身份。此前其他已失败且冷却的身份，只有匹配的真实成功探测或业务成功恢复后，才解除对应的可恢复失败排除并正常准入；不得整批清空排除、解禁本请求最后失败身份或改变 request-shape 排除。没有其他可恢复 peer 时也保持 pending，不重试最后身份，不新建其 probe。客户端取消和原始声明的 residence deadline 始终有效，等待不续期；到期先核查健康、恢复与正常 eligibility，再决定仅该请求的传输处置。此更新仅覆盖旧条目的立即结束请求部分，保留最后身份不冷却、不回退到未授权 target、不自动重试的例外。客户端不得接收 provider 错误正文、代理错误状态/SSE error 或伪造成功。",
+        "version": 2
+      },
+      "version": 24
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "而且 session 不能因为连续 429 但是别的这个 provider.model.key 可用断流；现在会出现 provdier 健康，但是请求时合法，批量拒绝后某些 session 直接断流；应该是冷却前要 hold 住等待观察，不要轻易冷却",
+          "role": "user",
+          "source": "Direct user instructions in current Codex chat 01a16c5e-4fac-7be1-95b4-cb22f6877f39 on 2026-10-26, after confirming 429 health-neutral policy and correcting the last-provider exception"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261026-hold-before-cooldown",
+        "requirement_id": "routecodex-precool-observation-and-healthy-alternative",
+        "text": "合法请求在批量拒绝或连续429后，只要当前请求原池仍有符合 eligibility 的完整 provider/interface/model/key 可用，就不得直接拒绝或使某些 session 断流，必须立即选择健康替代。429仅作返回它的精确身份的容量回压，不进入健康冷却，不降低其他身份并发。对其他拟冷却的精确失败身份，先hold等待观察，不能先写冷却状态再观察。hold不持有业务容量，不阻塞其他请求、key、model、provider或整个池；同一监听端口中匹配精确身份的真实业务成功应解除其hold并取消尚未提交的冷却，其他身份或端口的成功不得修改它。观察时长与升级取自既有声明的typed错误策略和预算，不发明新超时或次数，也不把池等待阶梯当健康阈值。观察与健康检查结果通过唯一typed控制/错误资源交给健康owner；仅在原动作仍有效且声明条件满足时可提交冷却，旧代探测失败不得推翻较新的真实成功。保留最后候选不冷却、不探测、不自动重试且不直接终止请求的例外，保留客户端取消、原始deadline、正常容量硬上限、原始错误状态及统一typed Error链。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "而且 session 不能因为连续 429 但是别的这个 provider.model.key 可用断流；现在会出现 provdier 健康，但是请求时合法，批量拒绝后某些 session 直接断流；应该是冷却前要 hold 住等待观察，不要轻易冷却",
+          "role": "user",
+          "source": "Direct user instructions in current Codex chat 01a16c5e-4fac-7be1-95b4-cb22f6877f39 on 2026-10-26, after confirming 429 health-neutral policy and correcting the last-provider exception"
+        },
+        "requirement_id": "routecodex-precool-observation-and-healthy-alternative",
+        "status": "active",
+        "text": "合法请求在批量拒绝或连续429后，只要当前请求原池仍有符合 eligibility 的完整 provider/interface/model/key 可用，就不得直接拒绝或使某些 session 断流，必须立即选择健康替代。429仅作返回它的精确身份的容量回压，不进入健康冷却，不降低其他身份并发。对其他拟冷却的精确失败身份，先hold等待观察，不能先写冷却状态再观察。hold不持有业务容量，不阻塞其他请求、key、model、provider或整个池；同一监听端口中匹配精确身份的真实业务成功应解除其hold并取消尚未提交的冷却，其他身份或端口的成功不得修改它。观察时长与升级取自既有声明的typed错误策略和预算，不发明新超时或次数，也不把池等待阶梯当健康阈值。观察与健康检查结果通过唯一typed控制/错误资源交给健康owner；仅在原动作仍有效且声明条件满足时可提交冷却，旧代探测失败不得推翻较新的真实成功。保留最后候选不冷却、不探测、不自动重试且不直接终止请求的例外，保留客户端取消、原始deadline、正常容量硬上限、原始错误状态及统一typed Error链。",
+        "version": 1
+      },
+      "version": 25
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 23
+  "version": 25
 }

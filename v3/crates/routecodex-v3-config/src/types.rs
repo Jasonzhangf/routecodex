@@ -721,8 +721,8 @@ pub enum V3StreamingPolicy {
 #[serde(deny_unknown_fields)]
 pub struct V3ProviderConcurrencyAuthoringConfig {
     pub max_in_flight: u32,
-    /// Retained for compatibility with existing provider config files. Business request
-    /// admission never waits for provider capacity, so this value does not control it.
+    /// Runtime recovery waits for temporary capacity/cooldown exhaustion within
+    /// this budget. A single synchronous admission remains nonblocking.
     pub acquire_timeout_ms: u64,
     pub stale_lease_ms: u64,
 }
@@ -788,15 +788,6 @@ pub struct V3RoutePolicyAuthoringConfig {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum V3RouteConditionAuthoringConfig {
     CurrentCompaction,
-    SearchPoolTurnRatioAtLeast {
-        window_turns: usize,
-        numerator: usize,
-        denominator: usize,
-    },
-    ToolExecutionErrorTurnsAtLeast {
-        window_turns: usize,
-        count: usize,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

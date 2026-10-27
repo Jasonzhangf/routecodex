@@ -226,14 +226,22 @@ port = 8777
   error_samples_only = true
   error_sample_skip_statuses = [401, 402, 403, 429, 503]
 
-# 全局错误处理策略：只消费 provider mapping 产出的 typed error；不负责原始
-# provider error mapping。runtime 通过 internal.rs 查表，禁止在代码内硬编码。
+# 请求独立的池空恢复节奏；容量或健康恢复通知可提前唤醒，不占业务 lease。
+[target_recovery]
+  backoff_wait_ms = [1000, 3000, 15000, 35000, 90000]
+  steady_wait_ms = 1000
+
+# Real 429 observations, scoped to listener/provider/interface/model/key.
+[rate_limit_recovery]
+  observation_window_ms = 120000
+  cooldown_ms = 1800000
+  probe_required_after_ms = 3600000
+
 [error_handling]
   transient_stages = ["provider.sse_decode", "provider.sse_stream", "provider.transport_transient", "V3ProviderResp14Raw", "V3ProviderRespInbound01Raw", "V3ProviderReqOutbound09TransportRequest", "V3Transport13ResponsesHttpRequest"]
   transient_wait_ms = [1000, 3000, 5000]
-  # 503（upstream unavailable）是可恢复类：与 429/5xx 一样每个 typed provider 失败
-  # 首次即进入冷却，并共用 provider health 的长探活阶梯。它不属于 typed
-  # irrecoverable 账户/计费组（401..403）。
+  # 503 与其他可恢复失败走冷却前观察；429 使用上面的时间窗口。
+  # 它们不属于 typed irrecoverable 账户/计费组（401..403）。
   recoverable_http_statuses = [429, 500, 502, 503]
   # Recoverable admission uses the Error owner's shared threshold.
   recoverable_cooldown_ms = 5000

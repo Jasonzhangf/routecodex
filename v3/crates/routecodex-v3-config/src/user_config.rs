@@ -350,13 +350,16 @@ pub fn project_v3_user_config_03_authoring(
             pool.selection = V3SelectionPolicy {
                 strategy: V3SelectionStrategy::Priority,
             };
-            pool.targets = match server.routes.get(pool_id) {
-                Some(user_pool) => compile_pool_targets(
+            pool.targets = if pool_id == "default" {
+                default_targets.clone()
+            } else if let Some(user_pool) = server.routes.get(pool_id) {
+                compile_pool_targets(
                     user_pool.clone(),
                     provider_catalogue,
                     &server.provider_priority_schedule,
-                )?,
-                None => default_targets.clone(),
+                )?
+            } else {
+                Vec::new()
             };
         }
         internal.route_groups.insert(server_id.clone(), group);
@@ -374,14 +377,6 @@ pub fn project_v3_user_config_03_authoring(
                 provider_priority_schedule: server.provider_priority_schedule,
             },
         );
-    }
-
-    for group in internal.route_groups.values_mut() {
-        for pool in group.pools.values_mut() {
-            if pool.targets.is_empty() {
-                return Err(validation("user config route pool compiled empty"));
-            }
-        }
     }
 
     internal.servers = combined_servers;
@@ -475,7 +470,7 @@ fn validate_pool(
             "user config server {server_id:?} contains an empty pool id"
         )));
     }
-    if pool.tiers.is_empty() {
+    if pool.tiers.is_empty() && pool_id == "default" {
         return Err(validation(format!(
             "user config pool {server_id}.{pool_id} must contain at least one tier"
         )));

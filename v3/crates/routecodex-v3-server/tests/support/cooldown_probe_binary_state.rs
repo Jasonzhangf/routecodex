@@ -15,13 +15,16 @@ struct Peer {
     receipts: mpsc::UnboundedSender<(String, bool)>,
     release: Arc<Semaphore>,
     failures: Arc<Mutex<u32>>,
+    refusal_phase: Arc<std::sync::atomic::AtomicBool>,
     success_release: Arc<Semaphore>,
     fail_streaming_probe: bool,
-    /// Upstream status used to refuse a business attempt. Health-cooling tests
-    /// use 503 (a real recoverable health failure); the adaptive-budget test
-    /// uses 429 because only a real rate limit collapses the capacity budget.
-    refuse_status: axum::http::StatusCode,
-    refuse_code: &'static str,
+    refusal_status: u16,
+    late_probe_failure: Arc<std::sync::atomic::AtomicBool>,
+    late_business_failure: bool,
+    /// 429 前的并发闸门。适配后 adaptive 预算按 429 观测水位塌缩：只有三个
+    /// 业务请求同时到达上游（水位=held+3=4），平滑预算才保留 held 与探针
+    /// 同时在途的余量。仅在 in_flight_success 变体设置。
+    rate_limit_barrier: Option<Arc<Barrier>>,
     /// How many business attempts are refused before the upstream starts
     /// answering normally.
     refuse_limit: u32,
@@ -39,11 +42,31 @@ async fn upstream(
             .to_string()
             .contains("Reply exactly OK. Do not call tools.");
     peer.receipts.send((auth.clone(), probe)).unwrap();
+    if auth == "Bearer spare-secret" && body.to_string().contains("held spare") {
+        peer.release.acquire().await.unwrap().forget();
+    }
     if auth == "Bearer controlled-secret" {
         if body.to_string().contains("held success") {
             peer.success_release.acquire().await.unwrap().forget();
+            if peer.late_business_failure {
+                return (
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({"error":{"message":"late in-flight business failure"}})),
+                )
+                    .into_response();
+            }
         } else if probe {
             peer.release.acquire().await.unwrap().forget();
+            if peer
+                .late_probe_failure
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return (
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({"error":{"message":"late observation failure"}})),
+                )
+                    .into_response();
+            }
             if peer.fail_streaming_probe {
                 return Response::builder()
                     .status(503)
@@ -57,7 +80,9 @@ async fn upstream(
         }
         let refused = {
             let mut failures = peer.failures.lock().await;
-            if *failures < peer.refuse_limit {
+            if peer.refusal_phase.load(std::sync::atomic::Ordering::SeqCst)
+                && *failures < peer.refuse_limit
+            {
                 *failures += 1;
                 true
             } else {
@@ -65,9 +90,12 @@ async fn upstream(
             }
         };
         if refused {
+            if let Some(barrier) = &peer.rate_limit_barrier {
+                barrier.wait().await;
+            }
             return (
-                peer.refuse_status,
-                Json(json!({"error":{"code":peer.refuse_code,"message":"controlled refusal"}})),
+                axum::http::StatusCode::from_u16(peer.refusal_status).unwrap(),
+                Json(json!({"error":{"code":if peer.refusal_status == 429 { "insufficient_quota" } else { "server_error" },"message":"controlled provider failure"}})),
             )
                 .into_response();
         }
@@ -109,21 +137,77 @@ async fn wait_receipt(rx: &mut mpsc::UnboundedReceiver<(String, bool)>, expected
 }
 
 #[tokio::test]
-async fn three_business_5xxs_automatically_probe_2xx_and_restore_exact_key() {
-    automatic_recovery(false).await;
+async fn health_neutral_429_then_manual_probe_2xx_restores_exact_key() {
+    automatic_recovery(false, false).await;
+}
+
+#[tokio::test]
+async fn in_flight_business_success_wakes_exact_429_gate_before_backoff() {
+    automatic_recovery(true, false).await;
+}
+
+#[tokio::test]
+async fn non429_hold_preserves_healthy_fallback_and_matching_success_cancels_cooling() {
+    recovery_with_refusal_status(true, false, 503).await;
+}
+
+#[tokio::test]
+async fn non429_business_success_supersedes_in_flight_observation_failure() {
+    recovery_with_observation_race(true, false, 503, true, false).await;
+}
+
+#[tokio::test]
+async fn late_inflight_failure_cannot_shadow_existing_cooldown_recovery_public_http() {
+    recovery_with_observation_race(true, false, 503, false, true).await;
 }
 
 #[tokio::test]
 async fn zen_non_2xx_unfinished_probe_body_preserves_cooldown_and_allows_fallback() {
-    automatic_recovery(true).await;
+    recovery_with_refusal_status(false, true, 503).await;
 }
 
-async fn automatic_recovery(fail_streaming_probe: bool) {
+#[tokio::test]
+async fn business_5xx_observation_automatically_probes_and_restores_exact_key() {
+    recovery_with_refusal_status(false, false, 503).await;
+}
+
+async fn automatic_recovery(in_flight_success: bool, fail_streaming_probe: bool) {
+    recovery_with_refusal_status(in_flight_success, fail_streaming_probe, 429).await;
+}
+
+async fn recovery_with_refusal_status(
+    in_flight_success: bool,
+    fail_streaming_probe: bool,
+    refusal_status: u16,
+) {
+    recovery_with_observation_race(
+        in_flight_success,
+        fail_streaming_probe,
+        refusal_status,
+        false,
+        false,
+    )
+    .await;
+}
+
+async fn recovery_with_observation_race(
+    in_flight_success: bool,
+    fail_streaming_probe: bool,
+    refusal_status: u16,
+    late_probe_failure: bool,
+    late_business_failure: bool,
+) {
     let _guard = TEST_LOCK.lock().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let release = Arc::new(Semaphore::new(if fail_streaming_probe { 100 } else { 0 }));
+    let release = Arc::new(Semaphore::new(0));
     let failures = Arc::new(Mutex::new(0));
+    let refusal_phase = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let success_release = Arc::new(Semaphore::new(0));
+    let probe_failure = Arc::new(std::sync::atomic::AtomicBool::new(
+        late_probe_failure
+            || late_business_failure
+            || (!in_flight_success && refusal_status != 429),
+    ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_port = listener.local_addr().unwrap().port();
     // Aggregate health stores are isolated, but adaptive concurrency is keyed
@@ -137,13 +221,23 @@ async fn automatic_recovery(fail_streaming_probe: bool) {
         receipts: tx,
         release: release.clone(),
         failures: failures.clone(),
+        refusal_phase: refusal_phase.clone(),
         success_release: success_release.clone(),
         fail_streaming_probe,
-        // A real 5xx cools the exact identity on its first failure, so one
-        // refusal is enough to enter the cooldown-probe state.
-        refuse_status: axum::http::StatusCode::SERVICE_UNAVAILABLE,
-        refuse_code: "server_error",
-        refuse_limit: 1,
+        refusal_status,
+        late_probe_failure: probe_failure.clone(),
+        late_business_failure,
+        // The held request stays in flight for the whole refusal phase, so the
+        // new 429 watermark collapses the budget below anything the held
+        // request leaves free unless all three business attempts are refused
+        // simultaneously. A three-party gate makes that watermark (held + 3)
+        // deterministic instead of scheduler-dependent.
+        rate_limit_barrier: if in_flight_success {
+            Some(Arc::new(Barrier::new(3)))
+        } else {
+            None
+        },
+        refuse_limit: if in_flight_success { 3 } else { 1 },
     };
     let task = tokio::spawn(async move {
         axum::serve(
@@ -181,6 +275,7 @@ type = "{provider_type}"
 {probe_timeout}
 base_url = "http://127.0.0.1:{upstream_port}/v1"
 default_model = "test"
+concurrency = {{ max_in_flight = 4, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}, {{ alias = "spare", env = "V3_COOLDOWN_BINARY_SPARE_KEY" }}] }}
 [providers.{provider_id}.models.test]
 [route_groups.default.pools.default]
@@ -191,14 +286,247 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
-    // One refused business attempt is enough: a 5xx cools the exact identity
-    // immediately, and the client transparently lands on the spare key.
+    let held_success = if in_flight_success {
+        let client = client.clone();
+        let base = managed.base.clone();
+        let request =
+            tokio::spawn(async move { business_at(&client, &base, "held success").await });
+        wait_receipt(&mut rx, ("Bearer controlled-secret", false)).await;
+        Some(request)
+    } else {
+        None
+    };
+    if in_flight_success {
+        // The held request already owns one slot, so the three business
+        // attempts must be refused together: each 429 records the in-flight
+        // watermark (held + 3), the hour-window median stays above the held
+        // request, and the smoothed budget keeps room for the later probe.
+        let mut attempts = Vec::new();
+        for _ in 0..3 {
+            let client = client.clone();
+            let base = managed.base.clone();
+            attempts.push(tokio::spawn(async move {
+                business_at(&client, &base, "binary state business").await
+            }));
+        }
+        for attempt in attempts {
+            assert!(attempt.await.unwrap().contains("spare-secret"));
+        }
+        assert_eq!(
+            *failures.lock().await,
+            3,
+            "all three concurrent business attempts must reach exact key"
+        );
+    } else {
+        assert!(business(&client, &managed).await.contains("spare-secret"));
+        assert_eq!(*failures.lock().await, 1);
+    }
+    let mut refused_at = tokio::time::Instant::now();
+    let refused_count = *failures.lock().await;
     assert!(business(&client, &managed).await.contains("spare-secret"));
     assert_eq!(
         *failures.lock().await,
-        1,
-        "the business attempt must reach the exact key before cooldown"
+        refused_count,
+        "fresh must skip gated identity"
     );
+    assert!(
+        pool_entries(&client, managed.pool_url())
+            .await
+            .iter()
+            .all(|e| e["provider_id"] != provider_id || e["auth_alias"] != "key"),
+        "neither 429 nor an unobserved non429 failure may create a health cooldown"
+    );
+    if late_probe_failure || late_business_failure {
+        wait_receipt(&mut rx, ("Bearer controlled-secret", true)).await;
+        assert!(
+            pool_entries(&client, managed.pool_url())
+                .await
+                .iter()
+                .all(|entry| entry["provider_id"] != provider_id || entry["auth_alias"] != "key"),
+            "an in-flight observation must not create a cooldown"
+        );
+        assert!(
+            business(&client, &managed).await.contains("spare-secret"),
+            "the observation must not block a healthy sibling key"
+        );
+        refused_at = tokio::time::Instant::now();
+    }
+    refusal_phase.store(false, std::sync::atomic::Ordering::SeqCst);
+    if let Some(request) = held_success {
+        if late_business_failure {
+            release.add_permits(1);
+            timeout(Duration::from_secs(8), async {
+                loop {
+                    if pool_entries(&client, managed.pool_url())
+                        .await
+                        .iter()
+                        .any(|entry| {
+                            entry["provider_id"] == provider_id && entry["auth_alias"] == "key"
+                        })
+                    {
+                        break;
+                    }
+                    sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("failed qualified observation must commit exact cooldown");
+            assert!(business(&client, &managed).await.contains("spare-secret"));
+            success_release.add_permits(1);
+            assert!(timeout(Duration::from_secs(4), request)
+                .await
+                .expect("late failed attempt must immediately switch to healthy spare")
+                .unwrap()
+                .contains("spare-secret"));
+            assert!(
+                pool_entries(&client, managed.pool_url())
+                    .await
+                    .iter()
+                    .any(
+                        |entry| entry["provider_id"] == provider_id && entry["auth_alias"] == "key"
+                    ),
+                "late failure must retain the existing cooldown owner"
+            );
+            probe_failure.store(false, std::sync::atomic::Ordering::SeqCst);
+            while rx.try_recv().is_ok() {}
+            let (status, body) = post_json(&client,
+                format!("{}/_routecodex/health/cooldown-pool/probe", managed.base),
+                json!({"provider_id":provider_id,"interface_id":"default","auth_alias":"key","model_id":"test"}),
+            ).await;
+            assert_eq!(status, 200, "force exact recovery due: {body}");
+            release.add_permits(1);
+            timeout(Duration::from_secs(8), async {
+                loop {
+                    if pool_entries(&client, managed.pool_url())
+                        .await
+                        .iter()
+                        .all(|entry| {
+                            entry["provider_id"] != provider_id || entry["auth_alias"] != "key"
+                        })
+                    {
+                        break;
+                    }
+                    sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("current recovery must not be shadowed by a late precool lane");
+            assert!(
+                business(&client, &managed)
+                    .await
+                    .contains("controlled-secret"),
+                "the real recovered business identity must be selected again"
+            );
+            managed.finish().await;
+            task.abort();
+            let _ = task.await;
+            env::remove_var("V3_COOLDOWN_BINARY_SPARE_KEY");
+            return;
+        }
+        while rx.try_recv().is_ok() {}
+        let mut held_spares = Vec::new();
+        for _ in 0..4 {
+            let client = client.clone();
+            let base = managed.base.clone();
+            held_spares.push(tokio::spawn(async move {
+                business_at(&client, &base, "held spare").await
+            }));
+            wait_receipt(&mut rx, ("Bearer spare-secret", false)).await;
+        }
+        let client_wait = client.clone();
+        let base = managed.base.clone();
+        let waiting =
+            tokio::spawn(
+                async move { business_at(&client_wait, &base, "waiting exact key").await },
+            );
+        sleep(Duration::from_millis(100)).await;
+        if waiting.is_finished() {
+            panic!(
+                "no-alternative request completed before matching success: {:?}",
+                waiting.await
+            );
+        }
+        assert!(
+            refused_at.elapsed() < Duration::from_millis(500),
+            "fixture missed backoff window"
+        );
+        success_release.add_permits(1);
+        assert!(request.await.unwrap().contains("controlled-secret"));
+        assert!(timeout(Duration::from_millis(500), waiting)
+            .await
+            .expect("matching success must wake exact waiter before backoff")
+            .unwrap()
+            .contains("controlled-secret"));
+        assert!(
+            refused_at.elapsed() < Duration::from_millis(900),
+            "natural expiry is not success wakeup"
+        );
+        assert!(business(&client, &managed)
+            .await
+            .contains("controlled-secret"));
+        release.add_permits(if late_probe_failure { 5 } else { 4 });
+        for held in held_spares {
+            assert!(held.await.unwrap().contains("spare-secret"));
+        }
+        if late_probe_failure {
+            // The old physical observation can now return its real 503.
+            // Matching business success must have invalidated its decision.
+            let until = tokio::time::Instant::now() + Duration::from_millis(1200);
+            while tokio::time::Instant::now() < until {
+                assert!(
+                    pool_entries(&client, managed.pool_url())
+                        .await
+                        .iter()
+                        .all(|entry| entry["provider_id"] != provider_id
+                            || entry["auth_alias"] != "key"),
+                    "late observation failure must not resurrect cooling"
+                );
+                sleep(Duration::from_millis(50)).await;
+            }
+            assert!(business(&client, &managed)
+                .await
+                .contains("controlled-secret"));
+        }
+        managed.finish().await;
+        task.abort();
+        let _ = task.await;
+        env::remove_var("V3_COOLDOWN_BINARY_SPARE_KEY");
+        return;
+    }
+    if refusal_status != 429 {
+        // A real failed observation, rather than a manual seed, must admit
+        // ordinary503 cooldown before its independent recovery probe.
+        wait_receipt(&mut rx, ("Bearer controlled-secret", true)).await;
+        release.add_permits(1);
+        timeout(Duration::from_secs(4), async {
+            loop {
+                if pool_entries(&client, managed.pool_url())
+                    .await
+                    .iter()
+                    .any(|entry| {
+                        entry["provider_id"] == provider_id && entry["auth_alias"] == "key"
+                    })
+                {
+                    break;
+                }
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("failed physical observation commits exact503 cooldown");
+        probe_failure.store(false, std::sync::atomic::Ordering::SeqCst);
+    } else {
+        let (status, body) = post_json(
+            &client,
+            managed.add_url(),
+            json!({
+                "provider_id":provider_id, "interface_id":"default", "auth_alias":"key",
+                "model_id":"test", "kind":"probe", "duration_ms":1100
+            }),
+        )
+        .await;
+        assert_eq!(status, 200, "manual health probe seed: {body}");
+    }
     wait_receipt(&mut rx, ("Bearer controlled-secret", true)).await;
     let entries = pool_entries(&client, managed.pool_url()).await;
     assert!(
@@ -287,10 +615,13 @@ async fn business_success_restores_budget_for_a_later_business_request() {
         receipts: tx,
         release: Arc::new(Semaphore::new(0)),
         failures: failures.clone(),
+        refusal_phase: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         success_release: success_release.clone(),
         fail_streaming_probe: false,
-        refuse_status: axum::http::StatusCode::TOO_MANY_REQUESTS,
-        refuse_code: "rate_limit_error",
+        refusal_status: 429,
+        late_probe_failure: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        late_business_failure: false,
+        rate_limit_barrier: None,
         refuse_limit: 3,
     };
     let task = tokio::spawn(async move {

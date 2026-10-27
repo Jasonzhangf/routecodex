@@ -179,6 +179,313 @@ fn chat_messages_use_only_current_turn_tool_calls() {
     assert!(signals.last_assistant_tool.is_none());
 }
 
+// Bridges typed active-turn signals into route facts exactly like the runtime
+// entry does. The multi-call tests below fail while only the last tool call
+// reaches classification.
+fn route_facts_from_current_signals(signals: &V3CurrentTurnSignals) -> RouteClassifierInput {
+    RouteClassifierInput {
+        latest_message_from_user: signals.latest_message_from_user,
+        has_current_turn_tool_output: signals.has_current_turn_tool_output,
+        has_current_turn_tool_execution_error: signals.has_current_turn_tool_execution_error,
+        has_current_turn_web_search: signals.has_current_turn_web_search,
+        has_image_attachment: signals.has_current_turn_image,
+        is_compaction: signals.is_compaction,
+        current_user_text: signals.current_user_text.clone(),
+        last_assistant_tool_category: signals
+            .last_assistant_tool
+            .as_ref()
+            .map(|tool| tool.category.clone()),
+        current_turn_tool_categories: signals.current_turn_tool_categories.clone(),
+        ..Default::default()
+    }
+}
+
+fn chat_tool_turn(first: &str, second: &str) -> Value {
+    let call = |name: &str| match name {
+        "apply_patch" => json!({
+            "type":"function",
+            "function":{
+                "name":"apply_patch",
+                "arguments":"{\"patch\":\"*** Begin Patch\\n*** Update File: a\\n*** End Patch\"}"
+            }
+        }),
+        "read_file" => json!({
+            "type":"function",
+            "function":{"name":"read_file","arguments":"{\"path\":\"a\"}"}
+        }),
+        "exec_command" => json!({
+            "type":"function",
+            "function":{"name":"exec_command","arguments":"{\"cmd\":\"rg -n route src\"}"}
+        }),
+        other => panic!("unsupported chat tool {other}"),
+    };
+    json!({
+        "messages":[
+            {"role":"user","content":"continue"},
+            {"role":"assistant","tool_calls":[call(first), call(second)]},
+            {"role":"tool","content":"ok"}
+        ]
+    })
+}
+
+fn responses_tool_turn(first: &str, second: &str) -> Value {
+    let call = |name: &str, call_id: &str| match name {
+        "apply_patch" => json!({
+            "type":"function_call",
+            "name":"apply_patch",
+            "call_id":call_id,
+            "arguments":{"patch":"*** Begin Patch\n*** Update File: a\n*** End Patch"}
+        }),
+        "read_file" => json!({
+            "type":"function_call",
+            "name":"read_file",
+            "call_id":call_id,
+            "arguments":{"path":"a"}
+        }),
+        "exec_command" => json!({
+            "type":"function_call",
+            "name":"exec_command",
+            "call_id":call_id,
+            "arguments":{"cmd":"rg -n route src"}
+        }),
+        other => panic!("unsupported responses tool {other}"),
+    };
+    json!({
+        "input":[
+            {"type":"message","role":"user","content":"continue"},
+            call(first, "call-1"),
+            call(second, "call-2"),
+            {"type":"function_call_output","call_id":"call-2","output":"ok"}
+        ]
+    })
+}
+
+#[test]
+fn chat_multi_tool_turn_keeps_coding_over_thinking_in_both_orders() {
+    for (first, second) in [("apply_patch", "read_file"), ("read_file", "apply_patch")] {
+        let signals = build_v3_current_turn_route_facts_from_value(&chat_tool_turn(first, second));
+        assert!(signals.has_current_turn_tool_output, "{first}->{second}");
+        let route = classify_route(&route_facts_from_current_signals(&signals));
+        assert_eq!(
+            route.route_name, "coding",
+            "{first}->{second} must keep the higher-priority coding call"
+        );
+        assert!(
+            route
+                .candidates
+                .iter()
+                .any(|candidate| candidate == "thinking"),
+            "{first}->{second} must keep the independent thinking match: {:?}",
+            route.candidates
+        );
+    }
+}
+
+#[test]
+fn responses_multi_tool_turn_keeps_coding_over_thinking_in_both_orders() {
+    for (first, second) in [("apply_patch", "read_file"), ("read_file", "apply_patch")] {
+        let signals =
+            build_v3_current_turn_route_facts_from_value(&responses_tool_turn(first, second));
+        assert!(signals.has_current_turn_tool_output, "{first}->{second}");
+        let route = classify_route(&route_facts_from_current_signals(&signals));
+        assert_eq!(
+            route.route_name, "coding",
+            "{first}->{second} must keep the higher-priority coding call"
+        );
+        assert!(
+            route
+                .candidates
+                .iter()
+                .any(|candidate| candidate == "thinking"),
+            "{first}->{second} must keep the independent thinking match: {:?}",
+            route.candidates
+        );
+    }
+}
+
+#[test]
+fn chat_tool_category_competition_uses_route_priority() {
+    for (first, second) in [("read_file", "exec_command"), ("exec_command", "read_file")] {
+        let signals = build_v3_current_turn_route_facts_from_value(&chat_tool_turn(first, second));
+        let route = classify_route(&route_facts_from_current_signals(&signals));
+        assert_eq!(
+            route.route_name, "thinking",
+            "{first}->{second}: thinking must outrank search"
+        );
+        assert!(
+            route
+                .candidates
+                .iter()
+                .any(|candidate| candidate == "search"),
+            "{first}->{second}: search must stay a candidate: {:?}",
+            route.candidates
+        );
+    }
+}
+
+#[test]
+fn responses_tool_category_competition_uses_route_priority() {
+    for (first, second) in [("read_file", "exec_command"), ("exec_command", "read_file")] {
+        let signals =
+            build_v3_current_turn_route_facts_from_value(&responses_tool_turn(first, second));
+        let route = classify_route(&route_facts_from_current_signals(&signals));
+        assert_eq!(
+            route.route_name, "thinking",
+            "{first}->{second}: thinking must outrank search"
+        );
+        assert!(
+            route
+                .candidates
+                .iter()
+                .any(|candidate| candidate == "search"),
+            "{first}->{second}: search must stay a candidate: {:?}",
+            route.candidates
+        );
+    }
+}
+
+#[test]
+fn multi_tool_route_is_independent_of_call_order_and_keeps_last_tool() {
+    let forward =
+        build_v3_current_turn_route_facts_from_value(&chat_tool_turn("apply_patch", "read_file"));
+    let reverse =
+        build_v3_current_turn_route_facts_from_value(&chat_tool_turn("read_file", "apply_patch"));
+
+    for signals in [&forward, &reverse] {
+        assert!(signals
+            .current_turn_tool_categories
+            .contains(&"coding".to_string()));
+        assert!(signals
+            .current_turn_tool_categories
+            .contains(&"thinking".to_string()));
+        assert_eq!(signals.current_turn_tool_categories.len(), 2);
+    }
+    // The legacy single-value field still reports the most recent call.
+    assert_eq!(
+        forward
+            .last_assistant_tool
+            .as_ref()
+            .map(|tool| tool.category.as_str()),
+        Some("thinking")
+    );
+    assert_eq!(
+        reverse
+            .last_assistant_tool
+            .as_ref()
+            .map(|tool| tool.category.as_str()),
+        Some("coding")
+    );
+
+    let forward_route = classify_route(&route_facts_from_current_signals(&forward));
+    let reverse_route = classify_route(&route_facts_from_current_signals(&reverse));
+    assert_eq!(forward_route, reverse_route);
+    assert_eq!(forward_route.route_name, "coding");
+    assert_eq!(
+        forward_route.candidates,
+        vec!["coding", "thinking", "default"]
+    );
+}
+
+#[test]
+fn current_turn_tool_categories_are_deduplicated() {
+    let signals =
+        build_v3_current_turn_route_facts_from_value(&chat_tool_turn("apply_patch", "apply_patch"));
+    assert_eq!(
+        signals.current_turn_tool_categories,
+        vec!["coding".to_string()]
+    );
+}
+
+#[test]
+fn multi_tool_categories_keep_every_match_below_media_and_longcontext() {
+    let base = RouteClassifierInput {
+        latest_message_from_user: false,
+        has_current_turn_tool_output: true,
+        current_turn_tool_categories: vec![
+            "thinking".to_string(),
+            "coding".to_string(),
+            "search".to_string(),
+        ],
+        ..Default::default()
+    };
+
+    let multimodal = classify_route(&RouteClassifierInput {
+        has_image_attachment: true,
+        ..base.clone()
+    });
+    assert_eq!(multimodal.route_name, "multimodal");
+    assert_eq!(
+        multimodal.candidates,
+        vec!["multimodal", "coding", "thinking", "search", "default"]
+    );
+
+    let longcontext = classify_route(&RouteClassifierInput {
+        reached_long_context: true,
+        ..base.clone()
+    });
+    assert_eq!(longcontext.route_name, "longcontext");
+    assert_eq!(
+        longcontext.candidates,
+        vec!["longcontext", "coding", "thinking", "search", "default"]
+    );
+
+    let coding = classify_route(&base);
+    assert_eq!(coding.route_name, "coding");
+    assert_eq!(
+        coding.candidates,
+        vec!["coding", "thinking", "search", "default"]
+    );
+}
+
+#[test]
+fn websearch_category_in_the_set_does_not_activate_user_search_route() {
+    let web_only = classify_route(&RouteClassifierInput {
+        has_current_turn_tool_output: true,
+        current_turn_tool_categories: vec!["websearch".to_string()],
+        ..Default::default()
+    });
+    assert_eq!(web_only.route_name, "default");
+    assert_eq!(web_only.candidates, vec!["default"]);
+
+    let web_and_other = classify_route(&RouteClassifierInput {
+        has_current_turn_tool_output: true,
+        current_turn_tool_categories: vec!["websearch".to_string(), "other".to_string()],
+        ..Default::default()
+    });
+    assert_eq!(web_and_other.route_name, "tools");
+    assert_eq!(web_and_other.candidates, vec!["tools", "default"]);
+}
+
+#[test]
+fn chat_content_tool_calls_use_only_the_current_turn() {
+    let request = json!({
+        "messages": [
+            {"role":"user","content":"old"},
+            {"role":"assistant","content":[
+                {"type":"tool_call","name":"exec_command","arguments":{"command":"rg old"}}
+            ]},
+            {"role":"user","content":"apply now"},
+            {"role":"assistant","content":[
+                {
+                    "type":"tool_call",
+                    "name":"apply_patch",
+                    "arguments":{"patch":"*** Begin Patch\n*** Update File: a\n*** End Patch"}
+                }
+            ]}
+        ]
+    });
+    let signals = build_v3_current_turn_route_facts_from_value(&request);
+    assert!(!signals.latest_message_from_user);
+    assert!(signals.has_current_turn_tool_output);
+    assert_eq!(
+        signals
+            .last_assistant_tool
+            .as_ref()
+            .map(|tool| tool.category.as_str()),
+        Some("coding")
+    );
+}
+
 #[test]
 fn responses_tool_type_matrix_uses_current_turn_call() {
     for (call_type, output_type, argument_key) in [
@@ -246,6 +553,121 @@ fn current_turn_keyword_activates_web_search_but_declaration_does_not() {
         .route_name,
         "web_search"
     );
+}
+
+#[test]
+fn responses_user_content_string_drives_current_user_text_and_hosted_search() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "input": [{"role": "user", "content": "请搜索今天的新闻"}],
+        "tools": [{"type": "web_search"}]
+    }));
+    assert!(signals.latest_message_from_user);
+    assert_eq!(signals.current_user_text, "请搜索今天的新闻");
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_eq!(route.route_name, "web_search");
+    assert!(route
+        .required_capabilities
+        .contains(&"web_search".to_string()));
+}
+
+#[test]
+fn responses_tool_declaration_only_does_not_activate_hosted_search() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "input": [{"role": "user", "content": "修复这个路由问题"}],
+        "tools": [{"type": "web_search"}]
+    }));
+    assert!(signals.latest_message_from_user);
+    assert_eq!(signals.current_user_text, "修复这个路由问题");
+    assert!(!signals.has_current_turn_web_search);
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_ne!(route.route_name, "web_search");
+}
+
+#[test]
+fn responses_nested_content_parts_extract_user_text_and_keep_image() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "请搜索今天的新闻"},
+                {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="}
+            ]
+        }]
+    }));
+    assert_eq!(signals.current_user_text, "请搜索今天的新闻");
+    assert!(signals.has_current_turn_image);
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_eq!(route.route_name, "web_search");
+    assert!(route
+        .candidates
+        .iter()
+        .any(|candidate| candidate == "multimodal"));
+}
+
+#[test]
+fn responses_nested_image_only_does_not_fabricate_user_text() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="}
+            ]
+        }]
+    }));
+    assert_eq!(signals.current_user_text, "");
+    assert!(signals.has_current_turn_image);
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_eq!(route.route_name, "multimodal");
+}
+
+#[test]
+fn responses_history_user_text_does_not_leak_into_current_turn() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "input": [
+            {"role": "user", "content": "请搜索今天的新闻"},
+            {"role": "assistant", "content": "已经找到"},
+            {"role": "user", "content": "继续实现"}
+        ]
+    }));
+    assert!(signals.latest_message_from_user);
+    assert_eq!(signals.current_user_text, "继续实现");
+    assert!(!signals.has_current_turn_web_search);
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_ne!(route.route_name, "web_search");
+}
+
+#[test]
+fn responses_continuation_does_not_read_history_user_text() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "input": [
+            {"role": "user", "content": "请搜索今天的新闻"},
+            {"type": "function_call", "call_id": "call", "name": "exec_command", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call", "output": "ok"}
+        ]
+    }));
+    assert!(!signals.latest_message_from_user);
+    assert_eq!(signals.current_user_text, "");
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_ne!(route.route_name, "web_search");
+}
+
+#[test]
+fn responses_nested_web_search_part_is_a_current_turn_route_fact() {
+    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+        "input": [{
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "今天的头条"},
+                {"type": "web_search", "query": "today"}
+            ]
+        }]
+    }));
+    assert!(signals.latest_message_from_user);
+    assert!(signals.has_current_turn_web_search);
+    let route = classify_route(&route_facts_from_current_signals(&signals));
+    assert_eq!(route.route_name, "web_search");
 }
 
 #[test]
@@ -328,7 +750,7 @@ fn assistant_web_search_call_does_not_activate_user_search_route() {
 }
 
 #[test]
-fn shared_route_priority_matches_v2() {
+fn route_priority_uses_current_signals_and_places_longcontext_after_multimodal() {
     let fresh = classify_route(&RouteClassifierInput {
         latest_message_from_user: true,
         ..Default::default()
@@ -343,9 +765,16 @@ fn shared_route_priority_matches_v2() {
         ..Default::default()
     });
     assert_eq!(coding_long.route_name, "longcontext");
-    assert_eq!(coding_long.candidates, vec!["longcontext", "default"]);
+    assert_eq!(
+        coding_long.candidates,
+        vec!["longcontext", "coding", "default"]
+    );
 
-    for category in ["thinking", "search", "other"] {
+    for (category, tool_route) in [
+        ("thinking", "thinking"),
+        ("search", "search"),
+        ("other", "tools"),
+    ] {
         let long = classify_route(&RouteClassifierInput {
             reached_long_context: true,
             has_current_turn_tool_output: true,
@@ -353,7 +782,11 @@ fn shared_route_priority_matches_v2() {
             ..Default::default()
         });
         assert_eq!(long.route_name, "longcontext", "{category}");
-        assert_eq!(long.candidates, vec!["longcontext", "default"]);
+        assert_eq!(
+            long.candidates,
+            vec!["longcontext", tool_route, "default"],
+            "{category}"
+        );
     }
 }
 
@@ -384,7 +817,10 @@ fn explicit_web_search_does_not_get_shadowed_by_generic_user_thinking() {
         ..Default::default()
     });
     assert_eq!(classified.route_name, "web_search");
-    assert_eq!(classified.candidates, vec!["web_search", "default"]);
+    assert_eq!(
+        classified.candidates,
+        vec!["web_search", "thinking", "default"]
+    );
 }
 
 #[test]
@@ -406,15 +842,105 @@ fn compaction_is_the_highest_priority_route_signal() {
 
 #[test]
 fn longcontext_wins_when_longcontext_thinking_and_coding_conditions_hit() {
-    let classified = classify_route(&RouteClassifierInput {
+    let from_user = classify_route(&RouteClassifierInput {
         reached_long_context: true,
         latest_message_from_user: true,
+        ..Default::default()
+    });
+    assert_eq!(from_user.route_name, "longcontext");
+    assert_eq!(
+        from_user.candidates,
+        vec!["longcontext", "thinking", "default"]
+    );
+
+    let coding_continuation = classify_route(&RouteClassifierInput {
+        reached_long_context: true,
         has_current_turn_tool_output: true,
         last_assistant_tool_category: Some("coding".into()),
         ..Default::default()
     });
-    assert_eq!(classified.route_name, "longcontext");
-    assert_eq!(classified.candidates, vec!["longcontext", "default"]);
+    assert_eq!(coding_continuation.route_name, "longcontext");
+    assert_eq!(
+        coding_continuation.candidates,
+        vec!["longcontext", "coding", "default"]
+    );
+
+    // multimodal 仍高于 longcontext。
+    let modality = classify_route(&RouteClassifierInput {
+        reached_long_context: true,
+        has_image_attachment: true,
+        latest_message_from_user: true,
+        ..Default::default()
+    });
+    assert_eq!(modality.route_name, "multimodal");
+    assert_eq!(
+        modality.candidates,
+        vec!["multimodal", "longcontext", "thinking", "default"]
+    );
+
+    // compact 仍是最高优先级信号。
+    let compact = classify_route(&RouteClassifierInput {
+        reached_long_context: true,
+        is_compaction: true,
+        ..Default::default()
+    });
+    assert_eq!(compact.route_name, "compact");
+    assert_eq!(compact.candidates, vec!["compact", "default"]);
+}
+
+#[test]
+fn candidates_list_all_matching_signals_in_route_priority_order() {
+    let web_search_then_multimodal = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        has_current_turn_web_search: true,
+        has_image_attachment: true,
+        ..Default::default()
+    });
+    assert_eq!(web_search_then_multimodal.route_name, "web_search");
+    assert_eq!(
+        web_search_then_multimodal.candidates,
+        vec!["web_search", "multimodal", "thinking", "default"]
+    );
+
+    let web_search_then_longcontext = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        has_current_turn_web_search: true,
+        reached_long_context: true,
+        ..Default::default()
+    });
+    assert_eq!(web_search_then_longcontext.route_name, "web_search");
+    assert_eq!(
+        web_search_then_longcontext.candidates,
+        vec!["web_search", "longcontext", "thinking", "default"]
+    );
+
+    let multimodal_then_coding = classify_route(&RouteClassifierInput {
+        has_image_attachment: true,
+        has_current_turn_tool_output: true,
+        last_assistant_tool_category: Some("coding".into()),
+        ..Default::default()
+    });
+    assert_eq!(multimodal_then_coding.route_name, "multimodal");
+    assert_eq!(
+        multimodal_then_coding.candidates,
+        vec!["multimodal", "coding", "default"]
+    );
+
+    let multimodal_then_longcontext_then_coding = classify_route(&RouteClassifierInput {
+        has_image_attachment: true,
+        reached_long_context: true,
+        has_current_turn_tool_output: true,
+        last_assistant_tool_category: Some("coding".into()),
+        ..Default::default()
+    });
+    assert_eq!(
+        multimodal_then_longcontext_then_coding.route_name,
+        "multimodal"
+    );
+    assert_eq!(
+        multimodal_then_longcontext_then_coding.candidates,
+        vec!["multimodal", "longcontext", "coding", "default"]
+    );
 }
 
 #[test]
@@ -527,7 +1053,7 @@ fn request_user_input_current_turn_routes_to_thinking_but_unknown_tool_stays_too
 }
 
 #[test]
-fn dryrun_search_continuation_cascades_to_tools_and_default() {
+fn search_continuation_does_not_add_an_unmatched_tools_pool() {
     let r = classify_route(&RouteClassifierInput {
         latest_message_from_user: false,
         has_current_turn_tool_output: true,
@@ -535,32 +1061,23 @@ fn dryrun_search_continuation_cascades_to_tools_and_default() {
         ..Default::default()
     });
     assert_eq!(r.route_name, "search");
-    // search route must list tools (search pool may be empty on this port) and
-    // default as fallbacks so VR can walk the candidate list in order.
-    assert_eq!(
-        r.candidates,
-        vec![
-            "search".to_string(),
-            "tools".to_string(),
-            "default".to_string()
-        ]
-    );
+    assert_eq!(r.candidates, vec!["search", "default"]);
 }
 
 #[test]
-fn dryrun_search_route_does_not_double_insert_tools() {
+fn route_candidates_are_unique() {
     let r = classify_route(&RouteClassifierInput {
         latest_message_from_user: false,
         has_current_turn_tool_output: true,
         last_assistant_tool_category: Some("search".into()),
         ..Default::default()
     });
-    let tools_count = r
-        .candidates
-        .iter()
-        .filter(|c| c.as_str() == "tools")
-        .count();
-    assert_eq!(tools_count, 1, "tools must appear at most once");
+    for (index, candidate) in r.candidates.iter().enumerate() {
+        assert!(
+            !r.candidates[..index].contains(candidate),
+            "duplicate candidate: {candidate:?}"
+        );
+    }
 }
 
 // P0 control-plane isolation guard: route-classifier must not carry a
@@ -578,6 +1095,7 @@ fn route_classifier_input_has_no_control_state_fields() {
         input.has_current_turn_tool_output,
         input.has_current_turn_web_search,
         input.last_assistant_tool_category,
+        input.current_turn_tool_categories,
         input.has_background_keyword,
         input.is_compaction,
     );
@@ -594,6 +1112,7 @@ fn route_classifier_input_has_no_control_state_fields() {
         "has_current_turn_tool_output",
         "has_current_turn_web_search",
         "last_assistant_tool_category",
+        "current_turn_tool_categories",
         "has_background_keyword",
         "is_compaction",
     ];
@@ -658,7 +1177,7 @@ fn live_responses_history_image_attachment_drives_multimodal_route_via_typed_car
 }
 
 #[test]
-fn raw_latest_responses_image_survives_later_text_only_user() {
+fn responses_history_image_does_not_survive_a_later_text_only_user() {
     let request = serde_json::json!({
         "input": [
             {"type":"input_image","file_id":"latest-1"},
@@ -669,8 +1188,75 @@ fn raw_latest_responses_image_survives_later_text_only_user() {
     let entries = project_v3_current_turn_entries_from_value(&request);
     let signals = build_v3_current_turn_route_facts(&entries);
     assert!(
-        signals.has_current_turn_image,
-        "the latest retained image survives later text turns"
+        !signals.has_current_turn_image,
+        "an image from an earlier user turn must not classify the current text-only turn"
+    );
+}
+
+#[test]
+fn current_user_and_tool_images_activate_only_their_own_turn() {
+    let current_user = build_v3_current_turn_route_facts_from_value(&serde_json::json!({
+        "messages": [
+            {"role":"user","content":[{"type":"image_url","image_url":{"url":"old"}}]},
+            {"role":"assistant","content":"old answer"},
+            {"role":"user","content":[{"type":"image_url","image_url":{"url":"current"}}]}
+        ]
+    }));
+    assert!(current_user.has_current_turn_image);
+
+    let current_tool = build_v3_current_turn_route_facts_from_value(&serde_json::json!({
+        "input": [
+            {"type":"message","role":"user","content":"show the chart"},
+            {"type":"function_call","call_id":"view","name":"view_image","arguments":"{}"},
+            {
+                "type":"function_call_output",
+                "call_id":"view",
+                "output":"[{\"type\":\"input_image\",\"file_url\":\"data:image/png;base64,iVBORw0KGgo=\"}]"
+            }
+        ]
+    }));
+    assert!(current_tool.has_current_turn_image);
+    assert!(current_tool.has_current_turn_tool_output);
+}
+
+#[test]
+fn gemini_history_image_and_tool_do_not_leak_into_the_current_turn() {
+    let historical = build_v3_current_turn_route_facts_from_value(&serde_json::json!({
+        "contents": [
+            {"role":"user","parts":[
+                {"text":"old chart"},
+                {"inlineData":{"mimeType":"image/png","data":"old"}}
+            ]},
+            {"role":"model","parts":[
+                {"functionCall":{"name":"exec_command","args":{"command":"rg old"}}}
+            ]},
+            {"role":"user","parts":[{"text":"current text only"}]}
+        ]
+    }));
+    assert!(!historical.has_current_turn_image);
+    assert!(!historical.has_current_turn_tool_output);
+    assert!(historical.last_assistant_tool.is_none());
+
+    let current = build_v3_current_turn_route_facts_from_value(&serde_json::json!({
+        "contents": [
+            {"role":"user","parts":[{"text":"inspect the current chart"}]},
+            {"role":"model","parts":[
+                {"functionCall":{"name":"exec_command","args":{"command":"rg -n route src"}}}
+            ]},
+            {"role":"user","parts":[
+                {"inlineData":{"mimeType":"image/png","data":"current"}},
+                {"functionResponse":{"name":"exec_command","response":{"result":"ok"}}}
+            ]}
+        ]
+    }));
+    assert!(current.has_current_turn_image);
+    assert!(current.has_current_turn_tool_output);
+    assert_eq!(
+        current
+            .last_assistant_tool
+            .as_ref()
+            .map(|tool| tool.category.as_str()),
+        Some("search")
     );
 }
 

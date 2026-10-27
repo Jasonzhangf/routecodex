@@ -1,8 +1,149 @@
+/// Live planning waits on typed health without taking a business lease.
+pub async fn plan_v3_responses_protocol_execution_with_recovery(
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    provider_health: impl Into<V3ProviderFailureRuntimeHealth>,
+    now_epoch_ms: u64,
+) -> Result<
+    (V3ResponsesProtocolExecutionPlan, V3RequestExecutionControl),
+    V3ResponsesProtocolExecutionPlanFailure,
+> {
+    let control =
+        V3RequestExecutionControl::from_manifest(manifest, &raw.server_id).map_err(|error| {
+            protocol_plan_source_failure(
+                runtime_source("V3RequestExecutionControl", error.to_string()),
+                vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"],
+            )
+        })?;
+    let plan = tokio::time::timeout_at(
+        tokio::time::Instant::from_std(control.attempt_budget().residence_deadline()),
+        plan_v3_responses_protocol_execution_recovery_inner(
+            manifest,
+            raw,
+            provider_health.into(),
+            now_epoch_ms,
+            &control.attempt_budget(),
+        ),
+    )
+    .await
+    .map_err(|_| {
+        protocol_plan_source_failure(
+            Ok(build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3TargetRecoveryWait",
+                "request_residence_deadline_exceeded",
+                "protocol preplanning exceeded the request residence deadline",
+            )),
+            vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"],
+        )
+    })??;
+    Ok((plan, control))
+}
+
+async fn plan_v3_responses_protocol_execution_recovery_inner(
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    mut now_epoch_ms: u64,
+    attempt_budget: &crate::execution_control::V3AttemptBudget,
+) -> Result<V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure> {
+    let health = provider_health;
+    let started = attempt_budget.target_recovery_started();
+    let mut captured_target = None;
+    loop {
+        let failure = match plan_v3_responses_protocol_execution_with_captured_target(
+            manifest,
+            raw.clone(),
+            health.clone(),
+            now_epoch_ms,
+            &mut captured_target,
+        ) {
+            Ok(plan) => return Ok(plan),
+            Err(failure) => failure,
+        };
+        let Some(expanded) = failure.recovery_candidates.clone() else {
+            return Err(failure);
+        };
+        // A stalled advisory probe cannot outlive this request's recovery budget.
+        // Its cancellation preserves cooldown; the final planner below rechecks
+        // current eligibility before returning the typed failure.
+        tokio::time::timeout(
+            crate::operation_runner::plan_execution::target_recovery_remaining(&expanded, started),
+            health.run_exhaustion_rescue_probes(manifest, &expanded, now_epoch_ms),
+        )
+        .await
+        .unwrap_or(Ok(crate::provider_failure_runtime_policy::V3CooldownRescueProbeOutcome::default()))
+        .map_err(|error| {
+            protocol_plan_source_failure(
+                runtime_source("V3ProviderCooldownRescueProbe", error),
+                failure.node_trace.clone(),
+            )
+        })?;
+        now_epoch_ms =
+            crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                .map_err(|error| {
+                    protocol_plan_source_failure(
+                        runtime_source("V3TargetRecoveryWait", error),
+                        failure.node_trace.clone(),
+                    )
+                })?;
+        let failure = match plan_v3_responses_protocol_execution_with_captured_target(
+            manifest,
+            raw.clone(),
+            health.clone(),
+            now_epoch_ms,
+            &mut captured_target,
+        ) {
+            Ok(plan) => return Ok(plan),
+            Err(failure) if failure.recovery_candidates.is_some() => failure,
+            Err(failure) => return Err(failure),
+        };
+        if !crate::operation_runner::plan_execution::wait_for_target_recovery(
+            &expanded,
+            &health,
+            &raw.failure_session_scope,
+            &mut BTreeSet::new(),
+            &mut BTreeSet::new(),
+            now_epoch_ms,
+            attempt_budget,
+        )
+        .await
+        .map_err(|source| protocol_plan_source_failure(Ok(source), failure.node_trace.clone()))?
+        {
+            return Err(failure);
+        }
+        now_epoch_ms =
+            crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                .map_err(|error| {
+                    protocol_plan_source_failure(
+                        runtime_source("V3TargetRecoveryWait", error),
+                        failure.node_trace.clone(),
+                    )
+                })?;
+    }
+}
+
 pub fn plan_v3_responses_protocol_execution_with_provider_health(
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
     provider_health: impl Into<V3ProviderFailureRuntimeHealth>,
     now_epoch_ms: u64,
+) -> Result<V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure> {
+    plan_v3_responses_protocol_execution_with_captured_target(
+        manifest,
+        raw,
+        provider_health,
+        now_epoch_ms,
+        &mut None,
+    )
+}
+
+fn plan_v3_responses_protocol_execution_with_captured_target(
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    provider_health: impl Into<V3ProviderFailureRuntimeHealth>,
+    now_epoch_ms: u64,
+    captured_target: &mut Option<crate::operation_runner::V3ResolveTargetSideOutput>,
 ) -> Result<V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure> {
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
     let standardized = match build_v3_req_04_standardized_responses_from_v3_server_03(raw) {
@@ -58,7 +199,9 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     } else {
         "responses"
     };
-    let (resolved_request, resolved_target) =
+    let (resolved_request, resolved_target) = if let Some(target) = captured_target.take() {
+        (standardized.body.clone(), target)
+    } else {
         match crate::operation_runner::run_v3_resolve_target_operator(
             standardized.body.clone(),
             crate::operation_runner::V3ResolveTargetExecutionMode::DirectFresh {
@@ -91,7 +234,15 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
                     trace,
                 ))
             }
-        };
+        }
+    };
+    // Retain the route hit and its pending observation through recovery rounds.
+    // Capacity/health changes may reselect a target, never re-enter the Router.
+    *captured_target = Some(crate::operation_runner::V3ResolveTargetSideOutput {
+        opaque_hit: resolved_target.opaque_hit.clone(),
+        route_policy_pending: resolved_target.route_policy_pending.clone(),
+        route_policy_scope: resolved_target.route_policy_scope.clone(),
+    });
     trace.extend([
         "V3Router05RequestClassified",
         "V3Router06RoutePoolResolved",
@@ -121,10 +272,11 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         ) {
             Ok(preplan) => preplan,
             Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Exhausted {
+                expanded,
                 exhaustion,
                 ..
             }) => {
-                return Err(protocol_plan_source_failure(
+                let mut failure = protocol_plan_source_failure(
                     crate::shared::direct_plain_error(
                         V3ErrorSourceKind::TargetPoolExhausted,
                         "V3Target10ConcreteProviderSelected",
@@ -135,7 +287,9 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
                         ),
                     ),
                     trace,
-                ))
+                );
+                failure.recovery_candidates = Some(expanded);
+                return Err(failure);
             }
             Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Failed(source)) => {
                 return Err(protocol_plan_failure(source, trace))
@@ -220,6 +374,7 @@ fn protocol_plan_failure(
         source,
         node_trace,
         error_operator_fault: None,
+        recovery_candidates: None,
     }
 }
 

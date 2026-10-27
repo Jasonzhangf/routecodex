@@ -112,6 +112,10 @@ pub fn build_v3_provider_global_request(
     } else {
         V3ResponsesStreamIntent::Json
     };
+    let identity_scope = crate::adaptive_concurrency::V3ConcurrencyIdentityScope {
+        interface_id: target.interface_id.clone(),
+        model_id: target.canonical_model_id.clone(),
+    };
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
         request_id,
         target.provider_id,
@@ -124,6 +128,7 @@ pub fn build_v3_provider_global_request(
         target.concurrency_acquire_timeout_ms,
         None,
     )
+    .map(|request| request.with_identity_scope(identity_scope))
     .map_err(|error| error.to_string())
 }
 

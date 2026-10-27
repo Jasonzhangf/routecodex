@@ -1,6 +1,21 @@
 use super::*;
 use futures_util::FutureExt;
 
+fn run_blackbox_test<F>(future: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_stack_size(128 * 1024 * 1024)
+        .enable_all()
+        .build()
+        .expect("image input blackbox runtime");
+    runtime.block_on(async move {
+        tokio::spawn(future).await.expect("image input blackbox task");
+    });
+}
+
 const PNG: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 const OTHER: &str = "https://example.test/latest-second.png";
 const OLD: &str = "https://example.test/old-history.png";
@@ -29,7 +44,6 @@ fn contains_opaque_value(value: &Value, expected: &Value) -> bool {
             _ => false,
         }
 }
-
 fn image_references(value: &Value, output: &mut Vec<String>) {
     match value {
         Value::Object(row) => {
@@ -85,15 +99,59 @@ fn image_references(value: &Value, output: &mut Vec<String>) {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+/// Classification pool layouts exercised through the public chat, Responses and
+/// Anthropic entries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PoolState {
-    Available,
-    Empty,
-    Exhausted,
-    MixedAvailable,
-    MixedExhausted,
-    DefaultVisionAvailable,
-    TransportFailure,
+    /// One explicit, non-empty `multimodal` pool with a vision target.
+    MultimodalAvailable,
+    /// The optional `multimodal` pool is not configured at all.
+    MultimodalAbsent,
+    /// The `multimodal` pool is configured but its vision provider is disabled.
+    MultimodalDisabled,
+    /// The `multimodal` pool holds two vision tiers with different declared
+    /// priorities: tier one returns 502 and tier two succeeds.
+    MultimodalTierRecovery,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Expect {
+    Vision,
+    SecondVision,
+    Text,
+    Exhaustion,
+}
+
+/// The `request` fixture places images inside the current user run only when
+/// `tool` is false. The tool fixture ends with text-only user turns, so its
+/// tool-output images belong to an earlier turn and cannot classify the
+/// current request.
+fn expected_route(pool: PoolState, tool: bool) -> Expect {
+    let current_turn_image = !tool;
+    match pool {
+        PoolState::MultimodalAbsent => Expect::Text,
+        PoolState::MultimodalAvailable => {
+            if current_turn_image {
+                Expect::Vision
+            } else {
+                Expect::Text
+            }
+        }
+        PoolState::MultimodalTierRecovery => {
+            if current_turn_image {
+                Expect::SecondVision
+            } else {
+                Expect::Text
+            }
+        }
+        PoolState::MultimodalDisabled => {
+            if current_turn_image {
+                Expect::Exhaustion
+            } else {
+                Expect::Text
+            }
+        }
+    }
 }
 
 fn request(path: &str, tool: bool, image_only: bool) -> Value {
@@ -126,12 +184,13 @@ fn request(path: &str, tool: bool, image_only: bool) -> Value {
                     json!({"type":"function_call_output","call_id":"call_image","output":images}),
                 );
                 input.push(json!({"type":"function_call_output","call_id":"call_text","output":"data:image/png;base64,example is a parallel-text-result code literal"}));
-            } else {
-                input.push(json!({"role":"user","content":images}));
             }
             input.push(json!({"role":"user","content":"Current time reminder; source mentions data:image/png;base64,example"}));
             input.push(json!({"role":"user","content":[{"type":"input_text","text":"data:image/png;base64,example is documentation text"}]}));
             input.push(json!({"role":"user","content":"data:image/png;base64,example is ordinary message text"}));
+            if !tool {
+                input.push(json!({"role":"user","content":images}));
+            }
             json!({"model":"test","stream":false,"input":input})
         }
         "/v1/chat/completions" => {
@@ -146,12 +205,13 @@ fn request(path: &str, tool: bool, image_only: bool) -> Value {
                 messages
                     .push(json!({"role":"tool","tool_call_id":"call_image","content":chat_images}));
                 messages.push(json!({"role":"tool","tool_call_id":"call_text","content":"data:image/png;base64,example is a parallel-text-result code literal"}));
-            } else {
-                messages.push(json!({"role":"user","content":chat_images}));
             }
             messages.push(json!({"role":"user","content":"{\"data\":\"ordinary-business-json\",\"text\":\"Current time reminder; source mentions data:image/png;base64,example\"}"}));
             messages.push(json!({"role":"user","content":[{"type":"text","text":"data:image/png;base64,example is documentation text"}]}));
             messages.push(json!({"role":"user","content":"data:image/png;base64,example is ordinary message text"}));
+            if !tool {
+                messages.push(json!({"role":"user","content":chat_images}));
+            }
             json!({"model":"test","stream":false,"messages":messages})
         }
         "/v1/messages" => {
@@ -172,12 +232,13 @@ fn request(path: &str, tool: bool, image_only: bool) -> Value {
             if tool {
                 messages.push(json!({"role":"assistant","content":[{"type":"tool_use","id":"call_image","name":"read_image","input":{}},{"type":"tool_use","id":"call_text","name":"read_text","input":{}}]}));
                 messages.push(json!({"role":"user","content":[{"type":"tool_result","tool_use_id":"call_image","content":images},{"type":"tool_result","tool_use_id":"call_text","content":"data:image/png;base64,example is a parallel-text-result code literal"}]}));
-            } else {
-                messages.push(json!({"role":"user","content":images}));
             }
             messages.push(json!({"role":"user","content":"Current time reminder; source mentions data:image/png;base64,example"}));
             messages.push(json!({"role":"user","content":[{"type":"text","text":"data:image/png;base64,example is documentation text"}]}));
             messages.push(json!({"role":"user","content":"data:image/png;base64,example is ordinary message text"}));
+            if !tool {
+                messages.push(json!({"role":"user","content":images}));
+            }
             json!({"model":"test","stream":false,"max_tokens":128,"messages":messages})
         }
         _ => unreachable!(),
@@ -186,8 +247,74 @@ fn request(path: &str, tool: bool, image_only: bool) -> Value {
 
 async fn run_case(path: &str, tool: bool, pool: PoolState, protocol: &str) {
     run_case_shape(path, tool, pool, protocol, false, None).await;
-    if tool {
-        run_case_shape(path, tool, pool, protocol, true, None).await;
+    run_case_shape(path, tool, pool, protocol, true, None).await;
+}
+
+async fn assert_incomplete_blackbox_transport(
+    result: Result<reqwest::Response, reqwest::Error>,
+    started: std::time::Instant,
+    context: &str,
+) {
+    match result {
+        Err(error) => {
+            let elapsed = started.elapsed();
+            assert!(
+                !error.is_timeout(),
+                "{context}: an unfinished client wait is not a transport break: {error}"
+            );
+            assert!(
+                !error.is_connect(),
+                "{context}: the test listener was reachable, so connect failure is not exhaustion: {error}"
+            );
+            assert!(
+                error.status().is_none(),
+                "{context}: a client HTTP response is not a transport break: {error}"
+            );
+            assert!(
+                elapsed < Duration::from_secs(15),
+                "{context}: exhaustion must terminate before the client wait expires: {elapsed:?}"
+            );
+        }
+        Ok(mut response) => {
+            assert_eq!(
+                response.status(),
+                StatusCode::OK,
+                "{context}: exhaustion must not generate a client HTTP error"
+            );
+            let mut body = Vec::new();
+            let terminal = loop {
+                match response.chunk().await {
+                    Ok(Some(chunk)) => body.extend_from_slice(&chunk),
+                    Ok(None) => panic!(
+                        "{context}: exhaustion completed the client transport normally: {}",
+                        String::from_utf8_lossy(&body)
+                    ),
+                    Err(error) => break error,
+                }
+            };
+            let elapsed = started.elapsed();
+            assert!(
+                !terminal.is_timeout(),
+                "{context}: an unfinished client wait is not a transport break: {terminal}"
+            );
+            assert!(
+                !terminal.is_connect(),
+                "{context}: the test listener was reachable, so connect failure is not exhaustion: {terminal}"
+            );
+            assert!(
+                terminal.status().is_none(),
+                "{context}: a client HTTP response is not a transport break: {terminal}"
+            );
+            let body = String::from_utf8_lossy(&body);
+            assert!(
+                body.trim().is_empty(),
+                "{context}: exhaustion must not project a success or error payload: {body}"
+            );
+            assert!(
+                elapsed < Duration::from_secs(15),
+                "{context}: exhaustion must terminate before the client wait expires: {elapsed:?}"
+            );
+        }
     }
 }
 
@@ -202,6 +329,7 @@ async fn run_case_shape(
     // These cases count upstream attempts, so the Chat Process continuation
     // must not add an extra execution.
     routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    let expect = expected_route(pool, tool);
     // External HTTP providers capture the complete request. Exhausted image
     // pools use an explicit declared unavailable provider, preserving the real
     // multimodal capability declaration.
@@ -218,18 +346,25 @@ async fn run_case_shape(
     let text_response = response.clone();
     let (vision_url, mut vision_rx, vision_shutdown) =
         start_controlled_terminal_upstream_with_body(
-            if matches!(pool, PoolState::TransportFailure) {
+            if matches!(pool, PoolState::MultimodalTierRecovery) {
                 StatusCode::BAD_GATEWAY
             } else {
                 StatusCode::OK
             },
             "application/json",
-            if matches!(pool, PoolState::TransportFailure) {
+            if matches!(pool, PoolState::MultimodalTierRecovery) {
                 serde_json::to_vec(&json!({"error":{"message":"controlled vision failure"}}))
                     .unwrap()
             } else {
                 response.clone()
             },
+        )
+        .await;
+    let (second_url, mut second_rx, second_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "application/json",
+            response.clone(),
         )
         .await;
     let (text_url, mut text_rx, text_shutdown) = start_controlled_terminal_upstream_with_body(
@@ -247,6 +382,11 @@ async fn run_case_shape(
     );
     for server in manifest.servers.values_mut() {
         server.endpoints = vec!["responses".into(), "openai_chat".into(), "anthropic".into()];
+        // Bound the request residence deadline so a genuinely exhausted pool
+        // terminates at the public entry inside the test window.
+        if let Some(execution) = server.execution.as_mut() {
+            execution.attempt_store.residence_timeout_ms = 8_000;
+        }
     }
     let vision = manifest.providers.get_mut("test").unwrap();
     if protocol == "anthropic" {
@@ -254,7 +394,7 @@ async fn run_case_shape(
         vision.interfaces.get_mut("default").unwrap().base_url = vision.base_url.clone();
     }
     vision.models.get_mut("test").unwrap().wire_name = "vision-wire".into();
-    if !matches!(pool, PoolState::Empty) {
+    if !matches!(pool, PoolState::MultimodalAbsent) {
         vision
             .models
             .get_mut("test")
@@ -262,7 +402,7 @@ async fn run_case_shape(
             .capabilities
             .push("multimodal".into());
     }
-    if matches!(pool, PoolState::Exhausted | PoolState::MixedExhausted) {
+    if matches!(pool, PoolState::MultimodalDisabled) {
         vision.enabled = false;
     }
     let text = manifest.providers.get_mut("fallback").unwrap();
@@ -273,13 +413,23 @@ async fn run_case_shape(
         text.interfaces.get_mut("default").unwrap().base_url = text.base_url.clone();
     }
     text.models.get_mut("test").unwrap().wire_name = "text-wire".into();
+    // A second vision provider used only by the same-pool tier-recovery case.
+    let mut second = manifest.providers.get("test").unwrap().clone();
+    second.id = "second".into();
+    second.enabled = true;
+    second.base_url = if protocol == "anthropic" {
+        second_url.trim_end_matches("/v1").to_string()
+    } else {
+        second_url.clone()
+    };
+    second.interfaces.get_mut("default").unwrap().base_url = second.base_url.clone();
+    second.models.get_mut("test").unwrap().wire_name = "second-wire".into();
+    manifest.providers.insert("second".into(), second);
     let group = manifest.route_groups.get_mut("default").unwrap();
     group.pools.remove("client_test");
-    if matches!(
-        pool,
-        PoolState::MixedAvailable | PoolState::MixedExhausted | PoolState::DefaultVisionAvailable
-    ) {
-        let mut mixed = group.pools["default"].clone();
+    let default_pool = group.pools.get("default").unwrap().clone();
+    if !matches!(pool, PoolState::MultimodalAbsent) {
+        let mut mixed = default_pool.clone();
         mixed.id = "multimodal".into();
         mixed.match_rule = Some(routecodex_v3_config::V3RoutePoolMatchManifest {
             precedence: 100,
@@ -289,35 +439,30 @@ async fn run_case_shape(
             min_input_tokens: None,
             max_input_tokens: None,
         });
-        for target in &mut mixed.targets {
-            target.priority = Some(if target.provider.as_deref() == Some("fallback") {
-                3
-            } else {
-                2
-            });
+        let mut targets: Vec<_> = default_pool
+            .targets
+            .iter()
+            .filter(|target| target.provider.as_deref() == Some("test"))
+            .cloned()
+            .collect();
+        for target in &mut targets {
+            target.priority = Some(2);
         }
-        if matches!(pool, PoolState::DefaultVisionAvailable) {
-            mixed
-                .targets
-                .retain(|target| target.provider.as_deref() == Some("fallback"));
-            for target in &mut group.pools.get_mut("default").unwrap().targets {
-                target.priority = Some(if target.provider.as_deref() == Some("fallback") {
-                    3
-                } else {
-                    2
-                });
-            }
+        if matches!(pool, PoolState::MultimodalTierRecovery) {
+            let mut second_target = targets[0].clone();
+            second_target.provider = Some("second".into());
+            second_target.priority = Some(1);
+            targets.push(second_target);
         }
+        mixed.targets = targets;
         group.pools.insert("multimodal".into(), mixed);
     }
-    if !matches!(pool, PoolState::DefaultVisionAvailable) {
-        group
-            .pools
-            .get_mut("default")
-            .unwrap()
-            .targets
-            .retain(|target| target.provider.as_deref() == Some("fallback"));
-    }
+    group
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .targets
+        .retain(|target| target.provider.as_deref() == Some("fallback"));
     manifest.debug.snapshots = false;
     manifest.debug.dry_run = false;
     std::env::set_var("V3_P6_TEST_KEY", "local-image-fixture");
@@ -331,16 +476,49 @@ async fn run_case_shape(
             .unwrap()["output"] = output.clone();
     }
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let request_started = std::time::Instant::now();
     let result = reqwest::Client::new()
         .post(format!("http://{}{path}", handle.listeners[0].addr))
         .json(&body)
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(20))
         .send()
         .await;
     // Shut down owned listeners even when an assertion below finds a regression.
     handle.shutdown().await;
     let _ = vision_shutdown.send(());
+    let _ = second_shutdown.send(());
     let _ = text_shutdown.send(());
+    let drain = |rx: &mut mpsc::UnboundedReceiver<ProviderCapture>| {
+        let mut bodies = Vec::new();
+        while let Ok(capture) = rx.try_recv() {
+            bodies.push(capture.body);
+        }
+        bodies
+    };
+    if expect == Expect::Exhaustion {
+        // The selected pool's only candidate is disabled. The request must end
+        // without a fabricated success, without the provider error payload and
+        // without consulting the default pool.
+        assert_incomplete_blackbox_transport(
+            result,
+            request_started,
+            &format!("{path} tool={tool} protocol={protocol}"),
+        )
+        .await;
+        assert!(
+            drain(&mut vision_rx).is_empty(),
+            "a disabled candidate must not reach the network"
+        );
+        assert!(
+            drain(&mut second_rx).is_empty(),
+            "no second candidate may run for a disabled single candidate"
+        );
+        assert!(
+            drain(&mut text_rx).is_empty(),
+            "the default pool must not be consulted after the selected pool exhausts"
+        );
+        return;
+    }
     let result = result.unwrap_or_else(|error| {
         panic!("{path} tool={tool} pool={pool:?} protocol={protocol}: {error}")
     });
@@ -352,49 +530,78 @@ async fn run_case_shape(
         "{path} tool={tool} pool={pool:?}: {client}"
     );
     assert!(client.contains("image-blackbox-ok"), "{client}");
-    let wire = if matches!(
-        pool,
-        PoolState::Available | PoolState::MixedAvailable | PoolState::DefaultVisionAvailable
-    ) {
-        assert!(
-            text_rx.try_recv().is_err(),
-            "text provider must remain unused: {path} tool={tool} protocol={protocol}"
-        );
-        let capture = vision_rx
-            .try_recv()
-            .expect("multimodal must receive the request");
-        assert!(
-            vision_rx.try_recv().is_err(),
-            "exactly one provider attempt"
-        );
-        assert_eq!(capture.body["model"], "vision-wire");
-        capture.body
-    } else {
-        if matches!(pool, PoolState::TransportFailure) {
-            let attempted = vision_rx
-                .try_recv()
-                .expect("vision must be attempted before text projection");
-            let mut refs = Vec::new();
-            image_references(&attempted.body, &mut refs);
-            assert_eq!(
-                refs,
-                vec![PNG, OTHER],
-                "failed vision attempt must receive latest image bytes"
+    let mut vision_attempts = drain(&mut vision_rx);
+    let mut second_attempts = drain(&mut second_rx);
+    let mut text_attempts = drain(&mut text_rx);
+    let wire = match expect {
+        Expect::Vision => {
+            assert!(
+                text_attempts.is_empty(),
+                "default pool must stay unused when the multimodal pool matches: {path} tool={tool} protocol={protocol}"
             );
+            assert!(
+                second_attempts.is_empty(),
+                "single-candidate multimodal pool must not touch the second tier"
+            );
+            assert_eq!(
+                vision_attempts.len(),
+                1,
+                "exactly one vision attempt: {path} tool={tool} protocol={protocol}"
+            );
+            let body = vision_attempts.remove(0);
+            assert_eq!(body["model"], "vision-wire");
+            body
         }
-        assert!(
-            vision_rx.try_recv().is_err(),
-            "absent/exhausted multimodal has no network attempt"
-        );
-        let capture = text_rx
-            .try_recv()
-            .expect("text provider receives the exhausted/empty case");
-        assert!(
-            text_rx.try_recv().is_err(),
-            "exactly one text provider attempt"
-        );
-        assert_eq!(capture.body["model"], "text-wire");
-        capture.body
+        Expect::SecondVision => {
+            assert!(
+                text_attempts.is_empty(),
+                "default pool must stay unused during same-pool tier recovery: {path} {protocol}"
+            );
+            assert_eq!(
+                vision_attempts.len(),
+                1,
+                "exactly the first vision tier must be attempted before the second: {path} {protocol}"
+            );
+            let first = &vision_attempts[0];
+            assert_eq!(
+                first["model"],
+                "vision-wire",
+                "the higher-priority vision tier must run first: {path} {protocol}"
+            );
+            let mut first_refs = Vec::new();
+            image_references(first, &mut first_refs);
+            assert_eq!(
+                first_refs,
+                vec![PNG, OTHER],
+                "the failed first vision tier must still receive the current-turn image bytes: {path} {protocol}"
+            );
+            assert_eq!(
+                second_attempts.len(),
+                1,
+                "exactly the lower-priority vision tier must recover the request: {path} {protocol}"
+            );
+            let body = second_attempts.remove(0);
+            assert_eq!(body["model"], "second-wire");
+            body
+        }
+        _ => {
+            assert!(
+                vision_attempts.is_empty(),
+                "an earlier-turn image must not reach the multimodal provider: {path} tool={tool} protocol={protocol}"
+            );
+            assert!(
+                second_attempts.is_empty(),
+                "an earlier-turn image must not reach the second vision tier"
+            );
+            assert_eq!(
+                text_attempts.len(),
+                1,
+                "exactly one default-pool attempt: {path} tool={tool} protocol={protocol}"
+            );
+            let body = text_attempts.remove(0);
+            assert_eq!(body["model"], "text-wire");
+            body
+        }
     };
     let wire_text = wire.to_string();
     if let Some(output) = &tool_output {
@@ -420,10 +627,6 @@ async fn run_case_shape(
         }
     }
     assert!(
-        !wire_text.contains("PADDED"),
-        "earlier whitespace-padded tool image bytes must be cleaned"
-    );
-    assert!(
         wire_text.contains("source mentions data:image/png;base64,example"),
         "ordinary source literals must survive image cleanup"
     );
@@ -431,14 +634,6 @@ async fn run_case_shape(
     assert!(
         wire_text.contains("describe the latest image"),
         "ordinary text parts with data fields must survive image cleanup"
-    );
-    assert!(
-        !wire_text.contains(OLD),
-        "old image must be a placeholder: {wire_text}"
-    );
-    assert!(
-        wire_text.contains("[Image]"),
-        "history image placeholder must survive"
     );
     if !image_only {
         assert!(
@@ -460,24 +655,20 @@ async fn run_case_shape(
             wire_text.contains("call_text") && wire_text.contains("parallel-text-result"),
             "parallel tool result must survive"
         );
-        if protocol == "openai_chat"
-            && matches!(
-                pool,
-                PoolState::Available
-                    | PoolState::MixedAvailable
-                    | PoolState::DefaultVisionAvailable
-            )
-        {
+        if protocol == "openai_chat" {
             let messages = wire["messages"].as_array().unwrap();
             let first = messages
                 .iter()
                 .position(|message| message["tool_call_id"] == "call_image")
                 .unwrap();
             if image_only {
-                assert_eq!(
-                    messages[first]["content"],
-                    json!([]),
-                    "image-only tool results must keep the projected empty content-part array"
+                let parts = messages[first]["content"].as_array().unwrap();
+                assert!(
+                    !parts.is_empty()
+                        && parts.iter().all(|part| {
+                            part["type"] == "text" && part["text"] == "[Image]"
+                        }),
+                    "image-only tool results must project history image placeholders: {wire_text}"
                 );
             }
             assert_eq!(messages[first + 1]["tool_call_id"], "call_text", "all parallel tool results must precede the adjacent image user message: {wire_text}");
@@ -486,72 +677,85 @@ async fn run_case_shape(
     }
     let mut images = Vec::new();
     image_references(&wire, &mut images);
-    assert_eq!(
-        images,
-        vec![PNG, OTHER],
-        "representable latest images reach the selected provider even without a capability declaration: {protocol}"
-    );
-}
-
-#[tokio::test]
-async fn latest_images_chat_available() {
-    let _guard = TEST_LOCK.lock().await;
-    for tool in [false, true] {
-        for protocol in ["openai_chat", "responses", "anthropic"] {
-            run_case("/v1/chat/completions", tool, PoolState::Available, protocol).await;
-        }
+    if !tool {
+        assert_eq!(
+            images,
+            vec![PNG, OTHER],
+            "current-turn images reach the selected provider even without a capability declaration: {protocol} {wire_text}"
+        );
+    } else {
+        assert!(
+            images.is_empty(),
+            "earlier-turn tool images must remain cleaned history on the selected route: {protocol} {wire_text}"
+        );
+        assert!(
+            !wire_text.contains(OLD) && !wire_text.contains("PADDED"),
+            "earlier image bytes must not leak into the selected route: {protocol} {wire_text}"
+        );
+        assert!(
+            wire_text.contains("[Image]"),
+            "history image placeholder must survive: {protocol} {wire_text}"
+        );
     }
 }
 
-#[tokio::test]
-async fn latest_images_responses_available() {
-    let _guard = TEST_LOCK.lock().await;
-    for tool in [false, true] {
-        for protocol in ["openai_chat", "responses", "anthropic"] {
-            run_case("/v1/responses", tool, PoolState::Available, protocol).await;
-        }
-    }
-}
-
-#[tokio::test]
-async fn latest_images_anthropic_available() {
-    let _guard = TEST_LOCK.lock().await;
-    for tool in [false, true] {
-        for protocol in ["openai_chat", "responses", "anthropic"] {
-            run_case("/v1/messages", tool, PoolState::Available, protocol).await;
-        }
-    }
-}
-
-#[tokio::test]
-async fn latest_images_preserved_with_empty_or_exhausted_multimodal() {
-    let _guard = TEST_LOCK.lock().await;
-    for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
-        for tool in [false, true] {
-            for pool in [PoolState::Empty, PoolState::Exhausted] {
+#[test]
+fn current_turn_images_route_to_multimodal_pool_not_default() {
+    run_blackbox_test(async {
+        let _guard = TEST_LOCK.lock().await;
+        for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
+            for tool in [false, true] {
                 for protocol in ["openai_chat", "responses", "anthropic"] {
-                    run_case(path, tool, pool, protocol).await;
+                    run_case(path, tool, PoolState::MultimodalAvailable, protocol).await;
                 }
             }
         }
-    }
+    });
 }
 
-#[tokio::test]
-async fn mixed_multimodal_pool_skips_text_candidates_and_projects_only_after_exhaustion() {
-    let _guard = TEST_LOCK.lock().await;
-    for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
-        for tool in [false, true] {
-            for protocol in ["openai_chat", "responses", "anthropic"] {
-                run_case(path, tool, PoolState::MixedAvailable, protocol).await;
-                run_case(path, tool, PoolState::DefaultVisionAvailable, protocol).await;
+#[test]
+fn earlier_turn_image_routes_to_default_pool_without_multimodal() {
+    run_blackbox_test(async {
+        let _guard = TEST_LOCK.lock().await;
+        for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
+            for tool in [false, true] {
+                for protocol in ["openai_chat", "responses", "anthropic"] {
+                    run_case(path, tool, PoolState::MultimodalAbsent, protocol).await;
+                }
             }
-            run_case(path, tool, PoolState::MixedExhausted, "openai_chat").await;
         }
-    }
+    });
 }
 
-async fn assert_isolated_image_boundary(path: &str, content: Value, retain_image: bool) {
+#[test]
+fn single_multimodal_pool_recovers_within_pool_not_cross_pool() {
+    run_blackbox_test(async {
+        let _guard = TEST_LOCK.lock().await;
+        for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
+            for tool in [false, true] {
+                for protocol in ["openai_chat", "responses", "anthropic"] {
+                    run_case(path, tool, PoolState::MultimodalTierRecovery, protocol).await;
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn disabled_multimodal_pool_exhausts_without_default_fallback() {
+    run_blackbox_test(async {
+        let _guard = TEST_LOCK.lock().await;
+        for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
+            for tool in [false, true] {
+                for protocol in ["openai_chat", "responses", "anthropic"] {
+                    run_case(path, tool, PoolState::MultimodalDisabled, protocol).await;
+                }
+            }
+        }
+    });
+}
+
+async fn assert_isolated_image_boundary(path: &str, content: Value, earlier_image: bool) {
     // These cases count upstream attempts, so the Chat Process continuation
     // must not add an extra execution.
     routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
@@ -617,20 +821,21 @@ async fn assert_isolated_image_boundary(path: &str, content: Value, retain_image
         vec![
             json!({"role":"user","content":"describe the tool image"}),
             json!({"type":"function_call","call_id":"bare_data","name":"read_image","arguments":"{}"}),
-            content,
+            content.clone(),
         ]
     } else {
         vec![json!({"role":"user","content":content})]
     };
-    if retain_image {
+    if earlier_image {
         messages.push(json!({"role":"assistant","content":"previous answer"}));
         messages.push(json!({"role":"user","content":"a later ordinary text-only user turn"}));
     }
     body[field] = Value::Array(messages);
     let original = body.to_string();
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let addr = handle.listeners[0].addr;
     let result = reqwest::Client::new()
-        .post(format!("http://{}{path}", handle.listeners[0].addr))
+        .post(format!("http://{addr}{path}"))
         .json(&body)
         .timeout(Duration::from_secs(15))
         .send()
@@ -639,45 +844,58 @@ async fn assert_isolated_image_boundary(path: &str, content: Value, retain_image
     let _ = vision_shutdown.send(());
     let _ = text_shutdown.send(());
     let response =
-        result.unwrap_or_else(|error| panic!("{path} retain_image={retain_image}: {error}"));
+        result.unwrap_or_else(|error| panic!("{path} earlier_image={earlier_image}: {error}"));
     assert_eq!(response.status(), StatusCode::OK);
     assert!(response.text().await.unwrap().contains("boundary-ok"));
-    let wire = if retain_image {
-        assert!(
-            text_rx.try_recv().is_err(),
-            "latest image must select vision even after assistant and text-only user"
-        );
-        vision_rx.try_recv().expect("vision request").body
-    } else {
+    let mut content_refs = Vec::new();
+    image_references(&content, &mut content_refs);
+    let has_image =
+        !content_refs.is_empty() || content["type"].as_str() == Some("function_call_output");
+    let (wire, expected_model) = if earlier_image || !has_image {
         assert!(
             vision_rx.try_recv().is_err(),
-            "ordinary isolated text must not select vision: {original}"
+            "text-only current content must not select vision: {path} earlier_image={earlier_image} {original}"
         );
-        text_rx.try_recv().expect("text request").body
+        let body = text_rx.try_recv().expect("text request").body;
+        assert!(
+            text_rx.try_recv().is_err(),
+            "exactly one text attempt: {path} earlier_image={earlier_image}"
+        );
+        (body, "text-wire")
+    } else {
+        assert!(
+            text_rx.try_recv().is_err(),
+            "current-turn image must not select the text provider: {path} {original}"
+        );
+        let body = vision_rx.try_recv().expect("vision request").body;
+        assert!(
+            vision_rx.try_recv().is_err(),
+            "exactly one vision attempt: {path}"
+        );
+        (body, "vision-wire")
     };
     assert!(
         vision_rx.try_recv().is_err() && text_rx.try_recv().is_err(),
-        "exactly one attempt"
+        "the chosen receiver must be the only attempted provider: {path}"
     );
-    assert_eq!(
-        wire["model"],
-        if retain_image {
-            "vision-wire"
-        } else {
-            "text-wire"
-        }
-    );
+    assert_eq!(wire["model"], expected_model);
     let mut refs = Vec::new();
     image_references(&wire, &mut refs);
-    assert_eq!(refs, if retain_image { vec![PNG] } else { Vec::new() });
-    if retain_image {
-        assert!(
-            !wire.to_string().contains("[Image]"),
-            "the sole/latest image must not be cleaned"
+    if earlier_image {
+        assert_eq!(
+            refs,
+            vec![PNG],
+            "earlier-turn image must stay in forwarded history: {path}"
         );
         assert!(wire
             .to_string()
             .contains("a later ordinary text-only user turn"));
+    } else if has_image {
+        assert_eq!(refs, vec![PNG]);
+        assert!(
+            !wire.to_string().contains("[Image]"),
+            "the sole/latest image must not be cleaned"
+        );
     } else {
         assert!(
             wire.to_string().contains("data:image/"),
@@ -712,14 +930,12 @@ async fn isolated_image_literals_remain_text_and_select_text_route() {
 }
 
 #[tokio::test]
-async fn sole_latest_image_survives_assistant_and_later_text_only_user() {
+async fn earlier_turn_image_stays_in_history_and_selects_default() {
     let _guard = TEST_LOCK.lock().await;
     for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
         let content = match path {
             "/v1/responses" => json!([{"type":"input_image","image_url":PNG}]),
-            "/v1/messages" => {
-                json!([{"type":"image","source":{"type":"base64","media_type":"image/png","data":PNG.split_once(',').unwrap().1}}])
-            }
+            "/v1/messages" => json!([{"type":"image","source":{"type":"url","url":PNG}}]),
             _ => json!([{"type":"image_url","image_url":{"url":PNG}}]),
         };
         assert_isolated_image_boundary(path, content, true).await;
@@ -731,7 +947,7 @@ async fn vision_transport_failure_exhausts_before_default_image_passage() {
     let _guard = TEST_LOCK.lock().await;
     for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
         for tool in [false, true] {
-            run_case(path, tool, PoolState::TransportFailure, "openai_chat").await;
+            run_case(path, tool, PoolState::MultimodalTierRecovery, "openai_chat").await;
         }
     }
 }
@@ -761,7 +977,7 @@ async fn responses_tool_image_sources_and_opaque_parts_survive_protocol_projecti
                 if std::panic::AssertUnwindSafe(run_case_shape(
                     "/v1/responses",
                     true,
-                    PoolState::Available,
+                    PoolState::MultimodalAvailable,
                     protocol,
                     false,
                     Some(output.clone()),
@@ -787,7 +1003,7 @@ async fn typeless_data_tool_image_alone_selects_vision() {
     assert_isolated_image_boundary(
         "/v1/responses",
         json!({"type":"function_call_output","call_id":"bare_data","output":[{"data":PNG}]}),
-        true,
+        false,
     )
     .await;
 }

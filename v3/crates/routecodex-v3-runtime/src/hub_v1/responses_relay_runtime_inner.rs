@@ -152,9 +152,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         macro_rules! commit_route_policy_if_present {
             () => {{
                 if let Some(pending) = route_policy_pending.as_ref() {
-                    let now = v3_responses_relay_now_epoch_ms()?;
                     pending
-                        .commit_from_manifest(manifest, now)
+                        .commit::<String>()
                         .map_err(V3ResponsesRelayRuntimeError::Target)?;
                 }
             }};
@@ -266,29 +265,44 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 }
             };
         }
+        let request_execution_control = match initial_relay_seeds.request_execution_control {
+            Some(control) => control,
+            None => {
+                crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
+                    .map_err(|error| {
+                    V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
+                })?
+            }
+        };
         let allowed_execution_modes = handle_error_before_resp03!(
             allowed_execution_modes_for_relay_server(manifest, &input.server_id,)
         );
         let (execution_planned_request, initial_plan) =
-            match run_v3_plan_execution_operator_with_probes(
-                target_resolved_request,
-                manifest,
-                target_source,
-                &input.failure_session_scope,
-                &provider_health,
-                &failed_candidates,
-                &request_local_busy_candidates,
-                v3_relay_provider_policy_now_epoch_ms()
-                    .map_err(V3ResponsesRelayRuntimeError::Target)?,
-                deterministic_sample,
-                allow_exhaustion_rescue_probe,
-                retry_selected
-                    .take()
-                    .or_else(|| initial_selected_target.take()),
-                V3PlanExecutionModePolicy::DirectEntry {
-                    entry_protocol: V3HubEntryProtocol::Responses,
-                    allowed_modes: allowed_execution_modes.clone(),
-                },
+            match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
+                request_execution_control
+                    .attempt_budget()
+                    .residence_deadline(),
+                run_v3_plan_execution_operator_with_probes(
+                    request_execution_control.attempt_budget(),
+                    target_resolved_request,
+                    manifest,
+                    target_source,
+                    &input.failure_session_scope,
+                    &provider_health,
+                    &failed_candidates,
+                    &request_local_busy_candidates,
+                    v3_relay_provider_policy_now_epoch_ms()
+                        .map_err(V3ResponsesRelayRuntimeError::Target)?,
+                    deterministic_sample,
+                    allow_exhaustion_rescue_probe,
+                    retry_selected
+                        .take()
+                        .or_else(|| initial_selected_target.take()),
+                    V3PlanExecutionModePolicy::DirectEntry {
+                        entry_protocol: V3HubEntryProtocol::Responses,
+                        allowed_modes: allowed_execution_modes.clone(),
+                    },
+                ),
             )
             .await
             {
@@ -364,8 +378,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             };
         let initial_execution_mode = initial_plan.execution_mode;
         let retained_expanded = initial_plan.expanded;
-        failed_candidates.extend(initial_plan.request_local_excluded_candidates);
-        request_local_busy_candidates.extend(initial_plan.request_local_busy_candidates);
+        failed_candidates = initial_plan.request_local_excluded_candidates;
+        request_local_busy_candidates = initial_plan.request_local_busy_candidates;
         let mut initial_admitted = Some((
             initial_plan.selected,
             initial_plan.admission,
@@ -402,15 +416,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         let mut same_candidate_retries = BTreeMap::<String, usize>::new();
         let mut last_external_http = None;
         let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
-        let request_execution_control = match initial_relay_seeds.request_execution_control {
-            Some(control) => control,
-            None => {
-                crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
-                    .map_err(|error| {
-                    V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
-                })?
-            }
-        };
         let attempt_budget = request_execution_control.attempt_budget();
         let mut provider_send_attempts = attempt_budget.transport_attempts();
         let shared_retry_policy = retry_policy.as_shared_policy();
@@ -432,7 +437,10 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 (selected, Some(admission), protocol_decision)
             } else {
                 let preferred_selected = retry_selected.take();
-                match run_v3_plan_execution_operator_with_probes(
+                match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
+                    attempt_budget.residence_deadline(),
+                    run_v3_plan_execution_operator_with_probes(
+                        attempt_budget.clone(),
                     (*req05.previous.previous.previous.payload.0).clone(),
                     manifest,
                     V3PlanExecutionTargetSource::Expanded(retained_expanded.clone()),
@@ -449,14 +457,14 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         entry_protocol: V3HubEntryProtocol::Responses,
                         allowed_modes: allowed_execution_modes.clone(),
                     },
-                )
+                ))
                 .await
                 {
                     Ok((execution_planned_request, plan)) => {
                         req05.previous.previous.previous.payload.0 =
                             std::sync::Arc::new(execution_planned_request);
-                        failed_candidates.extend(plan.request_local_excluded_candidates);
-                        request_local_busy_candidates.extend(plan.request_local_busy_candidates);
+                        failed_candidates = plan.request_local_excluded_candidates;
+                        request_local_busy_candidates = plan.request_local_busy_candidates;
                         (plan.selected, Some(plan.admission), plan.protocol_decision)
                     }
                     Err(V3PlanExecutionStop::Failed(source)) => {
@@ -526,10 +534,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             response_processing_code: None,
                         };
                         return Ok(provider_failure_output(
-                            super::responses_relay_failures::terminalize_v3_responses_relay_provider_failure_with_source(
-                                failure,
-                                source,
-                                last_external_http.clone(),
+                            attach_v3_provider_failure_events_to_failure(
+                                super::responses_relay_failures::terminalize_v3_responses_relay_provider_failure_with_source(
+                                    failure,
+                                    source,
+                                    last_external_http.clone(),
+                                ),
+                                &provider_failure_events,
                             ),
                             trace,
                             0,
@@ -548,7 +559,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 drop(_provider_action_permit.take());
                 provider_action_permit_target = None;
             }
-            attempt_budget.set_transport_attempt_limit(selected.candidate_count);
             if matches!(
                 protocol_decision.mode,
                 crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
@@ -746,12 +756,19 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             }
             trace.push("V3ProviderReqOutbound09TransportRequest");
             let provider_request_snapshot = transport_request.provider_request_projection();
+            let mut _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
+                admission.take_rate_limit_control(&mut pending_provider_action_recovery)
+            });
             if pending_provider_action_recovery.is_some() {
                 drop(selected_admission.take());
             }
             if let Some(recovery) = pending_provider_action_recovery.take() {
                 match handle_error_before_resp03!(provider_health
-                    .wait_for_error05_recovery(&recovery, &selected)
+                    .wait_for_error05_recovery(
+                        &recovery,
+                        &selected,
+                        attempt_budget.residence_deadline()
+                    )
                     .await
                     .map_err(V3ResponsesRelayRuntimeError::ProviderHealth))
                 {
@@ -802,10 +819,16 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     }
                 }
             }
-            provider_send_attempts =
-                handle_error_before_resp03!(attempt_budget.admit_transport_attempt().map_err(
-                    |error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
-                ));
+            provider_send_attempts = handle_error_before_resp03!(
+                crate::provider_failure_runtime_policy::admit_v3_provider_transport_attempt(
+                    &attempt_budget,
+                    &mut selected_admission,
+                    &mut _rate_limit_permit,
+                    &mut _provider_action_permit,
+                )
+                .await
+                .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))
+            );
             handle_error_before_resp03!(runtime_timing
                 .start_external()
                 .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
@@ -831,6 +854,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             let provider_raw = match transport_result {
                 Ok(raw) => raw,
                 Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                    attempt_budget.release_unsent_transport_attempt();
+                    provider_send_attempts = attempt_budget.transport_attempts();
                     handle_error_before_resp03!(runtime_timing
                         .finish_external()
                         .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
@@ -842,6 +867,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     continue;
                 }
                 Err(V3ProviderError::HttpStatus { response }) => {
+                    if response.status == 429 {
+                        attempt_budget.record_rate_limited_attempt();
+                    }
                     last_external_http = Some(
                         crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
                     );
@@ -971,6 +999,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
             }
             let provider_status = provider_raw.status();
+            if provider_status == 429 {
+                attempt_budget.record_rate_limited_attempt();
+            }
             selected_observability.provider_status = Some(provider_status);
             let provider_id = provider_raw.provider_id().to_string();
             match provider_raw.into_body() {

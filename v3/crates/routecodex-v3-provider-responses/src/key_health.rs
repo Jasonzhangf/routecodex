@@ -39,7 +39,42 @@ pub struct V3ProviderHealthProbePermit {
     auth_alias: Option<String>,
     model_id: Option<String>,
     expected_generation: u64,
+    purpose: V3ProviderProbePurpose,
     pub(crate) acquisition_id: V3ProbeAcquisitionId,
+}
+
+/// Physical probe purpose for one owned acquisition.
+///
+/// The purpose qualifies only which control-plane owner may hold the single
+/// physical probe slot. It never classifies business health and never by
+/// itself authorizes a cooldown or score change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3ProviderProbePurpose {
+    /// Recovery probe for an identity already visible in the cooldown pool.
+    CooldownRecovery,
+    /// Observation probe for a healthy/held identity before any cooling
+    /// decision. It shares the same physical slot but holds no cooldown entry.
+    PrecoolObservation,
+}
+
+/// Typed result of closing one owned pre-cool observation probe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3ProviderPrecoolObservationOutcome {
+    /// The permit was still the authoritative owner for its health
+    /// generation. The observation is closed without fabricating a business
+    /// receipt, score change or cooldown.
+    Completed,
+    /// The permit no longer owned the slot or its health generation had moved.
+    /// Nothing was recorded.
+    Superseded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3ProviderRateLimitProbeDisposition {
+    NotApplicable,
+    Superseded,
+    Retained,
+    Reclassified,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,12 +89,34 @@ impl V3ProviderHealthProbePermit {
         expected_generation: u64,
         acquisition_id: V3ProbeAcquisitionId,
     ) -> Self {
+        Self::new_with_purpose(
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+            expected_generation,
+            acquisition_id,
+            V3ProviderProbePurpose::CooldownRecovery,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_purpose(
+        provider_id: String,
+        interface_id: String,
+        auth_alias: Option<String>,
+        model_id: Option<String>,
+        expected_generation: u64,
+        acquisition_id: V3ProbeAcquisitionId,
+        purpose: V3ProviderProbePurpose,
+    ) -> Self {
         Self {
             provider_id,
             interface_id,
             auth_alias,
             model_id,
             expected_generation,
+            purpose,
             acquisition_id,
         }
     }
@@ -82,6 +139,10 @@ impl V3ProviderHealthProbePermit {
 
     pub fn expected_generation(&self) -> u64 {
         self.expected_generation
+    }
+
+    pub fn purpose(&self) -> V3ProviderProbePurpose {
+        self.purpose
     }
 }
 

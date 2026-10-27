@@ -10,6 +10,12 @@ pub struct V3CurrentTurnRouteFacts {
     pub has_current_turn_tool_execution_error: bool,
     pub has_current_turn_web_search: bool,
     pub last_assistant_tool_category: Option<String>,
+    /// Every independent tool category observed in the current turn. A turn
+    /// can contain several calls; route classification must keep all real
+    /// matches so a later lower-priority call cannot shadow an earlier one.
+    /// Empty means "no full set was supplied" and the single
+    /// `last_assistant_tool_category` is used as a legacy fallback.
+    pub current_turn_tool_categories: Vec<String>,
     pub has_background_keyword: bool,
     pub current_user_text: String,
 }
@@ -20,11 +26,11 @@ pub const DEFAULT_ROUTE: &str = "default";
 
 pub const ROUTE_PRIORITY: [&str; 9] = [
     "compact",
+    "web_search",
     "multimodal",
     "longcontext",
-    "thinking",
     "coding",
-    "web_search",
+    "thinking",
     "search",
     "tools",
     DEFAULT_ROUTE,
@@ -50,21 +56,27 @@ impl Default for RouteClassification {
 }
 
 pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
-    let last_tool_category = if input.latest_message_from_user {
-        ""
-    } else {
-        input
-            .last_assistant_tool_category
-            .as_deref()
-            .unwrap_or_default()
-    };
     let thinking_from_user = input.latest_message_from_user;
     let continuation = !input.latest_message_from_user && input.has_current_turn_tool_output;
-    let thinking_continuation = continuation && last_tool_category == "thinking";
-    let coding_continuation = continuation && last_tool_category == "coding";
-    let search_continuation = continuation && last_tool_category == "search";
-    let other_tool_continuation = continuation && last_tool_category == "other";
-    let unknown_tool_continuation = continuation && last_tool_category.is_empty();
+    let categories: Vec<&str> = if input.current_turn_tool_categories.is_empty() {
+        input
+            .last_assistant_tool_category
+            .iter()
+            .map(String::as_str)
+            .collect()
+    } else {
+        input
+            .current_turn_tool_categories
+            .iter()
+            .map(String::as_str)
+            .collect()
+    };
+    let has_category = |category: &str| categories.contains(&category);
+    let thinking_continuation = continuation && has_category("thinking");
+    let coding_continuation = continuation && has_category("coding");
+    let search_continuation = continuation && has_category("search");
+    let other_tool_continuation = continuation && has_category("other");
+    let unknown_tool_continuation = continuation && categories.is_empty();
     let current_user_web_search_intent = input.latest_message_from_user
         && crate::tools::has_current_user_web_search_intent(&input.current_user_text);
     let web_search = input.latest_message_from_user
@@ -73,16 +85,6 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
     let evaluation = vec![
         ("compact", input.is_compaction, "compact:registered-ingress"),
         ("compact", input.is_compaction, "compact:request-purpose"),
-        (
-            "multimodal",
-            input.has_image_attachment,
-            "multimodal:metadata-attachment",
-        ),
-        (
-            "longcontext",
-            input.reached_long_context,
-            "longcontext:token-threshold",
-        ),
         (
             "web_search",
             web_search,
@@ -93,17 +95,25 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
             },
         ),
         (
+            "multimodal",
+            input.has_image_attachment,
+            "multimodal:metadata-attachment",
+        ),
+        (
+            "longcontext",
+            input.reached_long_context,
+            "longcontext:token-threshold",
+        ),
+        ("coding", coding_continuation, "coding:last-tool-coding"),
+        (
             "thinking",
-            (thinking_from_user || thinking_continuation)
-                && !input.reached_long_context
-                && !web_search,
+            thinking_from_user || thinking_continuation,
             if thinking_continuation {
                 "thinking:last-tool-thinking"
             } else {
                 "thinking:user-input"
             },
         ),
-        ("coding", coding_continuation, "coding:last-tool-coding"),
         ("search", search_continuation, "search:last-tool-search"),
         (
             "tools",
@@ -116,20 +126,39 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
         ),
     ];
 
-    let (route_name, primary_reason) = ROUTE_PRIORITY
-        .iter()
-        .find_map(|route| {
-            evaluation
-                .iter()
-                .find(|(name, triggered, _)| name == route && *triggered)
-                .map(|(_, _, reason)| ((*route).to_string(), (*reason).to_string()))
-        })
-        .unwrap_or_else(|| {
-            (
-                DEFAULT_ROUTE.to_string(),
-                "default:route-selected".to_string(),
-            )
-        });
+    let mut matched = ROUTE_PRIORITY.iter().filter_map(|route| {
+        evaluation
+            .iter()
+            .find(|(name, triggered, _)| name == route && *triggered)
+            .map(|(_, _, reason)| ((*route).to_string(), (*reason).to_string()))
+    });
+    let (route_name, primary_reason) = matched.next().unwrap_or_else(|| {
+        (
+            DEFAULT_ROUTE.to_string(),
+            "default:route-selected".to_string(),
+        )
+    });
+    let candidates = if route_name == "compact" {
+        vec!["compact".to_string(), DEFAULT_ROUTE.to_string()]
+    } else {
+        let mut candidates = ROUTE_PRIORITY
+            .iter()
+            .filter(|route| **route != "compact" && **route != DEFAULT_ROUTE)
+            .filter(|route| {
+                evaluation
+                    .iter()
+                    .any(|(name, triggered, _)| name == *route && *triggered)
+            })
+            .map(|route| (*route).to_string())
+            .collect::<Vec<_>>();
+        if !candidates.iter().any(|route| route == &route_name) {
+            candidates.push(route_name.clone());
+        }
+        if !candidates.iter().any(|route| route == DEFAULT_ROUTE) {
+            candidates.push(DEFAULT_ROUTE.to_string());
+        }
+        candidates
+    };
 
     let mut reasoning = vec![primary_reason.clone()];
     for (_, triggered, reason) in &evaluation {
@@ -142,28 +171,33 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
         required_capabilities.push("web_search".to_string());
     }
 
-    let mut candidates = vec![route_name.clone()];
-    if route_name != "compact"
-        && route_name != "longcontext"
-        && input.reached_long_context
-        && !candidates.iter().any(|route| route == "longcontext")
-    {
-        candidates.push("longcontext".to_string());
-    }
-    // Search route must cascade to tools when the search pool is empty: VR walks
-    // candidates in order, so listing tools (and default) after search lets the
-    // request still serve when no search-capable upstream is available.
-    if route_name == "search" && !candidates.iter().any(|route| route == "tools") {
-        candidates.push("tools".to_string());
-    }
-    if !candidates.iter().any(|route| route == DEFAULT_ROUTE) {
-        candidates.push(DEFAULT_ROUTE.to_string());
-    }
-
     RouteClassification {
         route_name,
         reasoning: reasoning.join("|"),
         candidates,
         required_capabilities,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn route_priority_keeps_longcontext_between_multimodal_and_coding() {
+        assert_eq!(
+            ROUTE_PRIORITY,
+            [
+                "compact",
+                "web_search",
+                "multimodal",
+                "longcontext",
+                "coding",
+                "thinking",
+                "search",
+                "tools",
+                DEFAULT_ROUTE,
+            ]
+        );
     }
 }

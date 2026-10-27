@@ -5,6 +5,33 @@ use crate::webui_observability::{
 use crate::*;
 use serde_json::Value;
 
+/// Resolve the WebUI `route` (route classification) and `pool` labels.
+///
+/// A `provider.model` explicit pin bypasses classifier pool selection: the
+/// virtual router resolves it to the synthetic `direct` pool and never consults
+/// a classifier pool, even though the classifier still attaches its reasoning to
+/// the plan. `direct` is that execution mode, not a classification pool. Such a
+/// request is projected as unclassified (`route = "-"` and no `pool`) so it is
+/// not counted as a classifier route, while provider identity, wire model and
+/// execution mode stay on the record for diagnosis. Classified requests keep the
+/// pool that actually ran.
+pub(crate) fn resolve_v3_webui_route_labels(
+    observability: &V3RuntimeObservability,
+) -> (String, Option<String>) {
+    if is_v3_explicit_provider_model_pin(observability) {
+        return ("-".to_string(), None);
+    }
+    let route = resolve_v3_console_route_projection(observability).label;
+    (route, observability.pool_id.clone())
+}
+
+/// `provider.model` explicit pin marker: the virtual router resolves an explicit
+/// provider/model request to the synthetic `direct` pool without consulting a
+/// classifier pool.
+fn is_v3_explicit_provider_model_pin(observability: &V3RuntimeObservability) -> bool {
+    observability.pool_id.as_deref() == Some("direct")
+}
+
 /// Typed WebUI projection: emits a lifecycle event to the shared
 /// V3WebuiObservability handle carried by the listener state. This is a typed
 /// side-channel projection, never a payload mutation.
@@ -12,17 +39,40 @@ pub(crate) fn build_v3_webui_meta_for_context(
     context: &V3ConsoleEmissionContext,
     observability: &V3RuntimeObservability,
 ) -> V3ObsRequestMeta {
+    build_v3_webui_meta(
+        &context.request_identity.request_id,
+        &context.endpoint,
+        &context.entry_protocol,
+        observability,
+    )
+}
+
+fn build_v3_webui_meta(
+    request_id: &str,
+    endpoint: &str,
+    entry_protocol: &str,
+    observability: &V3RuntimeObservability,
+) -> V3ObsRequestMeta {
+    let (route_label, pool_label) = resolve_v3_webui_route_labels(observability);
+    // A pin bypasses classification, so the classifier reasoning is not this
+    // request's route reason; keep the un-hit classifier route out of the
+    // reason grouping as well.
+    let route_reason = if is_v3_explicit_provider_model_pin(observability) {
+        None
+    } else {
+        observability.route_classification_reason.clone()
+    };
     V3ObsRequestMeta {
-        request_id: context.request_identity.request_id.clone(),
-        endpoint: context.endpoint.clone(),
+        request_id: request_id.to_string(),
+        endpoint: endpoint.to_string(),
         model: observability
             .model_id
             .clone()
             .or_else(|| observability.wire_model.clone()),
-        route: Some(resolve_v3_console_route_projection(observability).label),
-        route_reason: observability.route_classification_reason.clone(),
+        route: Some(route_label),
+        route_reason,
         routing_group: observability.routing_group_id.clone(),
-        pool: observability.pool_id.clone(),
+        pool: pool_label,
         provider_id: observability.provider_id.clone(),
         auth_alias: observability.auth_alias.clone(),
         provider_type: observability.provider_type.clone(),
@@ -31,7 +81,7 @@ pub(crate) fn build_v3_webui_meta_for_context(
             .provider_key
             .clone()
             .or_else(|| observability.provider_id.clone()),
-        entry_protocol: Some(context.entry_protocol.clone()),
+        entry_protocol: Some(entry_protocol.to_string()),
         execution_mode: Some(observability.execution_mode.clone()),
         transport: Some(observability.transport.clone()),
         provider_status: observability.provider_status,
@@ -202,4 +252,104 @@ pub(crate) fn record_v3_webui_provider_failure(
         return false;
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn observability(
+        pool_id: Option<&str>,
+        route_classification_reason: Option<&str>,
+    ) -> V3RuntimeObservability {
+        V3RuntimeObservability {
+            route_classification_reason: route_classification_reason.map(str::to_string),
+            pool_id: pool_id.map(str::to_string),
+            routing_group_id: Some("default".to_string()),
+            execution_mode: "direct".to_string(),
+            provider_id: Some("pinned".to_string()),
+            auth_alias: Some("key".to_string()),
+            provider_key: Some("pinned:key:gpt-5.5".to_string()),
+            provider_type: Some("openai-responses".to_string()),
+            model_id: Some("gpt-5.5".to_string()),
+            wire_model: Some("gpt-5.5".to_string()),
+            transport: "sse".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn explicit_provider_model_pin_is_not_reported_as_classifier_route_or_pool() {
+        // A provider.model pin bypasses classifier pool selection, even though
+        // the classifier still attaches a reasoning string to the plan. Neither
+        // the un-hit classifier route nor a fabricated classifier pool may be
+        // reported for the request.
+        let observed = observability(Some("direct"), Some("thinking:user-input"));
+        let (route, pool) = resolve_v3_webui_route_labels(&observed);
+        assert_eq!(route, "-");
+        assert_eq!(pool, None);
+    }
+
+    #[test]
+    fn explicit_provider_model_pin_with_coding_reason_stays_unclassified() {
+        let observed = observability(Some("direct"), Some("coding:tool-continuation"));
+        let (route, pool) = resolve_v3_webui_route_labels(&observed);
+        assert_eq!(route, "-");
+        assert_eq!(pool, None);
+    }
+
+    #[test]
+    fn classified_request_reports_the_hit_pool_truthfully() {
+        // The pool that actually ran is the classification truth, not a stale
+        // classifier fragment carried in the reason field.
+        let observed = observability(Some("coding"), Some("thinking:user-input"));
+        let (route, pool) = resolve_v3_webui_route_labels(&observed);
+        assert_eq!(route, "coding");
+        assert_eq!(pool.as_deref(), Some("coding"));
+    }
+
+    #[test]
+    fn classified_request_without_classifier_reason_keeps_pool_label() {
+        let observed = observability(Some("search"), None);
+        let (route, pool) = resolve_v3_webui_route_labels(&observed);
+        assert_eq!(route, "search");
+        assert_eq!(pool.as_deref(), Some("search"));
+    }
+
+    #[test]
+    fn unclassified_console_fallback_is_preserved() {
+        let observed = V3RuntimeObservability {
+            routing_group_id: Some("default".to_string()),
+            execution_mode: "direct".to_string(),
+            ..Default::default()
+        };
+        let (route, pool) = resolve_v3_webui_route_labels(&observed);
+        assert_eq!(route, "default");
+        assert_eq!(pool, None);
+    }
+
+    #[test]
+    fn explicit_pin_meta_keeps_identity_and_mode_without_classifier_route() {
+        let observed = observability(Some("direct"), Some("thinking:user-input"));
+        let meta = build_v3_webui_meta("req-pin", "/v1/responses", "responses", &observed);
+        assert_eq!(meta.route.as_deref(), Some("-"));
+        assert_eq!(meta.pool, None);
+        assert_eq!(meta.route_reason, None);
+        assert_eq!(meta.execution_mode.as_deref(), Some("direct"));
+        assert_eq!(meta.provider_id.as_deref(), Some("pinned"));
+        assert_eq!(meta.provider.as_deref(), Some("pinned:key:gpt-5.5"));
+        assert_eq!(meta.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(meta.wire_model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(meta.provider_type.as_deref(), Some("openai-responses"));
+        assert_eq!(meta.transport.as_deref(), Some("sse"));
+    }
+
+    #[test]
+    fn classified_meta_keeps_hit_pool_and_reason() {
+        let observed = observability(Some("coding"), Some("thinking:user-input"));
+        let meta = build_v3_webui_meta("req-code", "/v1/responses", "responses", &observed);
+        assert_eq!(meta.route.as_deref(), Some("coding"));
+        assert_eq!(meta.pool.as_deref(), Some("coding"));
+        assert_eq!(meta.route_reason.as_deref(), Some("thinking:user-input"));
+    }
 }

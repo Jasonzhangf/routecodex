@@ -7,7 +7,7 @@ implementation_symbols:
   - accept_v3_client_sse_transport
   - v3_request_wants_sse
 supporting_callers:
-  - pending_endpoint_after_responses_admission
+  - pending_endpoint_after_json_parse
   - execute_responses_direct_server_outcome
 entrypoint:
   node_id: V3DirectSseAccept01ClientChannel
@@ -31,7 +31,7 @@ edges:
     contract: only the existing Direct or Relay runtime client projection or typed Error06 terminal frame is forwarded; provider raw SSE and reparsed HTTP JSON are never forwarded
 supporting_edges:
   - step_id: v3-direct-sse-accept-skeleton-intent-01
-    caller: pending_endpoint_after_responses_admission
+    caller: pending_endpoint_after_json_parse
     caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
     callee: v3_request_wants_sse
     callee_file: v3/crates/routecodex-v3-server/src/lib.rs

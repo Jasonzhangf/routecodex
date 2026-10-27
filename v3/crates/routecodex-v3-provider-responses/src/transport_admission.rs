@@ -1,4 +1,6 @@
-use crate::adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease};
+use crate::adaptive_concurrency::{
+    V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease, V3ConcurrencyIdentityScope,
+};
 use crate::transport::{
     v3_transport_13_request, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
     V3Transport13ResponsesRequest, V3Transport13ResponsesRequestKind,
@@ -60,13 +62,27 @@ impl V3Transport13ResponsesRequest {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn take_or_acquire_provider_admission(
     pre_acquired: Option<V3AdaptiveConcurrencyLease>,
     controller: V3AdaptiveConcurrencyController,
     provider_key: String,
 ) -> Result<V3AdaptiveConcurrencyLease, V3ProviderAdmissionError> {
+    take_or_acquire_provider_admission_scoped(pre_acquired, controller, provider_key, None)
+}
+
+pub(crate) fn take_or_acquire_provider_admission_scoped(
+    pre_acquired: Option<V3AdaptiveConcurrencyLease>,
+    controller: V3AdaptiveConcurrencyController,
+    provider_key: String,
+    scope: Option<&V3ConcurrencyIdentityScope>,
+) -> Result<V3AdaptiveConcurrencyLease, V3ProviderAdmissionError> {
     match pre_acquired {
-        Some(lease) if lease.provider_key() == provider_key && lease.belongs_to(&controller) => {
+        Some(lease)
+            if lease.provider_key() == provider_key
+                && lease.identity_scope() == scope
+                && lease.belongs_to(&controller) =>
+        {
             Ok(lease)
         }
         Some(lease) => {
@@ -76,7 +92,7 @@ pub(crate) fn take_or_acquire_provider_admission(
             Err(V3ProviderAdmissionError::LeaseMismatch)
         }
         None => controller
-            .try_acquire_business(&provider_key)
+            .try_acquire_business_scoped(&provider_key, scope)
             .ok_or(V3ProviderAdmissionError::Busy),
     }
 }
@@ -105,6 +121,46 @@ pub(crate) fn provider_admission_error(
 mod tests {
     use super::{take_or_acquire_provider_admission, V3ProviderAdmissionError};
     use crate::adaptive_concurrency::V3AdaptiveConcurrencyController;
+
+    #[test]
+    fn preacquired_lease_cannot_cross_model_or_interface_scope() {
+        use crate::adaptive_concurrency::V3ConcurrencyIdentityScope;
+        let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
+        let source = V3ConcurrencyIdentityScope {
+            interface_id: "responses".into(),
+            model_id: "a".into(),
+        };
+        for target in [
+            V3ConcurrencyIdentityScope {
+                interface_id: "responses".into(),
+                model_id: "b".into(),
+            },
+            V3ConcurrencyIdentityScope {
+                interface_id: "chat".into(),
+                model_id: "a".into(),
+            },
+        ] {
+            let lease = controller
+                .try_acquire_business_scoped("provider:key", Some(&source))
+                .unwrap();
+            assert!(matches!(
+                super::take_or_acquire_provider_admission_scoped(
+                    Some(lease),
+                    controller.clone(),
+                    "provider:key".into(),
+                    Some(&target)
+                ),
+                Err(V3ProviderAdmissionError::LeaseMismatch)
+            ));
+            assert_eq!(
+                controller
+                    .snapshot("provider:key")
+                    .unwrap()
+                    .total_provider_in_flight,
+                0
+            );
+        }
+    }
 
     #[test]
     fn missing_preacquired_lease_does_not_wait_when_provider_is_at_budget() {

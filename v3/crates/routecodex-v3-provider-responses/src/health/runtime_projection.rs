@@ -74,21 +74,16 @@ fn key_health_projection(
     now_ms: u64,
 ) -> V3ProviderKeyHealthProjection {
     let history = state.adaptive_history.get(key);
-    let probe = state.provider_cooldown_probes.get(key);
-    // Diagnostics must agree with selection: both read the same helper. The
-    // reported deadline is the real hold window for a rate-limit hold or an
-    // advisory probe, otherwise the probe cadence.
-    let cooldown = probe.is_some_and(|probe| probe_state_blocks_availability(probe, now_ms));
-    let cooldown_until_ms = probe.and_then(|probe| {
-        if probe.cooldown_cause
-            == Some(crate::global_cooldown::V3ProviderCooldownFailureClass::RateLimit)
-            || probe.advisory_probe
-        {
-            probe.blocked_until_ms
-        } else {
-            probe.next_probe_at_ms.or(probe.blocked_until_ms)
-        }
-    });
+    let cooldown_until_ms = history
+        .and_then(|history| history.rate_limit_episode.as_ref())
+        .and_then(|episode| episode.not_before_ms)
+        .or_else(|| {
+            state
+                .provider_cooldown_probes
+                .get(key)
+                .and_then(|probe| probe.next_probe_at_ms)
+        });
+    let cooldown = key_blocks_availability(state, key, now_ms);
     V3ProviderKeyHealthProjection {
         provider_id: key.provider_id.clone(),
         interface_id: key.interface_id.clone(),
@@ -105,23 +100,28 @@ fn key_health_projection(
 }
 
 fn record_health_delta(history: &mut V3ProviderAdaptiveHistory, delta: i32) {
-    history.score_milli =
-        (i64::from(history.score_milli) + i64::from(delta)).clamp(0, 150) as u32;
+    history.score_milli = (i64::from(history.score_milli) + i64::from(delta)).clamp(0, 150) as u32;
 }
 
-/// A probe excludes the identity only while the real cooldown window is open.
-/// A 429 rate-limit hold is bounded: it stops blocking once `blocked_until_ms`
-/// passes, so the identity is released automatically even without a probe. An
-/// advisory probe's scheduling state (active, pending, in-flight) is never an
-/// availability decision: upstream stays selectable and the probe remains the
-/// recovery path, so a probe failure cannot lock the provider out.
-fn probe_state_blocks_availability(probe: &V3ProviderCooldownProbeState, now_ms: u64) -> bool {
-    if probe.cooldown_cause == Some(crate::global_cooldown::V3ProviderCooldownFailureClass::RateLimit)
-        || probe.advisory_probe
+/// All availability projections read mandatory episode restrictions before
+/// advisory probe state. A timer cannot substitute for a required probe.
+fn key_blocks_availability(
+    state: &V3ProviderHealthState,
+    key: &V3ProviderCooldownProbeKey,
+    now_ms: u64,
+) -> bool {
+    if state.adaptive_history.get(key)
+        .and_then(|history| history.rate_limit_episode.as_ref())
+        .is_some_and(|episode| episode.probe_required
+            || episode.not_before_ms.is_some_and(|until| now_ms < until))
     {
-        return probe
-            .blocked_until_ms
-            .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms);
+        return true;
+    }
+    let Some(probe) = state.provider_cooldown_probes.get(key) else {
+        return false;
+    };
+    if probe.advisory_probe {
+        return probe.blocked_until_ms.is_some_and(|until| now_ms < until);
     }
     probe.active_probe.is_some()
         || probe.next_probe_at_ms.is_some()
@@ -337,15 +337,24 @@ fn complete_provider_probe_success_at_generation(
     key: &V3ProviderCooldownProbeKey,
     now_ms: u64,
     expected_generation: Option<u64>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let current_generation = state
         .adaptive_history
         .get(key)
         .map_or(0, |history| history.score_generation);
     if let Some(expected_generation) = expected_generation {
         if expected_generation != current_generation {
-            return Ok(());
+            return Ok(false);
         }
+    }
+
+    if !rate_limit::accept_qualified_probe_success(
+        state,
+        key,
+        now_ms,
+        expected_generation.is_some(),
+    ) {
+        return Ok(false);
     }
 
     record_adaptive_success(state, key, now_ms);
@@ -362,7 +371,7 @@ fn complete_provider_probe_success_at_generation(
 
     state.provider_cooldown_probes.remove(key);
     state.auth_key_cooldowns.remove(key);
-    Ok(())
+    Ok(true)
 }
 
 #[allow(clippy::too_many_arguments)]

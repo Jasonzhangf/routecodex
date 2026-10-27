@@ -39,6 +39,7 @@ const files = {
   server: 'v3/crates/routecodex-v3-server/src/lib.rs',
   serverTests: 'v3/crates/routecodex-v3-server/src/tests/mod.rs',
   gateTests: 'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs',
+  sessionGateTests: 'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_session_isolation_contract.rs',
   openaiChatTests: 'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
   geminiTests: 'v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs',
   directSseTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
@@ -205,15 +206,13 @@ for (const token of [
   'impl Drop for V3ProviderActionPermit',
   'self.gate.abandon_admission(&self.key, self.generation)',
   'waiter_queue: VecDeque<u64>',
-  'state.waiter_queue.len() > 1',
   'state.admitted_generation.is_some()',
-  '!require_admission && *active_key == *key && state.admitted_generation.is_some()',
-  'let active_admission_owned = states.iter().any',
+  '!require_admission && state.admitted_generation.is_some()',
+  'let active_admission_owned = states',
   'if !active_admission_owned {',
-  'let group_has_active_admission = states.iter().any',
-  '(!self.admit_action || !group_has_active_admission)',
+  '(!self.admit_action || !exact_has_active_admission)',
   'record_failure_and_commit_terminal_projection',
-  'pub async fn wait_for_exact_provider_action(',
+  'pub async fn wait_for_recovery_ticket(',
   'pub fn abandon_admission(',
   'pub fn commit_terminal_admission(',
   'V3ProviderActionRecoveryTransition',
@@ -228,18 +227,31 @@ const recordProviderSuccessBody = findFunctionBody(
   files.gate,
 );
 if (
-  !/key\.provider_scope\s*==\s*\*provider_scope\s*\|\|\s*state\.admitted_action_scope\.as_ref\(\)\s*==\s*Some\(provider_scope\)/u
+  !/key\.provider_scope\s*==\s*\*provider_scope/u
     .test(recordProviderSuccessBody)
 ) {
   failures.push(
-    `${files.gate}: provider success may release only its exact provider scope or the permit-owned action scope`,
+    `${files.gate}: provider success may release only its exact provider scope`,
   );
 }
 for (const forbidden of [
+  'wait_for_provider_action(',
+  'wait_for_exact_provider_action(',
+  'wait_for_matching_provider_action(',
+  'admitted_action_scope',
+  'group_has_active_admission',
+  'active_sibling_lane_generation',
+  'state.waiter_queue.len() > 1',
+]) {
+  if (text.gate.includes(forbidden)) {
+    failures.push(`${files.gate}: retired cross-request coupling ${forbidden}`);
+  }
+}
+for (const requiredDiagnostic of [
   'provider action gate state disappeared without an explicit transition',
   'provider action gate notification channel closed without an explicit transition',
 ]) {
-  requireText(text.gate, files.gate, forbidden);
+  requireText(text.gate, files.gate, requiredDiagnostic);
 }
 if (
   /generation:\s*0,[\s\S]{0,180}?released_by_success:\s*true/u.test(text.gate)
@@ -558,10 +570,8 @@ const requiredGateTests = [
   'isolated_terminal_projection_commits_without_waiting_for_provider_action_admission',
   'terminal_projection_advances_an_active_exact_key_and_preserves_its_permit',
   'unrelated_success_cannot_delay_a_terminal_projection',
-  'overlapping_waiter_promotes_scope_to_five_seconds_and_one_admission',
   'process_shared_handles_observe_the_same_cross_request_generation',
   'terminal_transition_wakes_old_waiter_for_reselection_then_serializes_next_generation',
-  'changing_provider_and_error_family_cannot_restart_an_active_lane_at_one_second',
   'admitted_action_requires_explicit_drop_before_replacement_generation',
   'unrelated_same_group_provider_success_cannot_release_an_owned_action_permit',
   'fifo_waiter_cancellation_removes_only_its_ticket',
@@ -569,6 +579,14 @@ const requiredGateTests = [
 ];
 for (const testName of requiredGateTests) {
   assertRustTest(text.gateTests, files.gateTests, testName);
+}
+for (const testName of [
+  'non429_failure_does_not_escalate_another_identity_in_the_same_session',
+  'admitted_identity_cannot_occupy_another_identity_in_the_same_session',
+  'terminal_identity_cannot_supersede_another_identity_in_the_same_session',
+  'rate_limit_lane_and_success_release_are_shared_across_sessions',
+]) {
+  assertRustTest(text.sessionGateTests, files.sessionGateTests, testName);
 }
 for (const token of [
   'sse_provider_attempt_is_not_committed_before_provider_terminal',
@@ -696,7 +714,6 @@ for (const [nodeId, owner] of [
   ['V3Error05ExecutionDecision', 'routecodex-v3-error'],
   ['V3Error05RecoveryWitness', 'routecodex-v3-error'],
   ['V3ProviderActionGateAdmission', 'routecodex-v3-runtime'],
-  ['V3ExecutionRetryOrReselect', 'routecodex-v3-runtime'],
   ['V3ProviderActionGateTerminalAdmission', 'routecodex-v3-runtime'],
   ['V3ProviderActionGateTerminalCommitted', 'routecodex-v3-runtime'],
   ['V3ProviderActionPermitInFlight', 'routecodex-v3-runtime'],
@@ -724,7 +741,7 @@ assertExactStrings(
 assertExactStrings(
   manifest?.return_path,
   [
-    'V3ExecutionRetryOrReselect',
+    'V3ProviderActionPermitInFlight',
     'V3ProviderActionGateTerminalCommitted',
     'V3ProviderActionSuccessRecorded',
     'V3ProviderActionFailureRecorded',
@@ -818,11 +835,11 @@ assertIncludes(
 if (
   manifest?.admission_permit?.owner_type !== 'V3ProviderActionPermit'
   || manifest?.admission_permit?.wall_clock_expiry !== 'forbidden'
-  || manifest?.admission_permit?.fresh_request_consumes_active_recovery_lane !== false
+  || manifest?.admission_permit?.fresh_request_consumes_active_recovery_lane !== 'http_429_only'
   || manifest?.admission_permit?.waiter_order !== 'fifo_ticket'
 ) {
   failures.push(
-    `${files.manifest}: admission_permit must lock explicit ownership, no wall-clock expiry, FIFO, and fresh-request isolation`,
+    `${files.manifest}: admission_permit must lock explicit ownership, no wall-clock expiry, FIFO, and fresh-request sharing only for HTTP 429`,
   );
 }
 if (Object.hasOwn(manifest, 'admission_lease')) {
@@ -853,7 +870,7 @@ for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-04', 'Witness', 'Gate'],
   ['v3-provider-action-gate-05', 'E05', 'E06'],
   ['v3-provider-action-gate-06', 'TerminalAdmission', 'TerminalCommit'],
-  ['v3-provider-action-gate-07', 'Gate', 'Retry'],
+  ['v3-provider-action-gate-07', 'Wire', 'Witness'],
   ['v3-provider-action-gate-08', 'Witness', 'Gate'],
   ['v3-provider-action-gate-10', 'Witness', 'Gate'],
   ['v3-provider-action-gate-11', 'Witness', 'Gate'],
@@ -895,6 +912,11 @@ for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-49', 'ProviderCodec', 'ProviderOutcome'],
   ['v3-provider-action-gate-50', 'ProviderRaw', 'ProviderCodec'],
   ['v3-provider-action-gate-51', 'ProviderCodec', 'ProviderOutcome'],
+  ['v3-provider-action-gate-52', 'Wire', 'Witness'],
+  ['v3-provider-action-gate-53', 'Wire', 'Witness'],
+  ['v3-provider-action-gate-54', 'Wire', 'Witness'],
+  ['v3-provider-action-gate-55', 'Wire', 'Witness'],
+  ['v3-provider-action-gate-56', 'Wire', 'Witness'],
 ]) {
   assertWikiEdge(v3WikiMermaid, files.wiki, stepId, fromAlias, toAlias);
 }
