@@ -491,6 +491,46 @@ pub(crate) fn probe_new_lane(
     diagnostic:
       /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
   },
+  {
+    // Hoisting every "anthropic" literal inside the function into a file-scope
+    // const erases the in-body brand while leaving compilable code. Combined with
+    // deleting the binding and renaming the function it defeats A/B/C and a
+    // literal-only D. Evidence D must follow the const reference, not just a
+    // literal, or the lane disappears from the scan and the regression ships.
+    name: "hoisting the anthropic literal into a const cannot hide the lane",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) => {
+      const fnName = "pub(crate) async fn execute_v3_anthropic_direct_server_outcome(";
+      const start = source.indexOf(fnName);
+      if (start < 0) return source;
+      const fnClose = source.indexOf("\n}", start);
+      const fnBody = source.slice(start, fnClose);
+      const head = source
+        .slice(0, start)
+        .replace(
+          /^use crate::\*;/u,
+          'pub(crate) const ANTHROPIC_LANE_PROTOCOL: &str = "anthropic";\nuse crate::*;',
+        );
+      const newFn = fnBody
+        .replace(
+          "        let client_body_is_sse = relay_output.client_body.is_sse();\n        let stream_console_finalizer = if client_body_is_sse {",
+          "        let stream_console_finalizer = if relay_output.client_body.is_sse() {",
+        )
+        .replace(
+          "                started_at,\n                !client_body_is_sse,\n            );",
+          "                started_at,\n                relay_output.stream_observation.is_none(),\n            );",
+        )
+        .replace(
+          "execute_v3_anthropic_direct_server_outcome",
+          "execute_v3_same_protocol_direct_server_outcome",
+        )
+        .split('"anthropic"')
+        .join("ANTHROPIC_LANE_PROTOCOL");
+      return head + newFn + source.slice(fnClose);
+    },
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
 ];
 
 const failures = [];

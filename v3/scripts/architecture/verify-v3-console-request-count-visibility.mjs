@@ -493,11 +493,12 @@ function enclosingFunction(masked, blocks, functions, index) {
 //      binding — the identifier and an optional type annotation are free;
 //   B. the enclosing function name mentions anthropic;
 //   C. an enclosing block guard selects the "anthropic" entry protocol;
-//   D. the enclosing function body references the "anthropic" entry protocol as
-//      a string literal, and no guard enclosing this emit selects a different
-//      protocol — so renaming the function or the binding still leaves the lane
-//      branded inside its own body. The exclusion is per-emit, not per-body: a
-//      decoy guard elsewhere in the function must not suppress it.
+//   D. the enclosing function body names the anthropic lane, directly as the
+//      "anthropic" string or indirectly through an identifier or a file-scope
+//      const bound to it, and no guard enclosing this emit selects a different
+//      protocol. So renaming the function or the binding, or hoisting the literal
+//      into a const, still leaves the lane identifiable. The exclusion is
+//      per-emit, not per-body: a decoy guard elsewhere cannot suppress it.
 // Returns the evidence label, or null when the lane is not anthropic.
 function anthropicLaneEvidenceAt(masked, source, codeText, emitIndex, blocks, functions, bindingIndexes) {
   for (const bindingIndex of bindingIndexes) {
@@ -519,10 +520,10 @@ function anthropicLaneEvidenceAt(masked, source, codeText, emitIndex, blocks, fu
       }
     }
   }
-  // Evidence D: the function body names the anthropic lane as a string literal,
-  // and no guard enclosing this emit selects a different protocol. A shared
-  // multi-protocol dispatcher is excluded per emit, so a decoy guard placed
-  // elsewhere in the body cannot silence this evidence.
+  // Evidence D: the function body names the anthropic lane, directly or through a
+  // hoisted constant, and no guard enclosing this emit selects a different
+  // protocol. A shared multi-protocol dispatcher is excluded per emit, so a decoy
+  // guard placed elsewhere in the body cannot silence this evidence.
   const body = codeText.slice(fn.open, fn.close + 1);
   const enclosingGuards = blocks
     .filter((block) => emitIndex > block.open && emitIndex < block.close)
@@ -530,7 +531,17 @@ function anthropicLaneEvidenceAt(masked, source, codeText, emitIndex, blocks, fu
   const otherProtocolGuard = enclosingGuards.some((guard) =>
     /entry_protocol\s*==\s*"(gemini|openai_chat|openai|responses)"/u.test(guard),
   );
-  if (!otherProtocolGuard && /"anthropic"/u.test(body)) {
+  if (otherProtocolGuard) return null;
+  const hoistedNames = [];
+  for (const match of codeText.matchAll(
+    /\b(?:const|static)\s+([A-Za-z_]\w*)\s*:[^=;]*=\s*"anthropic"\s*;/gu,
+  )) {
+    hoistedNames.push(match[1]);
+  }
+  const referencesHoistedLiteral = hoistedNames.some((name) =>
+    new RegExp(`\\b${name}\\b`, "u").test(body),
+  );
+  if (/anthropic/iu.test(body) || referencesHoistedLiteral) {
     return 'enclosing function body references the "anthropic" entry protocol';
   }
   return null;
