@@ -3,6 +3,57 @@ use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use std::sync::{Arc, Mutex};
 
+#[test]
+fn target_recovery_backoff_starts_at_declared_one_second() {
+    let budget =
+        V3AttemptBudget::new_isolated(test_limits(8, 16, 32), Arc::new(AtomicUsize::new(0)));
+    let now = Instant::now();
+    assert_eq!(
+        budget.current_target_recovery_deadline(now),
+        Some(now + Duration::from_secs(1))
+    );
+}
+
+#[test]
+fn target_recovery_ladder_and_notification_wakes_keep_original_due_time() {
+    let mut limits = test_limits(8, 16, 32);
+    limits.residence_timeout = Duration::from_secs(600);
+    let budget = V3AttemptBudget::new_isolated(limits, Arc::new(AtomicUsize::new(0)));
+    let mut now = Instant::now();
+    let sibling = V3AttemptBudget::new_isolated(limits, Arc::new(AtomicUsize::new(0)));
+    let sibling_started = now;
+    let sibling_due = sibling.current_target_recovery_deadline(sibling_started);
+    for seconds in [1, 3, 15, 35, 90, 1, 1] {
+        let due_at = now + Duration::from_secs(seconds);
+        assert_eq!(budget.current_target_recovery_deadline(now), Some(due_at));
+        let notified_at = now + Duration::from_millis(200);
+        let reselected = budget.clone();
+        reselected.advance_target_recovery_step_if_due(notified_at);
+        assert_eq!(
+            reselected.current_target_recovery_deadline(notified_at),
+            Some(due_at)
+        );
+        budget.advance_target_recovery_step_if_due(due_at);
+        budget.advance_target_recovery_step_if_due(due_at);
+        assert_eq!(
+            sibling.current_target_recovery_deadline(sibling_started),
+            sibling_due,
+            "advancing one request must not advance another request's recovery cursor"
+        );
+        now = due_at;
+    }
+    let fresh = V3AttemptBudget::new_isolated(limits, Arc::new(AtomicUsize::new(0)));
+    let fresh_now = Instant::now();
+    assert_eq!(
+        fresh.current_target_recovery_deadline(fresh_now),
+        Some(fresh_now + Duration::from_secs(1))
+    );
+    assert_eq!(
+        budget.current_target_recovery_deadline(budget.residence_deadline()),
+        None
+    );
+}
+
 fn test_limits(
     attempt_max_bytes: usize,
     request_max_bytes: usize,
@@ -49,6 +100,24 @@ fn direct_dsml_complete_rewrite_keeps_budget_and_terminal_reservation() {
 }
 
 #[test]
+fn unsent_capacity_rejection_releases_only_pending_attempt() {
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), Arc::new(AtomicUsize::new(0)));
+    // One actual HTTP429 keeps its wire sequence, but not a failure allowance.
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 1);
+    budget.record_rate_limited_attempt();
+    for _ in 0..10 {
+        assert_eq!(budget.admit_transport_attempt().unwrap(), 2);
+        budget.release_unsent_transport_attempt();
+        assert_eq!(budget.transport_attempts(), 1);
+    }
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 2);
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 3);
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 4);
+    assert!(budget.admit_transport_attempt().is_err());
+    assert_eq!(budget.transport_attempts(), 4);
+}
+
+#[test]
 fn attempt_budget_counts_all_transport_attempts_without_reset() {
     let process_bytes = Arc::new(AtomicUsize::new(0));
     let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), Arc::clone(&process_bytes));
@@ -58,57 +127,42 @@ fn attempt_budget_counts_all_transport_attempts_without_reset() {
     assert_eq!(budget.admit_transport_attempt().unwrap(), 3);
     assert!(matches!(
         budget.admit_transport_attempt(),
-        Err(V3AttemptStoreError::LocalResourceExhausted(_))
+        Err(V3AttemptStoreError::TransportAttemptsExhausted(_))
     ));
     assert_eq!(budget.transport_attempts(), 3);
     assert_eq!(process_bytes.load(Ordering::Acquire), 0);
 }
 
 #[test]
-fn attempt_budget_limit_follows_candidate_plan() {
-    let process_bytes = Arc::new(AtomicUsize::new(0));
-    let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), process_bytes);
-    budget.set_transport_attempt_limit(14);
-    for expected in 1..=3 {
-        assert_eq!(budget.admit_transport_attempt().unwrap(), expected);
-    }
-    assert!(matches!(
-        budget.admit_transport_attempt(),
-        Err(V3AttemptStoreError::LocalResourceExhausted(message))
-            if message.contains("limit 3")
-    ));
+fn issue44cc3af_429_wait_does_not_consume_failure_slots_or_reset_attempt_sequence() {
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), Arc::new(AtomicUsize::new(0)));
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 1);
+    budget.record_rate_limited_attempt();
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 2);
+    budget.record_rate_limited_attempt();
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 3);
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 4);
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 5);
+    assert!(
+        budget.admit_transport_attempt().is_err(),
+        "non-429 failures remain bounded"
+    );
+    assert_eq!(budget.transport_attempts(), 5);
 }
 
 #[test]
-fn attempt_budget_limit_does_not_shrink_after_reselection() {
+fn attempt_budget_preserves_configured_hard_limit() {
     let process_bytes = Arc::new(AtomicUsize::new(0));
     let mut limits = test_limits(8, 8, 8);
     limits.request_max_attempts = 5;
     let budget = V3AttemptBudget::new_isolated(limits, process_bytes);
-    budget.set_transport_attempt_limit(4);
-    budget.set_transport_attempt_limit(1);
-    for expected in 1..=4 {
+    for expected in 1..=5 {
         assert_eq!(budget.admit_transport_attempt().unwrap(), expected);
     }
     assert!(matches!(
         budget.admit_transport_attempt(),
-        Err(V3AttemptStoreError::LocalResourceExhausted(message))
-            if message.contains("limit 4")
-    ));
-}
-
-#[test]
-fn attempt_budget_limit_follows_one_candidate_plan_below_configured_ceiling() {
-    let process_bytes = Arc::new(AtomicUsize::new(0));
-    let mut limits = test_limits(8, 8, 8);
-    limits.request_max_attempts = 10;
-    let budget = V3AttemptBudget::new_isolated(limits, process_bytes);
-    budget.set_transport_attempt_limit(1);
-    assert_eq!(budget.admit_transport_attempt().unwrap(), 1);
-    assert!(matches!(
-        budget.admit_transport_attempt(),
-        Err(V3AttemptStoreError::LocalResourceExhausted(message))
-            if message.contains("limit 1")
+        Err(V3AttemptStoreError::TransportAttemptsExhausted(message))
+            if message.contains("limit 5")
     ));
 }
 

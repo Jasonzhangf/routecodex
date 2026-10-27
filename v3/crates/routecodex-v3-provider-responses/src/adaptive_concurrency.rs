@@ -15,6 +15,30 @@ pub const V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS: u64 = 60 * 60_000;
 /// `provider.concurrency.maxInFlight`.
 pub const V3_DEFAULT_PROVIDER_MAX_IN_FLIGHT: u32 = 40;
 
+/// Dynamic capacity belongs to a declared interface/model, never a wire body.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct V3ConcurrencyIdentityScope {
+    pub interface_id: String,
+    pub model_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct V3ConcurrencyBucketKey {
+    provider_key: String,
+    scope: Option<V3ConcurrencyIdentityScope>,
+}
+
+impl V3ConcurrencyBucketKey {
+    fn new(provider_key: &str, scope: Option<&V3ConcurrencyIdentityScope>) -> Self {
+        Self {
+            provider_key: provider_key.to_owned(),
+            scope: scope.cloned(),
+        }
+    }
+}
+
+type V3ConcurrencyStates = BTreeMap<V3ConcurrencyBucketKey, V3AdaptiveConcurrencyState>;
+
 fn current_epoch_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -25,6 +49,8 @@ fn current_epoch_ms() -> u64 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3AdaptiveConcurrencySnapshot {
     pub provider_key: String,
+    pub identity_scope: Option<V3ConcurrencyIdentityScope>,
+    pub total_provider_in_flight: u32,
     pub budget: u32,
     pub in_flight: u32,
     pub saturated: bool,
@@ -60,6 +86,10 @@ impl V3AdaptiveConcurrencyLease {
         self.permit.provider_key()
     }
 
+    pub fn identity_scope(&self) -> Option<&V3ConcurrencyIdentityScope> {
+        self.permit.identity_scope.as_ref()
+    }
+
     pub(crate) fn belongs_to(&self, controller: &V3AdaptiveConcurrencyController) -> bool {
         Arc::ptr_eq(&self.controller.inner, &controller.inner)
     }
@@ -82,6 +112,7 @@ pub enum V3AdaptiveConcurrencyProbeResult {
 #[derive(Debug, PartialEq, Eq)]
 pub struct V3AdaptiveConcurrencyPermit {
     provider_key: String,
+    identity_scope: Option<V3ConcurrencyIdentityScope>,
     probe: bool,
 }
 
@@ -106,6 +137,15 @@ impl V3AdaptiveConcurrencyPermitGuard {
     pub(crate) fn with_probe_result(mut self, result: V3AdaptiveConcurrencyProbeResult) -> Self {
         self.probe_result = Some(result);
         self
+    }
+
+    pub(crate) fn observe_rate_limit(&self, now_ms: u64) -> Result<(), String> {
+        let permit = self.permit.as_ref().expect("live guard owns its permit");
+        self.controller.observe_rate_limit_scoped(
+            &permit.provider_key,
+            permit.identity_scope.as_ref(),
+            now_ms,
+        )
     }
 }
 
@@ -173,7 +213,7 @@ impl Default for V3AdaptiveConcurrencyState {
 
 #[derive(Debug, Default)]
 struct V3AdaptiveConcurrencyInner {
-    states: Mutex<BTreeMap<String, V3AdaptiveConcurrencyState>>,
+    states: Mutex<V3ConcurrencyStates>,
     initial_budget: u32,
     hard_max_in_flight: u32,
 }
@@ -192,6 +232,40 @@ impl PartialEq for V3AdaptiveConcurrencyController {
 impl Eq for V3AdaptiveConcurrencyController {}
 
 impl V3AdaptiveConcurrencyController {
+    fn total_in_flight(states: &V3ConcurrencyStates, provider_key: &str) -> u32 {
+        states
+            .iter()
+            .filter(|(key, _)| key.provider_key == provider_key)
+            .fold(0u32, |total, (_, state)| {
+                total.saturating_add(state.in_flight)
+            })
+    }
+
+    fn state_mut<'a>(
+        &self,
+        states: &'a mut V3ConcurrencyStates,
+        provider_key: &str,
+        scope: Option<&V3ConcurrencyIdentityScope>,
+    ) -> &'a mut V3AdaptiveConcurrencyState {
+        let shared = states
+            .entry(V3ConcurrencyBucketKey::new(provider_key, None))
+            .or_insert_with(|| V3AdaptiveConcurrencyState {
+                budget: self.inner.initial_budget,
+                hard_max_in_flight: self.inner.hard_max_in_flight,
+                ..V3AdaptiveConcurrencyState::default()
+            });
+        let hard_max = shared.hard_max_in_flight;
+        let notify = shared.notify.clone();
+        states
+            .entry(V3ConcurrencyBucketKey::new(provider_key, scope))
+            .or_insert_with(|| V3AdaptiveConcurrencyState {
+                budget: hard_max,
+                hard_max_in_flight: hard_max,
+                notify,
+                ..V3AdaptiveConcurrencyState::default()
+            })
+    }
+
     pub fn process_shared() -> Self {
         static SHARED: OnceLock<V3AdaptiveConcurrencyController> = OnceLock::new();
         SHARED
@@ -235,16 +309,21 @@ impl V3AdaptiveConcurrencyController {
             .states
             .lock()
             .expect("adaptive concurrency state lock should not be poisoned");
-        let state =
-            states
-                .entry(provider_key.to_string())
-                .or_insert_with(|| V3AdaptiveConcurrencyState {
-                    budget: initial_budget,
-                    hard_max_in_flight: initial_budget,
-                    ..V3AdaptiveConcurrencyState::default()
-                });
-        state.hard_max_in_flight = initial_budget;
-        state.budget = state.budget.min(initial_budget);
+        let shared_key = V3ConcurrencyBucketKey::new(provider_key, None);
+        states
+            .entry(shared_key)
+            .or_insert_with(|| V3AdaptiveConcurrencyState {
+                budget: initial_budget,
+                hard_max_in_flight: initial_budget,
+                ..V3AdaptiveConcurrencyState::default()
+            });
+        for (_, state) in states
+            .iter_mut()
+            .filter(|(key, _)| key.provider_key == provider_key)
+        {
+            state.hard_max_in_flight = initial_budget;
+            state.budget = state.budget.min(initial_budget);
+        }
         Ok(())
     }
 
@@ -283,13 +362,7 @@ impl V3AdaptiveConcurrencyController {
                     .states
                     .lock()
                     .expect("adaptive concurrency state lock should not be poisoned");
-                let state = states.entry(provider_key.clone()).or_insert_with(|| {
-                    V3AdaptiveConcurrencyState {
-                        budget: self.inner.initial_budget,
-                        hard_max_in_flight: self.inner.hard_max_in_flight,
-                        ..V3AdaptiveConcurrencyState::default()
-                    }
-                });
+                let state = self.state_mut(&mut states, &provider_key, None);
                 state.notify.clone()
             };
             let notified = notify.notified();
@@ -300,13 +373,82 @@ impl V3AdaptiveConcurrencyController {
         }
     }
 
+    /// Observe only the named capacity owners; never acquire a business lease.
+    pub async fn wait_for_capacity_change(&self, provider_keys: &[String]) {
+        let keys: Vec<_> = provider_keys
+            .iter()
+            .map(|key| (key.clone(), None))
+            .collect();
+        self.wait_for_scoped_capacity_change(&keys).await;
+    }
+
+    pub async fn wait_for_scoped_capacity_change(
+        &self,
+        keys: &[(String, Option<V3ConcurrencyIdentityScope>)],
+    ) {
+        let notifications = {
+            let states = self
+                .inner
+                .states
+                .lock()
+                .expect("adaptive concurrency state lock should not be poisoned");
+            let mut notifications = Vec::new();
+            for (provider_key, scope) in keys {
+                let Some(state) =
+                    states.get(&V3ConcurrencyBucketKey::new(provider_key, scope.as_ref()))
+                else {
+                    return;
+                };
+                notifications.push(Box::pin(state.notify.clone().notified_owned()));
+            }
+            notifications
+        };
+        if notifications.is_empty() {
+            return futures_util::future::pending().await;
+        }
+        let mut notifications = notifications;
+        for notification in &mut notifications {
+            notification.as_mut().enable();
+        }
+        // Registration precedes this check so a release between either step
+        // cannot be lost. The following selection still owns actual admission.
+        let available = {
+            let states = self
+                .inner
+                .states
+                .lock()
+                .expect("adaptive concurrency state lock should not be poisoned");
+            keys.iter().any(|(provider_key, scope)| {
+                states
+                    .get(&V3ConcurrencyBucketKey::new(provider_key, scope.as_ref()))
+                    .is_none_or(|state| {
+                        Self::total_in_flight(&states, provider_key) < state.hard_max_in_flight
+                            && state.in_flight < state.budget
+                    })
+            })
+        };
+        if available {
+            return;
+        }
+        futures_util::future::select_all(notifications).await;
+    }
+
     pub fn try_acquire(
         &self,
         provider_key: &str,
         now_ms: u64,
     ) -> Option<V3AdaptiveConcurrencyLease> {
-        self.try_acquire_business(provider_key)
-            .or_else(|| self.try_acquire_probe(provider_key, now_ms))
+        self.try_acquire_scoped(provider_key, None, now_ms)
+    }
+
+    pub fn try_acquire_scoped(
+        &self,
+        provider_key: &str,
+        scope: Option<&V3ConcurrencyIdentityScope>,
+        now_ms: u64,
+    ) -> Option<V3AdaptiveConcurrencyLease> {
+        self.try_acquire_business_scoped(provider_key, scope)
+            .or_else(|| self.try_acquire_probe_for_scope(provider_key, scope, now_ms, false))
     }
 
     pub fn try_acquire_scheduled_probe(
@@ -314,59 +456,32 @@ impl V3AdaptiveConcurrencyController {
         provider_key: &str,
         now_ms: u64,
     ) -> Option<V3AdaptiveConcurrencyLease> {
-        let mut states = self
-            .inner
-            .states
-            .lock()
-            .expect("adaptive concurrency state lock should not be poisoned");
-        let state =
-            states
-                .entry(provider_key.to_string())
-                .or_insert_with(|| V3AdaptiveConcurrencyState {
-                    budget: self.inner.initial_budget,
-                    hard_max_in_flight: self.inner.hard_max_in_flight,
-                    ..V3AdaptiveConcurrencyState::default()
-                });
-        if state.saturated
-            && !state.probe_in_flight
-            && state.in_flight >= state.budget
-            && state.in_flight < state.hard_max_in_flight
-            && state.next_probe_at_ms.is_some_and(|next| now_ms >= next)
-        {
-            state.probe_in_flight = true;
-            state.in_flight = state.in_flight.saturating_add(1);
-            return Some(V3AdaptiveConcurrencyLease {
-                admission: V3AdaptiveConcurrencyAdmission::Probe,
-                permit: V3AdaptiveConcurrencyPermit {
-                    provider_key: provider_key.to_string(),
-                    probe: true,
-                },
-                controller: self.clone(),
-            });
-        }
-        None
+        self.try_acquire_probe_for_scope(provider_key, None, now_ms, true)
     }
 
     pub fn try_acquire_business(&self, provider_key: &str) -> Option<V3AdaptiveConcurrencyLease> {
+        self.try_acquire_business_scoped(provider_key, None)
+    }
+
+    pub fn try_acquire_business_scoped(
+        &self,
+        provider_key: &str,
+        scope: Option<&V3ConcurrencyIdentityScope>,
+    ) -> Option<V3AdaptiveConcurrencyLease> {
         let mut states = self
             .inner
             .states
             .lock()
             .expect("adaptive concurrency state lock should not be poisoned");
-        let state =
-            states
-                .entry(provider_key.to_string())
-                .or_insert_with(|| V3AdaptiveConcurrencyState {
-                    budget: self.inner.initial_budget,
-                    hard_max_in_flight: self.inner.hard_max_in_flight,
-                    ..V3AdaptiveConcurrencyState::default()
-                });
-        if state.in_flight < state.budget && state.in_flight < state.hard_max_in_flight {
+        let total_in_flight = Self::total_in_flight(&states, provider_key);
+        let state = self.state_mut(&mut states, provider_key, scope);
+        if state.in_flight < state.budget && total_in_flight < state.hard_max_in_flight {
             state.in_flight = state.in_flight.saturating_add(1);
             return Some(V3AdaptiveConcurrencyLease {
                 admission: V3AdaptiveConcurrencyAdmission::Lease,
                 permit: V3AdaptiveConcurrencyPermit {
                     provider_key: provider_key.to_string(),
+                    identity_scope: scope.cloned(),
                     probe: false,
                 },
                 controller: self.clone(),
@@ -380,23 +495,28 @@ impl V3AdaptiveConcurrencyController {
         provider_key: &str,
         now_ms: u64,
     ) -> Option<V3AdaptiveConcurrencyLease> {
+        self.try_acquire_probe_for_scope(provider_key, None, now_ms, false)
+    }
+
+    fn try_acquire_probe_for_scope(
+        &self,
+        provider_key: &str,
+        scope: Option<&V3ConcurrencyIdentityScope>,
+        now_ms: u64,
+        scheduled_only: bool,
+    ) -> Option<V3AdaptiveConcurrencyLease> {
         let mut states = self
             .inner
             .states
             .lock()
             .expect("adaptive concurrency state lock should not be poisoned");
-        let state =
-            states
-                .entry(provider_key.to_string())
-                .or_insert_with(|| V3AdaptiveConcurrencyState {
-                    budget: self.inner.initial_budget,
-                    hard_max_in_flight: self.inner.hard_max_in_flight,
-                    ..V3AdaptiveConcurrencyState::default()
-                });
-        if !state.saturated
+        let total_in_flight = Self::total_in_flight(&states, provider_key);
+        let state = self.state_mut(&mut states, provider_key, scope);
+        if !scheduled_only
+            && !state.saturated
             && !state.probe_in_flight
             && state.in_flight >= state.budget
-            && state.in_flight < state.hard_max_in_flight
+            && total_in_flight < state.hard_max_in_flight
         {
             state.probe_in_flight = true;
             state.in_flight = state.in_flight.saturating_add(1);
@@ -404,6 +524,7 @@ impl V3AdaptiveConcurrencyController {
                 admission: V3AdaptiveConcurrencyAdmission::Probe,
                 permit: V3AdaptiveConcurrencyPermit {
                     provider_key: provider_key.to_string(),
+                    identity_scope: scope.cloned(),
                     probe: true,
                 },
                 controller: self.clone(),
@@ -412,7 +533,7 @@ impl V3AdaptiveConcurrencyController {
         if state.saturated
             && !state.probe_in_flight
             && state.in_flight >= state.budget
-            && state.in_flight < state.hard_max_in_flight
+            && total_in_flight < state.hard_max_in_flight
             && state.next_probe_at_ms.is_some_and(|next| now_ms >= next)
         {
             state.probe_in_flight = true;
@@ -421,6 +542,7 @@ impl V3AdaptiveConcurrencyController {
                 admission: V3AdaptiveConcurrencyAdmission::Probe,
                 permit: V3AdaptiveConcurrencyPermit {
                     provider_key: provider_key.to_string(),
+                    identity_scope: scope.cloned(),
                     probe: true,
                 },
                 controller: self.clone(),
@@ -444,7 +566,10 @@ impl V3AdaptiveConcurrencyController {
             .lock()
             .expect("adaptive concurrency state lock should not be poisoned");
         let state = states
-            .get_mut(&permit.provider_key)
+            .get_mut(&V3ConcurrencyBucketKey::new(
+                &permit.provider_key,
+                permit.identity_scope.as_ref(),
+            ))
             .ok_or_else(|| "adaptive concurrency provider key is missing".to_string())?;
         if !state.probe_in_flight || state.in_flight == 0 {
             return Err("adaptive concurrency probe is not in flight".to_string());
@@ -481,13 +606,22 @@ impl V3AdaptiveConcurrencyController {
     }
 
     pub fn observe_rate_limit(&self, provider_key: &str, now_ms: u64) -> Result<(), String> {
+        self.observe_rate_limit_scoped(provider_key, None, now_ms)
+    }
+
+    pub fn observe_rate_limit_scoped(
+        &self,
+        provider_key: &str,
+        scope: Option<&V3ConcurrencyIdentityScope>,
+        now_ms: u64,
+    ) -> Result<(), String> {
         let mut states = self
             .inner
             .states
             .lock()
             .expect("adaptive concurrency state lock should not be poisoned");
         let state = states
-            .get_mut(provider_key)
+            .get_mut(&V3ConcurrencyBucketKey::new(provider_key, scope))
             .ok_or_else(|| "adaptive concurrency provider key is missing".to_string())?;
         Self::record_rate_limit_sample(state, now_ms, state.in_flight);
         let smoothed = Self::smoothed_budget(state);
@@ -562,12 +696,21 @@ impl V3AdaptiveConcurrencyController {
     /// It restores one unit of adaptive budget and clears the saturation window.
     /// Keys without tracked state have nothing to restore.
     pub fn observe_business_success(&self, provider_key: &str, now_ms: u64) -> Result<(), String> {
+        self.observe_business_success_scoped(provider_key, None, now_ms)
+    }
+
+    pub fn observe_business_success_scoped(
+        &self,
+        provider_key: &str,
+        scope: Option<&V3ConcurrencyIdentityScope>,
+        now_ms: u64,
+    ) -> Result<(), String> {
         let mut states = self
             .inner
             .states
             .lock()
             .expect("adaptive concurrency state lock should not be poisoned");
-        let Some(state) = states.get_mut(provider_key) else {
+        let Some(state) = states.get_mut(&V3ConcurrencyBucketKey::new(provider_key, scope)) else {
             return Ok(());
         };
         Self::prune_rate_limit_samples(state, now_ms);
@@ -591,7 +734,10 @@ impl V3AdaptiveConcurrencyController {
             .lock()
             .expect("adaptive concurrency state lock should not be poisoned");
         let state = states
-            .get_mut(&permit.provider_key)
+            .get_mut(&V3ConcurrencyBucketKey::new(
+                &permit.provider_key,
+                permit.identity_scope.as_ref(),
+            ))
             .ok_or_else(|| "adaptive concurrency provider key is missing".to_string())?;
         if state.in_flight == 0 {
             return Err("adaptive concurrency lease underflow".to_string());
@@ -607,17 +753,31 @@ impl V3AdaptiveConcurrencyController {
     }
 
     pub fn snapshot(&self, provider_key: &str) -> Option<V3AdaptiveConcurrencySnapshot> {
+        self.snapshot_for_scope(provider_key, None)
+    }
+
+    pub fn snapshot_for_scope(
+        &self,
+        provider_key: &str,
+        scope: Option<&V3ConcurrencyIdentityScope>,
+    ) -> Option<V3AdaptiveConcurrencySnapshot> {
         let states = self
             .inner
             .states
             .lock()
             .expect("adaptive concurrency state lock should not be poisoned");
         states
-            .get(provider_key)
+            .get(&V3ConcurrencyBucketKey::new(provider_key, scope))
             .map(|state| V3AdaptiveConcurrencySnapshot {
                 provider_key: provider_key.to_string(),
+                identity_scope: scope.cloned(),
+                total_provider_in_flight: Self::total_in_flight(&states, provider_key),
                 budget: state.budget,
-                in_flight: state.in_flight,
+                in_flight: if scope.is_some() {
+                    state.in_flight
+                } else {
+                    Self::total_in_flight(&states, provider_key)
+                },
                 saturated: state.saturated,
                 probe_in_flight: state.probe_in_flight,
                 next_probe_at_ms: state.next_probe_at_ms,
@@ -632,6 +792,245 @@ impl V3AdaptiveConcurrencyController {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    fn identity(interface_id: &str, model_id: &str) -> V3ConcurrencyIdentityScope {
+        V3ConcurrencyIdentityScope {
+            interface_id: interface_id.into(),
+            model_id: model_id.into(),
+        }
+    }
+
+    #[test]
+    fn identity_watermarks_preserve_siblings_and_one_shared_hard_ceiling() {
+        let controller = V3AdaptiveConcurrencyController::new(8).unwrap();
+        let key = "provider:key";
+        let a = identity("responses", "a");
+        let b = identity("responses", "b");
+        let other_interface = identity("chat", "a");
+        let a_leases: Vec<_> = (0..2)
+            .map(|_| {
+                controller
+                    .try_acquire_business_scoped(key, Some(&a))
+                    .unwrap()
+            })
+            .collect();
+        let mut b_leases: Vec<_> = (0..4)
+            .map(|_| {
+                controller
+                    .try_acquire_business_scoped(key, Some(&b))
+                    .unwrap()
+            })
+            .collect();
+        controller
+            .observe_rate_limit_scoped(key, Some(&a), 1000)
+            .unwrap();
+        let refused = controller.snapshot_for_scope(key, Some(&a)).unwrap();
+        assert_eq!(refused.rate_limit_samples, 1);
+        assert_eq!(
+            refused.smoothed_budget, 1,
+            "sample is A's two leases, not all six provider leases"
+        );
+        assert_eq!(refused.budget, 1);
+        for lease in a_leases {
+            controller.release(lease.into_permit()).unwrap();
+        }
+        for _ in 0..4 {
+            b_leases.push(
+                controller
+                    .try_acquire_business_scoped(key, Some(&b))
+                    .unwrap(),
+            );
+        }
+        assert_eq!(
+            controller
+                .snapshot_for_scope(key, Some(&b))
+                .unwrap()
+                .in_flight,
+            8
+        );
+        assert!(
+            controller
+                .try_acquire_business_scoped(key, Some(&a))
+                .is_none(),
+            "models cannot multiply the shared ceiling"
+        );
+        assert!(controller
+            .try_acquire_business_scoped(key, Some(&other_interface))
+            .is_none());
+        for lease in b_leases {
+            controller.release(lease.into_permit()).unwrap();
+        }
+        let leases: Vec<_> = (0..8)
+            .map(|_| {
+                controller
+                    .try_acquire_business_scoped(key, Some(&other_interface))
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(
+            controller
+                .snapshot_for_scope(key, Some(&other_interface))
+                .unwrap()
+                .budget,
+            8
+        );
+        assert_eq!(
+            controller.snapshot(key).unwrap().total_provider_in_flight,
+            8
+        );
+        for lease in leases {
+            controller.release(lease.into_permit()).unwrap();
+        }
+        controller
+            .observe_business_success_scoped(key, Some(&b), 1001)
+            .unwrap();
+        assert_eq!(
+            controller.snapshot_for_scope(key, Some(&a)).unwrap().budget,
+            1
+        );
+        controller
+            .observe_business_success_scoped(key, Some(&a), 1002)
+            .unwrap();
+        assert_eq!(
+            controller.snapshot_for_scope(key, Some(&a)).unwrap().budget,
+            2
+        );
+        assert!(
+            !controller
+                .snapshot_for_scope(key, Some(&a))
+                .unwrap()
+                .saturated
+        );
+    }
+
+    #[test]
+    fn unscoped_legacy_429_cannot_contract_declared_identity_capacity() {
+        let controller = V3AdaptiveConcurrencyController::new(4).unwrap();
+        let key = "provider:key";
+        let legacy = controller.try_acquire_business(key).unwrap();
+        controller.observe_rate_limit(key, 1000).unwrap();
+        controller.release(legacy.into_permit()).unwrap();
+        assert_eq!(controller.snapshot(key).unwrap().budget, 1);
+        let scope = identity("responses", "a");
+        let leases: Vec<_> = (0..4)
+            .map(|_| {
+                controller
+                    .try_acquire_business_scoped(key, Some(&scope))
+                    .unwrap()
+            })
+            .collect();
+        assert!(
+            controller.try_acquire_business(key).is_none(),
+            "legacy calls also obey the shared hard ceiling"
+        );
+        for lease in leases {
+            controller.release(lease.into_permit()).unwrap();
+        }
+        assert_eq!(
+            controller.snapshot(key).unwrap().total_provider_in_flight,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_scoped_guard_releases_once_and_wakes_another_identity() {
+        let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+        let key = "provider:key";
+        let a = identity("responses", "a");
+        let b = identity("responses", "b");
+        let lease = controller
+            .try_acquire_business_scoped(key, Some(&a))
+            .unwrap();
+        assert!(controller
+            .try_acquire_business_scoped(key, Some(&b))
+            .is_none());
+        let owner = controller.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _guard = V3AdaptiveConcurrencyPermitGuard::new(owner, lease.into_permit());
+            started_tx.send(()).unwrap();
+            futures_util::future::pending::<()>().await;
+        });
+        started_rx.await.unwrap();
+        let observer = controller.clone();
+        let watched_b = b.clone();
+        let waiter = tokio::spawn(async move {
+            observer
+                .wait_for_scoped_capacity_change(&[(key.into(), Some(watched_b))])
+                .await;
+        });
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished());
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            controller
+                .snapshot_for_scope(key, Some(&a))
+                .unwrap()
+                .in_flight,
+            0
+        );
+        let next = controller
+            .try_acquire_business_scoped(key, Some(&b))
+            .unwrap();
+        drop(V3AdaptiveConcurrencyPermitGuard::new(
+            controller.clone(),
+            next.into_permit(),
+        ));
+        assert_eq!(
+            controller.snapshot(key).unwrap().total_provider_in_flight,
+            0
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn capacity_change_wait_is_scoped_and_never_acquires_a_lease() {
+        let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+        let held_a = controller.try_acquire_business("pool-a:key1").unwrap();
+        let held_b = controller.try_acquire_business("pool-b:key1").unwrap();
+        let watcher = controller.clone();
+        let waiter = tokio::spawn(async move {
+            watcher
+                .wait_for_capacity_change(&["pool-a:key1".to_owned()])
+                .await;
+        });
+        tokio::task::yield_now().await;
+        controller.release(held_b.into_permit()).unwrap();
+        tokio::task::yield_now().await;
+        assert!(
+            !waiter.is_finished(),
+            "an unrelated key release must not wake this waiter"
+        );
+        assert_eq!(controller.snapshot("pool-a:key1").unwrap().in_flight, 1);
+        controller.release(held_a.into_permit()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            controller.snapshot("pool-a:key1").unwrap().in_flight,
+            0,
+            "waking for reselection must not reserve business capacity"
+        );
+    }
+
+    #[tokio::test]
+    async fn capacity_change_wait_observes_release_before_registration() {
+        let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+        let held = controller.try_acquire_business("released:key1").unwrap();
+        controller.release(held.into_permit()).unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            controller.wait_for_capacity_change(&["released:key1".to_owned()]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(controller.snapshot("released:key1").unwrap().in_flight, 0);
+    }
 
     #[test]
     fn rejects_zero_initial_budget() {
@@ -1101,6 +1500,7 @@ mod tests {
             .complete_probe(
                 V3AdaptiveConcurrencyPermit {
                     provider_key: "opencode-go:key1".to_string(),
+                    identity_scope: None,
                     probe: false,
                 },
                 V3AdaptiveConcurrencyProbeResult::Accepted,
@@ -1111,6 +1511,7 @@ mod tests {
         assert!(controller
             .release(V3AdaptiveConcurrencyPermit {
                 provider_key: "opencode-go:key1".to_string(),
+                identity_scope: None,
                 probe: false,
             })
             .is_err());

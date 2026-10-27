@@ -712,7 +712,14 @@ async fn upstream_429_collapses_adaptive_budget_below_the_refused_watermark() {
         );
     }
 
-    let snapshot = controller.snapshot(&provider_key).unwrap();
+    let scope =
+        routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+            interface_id: provider_target.interface_id.clone(),
+            model_id: provider_target.canonical_model_id.clone(),
+        };
+    let snapshot = controller
+        .snapshot_for_scope(&provider_key, Some(&scope))
+        .unwrap();
     assert_eq!(
         snapshot.rate_limit_samples, 2,
         "each refused attempt must contribute one 429 watermark sample"

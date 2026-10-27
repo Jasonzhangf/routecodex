@@ -1493,8 +1493,20 @@ data: {"type":"message_stop"}
 
 #[tokio::test]
 async fn responses_relay_anthropic_provider_sse_malformed_reasoning_is_internal_typed_error() {
+    let mut manifest = manifest();
+    // The single failed identity cannot be retried and cannot close the
+    // request before its original declared recovery budget.
+    manifest
+        .servers
+        .get_mut("gateway_priority_5555")
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .residence_timeout_ms = 1000;
     let output = execute_v3_responses_relay_runtime(
-        &manifest(),
+        &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -1527,7 +1539,7 @@ async fn responses_relay_anthropic_provider_sse_malformed_reasoning_is_internal_
     let failure = observability
         .provider_failure_events
         .first()
-        .expect("provider failure event");
+        .unwrap_or_else(|| panic!("provider failure event missing: {output:?}"));
     assert!(
         failure
             .message

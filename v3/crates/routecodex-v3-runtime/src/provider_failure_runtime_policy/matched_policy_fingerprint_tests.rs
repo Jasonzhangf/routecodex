@@ -3,8 +3,8 @@ use super::*;
 // 匹配到的 policy 分支会把失败写入 session 策略账本。它必须沿用 failure_action
 // 的完整身份指纹（带 source.code 兜底），而不是只认 HTTP 状态码的全局指纹：
 // 缺状态码时两类不同的 provider 本地错误会塌进同一个 None 桶，累加到三次冷却。
-#[test]
-fn matched_policy_bridge_does_not_merge_distinct_no_status_classes() {
+#[tokio::test]
+async fn matched_policy_bridge_does_not_merge_distinct_no_status_classes() {
     let scope = "matched_policy_fingerprint";
     let source = r#"
 version = 3
@@ -74,23 +74,46 @@ public_code = "E_MATCHED_CLASS"
                 100 + index as u64,
             )
             .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
+        assert_eq!(record.state, "pre_cool_observation");
         assert_eq!(
-            record.failure_count, 1,
-            "class {class} must start its own streak instead of inheriting the other class' count"
+            record.failure_count, 0,
+            "class {class} health counters wait for the qualified observation"
         );
+        assert_eq!(record.cooldown_until_ms, None);
+    }
+    complete_due_precool_failures(&health, 101).await;
+    let cooldown_until_ms = health
+        .store()
+        .cooldown_entries(5_100)
+        .into_iter()
+        .find(|entry| {
+            entry.provider_id == "first"
+                && entry.interface_id == "default"
+                && entry.auth_alias.as_deref() == Some("key1")
+                && entry.model_id.as_deref() == Some("gpt-test")
+        })
+        .and_then(|entry| entry.until_ms);
+    assert_eq!(
+        cooldown_until_ms,
+        Some(5_101),
+        "both no-status classes must keep the threshold-one cooldown step"
+    );
+    for class in classes {
         let available = health
             .store()
-            .availability_for_session(
-                &scope_handle,
-                "first",
-                Some("key1"),
-                Some("gpt-test"),
-                100 + index as u64,
-            )
+            .availability_for_session(&scope_handle, "first", Some("key1"), Some("gpt-test"), 101)
             .available;
         assert!(
             !available,
             "threshold one blocks only this complete identity"
+        );
+        assert_eq!(
+            health
+                .store()
+                .provider_cooldown_probe_next_deadline_ms("first", Some("key1"), Some("gpt-test"),)
+                .expect("matched-policy probe deadline"),
+            Some(5_101),
+            "class {class} must start its own threshold-one streak"
         );
         assert!(
             health

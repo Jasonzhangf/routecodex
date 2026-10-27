@@ -57,7 +57,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.error.chain", "v3.error.action_plan"],
+        "reads": ["v3.error.chain", "v3.error.action_plan", "v3.error.provider_action_gate"],
         "writes": ["v3.error.chain", "v3.error.exhaustion_decision"]
       }
     },
