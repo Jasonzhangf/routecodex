@@ -525,6 +525,7 @@ function anthropicLaneEvidenceAt(masked, source, codeText, emitIndex, blocks, fu
   // protocol. A shared multi-protocol dispatcher is excluded per emit, so a decoy
   // guard placed elsewhere in the body cannot silence this evidence.
   const body = codeText.slice(fn.open, fn.close + 1);
+  const maskedBody = masked.slice(fn.open, fn.close + 1);
   const enclosingGuards = blocks
     .filter((block) => emitIndex > block.open && emitIndex < block.close)
     .map((block) => blockGuardText(masked, codeText, block.open));
@@ -532,6 +533,9 @@ function anthropicLaneEvidenceAt(masked, source, codeText, emitIndex, blocks, fu
     /entry_protocol\s*==\s*"(gemini|openai_chat|openai|responses)"/u.test(guard),
   );
   if (otherProtocolGuard) return null;
+  // Identifiers live in the fully masked view, so a diagnostic string that merely
+  // mentions anthropic cannot brand another lane; the exact protocol literal is
+  // still read from the comment-stripped view.
   const hoistedNames = [];
   for (const match of codeText.matchAll(
     /\b(?:const|static)\s+([A-Za-z_]\w*)\s*:[^=;]*=\s*"anthropic"\s*;/gu,
@@ -541,7 +545,11 @@ function anthropicLaneEvidenceAt(masked, source, codeText, emitIndex, blocks, fu
   const referencesHoistedLiteral = hoistedNames.some((name) =>
     new RegExp(`\\b${name}\\b`, "u").test(body),
   );
-  if (/anthropic/iu.test(body) || referencesHoistedLiteral) {
+  if (
+    /anthropic/iu.test(maskedBody) ||
+    /"anthropic"/u.test(body) ||
+    referencesHoistedLiteral
+  ) {
     return 'enclosing function body references the "anthropic" entry protocol';
   }
   return null;

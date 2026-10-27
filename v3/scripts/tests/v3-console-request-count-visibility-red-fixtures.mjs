@@ -509,7 +509,7 @@ pub(crate) fn probe_new_lane(
         .slice(0, start)
         .replace(
           /^use crate::\*;/u,
-          'pub(crate) const ANTHROPIC_LANE_PROTOCOL: &str = "anthropic";\nuse crate::*;',
+          'pub(crate) const LANE_PROTOCOL: &str = "anthropic";\nuse crate::*;',
         );
       const newFn = fnBody
         .replace(
@@ -525,11 +525,63 @@ pub(crate) fn probe_new_lane(
           "execute_v3_same_protocol_direct_server_outcome",
         )
         .split('"anthropic"')
-        .join("ANTHROPIC_LANE_PROTOCOL");
+        .join("LANE_PROTOCOL");
       return head + newFn + source.slice(fnClose);
     },
     diagnostic:
       /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // A lane whose body carries no "anthropic" text at all, only a reference to a
+    // neutrally named const bound to it. Nothing but following the const can see
+    // this lane, so this case binds the const-resolution branch instead of
+    // passing on an identifier that happens to contain the word.
+    name: "a neutral const bound to anthropic still identifies the lane",
+    create: {
+      path: "v3/crates/routecodex-v3-server/src/hoisted_lane.rs",
+      content: `use std::time::Instant;
+
+use crate::console::impl_bulk::emit_v3_observability_console_lines;
+use crate::V3ConsoleEmissionContext;
+use crate::V3RuntimeObservability;
+
+const LANE: &str = "anthropic";
+
+pub(crate) fn probe_hoisted_lane(
+    console_context: &V3ConsoleEmissionContext,
+    relay_output: &V3ProbeRelayOutput,
+    started_at: Instant,
+) {
+    let _lane = LANE;
+    emit_v3_observability_console_lines(
+        console_context,
+        200,
+        &[],
+        relay_output.observability(),
+        started_at,
+        relay_output.stream_observation.is_none(),
+    );
+}
+`,
+    },
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // A diagnostic string that merely mentions anthropic must not brand another
+    // lane. Scanning identifiers only in the fully masked view keeps this a PASS;
+    // reading string contents there would wrongly fail a correct lane.
+    name: "a string mentioning anthropic must not brand another lane",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source.replace(
+        "pub(crate) async fn execute_v3_gemini_direct_server_outcome(",
+        'pub(crate) async fn execute_v3_gemini_direct_server_outcome(\n    _unused_lane_note: (),\n',
+      ).replace(
+        "    let mut relay_output = match routecodex_v3_runtime::execute_v3_gemini_relay_runtime",
+        '    let _lane_note = "gemini lane must not receive an anthropic-only header";\n    let mut relay_output = match routecodex_v3_runtime::execute_v3_gemini_relay_runtime',
+      ),
+    expectPass: true,
   },
 ];
 
