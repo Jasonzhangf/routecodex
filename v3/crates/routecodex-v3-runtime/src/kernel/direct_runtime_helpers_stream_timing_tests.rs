@@ -26,6 +26,15 @@ fn projected_delta_text(frames: &[Vec<u8>]) -> String {
     text
 }
 
+fn projected_output_text_delta_text(frames: &[Vec<u8>]) -> String {
+    frames
+        .iter()
+        .flat_map(|frame| parse_direct_sse_json_frames(frame))
+        .filter(|event| event["type"] == "response.output_text.delta")
+        .filter_map(|event| event["delta"].as_str().map(ToOwned::to_owned))
+        .collect()
+}
+
 fn expect_ordinary_source<T>(
     result: crate::shared::V3DirectSourceResult<T>,
 ) -> V3Error01SourceRaised {
@@ -999,7 +1008,9 @@ async fn direct_sse_empty_complete_anthropic_terminal_is_provider_failure() {
     // A complete Anthropic success with no business content
     // (`message_start content:[] -> end_turn -> message_stop`) must not seal a
     // normal empty completion on the Direct path. It is a typed provider
-    // failure for the resident owner to reselect/abort, never a client error.
+    // failure for the resident owner to reselect, never a client error. Only
+    // after the declared recovery path confirms the provider pool is
+    // unavailable may the request transport disconnect.
     let provider: V3ClientSseStream = Box::pin(stream::iter([Ok(
         concat!(
             "event: message_start\n",
@@ -1139,6 +1150,105 @@ async fn first_frame_commit_delivers_business_frame_before_provider_terminal() {
     );
 }
 
+/// D1=B: a registered complete-response hook owns the whole attempt, so no
+/// provider business carrier may cross the client channel before the terminal
+/// has gone through that hook, deliverability, and the single seal.
+#[tokio::test]
+async fn issue5daee8a_governed_attempt_holds_business_frames_until_terminal() {
+    let chunks = responses_text_item_sequence("hello");
+    let (prefix, tail) = chunks.split_at(4);
+    let prefix = prefix.to_vec();
+    let tail = tail.to_vec();
+    let held_first = tail[0].clone();
+    let paced = stream::iter(prefix.into_iter().map(Ok))
+        .chain(stream::once(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+            Ok(held_first)
+        }))
+        .chain(stream::iter(tail.into_iter().skip(1).map(Ok)));
+    let source: crate::nodes::V3ProviderAttemptSseInnerStream = Box::pin(paced);
+    let projected = wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(source),
+        V3RuntimeStreamObservation::default(),
+        V3RuntimeTimingState::start(),
+        false,
+        false,
+        V3HubProviderWireProtocol::Responses,
+    );
+    let registry = crate::hooks::register_responses_direct_hooks();
+    let context = crate::direct_response_hooks::V3DirectDsmlContext::from_request(
+        &serde_json::json!({}),
+        &std::collections::HashMap::new(),
+    );
+    let (sink, mut rx) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let collector = collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
+        projected,
+        V3HubProviderWireProtocol::Responses,
+        crate::nodes::V3AttemptBudget::process_default(),
+        None,
+        None,
+        Some((&registry, &context)),
+        Some(sink),
+    );
+    let (sealed, early) = tokio::join!(collector, async {
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+        let mut frames = Vec::new();
+        while let Ok(frame) = rx.try_recv() {
+            frames.push(frame);
+        }
+        frames
+    });
+    let held_wire = String::from_utf8_lossy(&early.concat()).into_owned();
+    for marker in [
+        "response.output_text.delta",
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.output_text.done",
+        "response.content_part.done",
+        "response.output_item.done",
+        "response.reasoning_summary_text.",
+        "response.reasoning_summary_part.",
+        "response.completed",
+        "response.failed",
+        "response.incomplete",
+    ] {
+        assert!(
+            !held_wire.contains(marker),
+            "a governed attempt released a business carrier {marker:?} before terminal governance: {held_wire}"
+        );
+    }
+    assert!(
+        early.is_empty(),
+        "the governed hold window must release no provider business frame: {held_wire}"
+    );
+
+    let sealed = sealed.expect("governed attempt must seal");
+    let frames = sealed.collect::<Vec<_>>().await;
+    let events = frames
+        .iter()
+        .flat_map(|frame| parse_direct_sse_json_frames(frame))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        projected_output_text_delta_text(&frames),
+        "hello",
+        "the governed result must still reach the client"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["type"] == "response.completed")
+            .count(),
+        1,
+        "the held attempt must finish with exactly one real terminal: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| event["type"] == "error" || event["error"].is_object()),
+        "the held attempt must not synthesize a client error: {events:?}"
+    );
+}
+
 /// A real harness round can end in a tool call with no visible text at all. The
 /// named tool-call start must commit the attempt before the provider terminal,
 /// while the argument payload stays held until its item completes, so the
@@ -1253,23 +1363,23 @@ fn responses_tool_call_chunks() -> Vec<Vec<u8>> {
     vec![lead, partial_arguments, completion]
 }
 
-/// The same tool-call round through the production Direct response hooks: the
-/// early-commit path must emit exactly the buffered attempt bytes and must still
-/// seal the attempt.
+/// The same tool-call round through the production Direct response hooks: D1=B
+/// keeps a hook-governed attempt fully buffered through terminal governance.
+/// The sealed attempt must emit exactly the buffered bytes.
 #[tokio::test]
 async fn first_frame_commit_tool_call_matches_buffered_hooks() {
     let chunks = responses_tool_call_chunks();
     let early = run_early_commit_attempt(chunks.clone()).await;
     assert!(
-        early.committed,
-        "a named tool-call start must commit the attempt early"
+        !early.committed,
+        "a hook-governed tool-call attempt must wait for terminal governance"
     );
-    assert!(!early.failed, "the committed tool-call attempt must seal");
+    assert!(!early.failed, "the governed tool-call attempt must seal");
     let buffered = buffered_with_hooks(chunks).await;
     assert_eq!(
         String::from_utf8_lossy(&early.frames.concat()),
         String::from_utf8_lossy(&buffered.concat()),
-        "the early-committed tool-call bytes must equal the buffered attempt"
+        "the governed tool-call bytes must equal the buffered attempt"
     );
 }
 
@@ -1550,6 +1660,40 @@ fn responses_split_delta_sequence(deltas: &[&str], full: &str) -> Vec<Vec<u8>> {
             .into_bytes()
         })
         .collect()
+}
+
+fn responses_thinking_delta_terminal_without_done() -> Vec<Vec<u8>> {
+    [
+        serde_json::json!({"type":"response.created","response":{"id":"r1","status":"in_progress","output":[]}}),
+        serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"id":"m1","type":"message","role":"assistant","status":"in_progress","content":[]}}),
+        serde_json::json!({"type":"response.content_part.added","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}),
+        serde_json::json!({"type":"response.output_text.delta","output_index":0,"item_id":"m1","content_index":0,"delta":"hello"}),
+        serde_json::json!({"type":"response.output_text.delta","output_index":0,"item_id":"m1","content_index":0,"delta":"<thinking>secret</thinking> tail"}),
+        serde_json::json!({"type":"response.completed","response":{"id":"r1","status":"completed","output":[{"id":"m1","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello<thinking>secret</thinking> tail"}]}]}}),
+    ]
+    .into_iter()
+    .map(responses_sse_frame)
+    .collect()
+}
+
+fn responses_introduced_message_becomes_reasoning() -> Vec<Vec<u8>> {
+    [
+        serde_json::json!({"type":"response.created","response":{"id":"r1","status":"in_progress","output":[]}}),
+        serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"id":"m_a","type":"message","role":"assistant","status":"in_progress","content":[]}}),
+        serde_json::json!({"type":"response.content_part.added","output_index":0,"item_id":"m_a","content_index":0,"part":{"type":"output_text","text":""}}),
+        serde_json::json!({"type":"response.output_text.delta","output_index":0,"item_id":"m_a","content_index":0,"delta":"visible-a"}),
+        serde_json::json!({"type":"response.output_text.done","output_index":0,"item_id":"m_a","content_index":0,"text":"visible-a"}),
+        serde_json::json!({"type":"response.output_item.added","output_index":1,"item":{"id":"m_b","type":"message","role":"assistant","status":"in_progress","content":[]}}),
+        serde_json::json!({"type":"response.content_part.added","output_index":1,"item_id":"m_b","content_index":0,"part":{"type":"output_text","text":""}}),
+        serde_json::json!({"type":"response.output_text.delta","output_index":1,"item_id":"m_b","content_index":0,"delta":"<thinking>secret</thinking>"}),
+        serde_json::json!({"type":"response.completed","response":{"id":"r1","status":"completed","output":[
+            {"id":"m_a","type":"message","role":"assistant","content":[{"type":"output_text","text":"visible-a"}]},
+            {"id":"m_b","type":"message","role":"assistant","content":[{"type":"output_text","text":"<thinking>secret</thinking>"}]}
+        ]}}),
+    ]
+    .into_iter()
+    .map(responses_sse_frame)
+    .collect()
 }
 
 struct EarlyCommitRun {
@@ -1838,16 +1982,16 @@ async fn first_frame_commit_analysis_label_stays_governed() {
     );
 }
 
-/// The early commit must not bypass the registered complete-attempt hook: the
-/// hook still runs after the terminal and the sealed remainder keeps byte
-/// identity with the fully buffered attempt.
+/// D1=B keeps the clean visible text inside the held attempt. The registered
+/// complete-attempt hook runs after the terminal, and the sealed result keeps
+/// byte identity with the fully buffered attempt.
 #[tokio::test]
 async fn first_frame_commit_keeps_governance_after_commit() {
     let chunks = responses_text_item_sequence("hello world");
     let run = run_early_commit_attempt(chunks.clone()).await;
     assert!(
-        run.committed,
-        "clean visible text must commit the client channel"
+        !run.committed,
+        "a hook-governed clean text attempt must wait for terminal governance"
     );
     assert!(!run.failed, "a clean text attempt must seal");
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
@@ -1855,16 +1999,14 @@ async fn first_frame_commit_keeps_governance_after_commit() {
     assert_eq!(
         streamed,
         String::from_utf8(buffered.concat()).unwrap(),
-        "post-commit governance must keep byte identity with the buffered attempt"
+        "whole-attempt governance must keep byte identity with the buffered attempt"
     );
 }
 
-/// A marker that appears only after the commit must be governed by the
-/// registered whole-attempt owner without rewriting already flushed frames. The
-/// committed prefix stays on the client channel; the owner continues the
-/// governed item from the delivered visible text, so the tail is delivered as
-/// reasoning and no raw marker reaches the client. This is the Direct SSE
-/// post-commit governance contract: no transport break, no 598 ledger label.
+/// A marker that appears after the first visible delta must be governed by the
+/// registered whole-attempt owner while the attempt is still held. The visible
+/// prefix is delivered, the wrapper body becomes reasoning, no raw marker
+/// reaches the client, and the attempt seals normally.
 #[tokio::test]
 async fn first_frame_commit_marker_after_commit_is_governed_without_leaking() {
     let first = "hello";
@@ -1892,19 +2034,22 @@ async fn first_frame_commit_marker_after_commit_is_governed_without_leaking() {
     })
     .collect();
     let run = run_early_commit_attempt(chunks).await;
-    assert!(run.committed, "the clean first delta must commit");
+    assert!(
+        !run.committed,
+        "the clean first delta must wait for whole-attempt governance"
+    );
     assert!(
         !run.failed,
-        "a governed post-commit attempt must seal without a transport break"
+        "a governed whole attempt must seal without a transport break"
     );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     assert!(
         !streamed.contains("<thinking>"),
-        "no raw marker may reach the client after a committed prefix: {streamed}"
+        "no raw marker may reach the client: {streamed}"
     );
     assert!(
         streamed.contains("response.reasoning_summary_text.delta"),
-        "the post-commit marker must be governed into reasoning: {streamed}"
+        "the held marker must be governed into reasoning: {streamed}"
     );
     assert!(
         streamed.contains("hello"),
@@ -1912,11 +2057,74 @@ async fn first_frame_commit_marker_after_commit_is_governed_without_leaking() {
     );
 }
 
+#[tokio::test]
+async fn direct_thinking_delta_terminal_without_done_preserves_visible_suffix() {
+    let run = run_early_commit_attempt(responses_thinking_delta_terminal_without_done()).await;
+    assert!(
+        !run.committed,
+        "the thinking attempt must wait for whole-attempt governance"
+    );
+    assert!(
+        !run.failed,
+        "a representable thinking attempt must seal without a transport break"
+    );
+    assert_eq!(
+        projected_output_text_delta_text(&run.frames),
+        "hello tail",
+        "the client delta stream must contain the complete governed visible text"
+    );
+    let wire = String::from_utf8_lossy(&run.frames.concat()).into_owned();
+    assert!(!wire.contains("<thinking>"), "{wire}");
+    assert!(
+        wire.contains("response.reasoning_summary_text.delta"),
+        "{wire}"
+    );
+}
+
+#[tokio::test]
+async fn direct_thinking_governed_attempt_rewrites_message_to_reasoning() {
+    let run = run_early_commit_attempt(responses_introduced_message_becomes_reasoning()).await;
+    assert!(
+        !run.committed,
+        "the introduced-message attempt must wait for whole-attempt governance"
+    );
+    let events = run
+        .frames
+        .iter()
+        .flat_map(|frame| parse_direct_sse_json_frames(frame))
+        .collect::<Vec<_>>();
+    assert!(
+        !events.iter().any(|event| {
+            event["type"] == "response.output_item.added"
+                && event["item"]["id"] == "m_b"
+                && event["item"]["type"] == "message"
+        }),
+        "no delivered message identity may be mutated into reasoning: {events:?}"
+    );
+    assert!(
+        !run.failed,
+        "the held whole attempt can represent B as reasoning and seal: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "response.completed"),
+        "the representable whole attempt must emit one normal terminal: {events:?}"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event["type"] == "response.output_item.added"
+                && event["item"]["id"] == "m_b"
+                && event["item"]["type"] == "reasoning"
+        }),
+        "B must be projected as reasoning after whole-attempt governance: {events:?}"
+    );
+}
+
 /// A marker-like token inside a protected range is business text. The probe
 /// cannot know that (only the registered owner knows fenced and inline code),
-/// so the committed channel must hold the tail and let the owner decide: the
-/// owner protects the fenced text, the tail is replayed unchanged, and the
-/// response is not truncated into a transport break.
+/// so the held attempt lets the owner decide: it protects the fenced text, the
+/// tail is replayed unchanged, and the response is not truncated.
 #[tokio::test]
 async fn first_frame_commit_protected_marker_text_is_delivered_after_commit() {
     let deltas = ["example:\n```\n", "<thinking>literal</thinking>\n```\ndone"];
@@ -1924,12 +2132,12 @@ async fn first_frame_commit_protected_marker_text_is_delivered_after_commit() {
     let chunks = responses_split_delta_sequence(&deltas, &full);
     let run = run_early_commit_attempt(chunks.clone()).await;
     assert!(
-        run.committed,
-        "the clean first delta must commit so the tail is decided post-commit"
+        !run.committed,
+        "the protected text must be decided by whole-attempt governance"
     );
     assert!(
         !run.failed,
-        "protected business text must not truncate a committed response"
+        "protected business text must not truncate a governed response"
     );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     assert!(
@@ -1943,7 +2151,7 @@ async fn first_frame_commit_protected_marker_text_is_delivered_after_commit() {
     let buffered = buffered_with_hooks(chunks).await;
     assert_eq!(
         run.frames, buffered,
-        "the committed stream must carry exactly the buffered bytes"
+        "the governed stream must carry exactly the buffered bytes"
     );
 }
 
@@ -1981,24 +2189,27 @@ async fn first_frame_commit_marker_split_across_deltas_never_commits() {
     );
 }
 
-/// The same split after a certified prefix: the owner continues from the
-/// delivered visible text, so the held frame and the frame that confirms the
-/// marker are governed into reasoning and nothing leaks. The attempt seals.
+/// The same split after a clean visible delta: the held whole attempt keeps the
+/// prefix and marker together for governance, so nothing leaks and the attempt
+/// seals normally.
 #[tokio::test]
 async fn first_frame_commit_marker_split_after_commit_is_governed_without_leaking() {
     let full = "hello <thinking>secret</thinking>";
     let chunks =
         responses_split_delta_sequence(&["hello ", "<thin", "king>secret</thinking>"], full);
     let run = run_early_commit_attempt(chunks).await;
-    assert!(run.committed, "the clean prefix must commit");
+    assert!(
+        !run.committed,
+        "the clean prefix must wait for whole-attempt governance"
+    );
     assert!(
         !run.failed,
-        "the split marker must be governed, not break the committed channel"
+        "the split marker must be governed without breaking the attempt"
     );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     assert!(
         streamed.contains("hello"),
-        "the certified prefix must still reach the client: {streamed}"
+        "the visible prefix must still reach the client: {streamed}"
     );
     assert!(
         !streamed.contains("<thin"),
@@ -2006,18 +2217,17 @@ async fn first_frame_commit_marker_split_after_commit_is_governed_without_leakin
     );
     assert!(
         streamed.contains("response.reasoning_summary_text.delta"),
-        "the post-commit marker body must be governed into reasoning: {streamed}"
+        "the held marker body must be governed into reasoning: {streamed}"
     );
     assert!(
         streamed.contains("response.completed"),
-        "a governed post-commit attempt must finish with a normal terminal: {streamed}"
+        "a governed whole attempt must finish with a normal terminal: {streamed}"
     );
 }
 
 /// A marker that only appears in the terminal snapshot is still governed,
-/// because the complete-attempt owners read that snapshot. The delivered text
-/// is a prefix of the governed visible text, so the owner replays only the
-/// undelivered remainder and the attempt seals.
+/// because the complete-attempt owners read that snapshot while the attempt is
+/// held. The visible prefix and reasoning are projected once at the seal.
 #[tokio::test]
 async fn first_frame_commit_marker_only_in_terminal_snapshot_is_governed_without_leaking() {
     let clean = "hello";
@@ -2040,15 +2250,18 @@ async fn first_frame_commit_marker_only_in_terminal_snapshot_is_governed_without
     })
     .collect();
     let run = run_early_commit_attempt(chunks).await;
-    assert!(run.committed, "the clean delta must commit");
+    assert!(
+        !run.committed,
+        "the terminal-snapshot attempt must wait for whole-attempt governance"
+    );
     assert!(
         !run.failed,
-        "a governed terminal snapshot must seal, not break the committed channel"
+        "a governed terminal snapshot must seal without breaking"
     );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     assert!(
         streamed.contains("hello"),
-        "the certified prefix must still reach the client: {streamed}"
+        "the visible prefix must still reach the client: {streamed}"
     );
     assert!(
         !streamed.contains("<thinking>"),
@@ -2060,18 +2273,21 @@ async fn first_frame_commit_marker_only_in_terminal_snapshot_is_governed_without
     );
     assert!(
         streamed.contains("response.completed"),
-        "a governed post-commit attempt must finish with a normal terminal: {streamed}"
+        "a governed whole attempt must finish with a normal terminal: {streamed}"
     );
 }
 
-/// Ordinary comparison operators are not governed markers. A post-commit text
-/// frame with `<` must stream normally and keep byte identity with the fully
-/// buffered attempt, so the first-frame commit does not truncate code or math.
+/// Ordinary comparison operators are not governed markers. A held text frame
+/// with `<` must seal normally and keep byte identity with the fully buffered
+/// attempt, so governance does not truncate code or math.
 #[tokio::test]
 async fn first_frame_commit_plain_angle_bracket_text_streams_normally() {
     let chunks = responses_text_item_sequence("if a < b then b > a");
     let run = run_early_commit_attempt(chunks.clone()).await;
-    assert!(run.committed, "plain comparison text must commit");
+    assert!(
+        !run.committed,
+        "plain comparison text must wait for whole-attempt governance"
+    );
     assert!(
         !run.failed,
         "plain comparison text must not break the transport"
@@ -2086,8 +2302,8 @@ async fn first_frame_commit_plain_angle_bracket_text_streams_normally() {
 }
 
 /// A standalone orphan tool close label is a removable DSML label, so the
-/// complete attempt drops it and flags an unharvestable tool invocation. A
-/// committed prefix must never carry it to the client.
+/// complete attempt drops it and flags an unharvestable tool invocation. The
+/// held attempt must never carry it to the client.
 #[tokio::test]
 async fn first_frame_commit_orphan_tool_close_label_never_reaches_the_client() {
     let label = "</\u{FF5C}DSML\u{FF5C}tool_calls>";
@@ -2095,8 +2311,8 @@ async fn first_frame_commit_orphan_tool_close_label_never_reaches_the_client() {
     let chunks = responses_split_delta_sequence(&["hello", "\n", label, "\n"], &full);
     let run = run_early_commit_attempt(chunks.clone()).await;
     assert!(
-        run.committed,
-        "the clean visible prefix must commit before the label arrives"
+        !run.committed,
+        "the orphan label must be governed before any business frame"
     );
     let streamed = String::from_utf8(run.frames.concat()).unwrap();
     assert!(
@@ -2141,8 +2357,8 @@ async fn first_frame_commit_bare_gt_residue_with_newline_never_leaks() {
 
 /// Interleaved carrier collision: item zero holds a bare `>` residue while an
 /// unrelated item streams plain text, and a mid-attempt snapshot re-reads both
-/// carriers. The committed channel must hold the residue until the DSML owner
-/// can remove it, so neither the `>` byte nor the close label reaches the client.
+/// carriers. The held attempt gives the DSML owner both carriers, so neither
+/// the `>` byte nor the close label reaches the client.
 #[tokio::test]
 async fn first_frame_commit_snapshot_carrier_collision_holds_residue() {
     let close = "</\u{FF5C}\u{FF5C}DSML\u{FF5C}\u{FF5C} calls>";
@@ -2181,10 +2397,12 @@ async fn first_frame_commit_snapshot_carrier_collision_holds_residue() {
     let run =
         run_early_commit_attempt_with_hooks(chunks.clone(), Some((&registry, &context))).await;
     let projected = projected_delta_text(&run.frames);
-    assert!(run.committed, "the clean visible prefix must commit");
-    // The DSML owner preserves the flushed prefix and continues the item from
-    // the delivered text, so this attempt now seals instead of breaking the
-    // transport; only the residue and label stay out of the client stream.
+    assert!(
+        !run.committed,
+        "the carrier collision must wait for whole-attempt governance"
+    );
+    // The DSML owner sees both carriers in the held attempt, so the attempt
+    // seals normally; only the residue and label stay out of the client stream.
     assert!(
         !run.failed,
         "the preserved-prefix owner rewrite must seal the attempt"

@@ -21,7 +21,7 @@ use std::{convert::Infallible, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Mutex},
     time::timeout,
 };
 
@@ -145,33 +145,16 @@ fn message_with_id(text: &str, item_id: &str) -> Value {
 
 fn scenario(input: &str, model: &str) -> Vec<String> {
     match input {
-        // A clean visible prefix commits the client channel, then the provider
-        // delivers a thinking wrapper in a later frame. The whole-attempt owner
-        // must continue governance from the delivered prefix instead of
-        // rewriting flushed client frames. The terminal text is the exact
-        // concatenation of the streamed deltas, as a real provider produces.
+        // A clean visible prefix is followed by a thinking wrapper in a later
+        // frame. Under D1=B the registered whole-attempt owner holds both
+        // frames, then projects the visible prefix and wrapper body together.
+        // The terminal text is the exact concatenation of the deltas.
         "post-commit-thinking-governed" => vec![
             delta(0, 0, "committed-prefix"),
             delta(0, 0, "<thinking>secret</thinking>"),
             completed(json!([message(
                 "committed-prefix<thinking>secret</thinking>"
             )])),
-        ],
-        // The provider commits the trailing-space delta `hello ` and then
-        // declares an item whose raw terminal text is
-        // `hello<thinking>secret</thinking>tail`. The governed visible text
-        // is `hellotail`, which cannot continue the delivered `hello `
-        // prefix, so the held tail can never be projected append-only. The
-        // owner must fail the attempt explicitly instead of sealing it.
-        // Note the message text drops the space after `</thinking>`; keeping
-        // it (`hello<thinking>secret</thinking> tail`) would produce the
-        // continuable visible `hello tail`, which is the compatible governor
-        // behavior already covered by `post-commit-thinking-governed`.
-        "post-commit-thinking-prefix-incompatible" => vec![
-            delta(0, 0, "hello "),
-            delta(0, 0, "<thinking>secret</thinking> tail"),
-            text_done(0, 0, "hello<thinking>secret</thinking>tail"),
-            completed(json!([message("hello<thinking>secret</thinking>tail")])),
         ],
         "split-orphan-before-commit" if model != "wire-recover" => {
             let label = dsml_close();
@@ -316,19 +299,58 @@ fn scenario(input: &str, model: &str) -> Vec<String> {
                 completed(json!([message(call)])),
             ]
         }
+        "post-commit-thinking-surviving-suffix" => {
+            scenario_post_commit_thinking_surviving_suffix(false)
+        }
+        "post-commit-thinking-surviving-suffix-done" => {
+            scenario_post_commit_thinking_surviving_suffix(true)
+        }
+        "whole-attempt-hold-strict" => scenario_post_commit_thinking_surviving_suffix(false),
+        "post-commit-introduced-item-type-stays-consistent" => {
+            scenario_post_commit_introduced_item_type_stays_consistent()
+        }
+        "post-commit-pure-reasoning-after-held-introduction" => {
+            scenario_post_commit_pure_reasoning_after_held_introduction()
+        }
         _ if model == "wire-recover" => vec![completed(json!([message("recovered")]))],
         _ => vec![completed(json!([message("sibling-success")]))],
     }
 }
 
-async fn upstream(
-    State(captures): State<mpsc::UnboundedSender<Value>>,
-    Json(body): Json<Value>,
-) -> Response<Body> {
+struct HoldServer {
+    reached: Mutex<Option<oneshot::Sender<()>>>,
+    release: Mutex<Option<oneshot::Receiver<()>>>,
+}
+
+struct HoldClient {
+    reached: oneshot::Receiver<()>,
+    release: oneshot::Sender<()>,
+}
+
+#[derive(Clone)]
+struct UpstreamState {
+    captures: mpsc::UnboundedSender<Value>,
+    hold: Option<(String, usize, std::sync::Arc<HoldServer>)>,
+}
+
+fn hold_channels() -> (HoldClient, std::sync::Arc<HoldServer>) {
+    let (reached_tx, reached) = oneshot::channel();
+    let (release, release_rx) = oneshot::channel();
+    (
+        HoldClient { reached, release },
+        std::sync::Arc::new(HoldServer {
+            reached: Mutex::new(Some(reached_tx)),
+            release: Mutex::new(Some(release_rx)),
+        }),
+    )
+}
+
+async fn upstream(State(state): State<UpstreamState>, Json(body): Json<Value>) -> Response<Body> {
+    let captures = state.captures.clone();
     let _ = captures.send(body.clone());
-    let input = body["input"].as_str().unwrap_or_default();
+    let input = body["input"].as_str().unwrap_or_default().to_owned();
     let model = body["model"].as_str().unwrap_or_default();
-    let frames = scenario(input, model);
+    let frames = scenario(&input, model);
     // The progressive case holds every frame after the first 500ms apart, so
     // the delta can only reach the client before the terminal if the gate
     // under test projects it during the provider hold.
@@ -337,9 +359,28 @@ async fn upstream(
     } else {
         None
     };
+    let hold = state.hold.clone();
     let stream = stream::unfold(
-        (frames.into_iter(), delay, 0usize),
-        |(mut frames, delay, index)| async move {
+        (frames.into_iter(), delay, 0usize, hold, input),
+        move |(mut frames, delay, index, hold, input)| async move {
+            let held = match hold.clone() {
+                Some((held_input, after, server)) if index == after => Some((held_input, server)),
+                _ => None,
+            };
+            if index > 0 {
+                if let Some((held_input, server)) = held {
+                    if input != held_input {
+                        return None;
+                    }
+                    if let Some(reached) = server.reached.lock().await.take() {
+                        let _ = reached.send(());
+                    }
+                    let mut release_slot = server.release.lock().await;
+                    if let Some(release) = release_slot.take() {
+                        let _ = release.await;
+                    }
+                }
+            }
             let frame = match frames.next() {
                 Some(frame) => frame,
                 None => return None,
@@ -351,7 +392,7 @@ async fn upstream(
             }
             Some((
                 Ok::<_, Infallible>(Bytes::from(frame)),
-                (frames, delay, index + 1),
+                (frames, delay, index + 1, hold, input),
             ))
         },
     );
@@ -386,17 +427,35 @@ impl Entry {
 }
 
 async fn start(recovery: bool) -> Entry {
+    start_with_hold(recovery, None).await.0
+}
+
+async fn start_with_hold(
+    recovery: bool,
+    hold: Option<(&str, usize)>,
+) -> (Entry, Option<HoldClient>) {
     std::env::set_var(PROVIDER_KEY_ENV, "owned-fixture-key");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_addr = listener.local_addr().unwrap();
     let (shutdown, stop) = oneshot::channel();
     let (captures, received) = mpsc::unbounded_channel();
+    let (hold_client, hold_server) = match hold {
+        Some((input, after)) => {
+            let (client, server) = hold_channels();
+            (Some(client), Some((input.to_owned(), after, server)))
+        }
+        None => (None, None),
+    };
+    let state = UpstreamState {
+        captures,
+        hold: hold_server,
+    };
     let peer = tokio::spawn(async move {
         axum::serve(
             listener,
             Router::new()
                 .route("/v1/responses", post(upstream))
-                .with_state(captures),
+                .with_state(state),
         )
         .with_graceful_shutdown(async {
             let _ = stop.await;
@@ -469,12 +528,15 @@ snapshots = true
     );
     let manifest =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
-    Entry {
-        handle: spawn_v3_server_aggregate(manifest).await.unwrap(),
-        captures: received,
-        shutdown,
-        peer,
-    }
+    (
+        Entry {
+            handle: spawn_v3_server_aggregate(manifest).await.unwrap(),
+            captures: received,
+            shutdown,
+            peer,
+        },
+        hold_client,
+    )
 }
 
 async fn raw_request(
@@ -509,6 +571,49 @@ async fn raw_request_body(
         .await
         .expect("public request must terminate before the fixture watchdog");
     (wire, ended)
+}
+
+async fn strict_hold_raw_request(
+    entry: &Entry,
+    session: &str,
+    input: &str,
+    hold: HoldClient,
+    window: Duration,
+) -> (Vec<u8>, Vec<u8>) {
+    let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
+        .await
+        .unwrap();
+    let body = json!({
+        "model": "test",
+        "input": input,
+        "stream": true
+    })
+    .to_string();
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: {session}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let HoldClient { reached, release } = hold;
+    timeout(Duration::from_secs(8), reached)
+        .await
+        .expect("controlled upstream must reach its hold point")
+        .expect("controlled upstream hold sender");
+    let deadline = std::time::Instant::now() + window;
+    let mut held_wire = Vec::new();
+    while std::time::Instant::now() < deadline {
+        let mut chunk = [0u8; 4096];
+        match timeout(Duration::from_millis(50), socket.read(&mut chunk)).await {
+            Ok(Ok(0)) => break,
+            Ok(Ok(count)) => held_wire.extend_from_slice(&chunk[..count]),
+            Ok(Err(_)) => break,
+            Err(_) => continue,
+        }
+    }
+    release.send(()).expect("upstream hold release receiver");
+    let mut tail = Vec::new();
+    let _ = timeout(Duration::from_secs(8), socket.read_to_end(&mut tail)).await;
+    (held_wire, tail)
 }
 
 /// Read the public stream incrementally and record when the first projected
@@ -674,6 +779,25 @@ fn projected_delta_text(wire: &[u8]) -> String {
     text
 }
 
+fn projected_output_text_delta_text(
+    wire: &[u8],
+    item_id: &str,
+    output_index: u64,
+    content_index: u64,
+) -> String {
+    let mut text = String::new();
+    for event in response_sse_events(&decoded_chunked_body(wire)) {
+        if event["type"] == "response.output_text.delta"
+            && event["item_id"] == item_id
+            && event["output_index"] == output_index
+            && event["content_index"] == content_index
+        {
+            text.push_str(event["delta"].as_str().unwrap_or_default());
+        }
+    }
+    text
+}
+
 fn assert_no_client_error(text: &str) {
     assert!(
         !text.contains("\"error\"")
@@ -683,6 +807,27 @@ fn assert_no_client_error(text: &str) {
             && !text.contains("502"),
         "client received a provider/proxy error payload: {text}"
     );
+}
+
+fn assert_no_business_carrier(text: &str, context: &str) {
+    for marker in [
+        "response.output_text.delta",
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.output_text.done",
+        "response.content_part.done",
+        "response.output_item.done",
+        "response.reasoning_summary_text.",
+        "response.reasoning_summary_part.",
+        "response.completed",
+        "response.failed",
+        "response.incomplete",
+    ] {
+        assert!(
+            !text.contains(marker),
+            "{context}: a provider business carrier {marker:?} reached the client: {text}"
+        );
+    }
 }
 
 /// The per-listener request-records ledger for the running fixture listener.
@@ -735,23 +880,27 @@ fn assert_no_http_598_terminal(rows: &[Value]) -> Vec<Value> {
     terminal_rows
 }
 
-/// Public proof that a thinking wrapper arriving after a clean committed
-/// prefix is governed by the whole-attempt owner without rewriting the flushed
-/// client frames. The committed prefix stays on the wire, the wrapper body is
-/// projected as reasoning, the attempt ends with a normal `response.completed`,
-/// and the client never receives an error payload or a 598 projection. This is
-/// the live sample's post-commit governance break, now sealed by the owner's
-/// `flushed` continuation instead of ending the transport.
+/// Public proof that a thinking wrapper arriving after a clean visible delta is
+/// governed by the whole-attempt owner while D1=B holds every business frame.
+/// The held tail is released only after governance, the attempt ends with a
+/// normal `response.completed`, and the client never receives an error payload
+/// or a 598 projection.
 #[tokio::test]
-async fn post_commit_thinking_governance_delivers_governed_tail() {
+async fn whole_attempt_thinking_governance_delivers_governed_tail() {
     let _guard = TEST_LOCK.lock().await;
-    let entry = start(false).await;
-    let (wire, ended) = raw_request(
+    let (entry, hold) = start_with_hold(false, Some(("post-commit-thinking-governed", 1))).await;
+    let (held_wire, tail) = strict_hold_raw_request(
         &entry,
         "849ed8f-post-commit-thinking",
         "post-commit-thinking-governed",
+        hold.expect("controlled upstream hold"),
+        Duration::from_millis(300),
     )
     .await;
+    let held_text = wire_text(&held_wire);
+    assert_no_business_carrier(&held_text, "held thinking attempt");
+    let mut wire = held_wire;
+    wire.extend_from_slice(&tail);
     let text = wire_text(&wire);
     eprintln!("849ed8f post-terminal wire={text}");
 
@@ -778,10 +927,6 @@ async fn post_commit_thinking_governance_delivers_governed_tail() {
         "the completed attempt must end the chunked body: {text}"
     );
     assert_no_client_error(&text);
-    assert!(
-        ended.is_ok(),
-        "a governed post-commit attempt must end cleanly: {ended:?}"
-    );
 
     // The ledger must agree with the wire: a completed terminal with no
     // `error06_projection` http_598 label. The live sample recorded one from the
@@ -810,59 +955,16 @@ async fn post_commit_thinking_governance_delivers_governed_tail() {
     entry.stop().await;
 }
 
-/// Public proof that a governed terminal visible text which cannot continue the
-/// committed client prefix fails the attempt explicitly. The client already
-/// received `hello ` and the terminal snapshot's governed text is `hellotail`.
-/// Releasing the held tail would either leak the raw wrapper or complete with a
-/// text the client cannot reconcile with the delivered prefix, so the committed
-/// transport must end without the raw marker, the wrapper body, the surviving
-/// tail, `response.completed`, a normal chunked end, or a client error payload.
 #[tokio::test]
-async fn post_commit_thinking_prefix_incompatible_breaks_without_leak() {
-    let _guard = TEST_LOCK.lock().await;
-    let entry = start(false).await;
-    let (wire, _) = raw_request(
-        &entry,
-        "849ed8f-post-commit-thinking-prefix-incompatible",
-        "post-commit-thinking-prefix-incompatible",
-    )
-    .await;
-    let text = wire_text(&wire);
-    eprintln!("849ed8f thinking-prefix-incompatible wire={text}");
-
-    assert!(
-        text.contains("hello "),
-        "the committed prefix must reach the client: {text}"
-    );
-    for leaked in ["<thinking>", "secret", "tail"] {
-        assert!(
-            !text.contains(leaked),
-            "the ungovernable tail {leaked:?} must never reach the client: {text}"
-        );
-    }
-    assert!(
-        !text.contains("response.completed"),
-        "an incompatible governed continuation must not complete: {text}"
-    );
-    assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
-    );
-    assert_no_client_error(&text);
-    entry.stop().await;
-}
-
-#[tokio::test]
-async fn split_orphan_after_clean_commit_does_not_leak_label_or_completion() {
+async fn whole_attempt_split_orphan_failure_projects_no_business_frame() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, _) = raw_request(&entry, "849ed8f-orphan-after", "split-orphan-after-commit").await;
     let text = wire_text(&wire);
     eprintln!("849ed8f orphan-after wire={text}");
 
-    assert!(text.contains("hello"), "{text}");
+    assert_no_business_carrier(&text, "orphan-label whole attempt");
     assert!(!text.contains("tool_calls"), "{text}");
-    assert!(!text.contains("response.completed"), "{text}");
     assert!(
         !text.ends_with("0\r\n\r\n"),
         "normal chunked completion leaked: {text}"
@@ -994,12 +1096,9 @@ async fn snapshot_carrier_collision_does_not_release_bare_residue_early() {
         !text.contains('>') && !text.contains("DSML"),
         "any projected event form must not carry the residue or label: {text}"
     );
-    // The committed prefix is the first visible delta. The DSML owner removes
-    // the bare close residue from the held tail while keeping the delivered
-    // frame byte-identical, so the attempt now completes instead of breaking
-    // the transport: the append-only precondition of the post-commit failure
-    // path (the owner cannot project the tail without rewriting a flushed
-    // frame) does not hold for this shape.
+    // The DSML owner removes the bare close residue while the whole attempt is
+    // still held, so the attempt completes and only the visible text reaches
+    // the client.
     assert!(
         text.contains("response.completed"),
         "the preserved-prefix rewrite must complete the attempt: {text}"
@@ -1038,8 +1137,8 @@ async fn clean_probe_terminal_acceptance_failure_never_projects_completion() {
     .await;
     let text = wire_text(&wire);
 
-    assert!(text.contains("clean-prefix"), "{text}");
-    assert!(!text.contains("response.completed"), "{text}");
+    assert_no_business_carrier(&text, "empty terminal whole attempt");
+    assert!(!text.contains("clean-prefix"), "{text}");
     assert!(
         !text.ends_with("0\r\n\r\n"),
         "normal chunked completion leaked: {text}"
@@ -1092,12 +1191,11 @@ async fn interleaved_carriers_hold_thinking_marker_without_leaking() {
 }
 
 #[tokio::test]
-async fn declared_tool_request_projects_first_business_delta_before_terminal() {
+async fn declared_tool_request_holds_business_delta_until_terminal() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
-    // The DSH harness always declares tools and omits `tool_choice`, so a
-    // declared-tool request is the normal live shape. The declared name is a
-    // plain function tool, like the harness injected tools.
+    // The declared-tool request still carries the registered complete-response
+    // hook, so D1=B holds its first business delta until terminal governance.
     let tools = json!([{
         "type": "function",
         "name": "write_file",
@@ -1125,8 +1223,8 @@ async fn declared_tool_request_projects_first_business_delta_before_terminal() {
         .expect("the attempt must project its terminal");
     let lead = completed_at.saturating_sub(first_delta_at);
     assert!(
-        lead >= Duration::from_millis(300),
-        "a declared-tool request must project its first business delta before the provider terminal; measured delta={first_delta_at:?} terminal={completed_at:?} lead={lead:?}"
+        lead < Duration::from_millis(300),
+        "a hook-governed declared-tool request must release its business delta only with the terminal; measured delta={first_delta_at:?} terminal={completed_at:?} lead={lead:?}"
     );
     assert_no_client_error(&text);
     entry.stop().await;
@@ -1264,4 +1362,437 @@ async fn declared_tool_one_line_fullwidth_markup_is_held_then_harvested_without_
 #[allow(dead_code)]
 fn _keep_base_link_used(entry: &Entry) -> String {
     entry.base()
+}
+
+/// D1=B: business frames must stay buffered through whole-attempt governance.
+/// Hold the provider after the visible `hello` delta and inspect the client
+/// socket for any business carrier before release. After release, the full
+/// governed visible suffix must be delivered without a raw thinking marker.
+#[tokio::test]
+async fn issue5daee8a_whole_attempt_governance_holds_business_frames_until_terminal() {
+    let _guard = TEST_LOCK.lock().await;
+    let (entry, hold) = start_with_hold(false, Some(("whole-attempt-hold-strict", 1))).await;
+    let (held_wire, tail) = strict_hold_raw_request(
+        &entry,
+        "849ed8f-r1-strict-hold",
+        "whole-attempt-hold-strict",
+        hold.expect("controlled upstream hold"),
+        Duration::from_millis(500),
+    )
+    .await;
+    let held_text = wire_text(&held_wire);
+    eprintln!("849ed8f r1 strict-hold held wire={held_text}");
+    for marker in [
+        "response.output_text.delta",
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.output_text.done",
+        "response.content_part.done",
+        "response.output_item.done",
+        "response.reasoning_summary_text.",
+        "response.reasoning_summary_part.",
+        "response.completed",
+        "response.failed",
+        "response.incomplete",
+    ] {
+        assert!(
+            !held_text.contains(marker),
+            "a provider business carrier {marker:?} reached the client before whole-attempt governance: {held_text}"
+        );
+    }
+    let mut full_wire = held_wire;
+    full_wire.extend_from_slice(&tail);
+    let text = wire_text(&full_wire);
+    assert_eq!(
+        projected_output_text_delta_text(&full_wire, "m1", 0, 0),
+        "hello tail",
+        "the release tail must complete the governed visible text: {text}"
+    );
+    assert_eq!(
+        completed_output_texts(&full_wire),
+        vec!["hello tail"],
+        "the terminal message text must be the governed visible text: {text}"
+    );
+    assert!(
+        !text.contains("<thinking>"),
+        "the raw thinking wrapper must not reach the client: {text}"
+    );
+    assert!(
+        text.contains("response.completed"),
+        "the governed attempt must complete normally: {text}"
+    );
+    assert!(
+        text.ends_with("0\r\n\r\n"),
+        "the completed attempt must end the chunked body: {text}"
+    );
+    assert_no_client_error(&text);
+    entry.stop().await;
+}
+
+/// R2: a delta-plus-terminal attempt where the thinking wrapper carries a
+/// surviving visible suffix. The first delta `hello` is ordinary visible text,
+/// then the second delta wraps a `<thinking>` marker around ` tail`. The
+/// terminal text is the exact concatenation of the two deltas. No
+/// `output_text.done` is sent. Under D1=B no business frame crosses the client
+/// channel while the upstream is held; after release the complete governed
+/// suffix is delivered exactly once.
+fn scenario_post_commit_thinking_surviving_suffix(flush_done: bool) -> Vec<String> {
+    let mut frames = vec![
+        delta_as(0, 0, "m1", "hello"),
+        delta_as(0, 0, "m1", "<thinking>secret</thinking> tail"),
+    ];
+    if flush_done {
+        frames.push(text_done_as(
+            0,
+            0,
+            "m1",
+            "hello<thinking>secret</thinking> tail",
+        ));
+    }
+    frames.push(completed(json!([message_with_id(
+        "hello<thinking>secret</thinking> tail",
+        "m1"
+    )])));
+    frames
+}
+
+#[tokio::test]
+async fn whole_attempt_thinking_delta_terminal_preserves_visible_suffix() {
+    let _guard = TEST_LOCK.lock().await;
+    let (entry, hold) =
+        start_with_hold(false, Some(("post-commit-thinking-surviving-suffix", 1))).await;
+    let (held_wire, tail) = strict_hold_raw_request(
+        &entry,
+        "849ed8f-r2-suffix",
+        "post-commit-thinking-surviving-suffix",
+        hold.expect("controlled upstream hold"),
+        Duration::from_millis(300),
+    )
+    .await;
+    assert_no_business_carrier(
+        &wire_text(&held_wire),
+        "R2 held delta-plus-terminal attempt",
+    );
+    let mut full_wire = held_wire;
+    full_wire.extend_from_slice(&tail);
+    let text = wire_text(&full_wire);
+    eprintln!("849ed8f r2 full wire={text}");
+
+    let deltas = projected_output_text_delta_text(&full_wire, "m1", 0, 0);
+    assert_eq!(
+        deltas.matches("hello").count(),
+        1,
+        "hello must appear once: {deltas}"
+    );
+    assert_eq!(
+        deltas.matches(" tail").count(),
+        1,
+        " tail must appear once: {deltas}"
+    );
+    assert_eq!(
+        deltas, "hello tail",
+        "concatenated delta text must be exactly the governed visible text: {deltas}"
+    );
+    assert!(
+        !text.contains("<thinking>"),
+        "the raw thinking wrapper must not reach the client: {text}"
+    );
+    assert_eq!(
+        completed_output_texts(&full_wire),
+        vec!["hello tail"],
+        "the terminal message text must be the governed visible text: {text}"
+    );
+    assert!(
+        text.contains("response.completed"),
+        "attempt must complete normally: {text}"
+    );
+    assert!(
+        text.ends_with("0\r\n\r\n"),
+        "completed attempt must end the chunked body: {text}"
+    );
+    assert_no_client_error(&text);
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn whole_attempt_thinking_delta_terminal_with_done_keeps_single_full_text() {
+    let _guard = TEST_LOCK.lock().await;
+    let (entry, hold) = start_with_hold(
+        false,
+        Some(("post-commit-thinking-surviving-suffix-done", 1)),
+    )
+    .await;
+    let (held_wire, tail) = strict_hold_raw_request(
+        &entry,
+        "849ed8f-r2-done",
+        "post-commit-thinking-surviving-suffix-done",
+        hold.expect("controlled upstream hold"),
+        Duration::from_millis(300),
+    )
+    .await;
+    assert_no_business_carrier(&wire_text(&held_wire), "R2 held done attempt");
+    let mut wire = held_wire;
+    wire.extend_from_slice(&tail);
+    let text = wire_text(&wire);
+    eprintln!("849ed8f r2 done wire={text}");
+
+    let deltas = projected_output_text_delta_text(&wire, "m1", 0, 0);
+    assert_eq!(
+        deltas.matches("hello").count(),
+        1,
+        "hello must appear once: {deltas}"
+    );
+    assert_eq!(
+        deltas.matches(" tail").count(),
+        1,
+        " tail must appear once: {deltas}"
+    );
+    assert_eq!(
+        deltas, "hello tail",
+        "the done branch must emit the full visible text exactly once: {deltas}"
+    );
+    assert!(
+        text.contains("response.completed"),
+        "attempt must complete normally: {text}"
+    );
+    assert!(
+        text.ends_with("0\r\n\r\n"),
+        "completed attempt must end the chunked body: {text}"
+    );
+    assert_no_client_error(&text);
+    entry.stop().await;
+}
+
+/// R3: item A carries ordinary visible text; item B arrives as an empty message
+/// introduction and then delivers only a thinking wrapper. Under D1=B the whole
+/// attempt remains held, so governance introduces B directly as reasoning
+/// without delivering or mutating a B message identity.
+fn scenario_post_commit_introduced_item_type_stays_consistent() -> Vec<String> {
+    vec![
+        sse(
+            "response.output_item.added",
+            json!({
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {"id":"m_a","type":"message","status":"in_progress","role":"assistant","content":[{"type":"output_text","text":""}]}
+            }),
+        ),
+        sse(
+            "response.output_item.added",
+            json!({
+                "type": "response.output_item.added",
+                "output_index": 1,
+                "item": {"id":"m_b","type":"message","status":"in_progress","role":"assistant","content":[{"type":"output_text","text":""}]}
+            }),
+        ),
+        sse(
+            "response.content_part.added",
+            json!({
+                "type": "response.content_part.added",
+                "output_index": 1,
+                "item_id": "m_b",
+                "content_index": 0,
+                "part": {"type":"output_text","text":""}
+            }),
+        ),
+        delta_as(0, 0, "m_a", "visible-a"),
+        text_done_as(0, 0, "m_a", "visible-a"),
+        sse(
+            "response.output_text.delta",
+            json!({
+                "type": "response.output_text.delta",
+                "item_id": "m_b",
+                "output_index": 1,
+                "content_index": 0,
+                "delta": "<thinking>secret</thinking>"
+            }),
+        ),
+        text_done_as(1, 0, "m_b", "<thinking>secret</thinking>"),
+        sse(
+            "response.output_item.done",
+            json!({
+                "type": "response.output_item.done",
+                "output_index": 1,
+                "item": {"id":"m_b","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"<thinking>secret</thinking>"}]}
+            }),
+        ),
+        completed(json!([
+            message_with_id("visible-a", "m_a"),
+            message_with_id("<thinking>secret</thinking>", "m_b")
+        ])),
+    ]
+}
+
+#[tokio::test]
+async fn whole_attempt_introduced_message_is_projected_as_reasoning() {
+    let _guard = TEST_LOCK.lock().await;
+    // Hold after A's item introduction. B's provider-side message introduction
+    // remains inside the attempt until the terminal governance decision.
+    let (entry, hold) = start_with_hold(
+        false,
+        Some(("post-commit-introduced-item-type-stays-consistent", 1)),
+    )
+    .await;
+    let (held_wire, tail) = strict_hold_raw_request(
+        &entry,
+        "849ed8f-r3-inconsistent",
+        "post-commit-introduced-item-type-stays-consistent",
+        hold.expect("controlled upstream hold"),
+        Duration::from_millis(300),
+    )
+    .await;
+    assert_no_business_carrier(&wire_text(&held_wire), "R3 held introduced-message attempt");
+    let mut wire = held_wire;
+    wire.extend_from_slice(&tail);
+    let text = wire_text(&wire);
+    eprintln!("849ed8f r3 wire={text}");
+
+    assert!(
+        text.contains("visible-a"),
+        "item A visible text must reach the client: {text}"
+    );
+    assert!(
+        !text.contains("<thinking>") && !text.contains("</thinking>"),
+        "{text}"
+    );
+    let events = response_sse_events(&decoded_chunked_body(&wire));
+    assert!(
+        !events.iter().any(|event| {
+            event["type"] == "response.output_item.added"
+                && event["item"]["id"] == "m_b"
+                && event["item"]["type"] == "message"
+        }),
+        "no message identity for B may be delivered before governance: {events:?}"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event["type"] == "response.output_item.added"
+                && event["item"]["id"] == "m_b"
+                && event["item"]["type"] == "reasoning"
+        }),
+        "B must be introduced directly as reasoning: {events:?}"
+    );
+    assert_eq!(
+        completed_output_texts(&wire),
+        vec!["visible-a"],
+        "A's visible text must remain the only message text: {text}"
+    );
+    assert!(
+        text.contains("response.completed"),
+        "the representable whole attempt must complete normally: {text}"
+    );
+    assert!(
+        text.ends_with("0\r\n\r\n"),
+        "the completed attempt must end the chunked body: {text}"
+    );
+    assert_no_client_error(&text);
+    entry.stop().await;
+}
+
+fn scenario_post_commit_pure_reasoning_after_held_introduction() -> Vec<String> {
+    vec![
+        sse(
+            "response.output_item.added",
+            json!({
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {"id":"m_a","type":"message","status":"in_progress","role":"assistant","content":[{"type":"output_text","text":""}]}
+            }),
+        ),
+        delta_as(0, 0, "m_a", "visible-a"),
+        // B's marker arrives before B is introduced. The commit probe holds it,
+        // so governance may introduce B as reasoning without mutating a
+        // delivered message identity.
+        sse(
+            "response.output_text.delta",
+            json!({
+                "type": "response.output_text.delta",
+                "item_id": "m_b",
+                "output_index": 1,
+                "content_index": 0,
+                "delta": "<thinking>secret</thinking>"
+            }),
+        ),
+        sse(
+            "response.output_item.added",
+            json!({
+                "type": "response.output_item.added",
+                "output_index": 1,
+                "item": {"id":"m_b","type":"message","status":"in_progress","role":"assistant","content":[{"type":"output_text","text":""}]}
+            }),
+        ),
+        sse(
+            "response.content_part.added",
+            json!({
+                "type": "response.content_part.added",
+                "output_index": 1,
+                "item_id": "m_b",
+                "content_index": 0,
+                "part": {"type":"output_text","text":""}
+            }),
+        ),
+        text_done_as(1, 0, "m_b", "<thinking>secret</thinking>"),
+        sse(
+            "response.output_item.done",
+            json!({
+                "type": "response.output_item.done",
+                "output_index": 1,
+                "item": {"id":"m_b","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"<thinking>secret</thinking>"}]}
+            }),
+        ),
+        completed(json!([
+            message_with_id("visible-a", "m_a"),
+            {
+                "id": "m_b",
+                "type": "reasoning",
+                "status": "completed",
+                "summary": [{"type":"summary_text","text":"secret"}]
+            }
+        ])),
+    ]
+}
+
+#[tokio::test]
+async fn whole_attempt_pure_reasoning_after_held_introduction_is_governed_normally() {
+    let _guard = TEST_LOCK.lock().await;
+    let (entry, hold) = start_with_hold(
+        false,
+        Some(("post-commit-pure-reasoning-after-held-introduction", 1)),
+    )
+    .await;
+    // A's first visible delta is still inside the attempt when the upstream
+    // holds. Governance may therefore introduce B directly as reasoning.
+    let (held_wire, tail) = strict_hold_raw_request(
+        &entry,
+        "849ed8f-r3-pure-ok",
+        "post-commit-pure-reasoning-after-held-introduction",
+        hold.expect("controlled upstream hold"),
+        Duration::from_millis(300),
+    )
+    .await;
+    assert_no_business_carrier(&wire_text(&held_wire), "R3 held pure-reasoning attempt");
+    let mut wire = held_wire;
+    wire.extend_from_slice(&tail);
+    let text = wire_text(&wire);
+    eprintln!("849ed8f r3 pure-ok wire={text}");
+
+    assert!(
+        text.contains("response.reasoning_summary_text.delta")
+            || text.contains("\"type\":\"reasoning\""),
+        "a governed pure-reasoning item must be projected: {text}"
+    );
+    assert!(
+        !text.contains("<thinking>") && !text.contains("</thinking>"),
+        "the raw thinking wrapper must never reach the client: {text}"
+    );
+    assert!(
+        text.contains("response.completed"),
+        "the attempt must complete normally: {text}"
+    );
+    assert!(
+        text.ends_with("0\r\n\r\n"),
+        "completed attempt must end the chunked body: {text}"
+    );
+    assert_no_client_error(&text);
+    entry.stop().await;
 }

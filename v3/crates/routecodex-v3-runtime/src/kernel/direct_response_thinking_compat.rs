@@ -182,12 +182,6 @@ fn rewrite_v3_direct_thinking_attempt_inner(
         .and_then(|response| response.get("output"))
         .and_then(Value::as_array)?
         .clone();
-    let plans = crate::shared_direct_thinking_compat::analyze_v3_direct_thinking_output(
-        &original_output,
-    );
-    if plans.is_empty() {
-        return None;
-    }
     let mut wire_items = BTreeMap::<usize, Option<String>>::new();
     for event in frames.iter().filter_map(|frame| direct_thinking_event_value(frame)) {
         let Some(index) = event.get("output_index").and_then(Value::as_u64)
@@ -196,6 +190,23 @@ fn rewrite_v3_direct_thinking_attempt_inner(
         wire_items.entry(index).and_modify(|bound| {
             if bound.as_deref() != Some(id) { *bound = None; }
         }).or_insert_with(|| Some(id.to_owned()));
+    }
+    let has_complete_tools = original_output
+        .iter()
+        .any(crate::shared_direct_thinking_compat::output_item_has_complete_tool);
+    let mut plans = crate::shared_direct_thinking_compat::analyze_v3_direct_thinking_output(
+        &original_output,
+    );
+    append_wire_tagged_reasoning_plans(
+        &mut plans,
+        frames,
+        terminal_position,
+        &original_output,
+        &wire_items,
+        has_complete_tools,
+    );
+    if plans.is_empty() {
+        return None;
     }
     // Opaque carrier values have no defined association with synthesized
     // reasoning events. Preserve the complete attempt rather than lose them.
@@ -207,11 +218,10 @@ fn rewrite_v3_direct_thinking_attempt_inner(
                 })))
     })) { return None; }
     let mut normalized_terminal = terminal.clone();
-    if !crate::shared_direct_thinking_compat::normalize_v3_direct_thinking_json(
-        &mut normalized_terminal,
-    ) {
-        return None;
-    }
+    // A terminal that already declares the item as reasoning carries no tag to
+    // normalize; it stays byte-identical and the wire-derived plan above owns
+    // the projection.
+    crate::shared_direct_thinking_compat::normalize_v3_direct_thinking_json(&mut normalized_terminal);
     let transformed_output = normalized_terminal
         .get("response")
         .and_then(|response| response.get("output"))
@@ -233,15 +243,21 @@ fn rewrite_v3_direct_thinking_attempt_inner(
     // This is a governance failure, not an absent transformation: the caller
     // must end the committed transport instead of sealing the inconsistent
     // tail.
-    let has_complete_tools = original_output
-        .iter()
-        .any(crate::shared_direct_thinking_compat::output_item_has_complete_tool);
     let streamed = delivered_thinking_visible_text(
         frames,
         terminal_position,
         &plans,
         &wire_items,
     );
+    if delivered_thinking_introduction_incompatible(
+        frames,
+        flushed,
+        &plans,
+        &wire_items,
+    ) {
+        *governed_prefix_incompatible = true;
+        return None;
+    }
     for ((output_index, content_index), delivered_text) in &delivered {
         if delivered_text.is_empty() {
             continue;
@@ -274,12 +290,56 @@ fn rewrite_v3_direct_thinking_attempt_inner(
     rewritten.extend_from_slice(&frames[..flushed]);
     let mut terminal_index = None;
     let mut emitted_pure_reasoning = BTreeSet::new();
+    let mut emitted_visible = delivered;
     let first_appended_wire_index = match wire_items.keys().next_back() {
         Some(index) => index.checked_add(1)?,
         None => original_output.len(),
     };
     for (frame_index, frame) in frames.iter().enumerate().skip(flushed) {
         if frame_index == terminal_position {
+            for plan in &plans {
+                if plan.pure_reasoning {
+                    continue;
+                }
+                for content_index in 0..plan.visible_parts.len() {
+                    let key = (plan.output_index, content_index);
+                    let visible = &plan.visible_parts[content_index];
+                    let emitted_text = emitted_visible
+                        .get(&key)
+                        .map(String::as_str)
+                        .unwrap_or_default();
+                    let Some(streamed_text) = streamed.get(&key) else {
+                        continue;
+                    };
+                    let streamed_projection =
+                        crate::shared_direct_thinking_compat::project_v3_thinking_tag_text_with_tools(
+                            streamed_text,
+                            has_complete_tools,
+                        );
+                    if !streamed_projection.tag_observed
+                        || streamed_projection.visible.as_str() != visible.as_str()
+                    {
+                        continue;
+                    }
+                    let Some(remaining) = visible.strip_prefix(emitted_text) else {
+                        *governed_prefix_incompatible = true;
+                        return None;
+                    };
+                    if !remaining.is_empty() {
+                        let original = json!({
+                            "output_index": plan.output_index,
+                            "content_index": content_index,
+                        });
+                        rewritten.push(direct_thinking_output_text_delta_frame(
+                            &original,
+                            plan,
+                            remaining,
+                            response_id.as_deref(),
+                        ));
+                        emitted_visible.insert(key, visible.clone());
+                    }
+                }
+            }
             for (index, item) in transformed_output.iter().enumerate().skip(original_output.len()) {
                 let wire_index = first_appended_wire_index.checked_add(index - original_output.len())?;
                 let mut added = item.clone();
@@ -360,7 +420,7 @@ fn rewrite_v3_direct_thinking_attempt_inner(
             "response.output_text.done" => {
                 let visible = direct_thinking_visible_part(plan, &value)?;
                 let content_index = direct_thinking_event_content_index(&value);
-                let delivered_text = delivered
+                let delivered_text = emitted_visible
                     .get(&(plan.output_index, content_index))
                     .map(String::as_str)
                     .unwrap_or_default();
@@ -375,6 +435,10 @@ fn rewrite_v3_direct_thinking_attempt_inner(
                         response_id.as_deref(),
                     ));
                 }
+                emitted_visible.insert(
+                    (plan.output_index, content_index),
+                    visible.to_owned(),
+                );
                 let mut done = value;
                 if let Some(object) = done.as_object_mut() {
                     object.insert("text".to_owned(), Value::String(visible.to_owned()));
@@ -402,6 +466,111 @@ fn rewrite_v3_direct_thinking_attempt_inner(
         }
     }
     terminal_index.map(|terminal_index| (rewritten, terminal_index))
+}
+
+fn delivered_thinking_introduction_incompatible(
+    frames: &[Vec<u8>],
+    flushed: usize,
+    plans: &[crate::shared_direct_thinking_compat::V3DirectThinkingOutputItemPlan],
+    wire_items: &BTreeMap<usize, Option<String>>,
+) -> bool {
+    frames.iter().take(flushed).any(|frame| {
+        let Some(event) = direct_thinking_event_value(frame) else {
+            return false;
+        };
+        let Some(plan) = direct_thinking_plan_for_event(plans, &event, wire_items) else {
+            return false;
+        };
+        plan.pure_reasoning
+            && ((event["type"] == "response.output_item.added"
+                && event["item"]["type"] == "message")
+                || (event["type"] == "response.content_part.added"
+                    && event["part"]["type"] == "output_text"))
+    })
+}
+
+/// A provider can stream a message carrier that carries a thinking wrapper and
+/// then declare the same item as `reasoning` in the terminal snapshot. That
+/// terminal item has no visible text for the shared analyzer, so the wire
+/// carriers are the only evidence that thinking governance applies. Add a pure
+/// reasoning plan for exactly that shape so the raw wrapper cannot reach the
+/// client and the declared reasoning summary is projected instead.
+fn append_wire_tagged_reasoning_plans(
+    plans: &mut Vec<crate::shared_direct_thinking_compat::V3DirectThinkingOutputItemPlan>,
+    frames: &[Vec<u8>],
+    terminal_position: usize,
+    original_output: &[Value],
+    wire_items: &BTreeMap<usize, Option<String>>,
+    has_complete_tools: bool,
+) {
+    for (output_index, item_id) in wire_items {
+        let Some(item_id) = item_id.as_deref() else {
+            continue;
+        };
+        if plans
+            .iter()
+            .any(|plan| plan.item_id.as_deref() == Some(item_id))
+        {
+            continue;
+        }
+        let Some(reasoning) = terminal_reasoning_summary(original_output.get(*output_index)) else {
+            continue;
+        };
+        let wire_is_tagged = frames.iter().take(terminal_position).any(|frame| {
+            let Some(event) = direct_thinking_event_value(frame) else {
+                return false;
+            };
+            if direct_thinking_event_item_id(&event) != Some(item_id) {
+                return false;
+            }
+            let Some(text) = direct_thinking_carrier_text(&event) else {
+                return false;
+            };
+            let projection =
+                crate::shared_direct_thinking_compat::project_v3_thinking_tag_text_with_tools(
+                    text,
+                    has_complete_tools,
+                );
+            projection.tag_observed && projection.visible.is_empty()
+        });
+        if !wire_is_tagged {
+            continue;
+        }
+        plans.push(crate::shared_direct_thinking_compat::V3DirectThinkingOutputItemPlan {
+            item_id: Some(item_id.to_owned()),
+            output_index: *output_index,
+            pure_reasoning: true,
+            visible_parts: Vec::new(),
+            reasoning,
+        });
+    }
+}
+
+fn terminal_reasoning_summary(item: Option<&Value>) -> Option<Vec<String>> {
+    let item = item?;
+    if item.get("type").and_then(Value::as_str) != Some("reasoning") {
+        return None;
+    }
+    let texts = item
+        .get("summary")?
+        .as_array()?
+        .iter()
+        .filter(|part| part.get("type").and_then(Value::as_str) == Some("summary_text"))
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    (!texts.is_empty()).then_some(texts)
+}
+
+fn direct_thinking_carrier_text(event: &Value) -> Option<&str> {
+    match event.get("type").and_then(Value::as_str) {
+        Some("response.output_text.delta") => event.get("delta").and_then(Value::as_str),
+        Some("response.output_text.done") => event.get("text").and_then(Value::as_str),
+        Some("response.content_part.done") => {
+            event.get("part").and_then(|part| part.get("text")).and_then(Value::as_str)
+        }
+        _ => None,
+    }
 }
 
 fn direct_thinking_event_value(frame: &[u8]) -> Option<Value> {
