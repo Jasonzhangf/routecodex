@@ -6,8 +6,8 @@ use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_runtime::{
     build_v3_chat_req_04_standardized_from_v3_server_03,
     build_v3_req_04_standardized_responses_from_v3_server_03,
-    build_v3_router_request_facts_for_entry,
-    build_v3_router_request_facts_from_v3_req_04_chat, build_v3_server_03_http_request_raw,
+    build_v3_router_request_facts_for_entry, build_v3_router_request_facts_from_v3_req_04_chat,
+    build_v3_server_03_http_request_raw,
 };
 use serde_json::json;
 
@@ -148,8 +148,7 @@ fn v3_req04_preserves_history_responses_image_while_text_only_turn_stays_thinkin
     let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
         .expect("responses req04 normalize");
     assert_eq!(
-        normalized.body["input"][0]["content"][1]["image_url"],
-        "data:image/png;base64,AAAA",
+        normalized.body["input"][0]["content"][1]["image_url"], "data:image/png;base64,AAAA",
         "history image bytes must stay in the standardized Responses request"
     );
 

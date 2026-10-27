@@ -40,7 +40,10 @@ fn builtin_classification_pools_do_not_restrict_client_protocol() {
     let group = &authoring.route_groups["routecodex_v3_4444"];
     for pool_id in ["thinking", "coding", "search"] {
         let rule = group.pools[pool_id].match_rule.as_ref().unwrap();
-        assert!(rule.entry_protocol.is_none(), "{pool_id} must accept every client protocol");
+        assert!(
+            rule.entry_protocol.is_none(),
+            "{pool_id} must accept every client protocol"
+        );
     }
 }
 
