@@ -93,11 +93,12 @@ impl Entry {
         let (b_port, b, b_task) = peer("provider-b").await;
         std::env::set_var("STICKY_KEY", "sticky-test-key");
         let port = test_ports::free_port();
+        let server_id = format!("sticky_pool_{port}");
         let source = format!(
             r#"
 version = 3
 {declaration}
-[servers.sticky_pool]
+[servers.{server_id}]
 bind = "127.0.0.1"
 port = {port}
 routing_group = "sticky_pool"
@@ -127,7 +128,7 @@ targets = [
 ]
 "#,
             declaration = hub_v1_fixture::hub_v1_test_declaration(),
-            execution = hub_v1_fixture::hub_v1_server_execution("sticky_pool"),
+            execution = hub_v1_fixture::hub_v1_server_execution(&server_id),
         );
         let mut manifest =
             compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
@@ -149,11 +150,8 @@ targets = [
                 }
             }
             let group = manifest.route_groups.get_mut("sticky_pool").unwrap();
-            let default = group.pools.get_mut("default").unwrap();
-            let b = default.targets.pop().unwrap();
-            let mut thinking = default.clone();
+            let mut thinking = group.pools["default"].clone();
             thinking.id = "thinking".into();
-            thinking.targets = vec![b];
             thinking.match_rule = Some(routecodex_v3_config::V3RoutePoolMatchManifest {
                 precedence: 1,
                 entry_protocol: None,
@@ -229,19 +227,33 @@ async fn session_sticky_binding_stays_inside_selected_pool() {
     let _home = LOCK.lock().await;
     let entry = Entry::start_with_isolated_pools(true).await;
     let image_input = json!([{"role":"user","content":[{"type":"input_text","text":"describe"},{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}]}]);
+    let thinking = entry.request("isolated-session").await;
+    let thinking_provider = entry.served_provider(&thinking);
+    let other = entry
+        .request_input("other-multimodal", image_input.clone())
+        .await;
+    assert_eq!(
+        entry.served_provider(&other),
+        thinking_provider,
+        "the other pool must start with independent occupancy"
+    );
     let multimodal = entry
         .request_input("isolated-session", image_input.clone())
         .await;
-    assert_eq!(entry.served_provider(&multimodal), "provider-a");
-    let thinking = entry.request("isolated-session").await;
-    assert_eq!(entry.served_provider(&thinking), "provider-b");
+    let multimodal_provider = entry.served_provider(&multimodal);
+    assert_ne!(
+        multimodal_provider, thinking_provider,
+        "the same session must have separate bindings for the two pools"
+    );
     let again = entry.request_input("isolated-session", image_input).await;
-    assert_eq!(entry.served_provider(&again), "provider-a");
+    assert_eq!(entry.served_provider(&again), multimodal_provider);
+    let thinking_again = entry.request("isolated-session").await;
+    assert_eq!(entry.served_provider(&thinking_again), thinking_provider);
     entry.stop().await;
 }
 
 #[tokio::test]
-async fn same_session_uses_standby_when_primary_fails() {
+async fn same_session_recovers_in_lower_tier_after_primary_failure() {
     let _home = LOCK.lock().await;
     let entry = Entry::start_with_options(false, true).await;
     let primary = entry.served_provider(&entry.request("failover-session").await);
@@ -298,7 +310,7 @@ async fn same_session_stays_and_different_sessions_spread() {
 }
 
 #[tokio::test]
-async fn no_session_header_keeps_working_without_sticky_binding() {
+async fn request_without_session_header_completes() {
     let _home = LOCK.lock().await;
     let entry = Entry::start().await;
 
