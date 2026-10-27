@@ -1,8 +1,9 @@
 use routecodex_v3_config::{
-    internal::is_v3_builtin_catalog_model, V3Config05ManifestPublished, V3ForwarderTargetManifest,
-    V3ProviderModelManifest, V3ProviderRequestCleanupAuthoringConfig, V3ReasoningEffort,
-    V3ResponsesTransportKind, V3RouteGroupManifest, V3RoutePoolManifest, V3RoutePoolTargetManifest,
-    V3RouteTargetKind, V3SelectionStrategy, V3WebSearchExecutionMode,
+    internal::is_v3_builtin_catalog_model, V3Config05ManifestPublished,
+    V3ForwarderTargetManifest, V3ProviderManifest, V3ProviderModelManifest,
+    V3ProviderRequestCleanupAuthoringConfig, V3ReasoningEffort, V3ResponsesTransportKind,
+    V3RouteGroupManifest, V3RoutePoolManifest, V3RoutePoolTargetManifest, V3RouteTargetKind,
+    V3SelectionStrategy, V3WebSearchExecutionMode,
 };
 use routecodex_v3_provider_responses::{V3ProviderAvailabilityReader, V3ProviderSchedulingReader};
 use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTargetHitOnce};
@@ -72,6 +73,12 @@ pub struct V3Target09CandidateSetExpanded {
     pub candidates: Vec<V3TargetCandidate>,
     pub provider_priority_schedule: routecodex_v3_config::V3ProviderPriorityScheduleAuthoringConfig,
     pub route_pool_tier_priorities: BTreeMap<String, Vec<i32>>,
+    /// Declared member identity of each pool that participated in the target
+    /// plan, expanded without request-scoped filters (`requested_model_filter`,
+    /// capability or availability). Session-sticky bindings prune against this
+    /// set so a request that only makes part of a pool eligible cannot evict
+    /// the session's remembered provider.
+    pub sticky_pool_members: BTreeMap<String, Vec<V3StickyMember>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -376,12 +383,63 @@ impl V3TargetInterpreter {
                 (pool_id, priorities)
             })
             .collect();
+        let sticky_pool_members = Self::sticky_pool_members(manifest, group, &classified.route);
         Ok(V3Target09CandidateSetExpanded {
             route: classified.route,
             candidates,
             provider_priority_schedule,
             route_pool_tier_priorities,
+            sticky_pool_members,
         })
+    }
+
+    /// Expands the configured members of every sticky pool in the target plan
+    /// without request-scoped filters, so a session's remembered provider is
+    /// never evicted by a request that only makes part of the pool eligible.
+    fn sticky_pool_members(
+        manifest: &V3Config05ManifestPublished,
+        group: &V3RouteGroupManifest,
+        route: &V3Router07OpaqueTargetHitOnce,
+    ) -> BTreeMap<String, Vec<V3StickyMember>> {
+        let mut members = BTreeMap::<String, BTreeMap<V3StickyKey, V3StickyMember>>::new();
+        for (entry, pool) in route
+            .target_plan
+            .iter()
+            .filter(|entry| entry.session_sticky)
+            .filter_map(|entry| {
+                group
+                    .pools
+                    .get(&entry.pool_id)
+                    .map(|pool| (entry, pool))
+            })
+        {
+            let mut visited = BTreeSet::new();
+            for target in &pool.targets {
+                collect_sticky_members(
+                    manifest,
+                    target,
+                    &mut visited,
+                    &mut members.entry(entry.pool_id.clone()).or_default(),
+                );
+            }
+        }
+        members
+            .into_iter()
+            .map(|(pool_id, members)| {
+                // Deterministic order: highest priority first, then weight,
+                // then identity. A fresh session draws from the least-held
+                // member; the tie-break only fixes a stable starting order.
+                let mut ordered = members.into_values().collect::<Vec<_>>();
+                ordered.sort_by(|left, right| {
+                    right
+                        .priority
+                        .cmp(&left.priority)
+                        .then_with(|| right.weight.cmp(&left.weight))
+                        .then_with(|| left.key.cmp(&right.key))
+                });
+                (pool_id, ordered)
+            })
+            .collect()
     }
 
     pub fn ignores_single_candidate_automatic_cooldown(
@@ -676,25 +734,15 @@ impl V3TargetInterpreter {
                     .find(|pool_id| sticky_pools.contains(*pool_id))
             })?;
             let scope_key = scope.scope_key(tier_pool_id);
+            // The sticky universe is the pool's declared member set, not the
+            // per-request expansion: a request that only makes part of the pool
+            // eligible (model filter, capability, availability) must not evict
+            // the session's remembered provider from the pool.
             let universe = expanded
-                .candidates
-                .iter()
-                .filter(|candidate| {
-                    candidate
-                        .pool_ids
-                        .iter()
-                        .any(|pool_id| pool_id == tier_pool_id)
-                })
-                .map(|candidate| V3StickyMember {
-                    key: V3StickyKey::new(
-                        &candidate.provider_id,
-                        &candidate.auth_alias,
-                        &candidate.model_id,
-                    ),
-                    weight: candidate.weight,
-                    priority: candidate.priority,
-                })
-                .collect::<Vec<_>>();
+                .sticky_pool_members
+                .get(tier_pool_id)
+                .cloned()
+                .unwrap_or_default();
             let universe_keys = universe
                 .iter()
                 .map(|member| member.key.clone())
@@ -1271,6 +1319,97 @@ fn pool_targets_route_model(
 
 fn model_visible_name_matches(model: &V3ProviderModelManifest, requested: &str) -> bool {
     model.id == requested || model.aliases.iter().any(|alias| alias == requested)
+}
+
+/// Collects the concrete `provider.model.key` members a sticky pool declares,
+/// independent of the current request. Forwarder targets are followed
+/// recursively; unknown providers/models/keys are skipped, because a member
+/// that cannot be expanded cannot be bound either.
+fn collect_sticky_members(
+    manifest: &V3Config05ManifestPublished,
+    target: &V3RoutePoolTargetManifest,
+    visited: &mut BTreeSet<String>,
+    members: &mut BTreeMap<V3StickyKey, V3StickyMember>,
+) {
+    match target.kind {
+        V3RouteTargetKind::ProviderModel => {
+            let (Some(provider_id), Some(model_id)) =
+                (target.provider.as_deref(), target.model.as_deref())
+            else {
+                return;
+            };
+            let Some(provider) = manifest
+                .providers
+                .get(provider_id)
+                .filter(|provider| provider.enabled)
+            else {
+                return;
+            };
+            if !provider.models.contains_key(model_id) {
+                return;
+            }
+            for alias in declared_auth_aliases(provider, target.key.as_deref()) {
+                let key = V3StickyKey::new(provider_id, &alias, model_id);
+                members.entry(key.clone()).or_insert(V3StickyMember {
+                    key,
+                    weight: target.weight.unwrap_or(1).max(1),
+                    priority: target.priority.unwrap_or(0),
+                });
+            }
+        }
+        V3RouteTargetKind::Forwarder => {
+            let Some(forwarder_id) = target.id.as_deref() else {
+                return;
+            };
+            if !visited.insert(forwarder_id.to_string()) {
+                return;
+            }
+            if let Some(forwarder) = manifest
+                .forwarders
+                .get(forwarder_id)
+                .filter(|forwarder| forwarder.enabled)
+            {
+                for nested in &forwarder.targets {
+                    let nested_target = V3RoutePoolTargetManifest {
+                        kind: nested.kind.clone(),
+                        id: nested.id.clone(),
+                        provider: nested.provider.clone(),
+                        model: nested
+                            .model
+                            .clone()
+                            .or_else(|| Some(forwarder.model.clone())),
+                        key: nested.key.clone(),
+                        interface: nested.interface.clone(),
+                        priority: nested.priority,
+                        weight: nested.weight,
+                    };
+                    collect_sticky_members(manifest, &nested_target, visited, members);
+                }
+            }
+            visited.remove(forwarder_id);
+        }
+    }
+}
+
+/// Auth aliases a pool target can bind to. A pinned `key` yields only that
+/// alias; an unpinned target yields every declared entry, matching the
+/// expansion that produces one candidate per auth entry.
+fn declared_auth_aliases(provider: &V3ProviderManifest, key: Option<&str>) -> Vec<String> {
+    match key {
+        Some(key) => provider
+            .auth
+            .entries
+            .iter()
+            .any(|entry| entry.alias == key)
+            .then(|| vec![key.to_string()])
+            .unwrap_or_default(),
+        None => provider
+            .auth
+            .entries
+            .iter()
+            .map(|entry| entry.alias.clone())
+            .collect(),
+    }
 }
 
 fn normalized_model_visible_ids(

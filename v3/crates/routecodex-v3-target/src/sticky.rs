@@ -311,9 +311,10 @@ fn fill_standby(
     binding.standby = candidates.first().cloned();
 }
 
-/// Orders candidates by session history first (most recent wins), then by the
-/// pool's own priority (higher wins, so a configured priority tier keeps its
-/// precedence), then by the fewest other sessions holding them, then weight.
+/// Orders candidates by session history first (most recent wins, and a used
+/// member always beats a never-used one), then by the pool's own priority
+/// (higher wins, so a configured priority tier keeps its precedence), then by
+/// relative load, then weight.
 fn rank_key(
     left: &V3StickyKey,
     right: &V3StickyKey,
@@ -321,7 +322,17 @@ fn rank_key(
     members: &BTreeMap<V3StickyKey, &V3StickyMember>,
     occupancy: &BTreeMap<V3StickyKey, usize>,
 ) -> std::cmp::Ordering {
-    let history_rank = |key: &V3StickyKey| binding.history.iter().position(|used| used == key);
+    // A never-used member has no history position; it must sort after every
+    // member this session already used, so `None` maps past all real indices.
+    let history_rank = |key: &V3StickyKey| {
+        binding
+            .history
+            .iter()
+            .position(|used| used == key)
+            .unwrap_or(usize::MAX)
+    };
+    let weight = |key: &V3StickyKey| u64::from(members.get(key).map_or(1, |member| member.weight));
+    let holds = |key: &V3StickyKey| occupancy.get(key).copied().unwrap_or(0) as u64;
     history_rank(left)
         .cmp(&history_rank(right))
         .then_with(|| {
@@ -330,17 +341,13 @@ fn rank_key(
             right_priority.cmp(&left_priority)
         })
         .then_with(|| {
-            occupancy
-                .get(left)
-                .copied()
-                .unwrap_or(0)
-                .cmp(&occupancy.get(right).copied().unwrap_or(0))
+            // Relative load: how many other sessions hold the member per unit
+            // of its configured weight. Cross-multiplied so equal weights fall
+            // back to plain hold counts, while unequal weights spread fresh
+            // sessions over the pool in the declared weight ratio.
+            (holds(left) * weight(right)).cmp(&(holds(right) * weight(left)))
         })
-        .then_with(|| {
-            let left_weight = members.get(left).map_or(1, |member| member.weight);
-            let right_weight = members.get(right).map_or(1, |member| member.weight);
-            right_weight.cmp(&left_weight)
-        })
+        .then_with(|| weight(right).cmp(&weight(left)))
         .then_with(|| left.cmp(right))
 }
 
@@ -554,6 +561,85 @@ mod tests {
             second.chosen,
             key("a"),
             "different pools must not affect each other"
+        );
+    }
+
+    #[test]
+    fn history_beats_never_used_when_refilling_primary() {
+        let state = V3StickySelectionState::default();
+        let scope = V3StickySelectionState::scope_key("srv", "grp", "pool", "session");
+        let members = universe(&["a", "b", "c"]);
+        let all = eligible(&["a", "b", "c"]);
+        state
+            .select(&scope, &members, &all, &BTreeSet::new())
+            .unwrap();
+        // "a" cools; the pair rolls to standby "b".
+        state
+            .select(&scope, &members, &eligible(&["b", "c"]), &cooled(&["a"]))
+            .unwrap();
+        // "b" leaves the pool; "a" and "c" remain. This session used "a" most
+        // recently before "b", so the primary slot must return to "a", never
+        // to the unused "c".
+        let smaller = universe(&["a", "c"]);
+        let after = state
+            .select(&scope, &smaller, &eligible(&["a", "c"]), &BTreeSet::new())
+            .unwrap();
+        assert_eq!(
+            after.primary,
+            key("a"),
+            "the session's own history must beat a never-used member"
+        );
+        assert_eq!(after.standby, Some(key("c")));
+    }
+
+    #[test]
+    fn fresh_sessions_spread_by_weight_ratio() {
+        let state = V3StickySelectionState::default();
+        let members = vec![
+            V3StickyMember {
+                key: key("a"),
+                weight: 1,
+                priority: 0,
+            },
+            V3StickyMember {
+                key: key("b"),
+                weight: 2,
+                priority: 0,
+            },
+            V3StickyMember {
+                key: key("c"),
+                weight: 3,
+                priority: 0,
+            },
+        ];
+        let all = eligible(&["a", "b", "c"]);
+        let mut distribution = BTreeMap::new();
+        for index in 0..12 {
+            let scope = V3StickySelectionState::scope_key(
+                "srv",
+                "grp",
+                "pool",
+                &format!("session-{index}"),
+            );
+            let selection = state
+                .select(&scope, &members, &all, &BTreeSet::new())
+                .unwrap();
+            *distribution.entry(selection.primary).or_insert(0usize) += 1;
+        }
+        assert_eq!(
+            distribution.get(&key("a")).copied(),
+            Some(2),
+            "weight 1 member should take one sixth of fresh sessions"
+        );
+        assert_eq!(
+            distribution.get(&key("b")).copied(),
+            Some(4),
+            "weight 2 member should take one third of fresh sessions"
+        );
+        assert_eq!(
+            distribution.get(&key("c")).copied(),
+            Some(6),
+            "weight 3 member should take half of fresh sessions"
         );
     }
 }

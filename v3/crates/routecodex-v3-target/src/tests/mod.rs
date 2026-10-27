@@ -3330,6 +3330,57 @@ fn sticky_pool_rolls_to_standby_when_primary_cools_and_does_not_pull_back() {
 }
 
 #[test]
+fn request_scoped_candidate_shrink_does_not_evict_the_session_binding() {
+    // A client model filter can shrink one request's candidate set to a subset
+    // of the pool. The sticky universe is the pool's declared members, so the
+    // session's remembered provider must survive that narrow request.
+    let manifest = sticky_pool_manifest();
+    let target = V3TargetInterpreter::default();
+    let scope = V3StickySelectionScope::new("sticky-shrink-srv", "g", "sticky-shrink-session");
+    let scheduling = AlwaysHealthy;
+
+    let first = target
+        .select_available_with_health_sticky(
+            expanded_with(&manifest, &target, 0),
+            &scheduling,
+            0,
+            0,
+            &scope,
+        )
+        .unwrap();
+    assert_eq!(first.candidate.provider_id, "a");
+
+    // Simulate the request-scoped filter: only provider b's candidate remains
+    // expandable for this one request, while the pool still declares both.
+    let mut narrowed = expanded_with(&manifest, &target, 0);
+    narrowed
+        .candidates
+        .retain(|candidate| candidate.provider_id != "a");
+    let narrowed_selection = target
+        .select_available_with_health_sticky(narrowed, &scheduling, 0, 0, &scope)
+        .unwrap();
+    assert_eq!(
+        narrowed_selection.candidate.provider_id, "b",
+        "the only eligible member serves the narrow request"
+    );
+
+    // The next normal request must return to the session's own provider.
+    let after = target
+        .select_available_with_health_sticky(
+            expanded_with(&manifest, &target, 0),
+            &scheduling,
+            0,
+            0,
+            &scope,
+        )
+        .unwrap();
+    assert_eq!(
+        after.candidate.provider_id, "a",
+        "a narrow request must not evict the session's remembered provider"
+    );
+}
+
+#[test]
 fn non_sticky_pool_keeps_weighted_sampling_and_ignores_the_scope() {
     // Control for the sticky tests: the same manifest without the sticky
     // strategy must keep changing with the deterministic sample.
