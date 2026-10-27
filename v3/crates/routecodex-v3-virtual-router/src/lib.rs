@@ -301,11 +301,6 @@ impl V3VirtualRouter {
         let default_pool = group.pools.get("default").ok_or_else(|| {
             V3VirtualRouterError::DefaultPoolMissing(classified.routing_group_id.clone())
         })?;
-        if default_pool.targets.is_empty() {
-            return Err(V3VirtualRouterError::DefaultPoolEmpty(
-                classified.routing_group_id,
-            ));
-        }
 
         for (pool_id, pool) in &group.pools {
             if pool_id == DEFAULT_ROUTE {
@@ -435,7 +430,14 @@ impl V3VirtualRouter {
                 )?;
             }
         }
-        tiers.push(build_plan_tier(default_pool));
+        if !default_pool.targets.is_empty() {
+            tiers.push(build_plan_tier(default_pool));
+        }
+        if tiers.is_empty() {
+            return Err(V3VirtualRouterError::DefaultPoolEmpty(
+                classified.routing_group_id,
+            ));
+        }
 
         Ok(V3Router06RoutePoolResolved {
             server_id: classified.server_id,
