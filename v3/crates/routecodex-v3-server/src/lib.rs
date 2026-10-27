@@ -1527,11 +1527,12 @@ fn get_failure_session_scope(
     if let Some(scope) = build_v3_provider_failure_session_scope_for_request(server, headers)? {
         return Ok(scope);
     }
-    V3ProviderFailureSessionScope::new(
+    Ok(V3ProviderFailureSessionScope::new(
         &server.id,
         &server.routing_group,
         format!("request-local-{request_id}"),
-    )
+    )?
+    .as_request_local())
 }
 
 /// Record private Chat Relay failure evidence through the shared serializer.

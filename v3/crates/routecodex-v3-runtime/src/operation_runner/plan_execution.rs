@@ -229,6 +229,7 @@ impl PlanExecutionOperator {
             let selected = match select_v3_target_with_session_then_global(
                 &routecodex_v3_target::V3TargetInterpreter::default(),
                 expanded.clone(),
+                &self.failure_session_scope,
                 &self
                     .provider_health
                     .session_bound_availability(&self.failure_session_scope),
@@ -1116,6 +1117,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             select_v3_target_with_session_then_global(
                 &V3TargetInterpreter::default(),
                 expanded.clone(),
+                &scope,
                 &health.session_bound_availability(&scope),
                 &health,
                 &BTreeSet::new(),
@@ -1312,6 +1314,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             crate::provider_failure_runtime_policy::select_v3_target_with_session_then_global(
                 &V3TargetInterpreter::default(),
                 expanded.clone(),
+                &scope,
                 &health.session_bound_availability(&scope),
                 &health,
                 &BTreeSet::new(),
@@ -1460,6 +1463,7 @@ targets = [
                     interface: None,
                     priority: 1,
                     weight: 1,
+                    session_sticky: false,
                     direct_provider_model: Some((
                         (*provider_id).to_string(),
                         "gpt-test".to_string(),

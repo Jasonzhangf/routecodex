@@ -7,7 +7,7 @@ use crate::{
     compile_v3_config_05_manifest, provider_directory::V3Config02AuthoringResolved,
     store::build_v3_config_loaded_snapshot, store::source_closure_sha256, validation,
     V3Config02AuthoringParsed, V3Config05ManifestPublished, V3ConfigError, V3ConfigLoadedSnapshot,
-    V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind, V3SelectionPolicy, V3SelectionStrategy,
+    V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind, V3SelectionPolicy,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -82,7 +82,18 @@ fn default_all_entry_protocols() -> Vec<String> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct V3UserRoutePool {
+    #[serde(default, skip_serializing_if = "V3SelectionPolicy::is_default")]
+    pub selection: V3SelectionPolicy,
     pub tiers: Vec<Vec<V3UserRouteMember>>,
+}
+
+impl Default for V3UserRoutePool {
+    fn default() -> Self {
+        Self {
+            selection: V3SelectionPolicy::default(),
+            tiers: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -347,10 +358,11 @@ pub fn project_v3_user_config_03_authoring(
         )?;
         let mut group = template.clone();
         for (pool_id, pool) in &mut group.pools {
-            pool.selection = V3SelectionPolicy {
-                strategy: V3SelectionStrategy::Priority,
-            };
-            pool.targets = match server.routes.get(pool_id) {
+            let user_pool = server.routes.get(pool_id);
+            pool.selection = user_pool
+                .map(|user_pool| user_pool.selection.clone())
+                .unwrap_or_default();
+            pool.targets = match user_pool {
                 Some(user_pool) => compile_pool_targets(
                     user_pool.clone(),
                     provider_catalogue,

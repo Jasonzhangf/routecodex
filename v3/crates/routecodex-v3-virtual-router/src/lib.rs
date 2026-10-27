@@ -97,6 +97,9 @@ pub struct V3Router07OpaqueTargetPlanEntry {
     /// do not have a manifest pool for Target to look up.
     pub priority: i32,
     pub weight: u32,
+    /// The owning pool selects session-sticky providers. Target10 keeps one
+    /// primary/standby pair per `(pool, session)` instead of sampling weights.
+    pub session_sticky: bool,
     /// Set only for `provider.model` direct routes: the resolved provider and
     /// canonical model, carried on the plan because the synthetic `direct`
     /// pool has no manifest declaration for Target to look up.
@@ -504,6 +507,7 @@ impl V3VirtualRouter {
                     interface: target.interface.clone(),
                     priority: target.priority.unwrap_or(0),
                     weight: target.weight.unwrap_or(1),
+                    session_sticky: tier.selection == V3SelectionStrategy::Sticky,
                     direct_provider_model: tier.direct_provider_model.clone().or_else(|| {
                         // 隐式能力池（implicit:*）是 synthetic pool，无 manifest
                         // 池声明；Target 展开时必须直接按 provider/model 解析，
@@ -795,6 +799,10 @@ fn ordered_target_indices(
 ) -> Vec<usize> {
     match strategy {
         V3SelectionStrategy::Priority => priority_tier_indices(targets, |target| target.priority)
+            .into_iter()
+            .flatten()
+            .collect(),
+        V3SelectionStrategy::Sticky => priority_tier_indices(targets, |target| target.priority)
             .into_iter()
             .flatten()
             .collect(),

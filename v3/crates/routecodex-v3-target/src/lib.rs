@@ -9,6 +9,13 @@ use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTarget
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
+mod sticky;
+
+pub use sticky::{
+    V3StickyBinding, V3StickyKey, V3StickyMember, V3StickySelection, V3StickySelectionScope,
+    V3StickySelectionState,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3Target08KindClassified {
     pub route: V3Router07OpaqueTargetHitOnce,
@@ -434,7 +441,51 @@ impl V3TargetInterpreter {
         now_ms: u64,
         deterministic_sample: u64,
     ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+        self.select_available_with_health_inner(
+            expanded,
+            scheduling,
+            now_ms,
+            deterministic_sample,
+            None,
+        )
+    }
+
+    /// Session-sticky admission of `select_available_with_health`.
+    ///
+    /// The sticky scope only reorders candidates inside the highest eligible
+    /// route-tier/priority bucket; health, capability, availability and
+    /// request-local exclusions keep their existing meaning. Without a sticky
+    /// scope the plain weighted selection runs unchanged.
+    pub fn select_available_with_health_sticky<R: V3ProviderSchedulingReader>(
+        &self,
+        expanded: V3Target09CandidateSetExpanded,
+        scheduling: &R,
+        now_ms: u64,
+        deterministic_sample: u64,
+        sticky: &V3StickySelectionScope,
+    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+        self.select_available_with_health_inner(
+            expanded,
+            scheduling,
+            now_ms,
+            deterministic_sample,
+            Some(sticky),
+        )
+    }
+
+    fn select_available_with_health_inner<R: V3ProviderSchedulingReader>(
+        &self,
+        expanded: V3Target09CandidateSetExpanded,
+        scheduling: &R,
+        now_ms: u64,
+        deterministic_sample: u64,
+        sticky: Option<&V3StickySelectionScope>,
+    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
         let mut unavailable = Vec::new();
+        // Candidates of the sticky pool that this attempt cannot use because of
+        // health, cooldown or a declared availability window. Only these hand
+        // the main slot over; a request-local failure never does.
+        let mut sticky_cooled = BTreeSet::new();
         let mut eligible = Vec::new();
         // Automatic-cooldown exemption counts only candidates still admitted by
         // capability and declared availability, so a window-inactive or
@@ -457,6 +508,11 @@ impl V3TargetInterpreter {
                     candidate.interface_id,
                     candidate.auth_alias,
                     candidate.model_id
+                ));
+                sticky_cooled.insert(V3StickyKey::new(
+                    &candidate.provider_id,
+                    &candidate.auth_alias,
+                    &candidate.model_id,
                 ));
                 continue;
             }
@@ -520,6 +576,21 @@ impl V3TargetInterpreter {
                     near_limit,
                 ));
             } else {
+                // A request-local failure is only a per-attempt exclusion. Any
+                // health, quota, capacity or declared-availability block hands
+                // the sticky main slot over.
+                if sticky.is_some()
+                    && projection
+                        .blocked_scopes
+                        .iter()
+                        .any(|scope| scope != "request_local_provider_failure")
+                {
+                    sticky_cooled.insert(V3StickyKey::new(
+                        &candidate.provider_id,
+                        &candidate.auth_alias,
+                        &candidate.model_id,
+                    ));
+                }
                 unavailable.push(format_candidate_scheduling_unavailable(
                     candidate,
                     &projection,
@@ -588,19 +659,91 @@ impl V3TargetInterpreter {
             .drain(..)
             .filter(|(_, _, projection, _, _, _)| projection.effective_priority == max_priority)
             .collect::<Vec<_>>();
-        let total_weight = tier
+        // Session-sticky selection only applies to the final bucket when that
+        // bucket belongs to a sticky pool. Other pools keep weighted sampling.
+        let sticky_pools = expanded
+            .route
+            .target_plan
             .iter()
-            .map(|(_, _, projection, _, _, _)| projection.effective_weight_milli)
-            .sum::<u64>();
-        let mut point = deterministic_sample % total_weight.max(1);
-        let mut chosen = 0;
-        for (tier_index, (_, _, projection, _, _, _)) in tier.iter().enumerate() {
-            if point < projection.effective_weight_milli {
-                chosen = tier_index;
-                break;
+            .filter(|entry| entry.session_sticky)
+            .map(|entry| entry.pool_id.clone())
+            .collect::<BTreeSet<_>>();
+        let sticky_chosen = sticky.and_then(|scope| {
+            let tier_pool_id = tier.iter().find_map(|(_, candidate, _, _, _, _)| {
+                candidate
+                    .pool_ids
+                    .iter()
+                    .find(|pool_id| sticky_pools.contains(*pool_id))
+            })?;
+            let scope_key = scope.scope_key(tier_pool_id);
+            let universe = expanded
+                .candidates
+                .iter()
+                .filter(|candidate| {
+                    candidate
+                        .pool_ids
+                        .iter()
+                        .any(|pool_id| pool_id == tier_pool_id)
+                })
+                .map(|candidate| V3StickyMember {
+                    key: V3StickyKey::new(
+                        &candidate.provider_id,
+                        &candidate.auth_alias,
+                        &candidate.model_id,
+                    ),
+                    weight: candidate.weight,
+                    priority: candidate.priority,
+                })
+                .collect::<Vec<_>>();
+            let universe_keys = universe
+                .iter()
+                .map(|member| member.key.clone())
+                .collect::<BTreeSet<_>>();
+            let eligible_keys = tier
+                .iter()
+                .map(|(_, candidate, _, _, _, _)| {
+                    V3StickyKey::new(
+                        &candidate.provider_id,
+                        &candidate.auth_alias,
+                        &candidate.model_id,
+                    )
+                })
+                .collect::<BTreeSet<_>>();
+            let cooled = sticky_cooled
+                .iter()
+                .filter(|key| universe_keys.contains(*key))
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let selection = scope
+                .state
+                .select(&scope_key, &universe, &eligible_keys, &cooled)?;
+            tier.iter().position(|(_, candidate, _, _, _, _)| {
+                V3StickyKey::new(
+                    &candidate.provider_id,
+                    &candidate.auth_alias,
+                    &candidate.model_id,
+                ) == selection.chosen
+            })
+        });
+        let chosen = match sticky_chosen {
+            Some(index) => index,
+            None => {
+                let total_weight = tier
+                    .iter()
+                    .map(|(_, _, projection, _, _, _)| projection.effective_weight_milli)
+                    .sum::<u64>();
+                let mut point = deterministic_sample % total_weight.max(1);
+                let mut weighted = 0;
+                for (tier_index, (_, _, projection, _, _, _)) in tier.iter().enumerate() {
+                    if point < projection.effective_weight_milli {
+                        weighted = tier_index;
+                        break;
+                    }
+                    point = point.saturating_sub(projection.effective_weight_milli);
+                }
+                weighted
             }
-            point = point.saturating_sub(projection.effective_weight_milli);
-        }
+        };
         let (index, candidate, _, _, _, _) = tier.swap_remove(chosen);
         let mut route = expanded.route;
         if let Some(pool_id) = route
@@ -1016,6 +1159,15 @@ impl V3TargetInterpreter {
                 let start = *cursor % targets.len();
                 *cursor = cursor.wrapping_add(1);
                 order.rotate_left(start);
+            }
+            // A forwarder target is not a concrete provider, so it has no
+            // sticky identity. Order it deterministically by declared priority
+            // and let the concrete provider selection downstream own stickiness.
+            V3SelectionStrategy::Sticky => {
+                order = priority_tier_indices(targets, |target| target.priority)
+                    .into_iter()
+                    .flatten()
+                    .collect();
             }
         }
         order
