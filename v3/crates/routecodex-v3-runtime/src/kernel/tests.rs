@@ -1,6 +1,123 @@
 include!("../../tests/support/kernel_unit.rs");
 
 #[tokio::test]
+async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
+    use crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth;
+    use routecodex_v3_error::{V3Error05ExecutionAction, V3_TRANSIENT_TRANSPORT_HANG_CODE};
+
+    let manifest = provider_concurrency_two_key_then_other_provider_manifest(
+        "hang_sibling_a",
+        "hang_sibling_b",
+        80,
+    );
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let scope = test_failure_session_scope("default");
+    let raw = crate::nodes::build_v3_server_03_http_request_raw(
+        "test".into(),
+        scope.clone(),
+        "hang-sibling".into(),
+        "hang-sibling-exec".into(),
+        "POST".into(),
+        "/v1/responses".into(),
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw, health.clone(), 0);
+    let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
+        route: plan.expanded.route.clone(),
+        candidate: plan.expanded.candidates[0].clone(),
+        candidate_count: plan.expanded.candidates.len(),
+        unavailable_candidates: Vec::new(),
+        attempts: 1,
+        default_floor_protected: false,
+    };
+    let selected_key = candidate_key(&selected.candidate);
+    let sibling_key = candidate_key(&plan.expanded.candidates[1]);
+    let other_provider_key = candidate_key(&plan.expanded.candidates[2]);
+    assert_eq!(selected.candidate.provider_id, "hang_sibling_a");
+    assert_eq!(selected.candidate.auth_alias, "key1");
+    assert_eq!(sibling_key, format!("hang_sibling_a:default:key2:test"));
+    assert_eq!(
+        other_provider_key,
+        format!("hang_sibling_b:default:key:test")
+    );
+
+    let availability = health.session_bound_availability(&scope);
+    let source = crate::shared::direct_external_error(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3Transport13ResponsesHttpRequest",
+        V3_TRANSIENT_TRANSPORT_HANG_CODE,
+        "provider did not return response headers within configured SSE first-frame timeout",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: None,
+            code: Some(V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string()),
+            provider_id: Some("hang_sibling_a".to_string()),
+            upstream_request_id: None,
+            message: Some(
+                "provider did not return response headers within configured SSE first-frame timeout"
+                    .to_string(),
+            ),
+        },
+    )
+    .expect("typed transport hang source");
+    let mut failed_candidates = BTreeSet::new();
+    let mut retries = std::collections::BTreeMap::new();
+    let mut trace = Vec::new();
+    let result = run_v3_direct_provider_failure_policy(
+        &V3DirectProviderFailurePolicyContext {
+            failure_session_scope: &scope,
+            provider_health: &health,
+            availability: &availability,
+            expanded: Some(&plan.expanded),
+            provider_pinned: false,
+            now_epoch_ms: 0,
+        },
+        &selected,
+        source,
+        502,
+        &mut V3DirectProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut retries,
+            trace: &mut trace,
+        },
+    )
+    .await
+    .expect("transport hang policy");
+    let matches_reselect = matches!(
+        result.decision.action,
+        V3Error05ExecutionAction::WaitThenReselect { .. }
+            | V3Error05ExecutionAction::ReevaluateTarget
+    );
+    if !matches_reselect {
+        panic!(
+            "transport hang must reselect away from the failed provider: {:?}",
+            result.decision.action
+        );
+    }
+    let retry_key = result
+        .event
+        .as_ref()
+        .and_then(|event| event.next_provider_key.clone())
+        .expect("transport hang must publish the concrete next candidate");
+    assert_eq!(
+        retry_key, other_provider_key,
+        "a first-frame transport hang must skip the same provider's sibling auth key"
+    );
+    assert!(
+        failed_candidates.contains(&selected_key),
+        "the failed exact key stays request-local excluded"
+    );
+    assert!(
+        failed_candidates.contains(&sibling_key),
+        "the same provider's sibling auth key is excluded for this request"
+    );
+    assert!(
+        !failed_candidates.contains(&other_provider_key),
+        "another provider stays eligible for this request"
+    );
+}
+
+#[tokio::test]
 async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
     use crate::provider_failure_runtime_policy::{
         run_v3_relay_provider_failure_policy_with_response_source,
