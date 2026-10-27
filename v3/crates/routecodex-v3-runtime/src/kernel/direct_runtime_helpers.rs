@@ -1009,6 +1009,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             crate::provider_failure_runtime_policy::select_v3_target_with_session_then_global(
                 &routecodex_v3_target::V3TargetInterpreter::default(),
                 expanded.clone(),
+                context.failure_session_scope,
                 context.availability,
                 context.provider_health,
                 &failed_with_current,

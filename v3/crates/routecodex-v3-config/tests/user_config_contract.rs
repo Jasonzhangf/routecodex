@@ -298,6 +298,40 @@ fn provider_priority_schedule_defaults_to_beijing_and_projects() {
 }
 
 #[test]
+fn sticky_selection_roundtrips_and_projects_to_pool() {
+    let parsed = parse_v3_user_config_02_routing(&user_config(
+        "[servers.any-name.routes.default]\nselection = { strategy = \"sticky\" }\ntiers = [[{ use = \"cc/model\" }]]",
+    ))
+    .unwrap();
+    assert_eq!(
+        parsed.servers["any-name"].routes["default"]
+            .selection
+            .strategy,
+        routecodex_v3_config::V3SelectionStrategy::Sticky
+    );
+    // Default (priority) selection is omitted when serialized, so existing
+    // configs round-trip unchanged.
+    let default_pool = parse_v3_user_config_02_routing(&user_config(
+        "[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }]]",
+    ))
+    .unwrap();
+    let serialized = toml::to_string(&default_pool).unwrap();
+    assert!(
+        !serialized.contains("selection"),
+        "unexpected: {serialized}"
+    );
+    // The sticky pool projects into the manifest as a sticky pool selection.
+    let projected =
+        project("[servers.any-name.routes.default]\nselection = { strategy = \"sticky\" }\ntiers = [[{ use = \"cc/model\" }]]");
+    assert_eq!(
+        projected.route_groups["any-name"].pools["default"]
+            .selection
+            .strategy,
+        routecodex_v3_config::V3SelectionStrategy::Sticky
+    );
+}
+
+#[test]
 fn provider_priority_schedule_rejects_invalid_timezone_and_pool_tier() {
     let invalid_timezone = user_config(
         "[servers.any-name.provider_priority_schedule]\ntimezone = \"Mars/Olympus\"\npeak_periods = [{ start = \"09:00\", end = \"18:00\" }]\n[[servers.any-name.provider_priority_schedule.providers]]\nprovider = \"cc\"\npeak_tier = 1\noff_peak_tier = 1\n[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }]]",
