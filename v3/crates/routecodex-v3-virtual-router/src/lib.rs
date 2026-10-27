@@ -12,7 +12,14 @@ pub struct V3RouterRequestFacts {
     pub entry_protocol: String,
     pub client_model: Option<String>,
     pub capabilities: BTreeSet<String>,
+    /// Complete-request token count. This is the full payload estimate and is
+    /// carried to Target for provider capacity/context-window estimation. It
+    /// must never drive pool `min_input_tokens`/`max_input_tokens` matching.
     pub input_tokens: u64,
+    /// Current-turn token count. Pool classification matching reads only this
+    /// value, so completed history cannot push a request into a
+    /// min/max-bounded pool. It is not the full request capacity.
+    pub current_turn_input_tokens: u64,
     pub route_classification: RouteClassification,
 }
 
@@ -23,6 +30,7 @@ impl V3RouterRequestFacts {
             client_model: None,
             capabilities: BTreeSet::new(),
             input_tokens: 0,
+            current_turn_input_tokens: 0,
             route_classification: RouteClassification::default(),
         }
     }
@@ -566,10 +574,10 @@ fn pool_matches(
         })
         && rule
             .min_input_tokens
-            .is_none_or(|minimum| facts.input_tokens >= minimum)
+            .is_none_or(|minimum| facts.current_turn_input_tokens >= minimum)
         && rule
             .max_input_tokens
-            .is_none_or(|maximum| facts.input_tokens <= maximum)
+            .is_none_or(|maximum| facts.current_turn_input_tokens <= maximum)
 }
 
 fn pool_route_signal_matches(pool_id: &str, rule: &V3RoutePoolMatchManifest, signal: &str) -> bool {

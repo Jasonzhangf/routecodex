@@ -451,7 +451,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.provider_compat_profile.request
   owner_feature_id: v3.provider_compat_profile_loading
-  summary: The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability and provider-policy carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, projects the provider-declared output cap, applies the provider-configurable reasoning-effort override, and preserves representable latest images and paired tool receipts independently of target capability metadata.
+  summary: The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability and provider-policy carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, projects the provider-declared output cap, applies the provider-configurable reasoning-effort override, and preserves representable images and paired tool receipts across the complete forwarded history independently of target capability metadata.
   edges:
   - step_id: v3-provider-compat-profile-request-01
     from_node: V3HubReqOutbound07ProviderSemantic
@@ -1978,13 +1978,13 @@ chains:
       - v3.route.request_facts
       side_channel_writes:
       - v3.route.selection_plan
-      invariant: one_fixed_order_classified_pool_only
-      invariant_detail: resolve_route_pool_plan selects the first configured non-empty pool
-        in the fixed order hosted web_search, multimodal, longcontext, coding, thinking, search, tools,
-        default; it builds no implicit capability pool and appends no default or other pool
-        after the matched pool. Optional pools absent or empty are skipped; default is the
-        required non-empty no-match endpoint. A longcontext candidate is skipped when
-        its pool is absent or empty.
+    invariant: one_fixed_order_classified_pool_only
+    invariant_detail: resolve_route_pool_plan selects the first configured non-empty pool
+      in the fixed order hosted web_search, multimodal, longcontext, coding, thinking, search, tools,
+      default; it builds no implicit capability pool and appends no default or other pool
+      after the matched pool. Optional pools absent or empty are skipped; default is the
+      required non-empty no-match endpoint. A longcontext candidate is skipped when
+      its pool is absent or empty.
   - step_id: v3-rd-05
     from_node: V3Router06RoutePoolResolved
     to_node: V3Router07OpaqueTargetHitOnce
@@ -8811,7 +8811,7 @@ chains:
       produces: [v3.route.policy_action]
       side_channel_reads: [v3.route.policy_action]
       side_channel_writes: []
-      invariant: ordinary_requests_do_not_consume_history_pool_action
+    invariant: ordinary_requests_do_not_consume_history_pool_action
   - step_id: v3-route-policy-04
     from_node: V3Router05RequestClassified
     to_node: V3Router06RoutePoolResolved

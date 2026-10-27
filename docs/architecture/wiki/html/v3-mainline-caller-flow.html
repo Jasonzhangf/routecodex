@@ -275,7 +275,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>93 functional paths</span>
-        <span>586 caller edges</span>
+        <span>587 caller edges</span>
       </div>
     </header>
 
@@ -468,7 +468,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>15</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>483</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>484</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -1113,7 +1113,7 @@ flowchart TD
             <span class="chain-id">05A Responses Direct</span>
             <span>VR/Target 选出具体 provider 后先做协议决策；同协议才进 Direct，mismatch 走 Relay/显式错误，且 Direct 投影禁止 raw 直投 client。</span>
             <span><code>v3.responses_direct.required_mainline</code></span>
-            <span>17 edges · 19 resources · v3-provider-responses, v3-runtime, v3-server, v3-target, v3-virtual-router</span>
+            <span>18 edges · 19 resources · v3-provider-responses, v3-runtime, v3-server, v3-target, v3-virtual-router</span>
           </a>
 <a class="branch-card" href="#chain-v3_responses_websocket_v2_transport_hardening">
             <span class="chain-id">v 3.responses.websocket_v 2.transport_hardening</span>
@@ -1446,7 +1446,7 @@ flowchart TD
         <span class="summary-sub">1 edges · <code>v3.provider_compat_profile.request</code> · V3HubReqOutbound07ProviderSemantic → ProviderReqCompat06ProviderCompat</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability and provider-policy carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, projects the provider-declared output cap, applies the provider-configurable reasoning-effort override, and preserves representable latest images and paired tool receipts independently of target capability metadata.</p>
+        <p class="chain-summary">The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability and provider-policy carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, projects the provider-declared output cap, applies the provider-configurable reasoning-effort override, and preserves representable images and paired tool receipts across the complete forwarded history independently of target capability metadata.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.provider_compat_profile_loading</code></span>
           <span>modules: <code>provider-compat-core · v3-runtime::hub_v1</code></span>
@@ -2287,7 +2287,7 @@ flowchart TD
       <summary>
         <span class="summary-main">05A Responses Direct</span>
         <span class="summary-sub">VR/Target 选出具体 provider 后先做协议决策；同协议才进 Direct，mismatch 走 Relay/显式错误，且 Direct 投影禁止 raw 直投 client。</span>
-        <span class="summary-sub">17 edges · <code>v3.responses_direct.required_mainline</code> · V3Config05ManifestPublished → V3Server16HttpFrame</span>
+        <span class="summary-sub">18 edges · <code>v3.responses_direct.required_mainline</code> · V3Config05ManifestPublished → V3Server16HttpFrame</span>
       </summary>
       <div class="branch-body">
         <p class="chain-summary">Required no-shortcut lifecycle. P6 is source-bound from Server03 through Server16; protocol execution planning decides initial Direct-or-Relay from the selected Target10, and provider-failure reselection may recompute that decision for the newly selected Target10 without re-entering the Router.</p>
@@ -2323,6 +2323,7 @@ flowchart TD
   n_v3_responses_direct_required_mainline_1 --&gt;|v3-rd-02&lt;br/&gt;v3-runtime → v3-runtime| n_v3_responses_direct_required_mainline_2
   n_v3_responses_direct_required_mainline_2 --&gt;|v3-rd-03&lt;br/&gt;v3-runtime → v3-virtual-router| n_v3_responses_direct_required_mainline_3
   n_v3_responses_direct_required_mainline_3 --&gt;|v3-rd-04&lt;br/&gt;v3-runtime → v3-virtual-router| n_v3_responses_direct_required_mainline_4
+  n_v3_responses_direct_required_mainline_3 --&gt;|v3-rd-04-single-pool&lt;br/&gt;v3-runtime → v3-virtual-router| n_v3_responses_direct_required_mainline_4
   n_v3_responses_direct_required_mainline_4 --&gt;|v3-rd-05&lt;br/&gt;v3-runtime → v3-virtual-router| n_v3_responses_direct_required_mainline_5
   n_v3_responses_direct_required_mainline_5 --&gt;|v3-rd-06&lt;br/&gt;v3-runtime → v3-target| n_v3_responses_direct_required_mainline_6
   n_v3_responses_direct_required_mainline_6 --&gt;|v3-rd-07&lt;br/&gt;v3-runtime → v3-target| n_v3_responses_direct_required_mainline_7
@@ -2347,6 +2348,7 @@ flowchart TD
 <tr><td><code>v3-rd-02</code></td><td><code>V3Server03HttpRequestRaw</code><br/>→ <code>V3Req04StandardizedResponses</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.protocol_fields</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.normal_payload</code></div></td><td><code>execute_v3_p5_routing_runtime</code><br/><small>routecodex-v3-runtime/src/foundation.rs</small></td><td><code>build_v3_req_04_standardized_responses_from_v3_server_03</code><br/><small>routecodex-v3-runtime/src/nodes.rs</small></td></tr>
 <tr><td><code>v3-rd-03</code></td><td><code>V3Req04StandardizedResponses</code><br/>→ <code>V3Router05RequestClassified</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code> <code>v3.config.published_manifest</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.route.request_facts</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.route.request_facts</code></div></td><td><code>execute_v3_p5_routing_runtime</code><br/><small>routecodex-v3-runtime/src/foundation.rs</small></td><td><code>V3VirtualRouter::classify_request_with_facts</code><br/><small>routecodex-v3-virtual-router/src/lib.rs</small></td></tr>
 <tr><td><code>v3-rd-04</code></td><td><code>V3Router05RequestClassified</code><br/>→ <code>V3Router06RoutePoolResolved</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.config.published_manifest</code> <code>v3.route.request_facts</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.route.selection_plan</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.route.request_facts</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.route.selection_plan</code></div></td><td><code>execute_v3_p5_routing_runtime</code><br/><small>routecodex-v3-runtime/src/foundation.rs</small></td><td><code>V3VirtualRouter::resolve_route_pool_plan</code><br/><small>routecodex-v3-virtual-router/src/lib.rs</small></td></tr>
+<tr><td><code>v3-rd-04-single-pool</code></td><td><code>V3Router05RequestClassified</code><br/>→ <code>V3Router06RoutePoolResolved</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.config.published_manifest</code> <code>v3.route.request_facts</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.route.selection_plan</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.route.request_facts</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.route.selection_plan</code></div></td><td><code>execute_v3_p5_routing_runtime</code><br/><small>routecodex-v3-runtime/src/foundation.rs</small></td><td><code>V3VirtualRouter::resolve_route_pool_plan</code><br/><small>routecodex-v3-virtual-router/src/lib.rs</small></td></tr>
 <tr><td><code>v3-rd-05</code></td><td><code>V3Router06RoutePoolResolved</code><br/>→ <code>V3Router07OpaqueTargetHitOnce</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.route.selection_plan</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.route.opaque_target</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.route.selection_plan</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.route.opaque_target</code></div></td><td><code>execute_v3_p5_routing_runtime</code><br/><small>routecodex-v3-runtime/src/foundation.rs</small></td><td><code>V3VirtualRouter::hit_opaque_target_plan_once</code><br/><small>routecodex-v3-virtual-router/src/lib.rs</small></td></tr>
 <tr><td><code>v3-rd-06</code></td><td><code>V3Router07OpaqueTargetHitOnce</code><br/>→ <code>V3Target08KindClassified</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.route.opaque_target</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.route.opaque_target</code></div></td><td><code>execute_v3_p5_routing_runtime</code><br/><small>routecodex-v3-runtime/src/foundation.rs</small></td><td><code>V3TargetInterpreter::classify_kind</code><br/><small>routecodex-v3-target/src/lib.rs</small></td></tr>
 <tr><td><code>v3-rd-07</code></td><td><code>V3Target08KindClassified</code><br/>→ <code>V3Target09CandidateSetExpanded</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.route.opaque_target</code> <code>v3.config.published_manifest</code> <code>v3.config.provider_priority_schedule</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.target.candidate_set</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.route.opaque_target</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.target.candidate_set</code></div></td><td><code>execute_v3_p5_routing_runtime</code><br/><small>routecodex-v3-runtime/src/foundation.rs</small></td><td><code>V3TargetInterpreter::expand_candidates</code><br/><small>routecodex-v3-target/src/lib.rs</small></td></tr>
@@ -4600,7 +4602,7 @@ flowchart TD
         <span class="summary-sub">2 edges · <code>vr.current_turn_typed_route_facts</code> · V3HubReqExecution05Planned → V3CurrentTurnRouteFacts</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">Typed current-turn route facts are produced before VR selection and cannot be reconstructed from request history or business text.</p>
+        <p class="chain-summary">Typed current-turn route facts are produced before VR selection and cannot be reconstructed from request history or business text. Images, tools, search calls and their results only classify when they belong structurally to the current turn; earlier user/tool turns remain business history and never change the current classification.</p>
         <div class="branch-meta">
           <span>owner: <code>vr.current_turn_typed_route_facts</code></span>
           <span>modules: <code>routecodex-v3-route-classifier · v3-runtime</code></span>
@@ -4921,7 +4923,7 @@ flowchart TD
         <span class="summary-sub">12 edges · <code>v3.route_policy.condition_evaluation</code> · V3RouteTurnObservation → V3Error02Classified</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">Typed turn observations are projected into a bounded history window and evaluated into a route-pool-only policy action before Virtual Router selection.</p>
+        <p class="chain-summary">Typed turn observations are projected into a bounded history window and evaluated into a route-pool-only policy action before Virtual Router selection. For ordinary requests, history-derived observations remain evidence only and no longer switch the fixed-order matched pool; only the registered compact route object is policy-selectable.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.route_policy_condition_evaluation</code></span>
           <span>modules: <code>routecodex-v3-route-classifier · v3-error · v3-provider-responses · v3-runtime · v3-runtime::hub_v1 · v3-virtual-router</code></span>

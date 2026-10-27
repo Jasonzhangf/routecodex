@@ -1,10 +1,12 @@
-//! 最后一个真实图片载体驱动视觉路由；后续纯文本不改变图片边界。
-//! Chat、Responses、Gemini 共用该规则；已清理的占位不产生视觉能力。
+//! 分类只读取当前轮 typed 投影；历史图片仍完整保留在标准化请求中。
+//! Chat、Responses、Gemini 共用该规则。
 
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_runtime::{
-    build_v3_chat_req_04_standardized_from_v3_server_03, build_v3_router_request_facts_for_entry,
+    build_v3_chat_req_04_standardized_from_v3_server_03,
+    build_v3_req_04_standardized_responses_from_v3_server_03,
+    build_v3_router_request_facts_for_entry,
     build_v3_router_request_facts_from_v3_req_04_chat, build_v3_server_03_http_request_raw,
 };
 use serde_json::json;
@@ -44,7 +46,7 @@ targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key
 }
 
 #[test]
-fn v3_routing_facts_keep_latest_chat_image_after_text_only_turn() {
+fn v3_req04_preserves_history_chat_image_while_text_only_turn_stays_thinking() {
     let raw = build_v3_server_03_http_request_raw(
         "server".to_string(),
         V3ProviderFailureSessionScope::new("server", "default", "request").expect("failure scope"),
@@ -62,6 +64,22 @@ fn v3_routing_facts_keep_latest_chat_image_after_text_only_turn() {
                         {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
                     ]
                 },
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_hist",
+                        "type": "function",
+                        "function": {"name": "read_image", "arguments": "{}"}
+                    }]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_hist",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,TOOL_ONLY"}}
+                    ]
+                },
                 {"role": "assistant", "content": "old image described"},
                 {"role": "user", "content": "continue without image"}
             ]
@@ -70,22 +88,41 @@ fn v3_routing_facts_keep_latest_chat_image_after_text_only_turn() {
 
     let normalized =
         build_v3_chat_req_04_standardized_from_v3_server_03(raw).expect("chat req04 normalize");
+    assert_eq!(
+        normalized.body["messages"][0]["content"][1]["image_url"]["url"],
+        "data:image/png;base64,AAAA",
+        "history image bytes must stay in the standardized Chat request"
+    );
+    assert_eq!(normalized.body["messages"][2]["tool_call_id"], "call_hist");
+    assert_eq!(
+        normalized.body["messages"][2]["content"][0]["image_url"]["url"],
+        "data:image/png;base64,TOOL_ONLY",
+        "history tool image bytes and pairing must stay in the standardized Chat request"
+    );
     let facts = build_v3_router_request_facts_from_v3_req_04_chat(
         &normalized,
         &manifest_with_websearch_for_routing_facts(),
     );
 
-    assert!(
-        facts.capabilities.contains("multimodal"),
-        "latest image must route multimodal after a text-only turn; caps={:?}",
+    assert_eq!(
+        facts.route_classification.route_name, "thinking",
+        "a later text-only turn must not inherit the history image; caps={:?}",
         facts.capabilities
     );
-    assert!(facts.capabilities.contains("vision"));
+    assert!(!facts.capabilities.contains("multimodal"));
+    assert!(!facts.capabilities.contains("vision"));
 }
 
 #[test]
-fn v3_routing_facts_keep_latest_responses_image_after_text_only_turn() {
-    let request = json!({
+fn v3_req04_preserves_history_responses_image_while_text_only_turn_stays_thinking() {
+    let raw = build_v3_server_03_http_request_raw(
+        "server".to_string(),
+        V3ProviderFailureSessionScope::new("server", "default", "request").expect("failure scope"),
+        "request".to_string(),
+        "execution".to_string(),
+        "POST".to_string(),
+        "/v1/responses".to_string(),
+        json!({
         "model": "deepseek-v4-flash",
         "input": [
             {
@@ -105,24 +142,34 @@ fn v3_routing_facts_keep_latest_responses_image_after_text_only_turn() {
                 "content": [{"type": "input_text", "text": "continue"}]
             }
         ]
-    });
+        }),
+    );
+
+    let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
+        .expect("responses req04 normalize");
+    assert_eq!(
+        normalized.body["input"][0]["content"][1]["image_url"],
+        "data:image/png;base64,AAAA",
+        "history image bytes must stay in the standardized Responses request"
+    );
 
     let facts = build_v3_router_request_facts_for_entry(
-        &request,
+        &normalized.body,
         "responses",
         TEST_LONGCONTEXT_THRESHOLD_TOKENS,
     );
 
-    assert!(
-        facts.capabilities.contains("multimodal"),
-        "latest responses image must route multimodal after a text-only turn; caps={:?}",
+    assert_eq!(
+        facts.route_classification.route_name, "thinking",
+        "a later text-only turn must not inherit the history image; caps={:?}",
         facts.capabilities
     );
-    assert!(facts.capabilities.contains("vision"));
+    assert!(!facts.capabilities.contains("multimodal"));
+    assert!(!facts.capabilities.contains("vision"));
 }
 
 #[test]
-fn v3_routing_facts_keep_latest_gemini_image_after_text_only_turn() {
+fn v3_gemini_history_image_does_not_classify_text_only_current_turn() {
     let request = json!({
         "model": "gemini-2.5-flash",
         "contents": [
@@ -144,12 +191,13 @@ fn v3_routing_facts_keep_latest_gemini_image_after_text_only_turn() {
         TEST_LONGCONTEXT_THRESHOLD_TOKENS,
     );
 
-    assert!(
-        facts.capabilities.contains("multimodal"),
-        "latest gemini image must route multimodal after a text-only turn; caps={:?}",
+    assert_eq!(
+        facts.route_classification.route_name, "thinking",
+        "a later text-only turn must not inherit the history image; caps={:?}",
         facts.capabilities
     );
-    assert!(facts.capabilities.contains("vision"));
+    assert!(!facts.capabilities.contains("multimodal"));
+    assert!(!facts.capabilities.contains("vision"));
 }
 
 #[test]

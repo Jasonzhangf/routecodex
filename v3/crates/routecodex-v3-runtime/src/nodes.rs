@@ -169,7 +169,7 @@ pub struct V3Req04StandardizedResponses {
 }
 
 /// Chat 入口标准化（与 V3Req04StandardizedResponses 同构，协议不同）：
-/// 校验 chat 协议必需字段（messages），应用唯一登记的历史图片占位清理；
+/// 校验 chat 协议必需字段（messages）；历史图片与工具配对保持原值。
 /// chat 不携带 Responses continuation 字段。
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Req04StandardizedChat {
@@ -290,7 +290,7 @@ pub struct V3Resp15ClientPayload {
 pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
     raw: V3Server03HttpRequestRaw,
 ) -> Result<V3Req04StandardizedResponses, String> {
-    let mut body = raw.body;
+    let body = raw.body;
     match body.get("previous_response_id") {
         None | Some(Value::Null) => None,
         Some(Value::String(value)) => {
@@ -304,9 +304,6 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
             return Err("previous_response_id must be null or a non-empty string".to_string())
         }
     };
-    // 与 chat direct / relay req_inbound 一致：历史轮图片占位符做语义等价归一化
-    // （只清理历史轮图片引用，不影响当前轮输入；禁止在不可变区做任何修补）。
-    crate::hub_v1::normalize_v3_history_image_placeholders(&mut body);
     Ok(V3Req04StandardizedResponses {
         memory_raw_capture_guidance_injected: false,
         server_id: raw.server_id,
@@ -326,11 +323,10 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
 pub fn build_v3_chat_req_04_standardized_from_v3_server_03(
     raw: V3Server03HttpRequestRaw,
 ) -> Result<V3Req04StandardizedChat, String> {
-    let mut body = raw.body;
+    let body = raw.body;
     if body.get("messages").and_then(Value::as_array).is_none() {
         return Err("Chat request payload must contain a messages array".to_string());
     }
-    crate::hub_v1::normalize_v3_history_image_placeholders(&mut body);
     Ok(V3Req04StandardizedChat {
         server_id: raw.server_id,
         port: raw.port,
@@ -390,12 +386,9 @@ pub fn build_v3_router_request_facts_for_entry(
     entry_protocol: &str,
     longcontext_threshold_tokens: Option<u64>,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-    // 与真实路由一致：路由判定必须基于历史轮图片已归一化的 payload
-    // （禁止 diagnostics dry-run / tests 与 cleaned 标准化路径发散）。
-    let mut normalized = body.clone();
-    crate::hub_v1::normalize_v3_history_image_placeholders(&mut normalized);
+    // 分类只读取当前轮 typed 投影，不读取或改写业务历史 payload。
     build_v3_router_request_facts_for_entry_with_control(
-        &normalized,
+        body,
         entry_protocol,
         longcontext_threshold_tokens,
         false,
@@ -410,10 +403,8 @@ pub(crate) fn build_v3_router_request_facts_for_entry_and_endpoint(
     longcontext_threshold_tokens: Option<u64>,
     manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-    let mut normalized = body.clone();
-    crate::hub_v1::normalize_v3_history_image_placeholders(&mut normalized);
     let mut facts = build_v3_router_request_facts_for_entry_with_control(
-        &normalized,
+        body,
         entry_protocol,
         longcontext_threshold_tokens,
         is_v3_compaction_endpoint(endpoint),
@@ -434,10 +425,8 @@ pub(crate) fn build_v3_router_request_facts_for_entry_with_manifest(
     longcontext_threshold_tokens: Option<u64>,
     manifest: &routecodex_v3_config::V3Config05ManifestPublished,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-    let mut normalized = body.clone();
-    crate::hub_v1::normalize_v3_history_image_placeholders(&mut normalized);
     build_v3_router_request_facts_for_entry_with_control(
-        &normalized,
+        body,
         entry_protocol,
         longcontext_threshold_tokens,
         false,
@@ -502,6 +491,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
             .map(ToOwned::to_owned),
         capabilities,
         input_tokens,
+        current_turn_input_tokens: current_turn_tokens,
         route_classification,
     }
 }
@@ -516,11 +506,9 @@ pub(crate) fn build_v3_router_request_facts_for_resolve_target(
     is_compaction: bool,
     manifest: &routecodex_v3_config::V3Config05ManifestPublished,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-    let mut normalized = body.clone();
-    crate::hub_v1::normalize_v3_history_image_placeholders(&mut normalized);
     let compaction = is_compaction || is_v3_compaction_endpoint(endpoint);
     let mut facts = build_v3_router_request_facts_for_entry_with_control(
-        &normalized,
+        body,
         entry_protocol,
         longcontext_threshold_tokens,
         compaction,
@@ -891,6 +879,44 @@ mod tests {
 
         assert!(normalized.body["previous_response_id"].is_null());
         assert_eq!(normalized.body["model"], "gpt-5.5");
+    }
+
+    #[test]
+    fn req04_responses_keeps_history_tool_image_and_call_pairing() {
+        let raw = build_v3_server_03_http_request_raw(
+            "server".to_string(),
+            V3ProviderFailureSessionScope::new("server", "default", "request")
+                .expect("failure scope"),
+            "request".to_string(),
+            "execution".to_string(),
+            "POST".to_string(),
+            "/v1/responses".to_string(),
+            json!({
+                "model": "gpt-5.5",
+                "input": [
+                    {"type":"message","role":"user","content":[{"type":"input_text","text":"look"}]},
+                    {"type":"function_call","call_id":"call_hist","name":"read_image","arguments":"{}"},
+                    {"type":"function_call_output","call_id":"call_hist","output":[
+                        {"type":"input_image","image_url":"data:image/png;base64,HISTORY_TOOL"}
+                    ]},
+                    {"type":"message","role":"assistant","content":[{"type":"output_text","text":"seen"}]},
+                    {"type":"message","role":"user","content":[{"type":"input_text","text":"explain"}]}
+                ]
+            }),
+        );
+
+        let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
+            .expect("Responses Req04 must normalize");
+
+        assert_eq!(
+            normalized.body["input"][2]["call_id"], "call_hist",
+            "history tool call pairing must survive standardization"
+        );
+        assert_eq!(
+            normalized.body["input"][2]["output"][0]["image_url"],
+            "data:image/png;base64,HISTORY_TOOL",
+            "history tool image bytes must survive standardization"
+        );
     }
 
     #[test]
@@ -1379,6 +1405,13 @@ mod tests {
             "complete request tokens must remain available for provider capacity: {}",
             facts.input_tokens
         );
+        assert!(
+            facts.current_turn_input_tokens < 1_000
+                && facts.current_turn_input_tokens < facts.input_tokens,
+            "current-turn tokens must exclude completed history: current={} full={}",
+            facts.current_turn_input_tokens,
+            facts.input_tokens
+        );
         assert_eq!(
             facts.route_classification.route_name, "thinking",
             "completed history must not satisfy the current-turn longcontext threshold"
@@ -1444,6 +1477,13 @@ targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key
         assert!(
             facts.input_tokens >= 1_000,
             "public builder must preserve complete request capacity tokens: {}",
+            facts.input_tokens
+        );
+        assert!(
+            facts.current_turn_input_tokens < 1_000
+                && facts.current_turn_input_tokens < facts.input_tokens,
+            "public builder must keep current-turn tokens separate from full capacity: current={} full={}",
+            facts.current_turn_input_tokens,
             facts.input_tokens
         );
         assert_eq!(
@@ -1683,11 +1723,10 @@ targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key
         let request = json!({
             "model": "MiniMax-M3",
             "input": [
-                {"type": "web_search", "query": "routecodex"},
                 {
                     "type": "message",
                     "role": "user",
-                    "content": [{"type": "input_text", "text": "search routecodex"}]
+                    "content": [{"type": "input_text", "text": "search routecodex"}, {"type": "web_search", "query": "routecodex"}]
                 }
             ]
         });

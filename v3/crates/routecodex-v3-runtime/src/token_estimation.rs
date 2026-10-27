@@ -6,8 +6,8 @@ use tiktoken_rs::{
 };
 
 use routecodex_v3_route_classifier::{
-    project_v3_current_turn_entries_from_value, ChatTurnEntry, ChatTurnRole, ResponsesTurnEntry,
-    ResponsesTurnKind, ResponsesTurnRole, V3CurrentTurnEntries,
+    project_v3_current_turn_entries_from_value, ChatTurnEntry, ChatTurnRole, GeminiTurnRole,
+    ResponsesTurnEntry, ResponsesTurnRole, V3CurrentTurnEntries,
 };
 
 use crate::nodes::detect_v3_media_kind;
@@ -18,6 +18,16 @@ pub(crate) fn estimate_v3_request_tokens(body: &Value) -> u64 {
     if let Some(messages) = body.get("messages").and_then(Value::as_array) {
         for message in messages {
             total_tokens += count_v3_message_tokens(message, encoder);
+        }
+    }
+    if let Some(contents) = body.get("contents").and_then(Value::as_array) {
+        for content in contents {
+            if let Some(role) = content.get("role").and_then(Value::as_str) {
+                total_tokens += count_v3_text_tokens(role, encoder);
+            }
+            if let Some(parts) = content.get("parts") {
+                total_tokens += count_v3_content_tokens(parts, encoder);
+            }
         }
     }
     let request_extras = count_v3_request_extras_tokens(body, encoder);
@@ -83,11 +93,23 @@ pub(crate) fn estimate_v3_current_turn_tokens(body: &Value) -> u64 {
                 object.insert("input".to_string(), Value::Array(items[start..].to_vec()));
             };
         }
-        V3CurrentTurnEntries::Gemini(_) | V3CurrentTurnEntries::PromptText(_) => {
-            // The estimator has no Gemini/prompt token path and the Gemini
-            // entry carries no slicing contract in the shared request
-            // estimator; keep the complete-request accounting unchanged for
-            // these entry protocols.
+        V3CurrentTurnEntries::Gemini(entries) => {
+            let Some(contents) = body.get("contents").and_then(Value::as_array) else {
+                return 0;
+            };
+            let mut start = entries
+                .iter()
+                .rposition(|entry| entry.role == GeminiTurnRole::User)
+                .unwrap_or(0);
+            while start > 0 && entries[start - 1].role == GeminiTurnRole::User {
+                start -= 1;
+            }
+            object.insert(
+                "contents".to_string(),
+                Value::Array(contents[start..].to_vec()),
+            );
+        }
+        V3CurrentTurnEntries::PromptText(_) => {
             return estimate_v3_request_tokens(body);
         }
         V3CurrentTurnEntries::Empty => return 0,
@@ -116,19 +138,9 @@ fn responses_current_turn_start(entries: &[ResponsesTurnEntry]) -> usize {
     let Some(mut start) = latest_user_index else {
         return 0;
     };
-    if entries[start].kind == ResponsesTurnKind::Other {
-        return if entries[..start]
-            .iter()
-            .any(|entry| entry.role == ResponsesTurnRole::User)
-        {
-            start
-        } else {
-            0
-        };
-    }
     while start > 0 {
         let previous = &entries[start - 1];
-        if previous.role != ResponsesTurnRole::User || previous.kind == ResponsesTurnKind::Other {
+        if previous.role != ResponsesTurnRole::User {
             break;
         }
         start -= 1;
@@ -347,7 +359,12 @@ fn count_v3_content_object_tokens(
     map: &serde_json::Map<String, Value>,
     encoder: &CoreBPE,
 ) -> usize {
-    if detect_v3_media_kind(map).is_some() {
+    if detect_v3_media_kind(map).is_some()
+        || map.contains_key("inlineData")
+        || map.contains_key("inline_data")
+        || map.contains_key("fileData")
+        || map.contains_key("file_data")
+    {
         return 0;
     }
     if let Some(text) = map.get("text").and_then(Value::as_str) {
@@ -630,6 +647,23 @@ mod tests {
     }
 
     #[test]
+    fn gemini_current_turn_estimate_excludes_history_and_counts_consecutive_users() {
+        let request = json!({"contents": [
+            {"role":"user","parts":[{"text":"old history ".repeat(4000)}]},
+            {"role":"model","parts":[{"text":"old answer"}]},
+            {"role":"user","parts":[{"text":"current request ".repeat(2000)}]},
+            {"role":"user","parts":[{"text":"followup"}]}
+        ]});
+        let full = estimate_v3_request_tokens(&request);
+        let current = estimate_v3_current_turn_tokens(&request);
+        assert!(current > 1000, "current turn must be counted: {current}");
+        assert!(
+            full > current,
+            "history must count only in the full estimate: full={full} current={current}"
+        );
+    }
+
+    #[test]
     fn v3_current_turn_estimate_excludes_completed_history() {
         let request = json!({
             "model": "gpt-5.5",
@@ -677,6 +711,29 @@ mod tests {
         assert!(
             current > 1_000,
             "active current-turn tool output must count toward the estimate: {current}"
+        );
+    }
+
+    #[test]
+    fn v3_current_turn_estimate_merges_consecutive_user_messages() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [
+                {"role":"user","content":"search the first part ".repeat(3_000)},
+                {"role":"user","content":"and the second part"}
+            ]
+        });
+
+        let full = estimate_v3_request_tokens(&request);
+        let current = estimate_v3_current_turn_tokens(&request);
+
+        assert!(
+            current > 1_000,
+            "consecutive user messages must merge into the current-turn estimate: {current}"
+        );
+        assert!(
+            current >= full,
+            "merged current turn must not drop the earlier user message: current={current} full={full}"
         );
     }
 }

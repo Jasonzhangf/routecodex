@@ -138,7 +138,7 @@ fn classify_error(
 fn relay_fresh_uses_sdk_input_for_resolution_and_preserves_complete_value() {
     let scope = "resolve_target_sdk_input";
     let manifest = Arc::new(manifest(scope));
-    let matched = body("client-responses");
+    let matched = body("primary.gpt-test");
     let unmatched = body("unmatched-model");
 
     let (matched_output, matched_side) =
@@ -150,7 +150,7 @@ fn relay_fresh_uses_sdk_input_for_resolution_and_preserves_complete_value() {
 
     assert_eq!(matched_output, matched);
     assert_eq!(unmatched_output, unmatched);
-    assert_eq!(matched_side.opaque_hit.pool_id, "client_responses");
+    assert_eq!(matched_side.opaque_hit.pool_id, "direct");
     assert_eq!(unmatched_side.opaque_hit.pool_id, "default");
     assert_ne!(
         matched_side.opaque_hit.pool_id,
@@ -162,7 +162,7 @@ fn relay_fresh_uses_sdk_input_for_resolution_and_preserves_complete_value() {
 fn direct_fresh_returns_typed_target_and_keeps_complete_business_value() {
     let scope = "resolve_target_direct";
     let manifest = Arc::new(manifest(scope));
-    let request = body("client-responses");
+    let request = body("primary.gpt-test");
 
     let (output, side) = run_v3_resolve_target_operator(
         request.clone(),
@@ -171,7 +171,7 @@ fn direct_fresh_returns_typed_target_and_keeps_complete_business_value() {
     .expect("DirectFresh must execute the real canonical operator");
 
     assert_eq!(output, request);
-    assert_eq!(side.opaque_hit.pool_id, "client_responses");
+    assert_eq!(side.opaque_hit.pool_id, "direct");
     assert!(side.route_policy_pending.is_some());
     assert_eq!(
         side.route_policy_scope
@@ -221,7 +221,7 @@ fn relay_without_model_uses_endpoint_model_only_for_routing() {
         server_id: scope.to_string(),
         entry_kind: "responses".to_string(),
         endpoint_path: "/v1/responses".to_string(),
-        requested_model: Some("client-responses".to_string()),
+        requested_model: Some("primary.gpt-test".to_string()),
         deterministic_sample: 0,
     };
 
@@ -229,7 +229,7 @@ fn relay_without_model_uses_endpoint_model_only_for_routing() {
         run_v3_resolve_target_operator(request.clone(), mode).expect("routing view succeeds");
 
     assert_eq!(output, request);
-    assert_eq!(side.opaque_hit.pool_id, "client_responses");
+    assert_eq!(side.opaque_hit.pool_id, "direct");
     assert_eq!(output.get("model"), None);
 }
 
@@ -329,8 +329,8 @@ fn endpoint_model_controls_routing_without_rewriting_body_model() {
     else {
         unreachable!();
     };
-    *requested_model = Some("client-responses".into());
+    *requested_model = Some("primary.gpt-test".into());
     let (output, side) = run_v3_resolve_target_operator(request.clone(), mode).unwrap();
     assert_eq!(output, request);
-    assert_eq!(side.opaque_hit.pool_id, "client_responses");
+    assert_eq!(side.opaque_hit.pool_id, "direct");
 }

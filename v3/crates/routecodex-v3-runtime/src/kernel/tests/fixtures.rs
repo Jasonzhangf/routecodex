@@ -290,8 +290,11 @@ auth = { type = "api_key", entries = [{ alias = "key", env = "DEFAULT_KEY" }] }
 
 [route_groups.default.pools.client_model]
 selection = { strategy = "priority" }
-match = { precedence = 10, entry_protocol = "responses", models = ["client-model"], min_input_tokens = 1, max_input_tokens = 100 }
-targets = [{ kind = "provider_model", provider = "optional", model = "test", key = "key", priority = 1 }]
+match = { precedence = 10, entry_protocol = "responses", required_capabilities = ["thinking"], min_input_tokens = 1, max_input_tokens = 100 }
+targets = [
+	{ kind = "provider_model", provider = "optional", model = "test", key = "key", priority = 2 },
+	{ kind = "provider_model", provider = "default", model = "test", key = "key", priority = 1 },
+]
 
 [route_groups.default.pools.default]
 selection = { strategy = "priority" }
