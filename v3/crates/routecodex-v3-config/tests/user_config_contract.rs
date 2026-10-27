@@ -1,8 +1,10 @@
 use routecodex_v3_config::{
     parse_v3_config_02_authoring, parse_v3_user_config_02_routing,
-    project_v3_user_config_03_authoring, V3UserConfig02RoutingSelectionParsed,
+    project_v3_user_config_03_authoring, V3UserConfig02RoutingSelectionParsed, V3UserConfigStore,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 const INTERNAL_BASE: &str = r#"
 version = 3
@@ -39,6 +41,54 @@ fn project(routes: &str) -> routecodex_v3_config::V3Config02AuthoringParsed {
         &catalogue(),
     )
     .unwrap()
+}
+
+fn write_real_config(label: &str, routes: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-user-config-{label}-{}-{}",
+        std::process::id(),
+        std::thread::current().name().unwrap_or("test")
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let token_path = root.join("secrets").join("cc.token");
+    fs::create_dir_all(token_path.parent().unwrap()).unwrap();
+    fs::write(&token_path, "test-secret-not-for-projection\n").unwrap();
+    write_provider(&root, &token_path);
+    let config_path = root.join("config.toml");
+    fs::write(&config_path, user_config(routes)).unwrap();
+    config_path
+}
+
+fn write_provider(root: &Path, token_path: &Path) {
+    let provider_path = root.join("provider").join("cc").join("config.v2.toml");
+    fs::create_dir_all(provider_path.parent().unwrap()).unwrap();
+    fs::write(
+        provider_path,
+        format!(
+            r#"version = "2.0.0"
+providerId = "cc"
+
+[provider]
+id = "cc"
+enabled = true
+type = "responses"
+baseURL = "https://cc.invalid/v1"
+defaultModel = "model"
+compatibilityProfile = "chat:test"
+
+[provider.auth]
+type = "apikey"
+entries = [{{ alias = "key", tokenFile = "{}" }}]
+
+[provider.models."model"]
+wireName = "model"
+capabilities = ["text"]
+supportsStreaming = true
+"#,
+            token_path.display()
+        ),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -85,15 +135,64 @@ fn arbitrary_server_and_port_project_to_isolated_runtime_groups() {
 }
 
 #[test]
-fn omitted_standard_pool_inherits_default_targets() {
+fn omitted_standard_pools_do_not_inherit_default_targets() {
     let projected =
         project("[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }]]");
-    assert_eq!(
-        projected.route_groups["any-name"].pools["coding"].targets[0]
-            .model
-            .as_deref(),
-        Some("model")
+    let pools = &projected.route_groups["any-name"].pools;
+    assert!(!pools["default"].targets.is_empty());
+    for pool_id in ["thinking", "coding", "longcontext"] {
+        assert!(
+            pools[pool_id].targets.is_empty(),
+            "{pool_id} must not inherit default targets"
+        );
+    }
+}
+
+#[test]
+fn explicitly_empty_non_default_pool_projects_without_targets() {
+    let projected = project(
+        "[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }]]\n[servers.any-name.routes.longcontext]\ntiers = []",
     );
+    assert!(projected.route_groups["any-name"].pools["longcontext"]
+        .targets
+        .is_empty());
+}
+
+#[test]
+fn omitted_and_empty_non_default_pools_compile_in_real_internal_template() {
+    for (label, extra_routes) in [
+        ("omitted-pools", ""),
+        (
+            "explicit-empty-tools",
+            "\n[servers.any-name.routes.tools]\ntiers = []",
+        ),
+    ] {
+        let routes = format!(
+            "[servers.any-name.routes.default]\ntiers = [[{{ use = \"cc/model\" }}]]{extra_routes}"
+        );
+        let config_path = write_real_config(label, &routes);
+        let manifest = V3UserConfigStore::new(&config_path)
+            .load_manifest()
+            .expect("default-only user config must compile");
+        let pools = &manifest.route_groups["any-name"].pools;
+        assert!(!pools["default"].targets.is_empty());
+        for pool_id in [
+            "compact",
+            "thinking",
+            "coding",
+            "longcontext",
+            "multimodal",
+            "web_search",
+            "search",
+            "tools",
+        ] {
+            assert!(
+                pools[pool_id].targets.is_empty(),
+                "{label}: {pool_id} must stay empty in the published manifest"
+            );
+        }
+        fs::remove_dir_all(config_path.parent().unwrap()).unwrap();
+    }
 }
 
 #[test]
@@ -108,14 +207,38 @@ fn rejects_custom_pool_and_legacy_group_fields() {
 }
 
 #[test]
-fn rejects_missing_default_empty_tier_and_duplicate_member() {
+fn rejects_missing_or_empty_default() {
     for routes in [
         "[servers.any-name.routes.thinking]\ntiers = [[{ use = \"cc/model\" }]]",
+        "[servers.any-name.routes.default]\ntiers = []",
         "[servers.any-name.routes.default]\ntiers = [[]]",
+    ] {
+        assert!(parse_v3_user_config_02_routing(&user_config(routes)).is_err());
+    }
+}
+
+#[test]
+fn rejects_empty_inner_tier_and_duplicate_member() {
+    for routes in [
+        "[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }]]\n[servers.any-name.routes.thinking]\ntiers = [[]]",
         "[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }], [{ use = \"cc/model\" }]]",
     ] {
         assert!(parse_v3_user_config_02_routing(&user_config(routes)).is_err());
     }
+}
+
+#[test]
+fn non_empty_non_default_pool_still_validates_references() {
+    let parsed = parse_v3_user_config_02_routing(&user_config(
+        "[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }]]\n[servers.any-name.routes.thinking]\ntiers = [[{ use = \"cc/missing\" }]]",
+    ))
+    .unwrap();
+    assert!(project_v3_user_config_03_authoring(
+        parsed,
+        parse_v3_config_02_authoring(INTERNAL_BASE).unwrap(),
+        &catalogue(),
+    )
+    .is_err());
 }
 
 #[test]

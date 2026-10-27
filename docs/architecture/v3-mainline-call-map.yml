@@ -1959,6 +1959,32 @@ chains:
       - v3.route.request_facts
       side_channel_writes:
       - v3.route.selection_plan
+  - step_id: v3-rd-04-single-pool
+    from_node: V3Router05RequestClassified
+    to_node: V3Router06RoutePoolResolved
+    caller_symbol: execute_v3_p5_routing_runtime
+    caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+    callee_symbol: V3VirtualRouter::resolve_route_pool_plan
+    callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.virtual_router_full_function
+    resource_flow:
+      consumes:
+      - v3.config.published_manifest
+      - v3.route.request_facts
+      produces:
+      - v3.route.selection_plan
+      side_channel_reads:
+      - v3.route.request_facts
+      side_channel_writes:
+      - v3.route.selection_plan
+      invariant: one_fixed_order_classified_pool_only
+      invariant_detail: resolve_route_pool_plan selects the first configured non-empty pool
+        in the fixed order hosted web_search, multimodal, longcontext, coding, thinking, search, tools,
+        default; it builds no implicit capability pool and appends no default or other pool
+        after the matched pool. Optional pools absent or empty are skipped; default is the
+        required non-empty no-match endpoint. A longcontext candidate is skipped when
+        its pool is absent or empty.
   - step_id: v3-rd-05
     from_node: V3Router06RoutePoolResolved
     to_node: V3Router07OpaqueTargetHitOnce
@@ -7937,7 +7963,10 @@ chains:
 - chain_id: vr.current_turn_typed_route_facts
   owner_feature_id: vr.current_turn_typed_route_facts
   summary: Typed current-turn route facts are produced before VR selection and
-    cannot be reconstructed from request history or business text.
+    cannot be reconstructed from request history or business text. Images, tools,
+    search calls and their results only classify when they belong structurally to
+    the current turn; earlier user/tool turns remain business history and never
+    change the current classification.
   manifest: docs/architecture/manifests/vr.route_classifier.mainline.yml
   edges:
   - step_id: vr-current-turn-01
@@ -8735,7 +8764,10 @@ chains:
 
 - chain_id: v3.route_policy.condition_evaluation
   owner_feature_id: v3.route_policy_condition_evaluation
-  summary: Typed turn observations are projected into a bounded history window and evaluated into a route-pool-only policy action before Virtual Router selection.
+  summary: Typed turn observations are projected into a bounded history window and evaluated
+    into a route-pool-only policy action before Virtual Router selection. For ordinary
+    requests, history-derived observations remain evidence only and no longer switch the
+    fixed-order matched pool; only the registered compact route object is policy-selectable.
   edges:
   - step_id: v3-route-policy-01
     from_node: V3RouteTurnObservation
@@ -8779,6 +8811,7 @@ chains:
       produces: [v3.route.policy_action]
       side_channel_reads: [v3.route.policy_action]
       side_channel_writes: []
+      invariant: ordinary_requests_do_not_consume_history_pool_action
   - step_id: v3-route-policy-04
     from_node: V3Router05RequestClassified
     to_node: V3Router06RoutePoolResolved

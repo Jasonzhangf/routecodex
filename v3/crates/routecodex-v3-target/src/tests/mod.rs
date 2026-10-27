@@ -316,30 +316,11 @@ fn provider_priority_schedule_honors_timezone_and_cross_midnight_window() {
 }
 
 #[test]
-fn provider_priority_schedule_excludes_synthetic_implicit_pools() {
-    let mut manifest = manifest();
-    manifest
-        .providers
-        .get_mut("a")
-        .unwrap()
-        .models
-        .get_mut("m")
-        .unwrap()
-        .capabilities
-        .push("web_search".into());
-    manifest
-        .servers
-        .get_mut("s")
-        .unwrap()
-        .provider_priority_schedule
-        .providers = vec![
-        routecodex_v3_config::V3ProviderPriorityScheduleEntryAuthoringConfig {
-            provider: "a".into(),
-            peak_tier: 2,
-            off_peak_tier: 1,
-        },
-    ];
-
+fn provider_priority_schedule_excludes_synthetic_direct_pool() {
+    // Direct provider.model targets are a synthetic `direct` pool, not a
+    // declared route pool. The declared provider-priority schedule orders tiers
+    // inside a real pool only and must leave the direct pin untouched.
+    let manifest = provider_priority_schedule_manifest();
     let router = V3VirtualRouter::default();
     let classified = router
         .classify_request_with_facts(
@@ -348,10 +329,10 @@ fn provider_priority_schedule_excludes_synthetic_implicit_pools() {
             "/v1/responses",
             V3RouterRequestFacts {
                 entry_protocol: "responses".into(),
-                client_model: None,
-                capabilities: BTreeSet::from(["web_search".into()]),
+                client_model: Some("a.m".into()),
+                capabilities: BTreeSet::new(),
                 input_tokens: 10,
-                route_classification: test_route("web_search", &["web_search", "default"]),
+                route_classification: RouteClassification::default(),
             },
         )
         .unwrap();
@@ -359,11 +340,16 @@ fn provider_priority_schedule_excludes_synthetic_implicit_pools() {
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "direct");
+    assert!(hit
+        .target_plan
+        .iter()
+        .all(|entry| entry.pool_id == "direct"));
     assert!(
-        hit.target_plan
+        !hit.target_plan
             .iter()
-            .any(|entry| entry.pool_id == "implicit:web_search"),
-        "test requires a synthetic implicit capability pool"
+            .any(|entry| entry.pool_id.starts_with("implicit:")),
+        "the router must not synthesize implicit capability pools"
     );
 
     let target = V3TargetInterpreter::default();
@@ -371,20 +357,19 @@ fn provider_priority_schedule_excludes_synthetic_implicit_pools() {
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
     assert!(
-        !expanded
-            .route_pool_tier_priorities
-            .contains_key("implicit:web_search"),
-        "synthetic implicit pools must not receive declared route-pool tiers"
+        !expanded.route_pool_tier_priorities.contains_key("direct"),
+        "synthetic direct pools must not receive declared route-pool tiers"
     );
     let candidate = expanded
         .candidates
         .iter()
         .find(|candidate| candidate.provider_id == "a")
-        .expect("provider a must be expanded from the implicit pool");
+        .expect("provider a must be expanded from the direct pin");
+    assert_eq!(candidate.priority, 1);
     assert_eq!(
         target.provider_priority_schedule_priority(&expanded, candidate, 1_767_229_200_000),
         candidate.priority,
-        "schedule must not alter an implicit-pool candidate"
+        "schedule must not alter a synthetic direct candidate"
     );
 }
 
@@ -1068,8 +1053,8 @@ targets = [{ kind = "forwarder", id = "client", priority = 1 }]
     assert_eq!(expanded.candidates.len(), 1);
     assert_eq!(expanded.candidates[0].provider_id, "upstream");
     assert_eq!(expanded.candidates[0].model_id, "wire-model");
-    // Symmetric with `pool_targets_route_model` Forwarder branch: the candidate
-    // is addressable by the forwarder model and every target model it wraps.
+    // The candidate is addressable by the forwarder model and every target
+    // model it wraps.
     assert_eq!(
         expanded.candidates[0].visible_model_ids,
         vec!["client-model", "wire-model"]
@@ -1152,7 +1137,7 @@ targets = [{ kind = "forwarder", id = "fwd_gpt", priority = 1 }]
 }
 
 #[test]
-fn requested_model_filter_ignores_provider_aliases_for_runtime_matching() {
+fn non_direct_model_alias_routes_like_auto() {
     let source = r#"
 version = 3
 [servers.s]
@@ -1174,6 +1159,79 @@ targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5
     let manifest =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
     let router = V3VirtualRouter::default();
+    let target = V3TargetInterpreter::default();
+    let expand = |client_model: &str| {
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some(client_model.to_string()),
+                    capabilities: BTreeSet::new(),
+                    input_tokens: 10,
+                    route_classification: RouteClassification::default(),
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        let expanded = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .expect("non-direct model names must not filter the selected pool");
+        let candidates = expanded
+            .candidates
+            .iter()
+            .map(|candidate| (candidate.provider_id.clone(), candidate.model_id.clone()))
+            .collect::<Vec<_>>();
+        (expanded.route.pool_id, candidates)
+    };
+
+    let (alias_pool, alias_candidates) = expand("MiniMax-M3");
+    let (auto_pool, auto_candidates) = expand("auto");
+    assert_eq!(alias_pool, "default");
+    assert_eq!(auto_pool, "default");
+    assert_eq!(alias_candidates, auto_candidates);
+    assert_eq!(
+        alias_candidates,
+        vec![("default_gpt".to_string(), "gpt-5.5".to_string())]
+    );
+}
+
+#[test]
+fn provider_model_alias_does_not_filter_selected_classification_pool() {
+    // A provider-model alias is a client-visible name, not a pool selector or a
+    // candidate filter. After the virtual router selects a classification pool
+    // (here default), the alias must not remove the provider candidate and must
+    // not fabricate a no-candidate error.
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.default_gpt]
+type = "responses"
+base_url = "http://gpt.invalid/v1"
+default_model = "gpt-5.5"
+auth = { type = "api_key", entries = [{ alias = "key", env = "GPT_KEY" }] }
+[providers.default_gpt.models."gpt-5.5"]
+aliases = ["chat-client"]
+capabilities = ["text"]
+[route_groups.g.pools.chat_client]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses", models = ["chat-client"] }
+targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5", key = "key", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5", key = "key", priority = 1 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
     let classified = router
         .classify_request_with_facts(
             &manifest,
@@ -1181,10 +1239,10 @@ targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5
             "/v1/responses",
             V3RouterRequestFacts {
                 entry_protocol: "responses".into(),
-                client_model: Some("MiniMax-M3".into()),
+                client_model: Some("chat-client".into()),
                 capabilities: BTreeSet::new(),
                 input_tokens: 10,
-                route_classification: RouteClassification::default(),
+                route_classification: test_route("default", &["default"]),
             },
         )
         .unwrap();
@@ -1192,16 +1250,18 @@ targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "default");
     let target = V3TargetInterpreter::default();
-    let error = target
+    let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
-        .unwrap_err();
-    assert_eq!(
-        error,
-        V3TargetError::RequestedModelUnavailable {
-            model_id: "MiniMax-M3".into()
-        }
-    );
+        .expect("the provider-model alias must not filter the selected default pool candidate");
+    assert_eq!(expanded.candidates.len(), 1);
+    assert_eq!(expanded.candidates[0].provider_id, "default_gpt");
+    assert_eq!(expanded.candidates[0].model_id, "gpt-5.5");
+    assert!(expanded.candidates[0]
+        .visible_model_ids
+        .iter()
+        .any(|id| id == "chat-client"));
 }
 
 #[test]
@@ -1289,7 +1349,7 @@ targets = [
 }
 
 #[test]
-fn requested_explicit_model_route_maps_to_declared_targets_without_alias_requirement() {
+fn non_direct_model_name_uses_classification_default_pool() {
     let source = r#"
 version = 3
 [servers.s]
@@ -1350,19 +1410,19 @@ targets = [
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
-    assert_eq!(hit.pool_id, "minimax");
+    assert_eq!(hit.pool_id, "default");
     assert_eq!(hit.request_client_model.as_deref(), Some("MiniMax-M3"));
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
-        .unwrap();
+        .expect("a non-direct model name must not select a match.models pool");
     assert_eq!(
         expanded
             .candidates
             .iter()
             .map(|candidate| candidate.provider_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["minimax", "default_gpt"]
+        vec!["default_gpt"]
     );
     let selected = target
         .select_available(
@@ -1373,7 +1433,83 @@ targets = [
             0,
         )
         .unwrap();
-    assert_eq!(selected.candidate.provider_id, "minimax");
+    assert_eq!(selected.candidate.provider_id, "default_gpt");
+}
+
+#[test]
+fn explicit_provider_model_pins_exact_provider_and_model() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.controlled]
+type = "openai_chat"
+base_url = "http://controlled.invalid/v1"
+default_model = "chat-wire-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "CONTROLLED_KEY" }] }
+[providers.controlled.models.chat-wire-model]
+wire_name = "chat-wire-model"
+aliases = ["chat-client-alias"]
+capabilities = ["text", "tools"]
+[providers.default_gpt]
+type = "responses"
+base_url = "http://gpt.invalid/v1"
+default_model = "gpt-5.5"
+auth = { type = "api_key", entries = [{ alias = "key", env = "GPT_KEY" }] }
+[providers.default_gpt.models."gpt-5.5"]
+capabilities = ["text"]
+[route_groups.g.pools.chat_client]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "openai_chat", models = ["chat-client-alias"] }
+targets = [{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "key", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5", key = "key", priority = 1 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/chat/completions",
+            V3RouterRequestFacts {
+                entry_protocol: "openai_chat".into(),
+                client_model: Some("controlled.chat-client-alias".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 10,
+                route_classification: RouteClassification::default(),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "direct");
+    assert_eq!(hit.request_client_model.as_deref(), Some("chat-wire-model"));
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .expect("a legal explicit provider.model must expand its exact target");
+    assert_eq!(expanded.candidates.len(), 1);
+    assert_eq!(expanded.candidates[0].provider_id, "controlled");
+    assert_eq!(expanded.candidates[0].model_id, "chat-wire-model");
+    assert_eq!(expanded.candidates[0].wire_model, "chat-wire-model");
+    let selected = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(selected.candidate.provider_id, "controlled");
+    assert_eq!(selected.candidate.model_id, "chat-wire-model");
 }
 
 #[test]
@@ -1414,28 +1550,122 @@ fn nested_forwarder_expands_and_reselects_inside_same_route_hit() {
 }
 
 #[test]
-fn optional_exhaustion_continues_inside_captured_default_floor() {
-    let expanded = expanded_tools();
-    assert_eq!(expanded.route.hit_count, 1);
-    assert_eq!(expanded.route.target_plan[0].pool_id, "tools");
+fn optional_exhaustion_continues_inside_selected_pool_tiers() {
+    // The request hits one pool. Inside that pool the provider tiers keep the
+    // user-confirmed order: an unavailable higher tier continues to the next
+    // tier, and the selected pool is never left for another pool.
+    let mut manifest = manifest();
+    let pool = manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("tools")
+        .unwrap();
+    pool.targets.push(V3RoutePoolTargetManifest {
+        kind: V3RouteTargetKind::ProviderModel,
+        id: None,
+        provider: Some("b".into()),
+        model: Some("m".into()),
+        key: Some("kb".into()),
+        interface: None,
+        priority: Some(2),
+        weight: Some(1),
+    });
+    // The default pool stays reachable only through its own pool: a distinct
+    // provider c exists there and must never appear when the tools pool is hit.
+    let mut provider_c = manifest.providers.get("b").unwrap().clone();
+    provider_c.id = "c".into();
+    provider_c.base_url = "http://c.invalid/v1".into();
+    provider_c.auth.entries[0].alias = "kc".into();
+    provider_c.auth.entries[0].env = Some("KEY_C".into());
+    manifest.providers.insert("c".into(), provider_c);
+    manifest
+        .forwarders
+        .get_mut("inner")
+        .unwrap()
+        .targets
+        .push(V3ForwarderTargetManifest {
+            kind: V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("c".into()),
+            model: Some("m".into()),
+            key: Some("kc".into()),
+            interface: None,
+            priority: Some(3),
+            weight: Some(1),
+        });
+
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client".into()),
+                capabilities: BTreeSet::from(["tools".into()]),
+                input_tokens: 10,
+                route_classification: test_route("tools", &["tools", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.hit_count, 1);
+    assert_eq!(hit.pool_id, "tools");
+    assert!(hit.target_plan.iter().all(|entry| entry.pool_id == "tools"));
+
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    assert_eq!(expanded.candidates.len(), 2);
     assert!(expanded
-        .route
-        .target_plan
+        .candidates
         .iter()
-        .any(|entry| entry.pool_id == "default"));
-    let selected = V3TargetInterpreter::default()
+        .all(|candidate| candidate.pool_ids == vec!["tools".to_string()]));
+    assert!(expanded
+        .candidates
+        .iter()
+        .all(|candidate| candidate.provider_id != "c"));
+
+    let selected = target
         .select_available(
-            expanded,
+            expanded.clone(),
             &Availability {
-                blocked: BTreeSet::from(["a:default:ka:m".into()]),
+                blocked: BTreeSet::from(["b:default:kb:m".into()]),
             },
             0,
         )
-        .unwrap();
+        .expect("the lower in-pool tier continues after the higher tier is unavailable");
     assert_eq!(selected.route.hit_count, 1);
-    assert_eq!(selected.candidate.provider_id, "b");
-    assert_eq!(selected.candidate.path[0], "pool:default");
-    assert_eq!(selected.attempts, 2);
+    assert_eq!(selected.candidate.provider_id, "a");
+    assert_eq!(selected.candidate.auth_alias, "ka");
+    assert_eq!(selected.route.pool_id, "tools");
+    assert_eq!(selected.candidate.path[0], "pool:tools");
+    assert_eq!(selected.attempts, 2, "the lower tier is the next attempt");
+
+    let exhausted = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::from(["a:default:ka:m".into(), "b:default:kb:m".into()]),
+            },
+            0,
+        )
+        .expect_err("the selected pool must never fall through to another pool");
+    assert_eq!(
+        exhausted.attempted_candidates,
+        vec![
+            "b:default:kb:m:availability(b:default:kb:m)".to_string(),
+            "a:default:ka:m:availability(a:default:ka:m)".to_string(),
+        ],
+        "exhaustion reports only the candidates of the selected pool"
+    );
 }
 
 #[test]
@@ -1595,19 +1825,26 @@ fn default_floor_does_not_reselect_request_local_failed_candidate() {
 }
 
 #[test]
-fn duplicate_optional_candidate_retains_default_floor_provenance() {
+fn optional_candidate_keeps_only_selected_pool_provenance() {
     let expanded = expanded_tools();
     let first = expanded
         .candidates
         .first()
         .expect("tools route must keep first candidate");
     assert_eq!(first.provider_id, "a");
+    // Provider `a` is also declared in the default pool, but the request hit the
+    // tools pool. Provenance must describe the selected pool only: no default
+    // floor membership may leak into the candidate.
+    assert_eq!(first.pool_ids, vec!["tools".to_string()]);
     assert!(
-        first.default_pool_member,
-        "deduped optional candidate must remember default membership"
+        !first.default_pool_member,
+        "a candidate reached through another pool must not carry default pool membership"
     );
-    assert!(first.pool_ids.iter().any(|pool_id| pool_id == "tools"));
-    assert!(first.pool_ids.iter().any(|pool_id| pool_id == "default"));
+    assert!(expanded
+        .route
+        .target_plan
+        .iter()
+        .all(|entry| entry.pool_id == "tools"));
 }
 
 #[test]
@@ -1638,6 +1875,117 @@ targets = [
   { kind = "provider_model", provider = "vision", model = "m", key = "key", priority = 1 },
   { kind = "provider_model", provider = "text", model = "m", key = "key", priority = 2 }
 ]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::from(["multimodal".into()]),
+                input_tokens: 10,
+                route_classification: test_route("multimodal", &["multimodal", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "default");
+    assert!(hit
+        .target_plan
+        .iter()
+        .all(|entry| entry.pool_id == "default"));
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+
+    let vision_first = target
+        .select_available(
+            expanded.clone(),
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .expect("an available vision candidate serves the multimodal request");
+    assert_eq!(vision_first.candidate.provider_id, "vision");
+    assert_eq!(vision_first.route.pool_id, "default");
+
+    let selected = target
+        .select_available(
+            expanded.clone(),
+            &Availability {
+                blocked: BTreeSet::from(["vision:default:key:m".into()]),
+            },
+            0,
+        )
+        .expect("the same pool keeps a projectable text candidate after vision cools");
+    assert_eq!(selected.candidate.provider_id, "text");
+    assert_eq!(selected.route.pool_id, "default");
+    assert!(selected
+        .unavailable_candidates
+        .iter()
+        .any(|reason| reason == "vision:default:key:m:availability(vision:default:key:m)"));
+    assert!(selected.candidate.required_capabilities.is_empty());
+
+    let exhausted = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::from([
+                    "vision:default:key:m".into(),
+                    "text:default:key:m".into(),
+                ]),
+            },
+            0,
+        )
+        .expect_err("the same pool must exhaust without falling to another pool");
+    assert_eq!(
+        exhausted.attempted_candidates,
+        vec![
+            "text:default:key:m:availability(text:default:key:m)".to_string(),
+            "vision:default:key:m:availability(vision:default:key:m)".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn multimodal_pool_exhaustion_never_falls_back_to_default_pool() {
+    // A routed multimodal pool that only contains an incapable candidate must
+    // exhaust itself and never cross into another pool for service.
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.vision]
+type = "responses"
+base_url = "http://vision.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "VISION_KEY" }] }
+[providers.vision.models.m]
+capabilities = ["text", "multimodal"]
+[providers.text]
+type = "responses"
+base_url = "http://text.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "TEXT_KEY" }] }
+[providers.text.models.m]
+capabilities = ["text"]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "vision", model = "m", key = "key", priority = 1 }
+]
 [route_groups.g.pools.multimodal]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses", required_capabilities = ["multimodal"] }
@@ -1666,25 +2014,37 @@ targets = [
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "multimodal");
+    assert!(hit
+        .target_plan
+        .iter()
+        .all(|entry| entry.pool_id == "multimodal"));
+
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected = target
+    assert!(
+        expanded
+            .candidates
+            .iter()
+            .all(|candidate| candidate.provider_id != "vision"),
+        "the incapable-by-capability default pool must not be expanded at all"
+    );
+    let exhausted = target
         .select_available(
             expanded,
             &Availability {
-                blocked: BTreeSet::from(["vision:default:key:m".into()]),
+                blocked: BTreeSet::new(),
             },
             0,
         )
-        .expect("cooled vision permits the default text projection");
-    assert_eq!(selected.candidate.provider_id, "text");
-    assert_eq!(selected.route.pool_id, "default");
-    assert!(selected
-        .unavailable_candidates
-        .iter()
-        .any(|reason| reason == "vision:default:key:m:availability(vision:default:key:m)"));
+        .expect_err("a multimodal pool without a capable candidate exhausts itself");
+    assert_eq!(
+        exhausted.attempted_candidates,
+        vec!["text:key:m:capability_mismatch".to_string()],
+        "exhaustion stays inside the selected multimodal pool"
+    );
 }
 
 #[test]
@@ -1773,7 +2133,119 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
 }
 
 #[test]
-fn cooled_hosted_search_tier_selects_default_provider_without_search_capability() {
+fn cooled_hosted_search_tier_exhausts_without_crossing_to_default_pool() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.search]
+type = "responses"
+base_url = "http://search.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "SEARCH_KEY" }] }
+[providers.search.models.m]
+capabilities = ["text", "web_search"]
+[providers.text]
+type = "responses"
+base_url = "http://text.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "TEXT_KEY" }] }
+[providers.text.models.m]
+capabilities = ["text"]
+[providers.search2]
+type = "responses"
+base_url = "http://search2.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "SEARCH2_KEY" }] }
+[providers.search2.models.m]
+capabilities = ["text", "web_search"]
+[route_groups.g.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [
+  { kind = "provider_model", provider = "search", model = "m", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "search2", model = "m", key = "key", priority = 2 }
+]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key", priority = 1 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::from(["web_search".into()]),
+                input_tokens: 10,
+                route_classification: test_route("web_search", &["web_search", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "web_search");
+    assert!(hit
+        .target_plan
+        .iter()
+        .all(|entry| entry.pool_id == "web_search"));
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    let selected = target
+        .select_available(
+            expanded.clone(),
+            &Availability {
+                blocked: BTreeSet::from(["search:default:key:m".to_string()]),
+            },
+            0,
+        )
+        .expect("the next in-pool web_search tier serves after the higher tier cools");
+    assert_eq!(selected.candidate.provider_id, "search2");
+    assert_eq!(
+        selected.route.pool_id, "web_search",
+        "the web_search pool remains selected after its higher tier cools"
+    );
+    assert!(selected
+        .unavailable_candidates
+        .iter()
+        .any(|reason| reason == "search:default:key:m:availability(search:default:key:m)"));
+
+    let exhausted = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::from([
+                    "search:default:key:m".to_string(),
+                    "search2:default:key:m".to_string(),
+                ]),
+            },
+            0,
+        )
+        .expect_err("a fully cooled web_search pool must not cross into the default pool");
+    assert_eq!(
+        exhausted.attempted_candidates,
+        vec![
+            "search2:default:key:m:availability(search2:default:key:m)".to_string(),
+            "search:default:key:m:availability(search:default:key:m)".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn cooled_single_search_candidate_keeps_its_pool_recovery_opportunity() {
+    // The pool has one provider and a recovery opportunity. Target must keep
+    // that provider selectable instead of terminating or crossing to default.
     let source = r#"
 version = 3
 [servers.s]
@@ -1828,21 +2300,35 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
+
+    struct AutomaticCooldown;
+    impl V3ProviderAvailabilityReader for AutomaticCooldown {
+        fn availability(
+            &self,
+            provider_id: &str,
+            auth_alias: Option<&str>,
+            model_id: Option<&str>,
+            _now_ms: u64,
+        ) -> V3ProviderAvailabilityProjection {
+            V3ProviderAvailabilityProjection {
+                provider_id: provider_id.into(),
+                interface_id: "default".into(),
+                auth_alias: auth_alias.map(Into::into),
+                model_id: model_id.map(Into::into),
+                available: false,
+                blocked_scopes: vec!["provider_key_health_cooldown".into()],
+            }
+        }
+    }
+
     let selected = target
-        .select_available(
-            expanded,
-            &Availability {
-                blocked: BTreeSet::from(["search:default:key:m".to_string()]),
-            },
-            0,
-        )
-        .expect("default must serve when hosted search is cooled");
-    assert_eq!(selected.candidate.provider_id, "text");
+        .select_available(expanded, &AutomaticCooldown, 0)
+        .expect("a pool with a recovery opportunity keeps its provider selectable");
+    assert_eq!(selected.candidate.provider_id, "search");
     assert_eq!(
-        selected.route.pool_id, "default",
-        "an empty web_search pool must not remain the selected pool"
+        selected.route.pool_id, "web_search",
+        "the recovery opportunity stays inside the selected pool"
     );
-    assert!(selected.candidate.required_capabilities.is_empty());
 }
 
 #[test]
@@ -2736,7 +3222,7 @@ fn malformed_internal_member_does_not_escape_while_a_sibling_remains() {
 }
 
 #[test]
-fn requested_model_with_pool_forwarder_route_condition_filters_to_that_model() {
+fn non_direct_model_name_keeps_all_default_pool_forwarder_candidates() {
     let source = r#"
 version = 3
 [servers.s]
@@ -2798,18 +3284,23 @@ targets = [
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    assert_eq!(expanded.candidates.len(), 1);
-    assert_eq!(expanded.candidates[0].provider_id, "minimax");
-    assert_eq!(expanded.candidates[0].model_id, "MiniMax-M3");
+    assert_eq!(
+        expanded
+            .candidates
+            .iter()
+            .map(|candidate| candidate.provider_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["minimax", "default_gpt"],
+        "a non-direct model name must not filter the selected default pool"
+    );
 }
 
 #[test]
 fn forwarder_target_model_visible_ids_match_requested_target_model() {
-    // 22:34 生产 503 复刻：forwarder.model=gpt-5.6 而 forwarder target
-    // model=gpt-5.6-sol（client 请求裸 gpt-5.6-sol）。pool_targets_route_model
-    // 判定 Forwarder 分支命中 target.model，但 expand_forwarder 只把
-    // forwarder.model 推入 visible_model_ids，导致 requested filter 把候选
-    // 全部滤光 -> RequestedModelUnavailable -> 假 no-candidate 503。
+    // A bare model name routes through classification, so the forwarder target
+    // model (gpt-5.6-sol) must stay part of the candidate's client-visible
+    // identities. No model-name filter may remove the selected pool's
+    // candidate.
     let source = r#"
 version = 3
 [servers.s]
@@ -2857,9 +3348,8 @@ targets = [{ kind = "forwarder", id = "fwd_free", priority = 1 }]
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .expect(
-            "forwarder target model must be part of visible_model_ids so the \
-             requested-model filter matches the same identity pool_targets_route_model \
-             already matched",
+            "a bare model name must not filter the selected default pool's \
+             forwarder candidate",
         );
     assert_eq!(expanded.candidates.len(), 1);
     assert_eq!(expanded.candidates[0].provider_id, "cc_sol");

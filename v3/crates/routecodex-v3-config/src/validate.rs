@@ -1148,11 +1148,6 @@ fn compile_route_groups(
                 .into_iter()
                 .map(|(pool_id, pool)| {
                     require_id("route pool", &pool_id)?;
-                    if pool.targets.is_empty() {
-                        return Err(validation(format!(
-                            "route group {group_id} pool {pool_id} is empty"
-                        )));
-                    }
                     let mut targets = Vec::new();
                     let match_rule = match (pool_id.as_str(), pool.match_rule) {
                         ("default", Some(_)) => {
