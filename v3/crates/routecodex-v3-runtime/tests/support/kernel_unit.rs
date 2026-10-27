@@ -556,6 +556,63 @@ targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
     compile_v3_config_05_manifest(authoring).unwrap()
 }
 
+fn provider_concurrency_two_key_then_other_provider_manifest(
+    first_provider: &str,
+    second_provider: &str,
+    acquire_timeout_ms: u64,
+) -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(&format!(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client"]
+allowed_transports = ["json"]
+
+[providers.{first_provider}]
+type = "responses"
+base_url = "http://{first_provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [
+  {{ alias = "key1", env = "FIRST_KEY_ONE" }},
+  {{ alias = "key2", env = "FIRST_KEY_TWO" }}
+] }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{first_provider}.models.test]
+wire_name = "wire-first"
+
+[providers.{second_provider}]
+type = "responses"
+base_url = "http://{second_provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "SECOND_KEY" }}] }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{second_provider}.models.test]
+wire_name = "wire-second"
+
+[forwarders.responses]
+model = "client-model"
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "{first_provider}", model = "test", key = "key1", priority = 3 }},
+  {{ kind = "provider_model", provider = "{first_provider}", model = "test", key = "key2", priority = 2 }},
+  {{ kind = "provider_model", provider = "{second_provider}", model = "test", key = "key", priority = 1 }}
+]
+
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
+"#
+    ))
+    .unwrap();
+    compile_v3_config_05_manifest(authoring).unwrap()
+}
+
 fn saturate_capacity_key(provider_key: &str, declared_max: u32) -> Vec<V3AdaptiveConcurrencyLease> {
     let controller = V3AdaptiveConcurrencyController::process_shared();
     let scope = routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
