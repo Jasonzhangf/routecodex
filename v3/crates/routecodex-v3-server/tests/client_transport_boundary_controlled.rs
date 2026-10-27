@@ -373,8 +373,15 @@ async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client()
     );
     let received = String::from_utf8_lossy(&received).to_string();
     assert!(
-        received.is_empty() || received.starts_with(": keepalive"),
-        "only transport keepalives may follow the committed head before the terminal: {received}"
+        received.contains(":\n\n"),
+        "the terminal must reach the client behind a transport comment frame instead of a silent close: {received:?}"
+    );
+    assert!(
+        received
+            .lines()
+            .filter(|line| !line.is_empty())
+            .all(|line| line.starts_with(':')),
+        "only transport comment frames may follow the committed head before the terminal: {received:?}"
     );
     assert!(
         !received.contains("raw provider secret detail"),

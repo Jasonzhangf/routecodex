@@ -211,6 +211,7 @@ fn commit_v3_client_sse_channel(
             V3_CLIENT_SSE_KEEPALIVE_COMMENT,
         )
         .into_bytes(),
+        flush_yield: false,
         state: V3ClientSseChannelState::AwaitOutcome {
             keepalive_sent: false,
         },
@@ -267,6 +268,10 @@ struct V3ClientSseChannelStream {
     client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
     interval: tokio::time::Interval,
     keepalive_chunk: Vec<u8>,
+    /// Set when a chunk was just handed to the client transport. The next poll
+    /// yields `Pending` once so the HTTP writer flushes that chunk before the
+    /// channel can advance to another chunk or a terminal event.
+    flush_yield: bool,
     state: V3ClientSseChannelState,
 }
 
@@ -359,12 +364,24 @@ impl Stream for V3ClientSseChannelStream {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         loop {
+            // The HTTP writer flushes a response body chunk only when the body
+            // stream reports `Pending`. A chunk followed immediately by another
+            // chunk or by the terminal event in the same wake would sit in a
+            // buffer that never reaches the socket, so the client observes a
+            // silent disconnect. Yield once per emitted chunk, with the waker
+            // armed, so the chunk is flushed before the channel advances.
+            if this.flush_yield {
+                this.flush_yield = false;
+                cx.waker().wake_by_ref();
+                return Poll::Pending;
+            }
             // Poll the committed client prefix before the state machine: a
             // committed frame must reach the client even while the runtime
             // outcome is pending, and the method borrow must not overlap the
             // state match.
             if matches!(this.state, V3ClientSseChannelState::AwaitOutcome { .. }) {
                 if let Poll::Ready(Some(frame)) = this.poll_client_frame(cx) {
+                    this.flush_yield = true;
                     return Poll::Ready(Some(Ok(frame)));
                 }
             }
@@ -378,6 +395,7 @@ impl Stream for V3ClientSseChannelStream {
                             return Poll::Ready(Some(this.keepalive()));
                         }
                         if this.interval.poll_tick(cx).is_ready() {
+                            this.flush_yield = true;
                             return Poll::Ready(Some(this.keepalive()));
                         }
                     }
@@ -450,7 +468,8 @@ impl Stream for V3ClientSseChannelStream {
                     // stream on the same client connection.
                     match stream.as_mut().poll_next(cx) {
                         Poll::Ready(Some(Ok(bytes))) => {
-                            return Poll::Ready(Some(Ok(bytes.to_vec())))
+                            this.flush_yield = true;
+                            return Poll::Ready(Some(Ok(bytes.to_vec())));
                         }
                         Poll::Ready(Some(Err(error))) => {
                             this.state = V3ClientSseChannelState::Finished;
@@ -475,12 +494,14 @@ impl Stream for V3ClientSseChannelStream {
                         Poll::Ready(None) => {
                             let frame = build_v3_client_sse_data_frame(&std::mem::take(payload));
                             this.state = V3ClientSseChannelState::Finished;
+                            this.flush_yield = true;
                             return Poll::Ready(Some(Ok(frame)));
                         }
                         Poll::Pending => {
                             // The committed payload body is still arriving; the
                             // channel stays transport-live while it does.
                             if this.interval.poll_tick(cx).is_ready() {
+                                this.flush_yield = true;
                                 return Poll::Ready(Some(this.keepalive()));
                             }
                             return Poll::Pending;
@@ -554,6 +575,7 @@ mod tests {
             client_wire_capture: None,
             interval,
             keepalive_chunk: b": keepalive\n\n".to_vec(),
+            flush_yield: false,
             state: V3ClientSseChannelState::AwaitOutcome {
                 keepalive_sent: false,
             },
