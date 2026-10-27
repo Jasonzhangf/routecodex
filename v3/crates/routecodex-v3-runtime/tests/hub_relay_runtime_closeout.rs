@@ -3041,7 +3041,6 @@ async fn provider_error_closeout_returns_terminal_exhaustion_instead_of_hanging(
                     concat!(module_path!(), ":", line!()),
                 )
                 .expect("test provider failure session scope"),
-                toolreason_observation_session_id: None,
                 request_id: "req-closeout-error".into(),
                 payload: json!({
                     "model":"claude-client-alias",
@@ -3307,7 +3306,6 @@ fn request(request_id: &str, messages: Value, stream: bool) -> V3AnthropicRelayR
             concat!(module_path!(), ":", line!()),
         )
         .expect("test provider failure session scope"),
-        toolreason_observation_session_id: None,
         request_id: request_id.into(),
         payload: json!({
             "model":"claude-client-alias",

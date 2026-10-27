@@ -1168,7 +1168,7 @@ fn append_v3_responses_client_function_call_progress_frames(
     // it into a 502: native string arguments pass through byte-for-byte;
     // structured arguments are deterministically encoded; an absent field is
     // kept absent without an invented parameter progress event. This does
-    // not infer or alter toolreason fields or the command object.
+    // not infer or alter tool fields or the command object.
     let arguments = match item.get("arguments") {
         Some(Value::String(arguments)) => arguments.clone(),
         Some(arguments @ (Value::Object(_) | Value::Array(_))) => serde_json::to_string(arguments)

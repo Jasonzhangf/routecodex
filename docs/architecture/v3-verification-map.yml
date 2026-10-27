@@ -1440,7 +1440,7 @@ features:
   - routecodex-v3-runtime foundation::tests::websocket_error_sdk_classification_matches_existing_parity executes all six SDK nodes with the existing WebSocket source kind, stage, code and internal status
   - routecodex-v3-server tests::websocket_sdk_fault::websocket_sdk_fault_consumer_breaks_transport_and_retains_both_diagnostics uses a real WebSocket and the production consumer diagnostic point; dropping the original cause must fail without a test-only persistence shortcut
   - Responses response dry-run consumes captured provider JSON or SSE through the registered Direct response hook and materializes the resulting client payload without provider network access
-  - Responses response dry-run rejects malformed captured provider-response envelopes and does not fabricate toolreason projection when reason is absent
+  - Responses response dry-run rejects malformed captured provider-response envelopes and never fabricates local projection when a provider reason is absent
   - Anthropic Relay response dry-run consumes captured provider JSON or SSE through RespInbound and Resp03, then materializes the Anthropic client projection without provider network access
   - routecodex-v3-runtime provider failure policy constants keep V3 direct and relay retry budgets aligned
   required_contract:
@@ -1464,7 +1464,7 @@ features:
   - Server model pending endpoint emits internal Debug/Error evidence and returns only complete success or a typed incomplete transport outcome
   - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
   - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
-  - Debug response dry-run replays captured provider-response SSE through RespInbound and Resp03, exposes the client projection as a diagnostic artifact, and strips reason only when a valid toolreason was harvested
+  - Debug response dry-run replays captured provider-response SSE through RespInbound and Resp03, exposes the client projection as a diagnostic artifact, and only applies the current ToolThinking/model-identity cleanup contract
   - Debug response dry-run dispatches /v1/responses to Direct and /v1/messages to Anthropic Relay without adding response semantics to the Server handler
   - Provider health scoped action tests prove cross-provider/key/model isolation
   - Direct shared-health blackbox proves three cross-request failures cool the first provider before network send
@@ -3730,7 +3730,6 @@ features:
   - every observed tool turn emits exactly one OK, MISSING, INVALID, or MISPLACED terminal observation with the existing canonical session_id and request_id
   - a parallel tool turn is OK only when every eligible call is valid; a mixed turn emits one deterministic non-OK status and no Tool-Thinking reasoning
   - v3.request.tool_thinking_turn_context carries original custom provenance only as a request-local typed resource and is released after Resp03
-  - v3.response.tool_thinking_turn_result carries projection authorization only as a request-local typed resource and is released after observation/client projection
   required_negative:
   - provider-facing guidance never contains another protocol's wire wrapper, field container, or positive example
   - missing, empty, or wrong-type reason; wrong-type or out-of-range supplied diagnostics; duplicate or misplaced active reserved fields; malformed JSON; and incomplete native calls never authorize reasoning, active-field removal, or any tool-call rewrite; legacy model_id cleanup is response-only compatibility and malformed custom wrappers remain unchanged
@@ -3752,7 +3751,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib tool_thinking_custom -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime model_identity -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime ordinary_response_instructions -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_toolreason -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue10a9b1d_ -- --nocapture --test-threads=1
   - native-reasoning preservation and separate-item projection tests pass for Responses JSON/SSE, OpenAI Chat JSON/SSE, and Anthropic JSON/SSE
   - prefix, marker, visible-ID, and content-collision negative tests prove no semantic fallback
   - stream event-order tests prove the synthetic reasoning item closes before the first native tool-call terminal event
@@ -3772,7 +3771,7 @@ features:
     fresh_real_codex_windows:
     - port 4444 Responses Direct with cc-sol.gpt-5.6-sol has five consecutive real tool turns
     - port 4444 Anthropic Relay with minimax_anthropic.MiniMax-M3 has five consecutive real tool turns
-    - every turn correlates the client request, provider-bound request, provider raw response, Resp03 result, client projection, typed TOOLREASON observation, and managed log by request_id
+    - every turn correlates the client request, provider-bound request, provider raw response, Resp03 result, client projection, and managed log by request_id
     curl_is_diagnostic_only: true
     agy_review: required
 

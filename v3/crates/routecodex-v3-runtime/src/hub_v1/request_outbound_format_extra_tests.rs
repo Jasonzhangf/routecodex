@@ -32,7 +32,7 @@ fn responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids() {
 }
 
 #[test]
-fn responses_wire_wraps_apply_patch_custom_tool_with_toolreason_schema() {
+fn responses_wire_wraps_apply_patch_custom_tool_without_retired_schema() {
     let payload = json!({"model": "gpt-test", "messages": [{"role": "user", "content": "patch"}], "tools": [{"type": "custom", "name": "apply_patch", "description": "Apply a patch", "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}}]});
 
     let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)

@@ -840,7 +840,7 @@
         </tbody>
         </table>
         <h2>stage_a.p0_rust_migration.mainline</h2>
-        <p>Stage A locks P0 Rust migration owner boundaries before implementation: servertool followup orchestration, Anthropic conversion, Responses continuation store, and request/response Chat Process tool governance.</p>
+        <p>Stage A locks P0 Rust migration owner boundaries before implementation: Anthropic conversion, Responses continuation store, and request/response Chat Process tool governance.</p>
         <p>Entry contract: <code>StageAOwnerBoundary</code> via <code>docs/goal-prompts/2026-07-03-rust-hub-pipeline-migration.md</code></p>
         <pre class="mermaid">flowchart LR
           ResponsesRequestInbound[&quot;ResponsesRequestInbound&quot;]
@@ -850,9 +850,7 @@
           ResponsesContinuationStore[&quot;ResponsesContinuationStore&quot;]
           OpenAiChatCanonical[&quot;OpenAiChatCanonical&quot;]
           AnthropicChatInbound[&quot;AnthropicChatInbound&quot;]
-          ServertoolOutcome[&quot;ServertoolOutcome&quot;]
           HubRespChatProcess03Governed[&quot;HubRespChatProcess03Governed&quot;]
-          HubRespChatProcess03Governed --&gt;|stage-a-p0-01| ServertoolOutcome
           AnthropicChatInbound --&gt;|stage-a-p0-02| OpenAiChatCanonical
           HubRespChatProcess03Governed --&gt;|stage-a-p0-03| ResponsesContinuationStore
           HubReqInbound02Standardized --&gt;|stage-a-p0-04| HubReqChatProcess03Governed
@@ -862,7 +860,6 @@
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
           class HubRespChatProcess03Governed anchored;
-          class ServertoolOutcome anchored;
           class AnthropicChatInbound anchored;
           class OpenAiChatCanonical anchored;
           class ResponsesContinuationStore anchored;
@@ -874,7 +871,6 @@
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>stage-a-p0-01</td><td><code>HubRespChatProcess03Governed -&gt; ServertoolOutcome</code></td><td>anchored</td><td><code>run_servertool_response_stage_json -&gt; plan_servertool_outcome_json</code></td><td></td><td><code>servertool.followup_orchestration</code>&lt;br/&gt;Orchestration logic for server-side tools followup</td></tr>
         <tr><td>stage-a-p0-02</td><td><code>AnthropicChatInbound -&gt; OpenAiChatCanonical</code></td><td>anchored</td><td><code>build_openai_chat_from_anthropic_json -&gt; map_chat_tools_to_anthropic_tools</code></td><td></td><td><code>conversion.shared.anthropic</code>&lt;br/&gt;Anthropic OpenAI chat protocol normalization and tool schema mapping</td></tr>
         <tr><td>stage-a-p0-03</td><td><code>HubRespChatProcess03Governed -&gt; ResponsesContinuationStore</code></td><td>anchored</td><td><code>prepare_responses_conversation_entry_json -&gt; restore_responses_continuation_payload</code></td><td></td><td><code>conversion.responses.store</code>&lt;br/&gt;Responses conversation store and continuation management</td></tr>
         <tr><td>stage-a-p0-04</td><td><code>HubReqInbound02Standardized -&gt; HubReqChatProcess03Governed</code></td><td>anchored</td><td><code>apply_req_process_tool_governance -&gt; apply_req_process_tool_governance_json</code></td><td></td><td><code>hub.req_chatprocess.tool_governance</code>&lt;br/&gt;Harvest text tool calls from request side and sanitize payloads</td></tr>

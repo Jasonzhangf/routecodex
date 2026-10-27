@@ -444,19 +444,7 @@ fn project_json_response(
         .with_complete_provider_attempt(complete_provider_attempt)
         .with_serialized_tool_context(serialized_tool_context.clone())
         .with_retain_response_cipher(retain_response_cipher)
-        .with_tool_thinking_enabled(tool_thinking_enabled)
-        .with_toolreason_expected_model_id(expected_model_id)
-        // JSON projection is also used after a provider SSE has been
-        // materialized for a non-streaming client response.  Observation must
-        // remain enabled there; the live SSE path does not invoke this
-        // Resp03 profile, so disabling it here silently loses MISSING logs.
-        .with_toolreason_observation_enabled(false);
-    if let Some(request_id) = request_id {
-        response_profile = response_profile.with_toolreason_observation_request_id(request_id);
-    }
-    if let Some(session_id) = session_id {
-        response_profile = response_profile.with_toolreason_observation_session_id(session_id);
-    }
+        .with_tool_thinking_enabled(tool_thinking_enabled);
     let has_source_summary =
         super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
             resp02.provider_payload(),
@@ -546,10 +534,6 @@ struct V3OpenAiChatSseState {
     retain_response_cipher: bool,
     stream_observation: V3RuntimeStreamObservation,
     tool_thinking_enabled: bool,
-    tool_names: Vec<String>,
-    pending_toolreasons: Vec<Option<String>>,
-    toolreason_argument_buffers: Vec<String>,
-    toolreason_emitted: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 }
 
@@ -617,10 +601,6 @@ fn project_sse_stream(
         tool_thinking_enabled,
         stream_observation,
         provider_outcome,
-        tool_names: Vec::new(),
-        pending_toolreasons: Vec::new(),
-        toolreason_argument_buffers: Vec::new(),
-        toolreason_emitted: false,
     };
     Box::pin(futures_util::stream::unfold(
         state,
@@ -661,15 +641,6 @@ fn project_sse_stream(
                             .and_then(Err);
                         return Some((result, state));
                     }
-                    crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
-                        &state.tool_names,
-                        &mut state.pending_toolreasons,
-                        &mut state.toolreason_emitted,
-                        crate::hub_v1::V3ToolreasonObservationContext {
-                            session_id: Some(&state.session_id),
-                            request_id: Some(&state.request_id),
-                        },
-                    );
                     // provider 可在 [DONE] 前关闭流；客户端协议仍必须收到终止帧。
                     if !state.seen_done {
                         state.seen_done = true;
@@ -888,7 +859,6 @@ fn project_responses_sse_as_openai_chat_stream(
             stream,
             decoder,
             transducer,
-            V3RelayToolreasonStreamState::new(),
             VecDeque::<Vec<u8>>::new(),
             false,
             false,
@@ -902,7 +872,6 @@ fn project_responses_sse_as_openai_chat_stream(
             mut provider,
             mut decoder,
             mut transducer,
-            mut toolreason,
             mut pending,
             mut done_seen,
             mut finished,
@@ -923,7 +892,6 @@ fn project_responses_sse_as_openai_chat_stream(
                                 provider,
                                 decoder,
                                 transducer,
-                                toolreason,
                                 pending,
                                 done_seen,
                                 finished,
@@ -957,7 +925,6 @@ fn project_responses_sse_as_openai_chat_stream(
                                     provider,
                                     decoder,
                                     transducer,
-                                    toolreason,
                                     pending,
                                     done_seen,
                                     finished,
@@ -969,15 +936,6 @@ fn project_responses_sse_as_openai_chat_stream(
                                 ),
                             ));
                         }
-                        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
-                            &toolreason.tool_names,
-                            &mut toolreason.pending_reasons,
-                            &mut toolreason.reason_emitted,
-                            crate::hub_v1::V3ToolreasonObservationContext {
-                                session_id: Some(session_id.as_str()),
-                                request_id: Some(request_id.as_str()),
-                            },
-                        );
                         // Provider success is committed by Runtime only after
                         // complete governance and sealing.
                         return None;
@@ -1106,7 +1064,6 @@ fn project_responses_sse_as_openai_chat_stream(
                                             provider,
                                             decoder,
                                             transducer,
-                                            toolreason,
                                             pending,
                                             done_seen,
                                             finished,
@@ -1124,7 +1081,6 @@ fn project_responses_sse_as_openai_chat_stream(
                                         provider,
                                         decoder,
                                         transducer,
-                                        toolreason,
                                         pending,
                                         done_seen,
                                         finished,
@@ -1143,7 +1099,6 @@ fn project_responses_sse_as_openai_chat_stream(
                                     provider,
                                     decoder,
                                     transducer,
-                                    toolreason,
                                     pending,
                                     done_seen,
                                     finished,

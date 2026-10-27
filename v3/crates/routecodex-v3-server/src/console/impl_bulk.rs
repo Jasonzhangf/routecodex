@@ -996,15 +996,6 @@ impl V3SseConsoleFinalizer {
             );
             return;
         }
-        if let Err(error) =
-            emit_v3_toolreason_console_line(&self.context, Some(&self.stream_observation))
-        {
-            emit_v3_runtime_observability_contract_failure(
-                &self.context,
-                &self.observability,
-                error,
-            );
-        }
         self.emit_relay_sse_complete_console_lines();
     }
 
@@ -1038,15 +1029,6 @@ impl V3SseConsoleFinalizer {
             &mut self.observability,
             Some(&self.stream_observation),
         ) {
-            emit_v3_runtime_observability_contract_failure(
-                &self.context,
-                &self.observability,
-                error,
-            );
-        }
-        if let Err(error) =
-            emit_v3_toolreason_console_line(&self.context, Some(&self.stream_observation))
-        {
             emit_v3_runtime_observability_contract_failure(
                 &self.context,
                 &self.observability,
@@ -1192,8 +1174,7 @@ impl V3DirectSseConsoleFinalizer {
         merge_v3_runtime_stream_observation(
             &mut self.observability,
             self.stream_observation.as_ref(),
-        )?;
-        emit_v3_toolreason_console_line(&self.context, self.stream_observation.as_ref())
+        )
     }
 
     pub(crate) fn emit_direct_sse_failure_console_line(
@@ -1321,35 +1302,6 @@ pub(crate) fn merge_v3_runtime_stream_observation(
             observability.timing = snapshot.timing;
         }
     }
-    Ok(())
-}
-
-pub(crate) fn emit_v3_toolreason_console_line(
-    context: &V3ConsoleEmissionContext,
-    observation: Option<&V3RuntimeStreamObservation>,
-) -> Result<(), String> {
-    let Some(observation) = observation else {
-        return Ok(());
-    };
-    let snapshot = observation.snapshot()?;
-    let Some(toolreason) = snapshot.toolreason else {
-        return Ok(());
-    };
-    let line = format!(
-        "TOOLREASON {} source={} stage={} session_id={} request_id={} tool={} confidence={} thinking={}",
-        toolreason.status,
-        toolreason.source,
-        toolreason.stage,
-        toolreason.session_id.as_deref().unwrap_or("<missing>"),
-        toolreason.request_id.as_deref().unwrap_or("<missing>"),
-        toolreason.tool,
-        toolreason
-            .confidence
-            .map_or("<missing>".to_string(), |value| value.to_string()),
-        toolreason.reason.as_deref().unwrap_or("<missing>"),
-    );
-    append_v3_human_console_line(&context.state, &line);
-    eprintln!("{line}");
     Ok(())
 }
 

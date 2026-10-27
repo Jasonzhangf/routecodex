@@ -1054,30 +1054,6 @@ resources:
     release_point: V3HubRespChatProcess03Governed
     required_gates: [tool_thinking_turn_context_payload_isolation, tool_thinking_custom_round_trip]
     binding_status: source_controlled_pending_online_matrix
-  - resource_id: v3.response.tool_thinking_turn_result
-    resource_kind: projection_resource
-    lifecycle: v3.tool_thinking_hook_skeleton.current_turn
-    owner_feature_id: v3.tool_thinking_hook_skeleton
-    owner_crate: routecodex-v3-runtime
-    owner_node: V3HubRespChatProcess03Governed
-    identity: [requestId, pipelineId]
-    semantic_contract:
-      producer: Resp03 finalizes exactly one typed status for an observed native tool-call turn after protocol completion.
-      valid_shape: Phase 1 OK carries a trimmed nonempty reason and one formatted projection text; confidence is an optional diagnostic validated when present, and legacy model_id is never projected.
-      invalid_shape: MISSING, INVALID, and MISPLACED carry no projection text and authorize no reasoning or active reason/confidence redaction; Resp03 may still remove legacy model_id at an identified native tool-call envelope/parameter boundary, while malformed JSON/custom wrappers remain unchanged.
-      projection_boundary: registered client-protocol projectors consume this typed result without inspecting visible IDs, prefixes, markers, ordinary reasoning, or history.
-      observation_boundary: exactly one canonical terminal observation consumes the same finalized result; projection diagnostics do not create a second terminal status.
-      payload_boundary: the typed result never enters provider/client payload, protocol metadata, history, debug payload, or MetadataCenter; only its registered normal reasoning projection may enter the client payload for OK.
-      lifetime: request-local; released after terminal observation and at-most-once client projection.
-    allowed_writers: [finalize_v3_tool_thinking_turn_at_resp03]
-    allowed_readers: [project_v3_tool_thinking_turn_result_at_resp03, log_v3_toolreason_observation_at_resp03_with_context]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, MetadataCenter, provider_request_payload, provider_response_payload, client_response_payload, generic_sse_transport, protocol_adapter]
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    may_enter_metadata_center: false
-    release_point: V3HubRespChatProcess03Governed
-    required_gates: [tool_thinking_turn_result_payload_isolation, tool_thinking_one_terminal_one_projection]
-    binding_status: source_controlled_pending_online_matrix
   - resource_id: v3.hub.provider_wire_payload
     resource_kind: provider_wire
     lifecycle: v3.hub_pipeline.v1

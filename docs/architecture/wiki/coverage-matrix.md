@@ -16,7 +16,7 @@
 | Response mainline detail | `docs/architecture/wiki/response-mainline-call-graph.md` | done | 自动生成，响应主线分页面 |
 | Error chain detail | `docs/architecture/wiki/error-mainline-call-graph.md` | done | 自动生成，错误主线分页面 |
 | Runtime lifecycle detail | `docs/architecture/wiki/runtime-lifecycle-call-graph.md` | done | 自动生成；明确 `ROUTECODEX_SESSION_DIR` 只是 runtime workdir root，`tmuxSessionId / sessionId / conversationId` 不共用身份语义 |
-| Servertool ownership map | `docs/architecture/wiki/servertool-ownership-map.md` | done | 自动生成，按 `hub.servertool_*` 聚合 |
+| Servertool ownership map | `docs/architecture/wiki/servertool-ownership-map.md` | retired | 退役 tombstone；不得恢复 server-side owner |
 | Virtual Router ownership map | `docs/architecture/wiki/virtual-router-ownership-map.md` | done | 自动生成，按 `vr.* / virtual_router.*` 聚合 |
 | Metadata center mainline source | `docs/architecture/wiki/metadata-center-mainline-source.md` | done | metadata family 分层、写入阶段 owner、未来 request-scoped center 主线 review 面 |
 | Continuation standard contract | `docs/architecture/wiki/continuation-standard-contract.md` | done | continuation `save / restore / materialize / release` 标准行为、协议模式、白盒/黑盒测试矩阵 |
@@ -32,7 +32,7 @@
 | Metadata boundary detail | `docs/architecture/wiki/metadata-boundary-map.md` | done | request/response metadata carrier、continuation owner、provider/client leak boundary |
 | Chat-process protocol mapping | `docs/architecture/wiki/chat-process-protocol-mapping.md` | done | `openai-chat / openai-responses / anthropic-messages` 统一语义字段与映射漏洞 |
 | Responses direct/relay detail | `docs/architecture/wiki/responses-direct-relay-map.md` | done | direct vs relay ownership、continuation owner、passthrough boundary |
-| Servertool followup call graph | `docs/architecture/wiki/servertool-followup-call-graph.md` | done | followup / CLI projection / backend-route |
+| Servertool followup call graph | `docs/architecture/wiki/servertool-followup-call-graph.md` | retired | 退役 tombstone；普通工具 call/result pair 替代 |
 | Server SSE bridge surface | `docs/architecture/wiki/server-responses-sse-bridge-map.md` | done | server JSON/SSE facade、Rust projection owner、JSON/SSE equality gaps |
 
 ## Rule

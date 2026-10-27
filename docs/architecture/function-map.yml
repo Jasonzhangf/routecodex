@@ -397,7 +397,6 @@ owners:
   - scripts/architecture/verify-v3-provider-compat-module-boundary.mjs
   - scripts/tests/v3-provider-compat-module-boundary-red-fixtures.mjs
   forbidden_paths:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - v3/crates/routecodex-v3-target
   - src/server/runtime/http-server
   - src/providers

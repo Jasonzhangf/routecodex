@@ -302,7 +302,6 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
             )
             .expect("test provider failure session scope"),
             request_id: "req-json".into(),
-            toolreason_observation_session_id: Some("rcc-session:request:req-json".into()),
             payload: json!({
                 "model":"claude-client-alias",
                 "messages":[{"role":"user","content":"Lookup alpha"}],
@@ -334,20 +333,6 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
         .contains(&"ProviderRespCompat02ProviderCompat"));
     assert_eq!(output.node_trace[14], "V3ServerRespOutbound06ClientFrame");
     assert_eq!(output.client_response["stop_reason"], "tool_use");
-    let toolreason = output
-        .stream_observation
-        .as_ref()
-        .unwrap()
-        .snapshot()
-        .unwrap()
-        .toolreason
-        .unwrap();
-    assert_eq!(toolreason.status, "OK");
-    assert_eq!(toolreason.reason.as_deref(), Some("查找 alpha"));
-    assert_eq!(
-        toolreason.session_id.as_deref(),
-        Some("rcc-session:request:req-json")
-    );
 }
 
 #[tokio::test]
@@ -373,7 +358,6 @@ async fn anthropic_responses_field_parity_request_matrix() {
             )
             .expect("test provider failure session scope"),
             request_id: "req-anthropic-field-matrix".into(),
-            toolreason_observation_session_id: None,
             payload: json!({
                 "model":"claude-client-alias",
                 "system":"system alpha\n\nsystem beta",
@@ -501,7 +485,6 @@ async fn anthropic_structured_system_extension_preserves_blocks_for_responses() 
             )
             .expect("test provider failure session scope"),
             request_id: "req-anthropic-structured-system-unmapped".into(),
-            toolreason_observation_session_id: None,
             payload: json!({
                 "model":"claude-client-alias",
                 "system":[{
@@ -715,7 +698,6 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
                 )
                 .expect("test provider failure session scope"),
                 request_id: "req-provider-reselect".into(),
-                toolreason_observation_session_id: None,
                 payload: json!({
                     "model":"claude-client-alias",
                     "messages":[{"role":"user","content":"use the available provider"}],
@@ -768,7 +750,6 @@ async fn provider_error_enters_error01_06_without_success_projection() {
             )
             .expect("test provider failure session scope"),
             request_id: "req-error".into(),
-            toolreason_observation_session_id: None,
             payload: json!({"model":"claude-client-alias","messages":[{"role":"user","content":"fail"}],"stream":false}),
         },
         &ErrorTransport,
@@ -1041,7 +1022,6 @@ async fn responses_sse_strips_untyped_signature_from_anthropic_client_governance
             )
             .expect("test provider failure session scope"),
             request_id: "req-thinking-sse".into(),
-            toolreason_observation_session_id: None,
             payload: json!({
                 "model":"claude-client-alias",
                 "messages":[{"role":"user","content":"think"}],
@@ -1098,7 +1078,6 @@ async fn responses_sse_without_terminal_fails_before_anthropic_success_projectio
             )
             .expect("test provider failure session scope"),
             request_id: "req-thinking-no-terminal".into(),
-            toolreason_observation_session_id: None,
             payload: json!({
                 "model":"claude-client-alias",
                 "messages":[{"role":"user","content":"think"}],
@@ -1155,7 +1134,6 @@ async fn anthropic_relay_continuous_non_terminal_sse_returns_typed_failure() {
                 )
                 .expect("test provider failure session scope"),
                 request_id: "req-anthropic-continuous-non-terminal".into(),
-                toolreason_observation_session_id: None,
                 payload: json!({
                     "model":"claude-client-alias",
                     "messages":[{"role":"user","content":"continuous non-terminal"}],
@@ -1315,7 +1293,6 @@ async fn anthropic_unknown_direct_provider_model_falls_back_to_default_pool() {
             )
             .expect("test provider failure session scope"),
             request_id: "req-anthropic-404".into(),
-            toolreason_observation_session_id: None,
             payload: json!({
                 "model":"controlled.unknown-model",
                 "messages":[{"role":"user","content":"ping"}],

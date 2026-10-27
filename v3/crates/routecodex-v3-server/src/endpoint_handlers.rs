@@ -138,7 +138,7 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
         endpoint: &path,
         request_id: &request_id,
     };
-    let toolreason_observation_session_id =
+    let console_log_session_id =
         resolve_v3_console_log_identity_from_parts(&request_headers, &payload, &request_id)
             .session_id;
     let responses_entry_facts =
@@ -150,7 +150,7 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
             &state,
             front_connection_identity,
             &request_id,
-            toolreason_observation_session_id.clone(),
+            console_log_session_id.clone(),
         ) {
             Ok(trace) => trace,
             Err(error) => {
@@ -384,7 +384,6 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
             request_id.clone(),
             payload.clone(),
             provider_failure_session_scope.clone(),
-            toolreason_observation_session_id.clone(),
             &trace_scope,
             snapshot_session_id.as_deref(),
             request_console_project_path.as_deref(),
@@ -414,7 +413,6 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
             payload,
             provider_failure_session_scope.clone(),
             execution_mode,
-            toolreason_observation_session_id.clone(),
             started_at,
             request_purpose,
             requested_stream,
@@ -986,7 +984,6 @@ fn execute_v3_provider_request_dry_run_branch<'a>(
     request_id: String,
     payload: Value,
     provider_failure_session_scope: V3ProviderFailureSessionScope,
-    toolreason_observation_session_id: String,
     trace_scope: &'a V3DebugTraceScope,
     snapshot_session_id: Option<&'a str>,
     request_console_project_path: Option<&'a str>,
@@ -1219,9 +1216,6 @@ fn execute_v3_provider_request_dry_run_branch<'a>(
                     server_id: state.server.id.clone(),
                     failure_session_scope: provider_failure_session_scope,
                     request_id: request_id.clone(),
-                    toolreason_observation_session_id: Some(
-                        toolreason_observation_session_id.clone(),
-                    ),
                     payload: payload.clone(),
                 },
                 client_headers,
@@ -1276,7 +1270,6 @@ fn execute_v3_non_responses_protocol_branch<'a>(
     payload: Value,
     provider_failure_session_scope: V3ProviderFailureSessionScope,
     execution_mode: V3EntryProtocolExecutionMode,
-    toolreason_observation_session_id: String,
     started_at: Instant,
     request_purpose: V3RequestPurpose,
     requested_stream: bool,
@@ -1476,9 +1469,6 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                     server_id: state.server.id.clone(),
                     failure_session_scope: provider_failure_session_scope.clone(),
                     request_id: request_id.clone(),
-                    toolreason_observation_session_id: Some(
-                        toolreason_observation_session_id.clone(),
-                    ),
                     payload: payload.clone(),
                 },
                 client_headers,
@@ -1552,19 +1542,6 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                         error,
                     );
                 }
-            }
-            if let Err(error) = emit_v3_toolreason_console_line(
-                &console_context,
-                output.stream_observation.as_ref(),
-            ) {
-                emit_v3_runtime_observability_contract_failure(
-                    &console_context,
-                    output
-                        .observability
-                        .as_ref()
-                        .unwrap_or(&V3RuntimeObservability::default()),
-                    error,
-                );
             }
             if let Some(observability) = output.observability.as_ref() {
                 let mut console_observability = observability.clone();

@@ -17,7 +17,7 @@ use crate::projection_drop_log::V3ProjectionDropContext;
 use crate::provider_failure_runtime_policy::raise_v3_source_via_err01;
 use crate::shared::{
     project_provider_raw_to_client_payload_for_complete_response_hooks,
-    project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context,
+    project_provider_raw_to_client_payload_with_plan_and_projection,
     V3DirectSourceError, V3DirectSourceResult, V3ProviderAttemptBody, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
@@ -352,8 +352,6 @@ pub(crate) fn register_responses_direct_hooks_with_key_catalog(
             output_node: "V3Error05ExecutionDecision",
         },
     ];
-    // Toolreason is retired from the production client SSE path. Tests may
-    // still register the helper explicitly, but runtime never intercepts it.
     let direct_sse_typed_hooks = V3DirectSseTypedHookCatalog::new();
     V3HookRegistry {
         hooks: HOOKS,
@@ -367,109 +365,6 @@ pub(crate) fn register_responses_direct_hooks_with_key_catalog(
         complete_response_sse: rewrite_v3_direct_complete_response_attempt,
         error: responses_direct_error_hook,
     }
-}
-
-pub(crate) fn apply_responses_toolreason_sse_hook(
-    value: &mut serde_json::Value,
-    tool_names: &[String],
-    pending_reasons: &mut Vec<Option<String>>,
-    reason_emitted: &mut bool,
-    project_to_client: bool,
-    session_id: Option<&str>,
-    request_id: Option<&str>,
-    expected_model_id: Option<&str>,
-    argument_buffers: &mut Vec<String>,
-    projection_authorized: &mut bool,
-    stream_observation: Option<&crate::hub_v1::V3RuntimeStreamObservation>,
-) -> Result<(), String> {
-    apply_toolreason_sse_hook_with_stream_observation(
-        value,
-        tool_names,
-        pending_reasons,
-        reason_emitted,
-        project_to_client,
-        session_id,
-        request_id,
-        expected_model_id,
-        argument_buffers,
-        Some(projection_authorized),
-        stream_observation,
-    )
-}
-
-pub(crate) fn apply_relay_toolreason_sse_hook(
-    value: &mut serde_json::Value,
-    tool_names: &[String],
-    pending_reasons: &mut Vec<Option<String>>,
-    reason_emitted: &mut bool,
-    project_to_client: bool,
-    session_id: Option<&str>,
-    request_id: Option<&str>,
-    expected_model_id: Option<&str>,
-    argument_buffers: &mut Vec<String>,
-    projection_authorized: Option<&mut bool>,
-) {
-    let result = apply_toolreason_sse_hook_with_stream_observation(
-        value,
-        tool_names,
-        pending_reasons,
-        reason_emitted,
-        project_to_client,
-        session_id,
-        request_id,
-        expected_model_id,
-        argument_buffers,
-        projection_authorized,
-        None,
-    );
-    debug_assert!(result.is_ok());
-}
-
-fn apply_toolreason_sse_hook_with_stream_observation(
-    value: &mut serde_json::Value,
-    tool_names: &[String],
-    pending_reasons: &mut Vec<Option<String>>,
-    reason_emitted: &mut bool,
-    project_to_client: bool,
-    session_id: Option<&str>,
-    request_id: Option<&str>,
-    expected_model_id: Option<&str>,
-    argument_buffers: &mut Vec<String>,
-    mut projection_authorized: Option<&mut bool>,
-    stream_observation: Option<&crate::hub_v1::V3RuntimeStreamObservation>,
-) -> Result<(), String> {
-    crate::hub_v1::strip_v3_tool_thinking_request_artifacts_at_resp03(value);
-    if projection_authorized.is_some()
-        && crate::hub_v1::v3_toolreason_projection_authorized_at_resp03(value, expected_model_id)
-    {
-        if let Some(authorized) = projection_authorized.as_deref_mut() {
-            *authorized = true;
-        }
-    }
-    let mut observation_error = None;
-    crate::hub_v1::map_v3_toolreason_stream_event_at_resp03_with_context_and_buffers_expected_model_and_stream_observation(
-        value,
-        true,
-        tool_names,
-        pending_reasons,
-        reason_emitted,
-        project_to_client,
-        session_id,
-        request_id,
-        Some(argument_buffers),
-        expected_model_id,
-        stream_observation,
-        &mut observation_error,
-    );
-    if let Some(error) = observation_error {
-        return Err(error);
-    }
-    if pending_reasons.iter().any(Option::is_some) {
-        if let Some(authorized) = projection_authorized.as_deref_mut() {
-            *authorized = true;
-        }
-    }
-    Ok(())
 }
 
 /// Responses Direct Req04 pre-send preparation: tool-thinking and memory
@@ -844,7 +739,6 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
     context: V3DirectResponseCompatContext,
 ) -> ResponseProjectionFuture {
     Box::pin(async move {
-        let request_id = raw.request_id().to_owned();
         let plan = context.compile_plan().map_err(|error| {
             raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -861,8 +755,6 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
             raw,
             &plan,
             context.tool_thinking_enabled,
-            context.toolreason_client_projection,
-            context.toolreason_observation_session_id.as_deref(),
         )
         .await?;
         if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
@@ -873,16 +765,7 @@ pub(crate) fn responses_direct_response_projection_hook_with_context(
         }
         if context.tool_thinking_enabled {
             if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
-                crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
-                    payload,
-                    true,
-                    context.toolreason_client_projection,
-                    Some(context.canonical_model_id.as_str()),
-                    crate::hub_v1::V3ToolreasonObservationContext {
-                        session_id: context.toolreason_observation_session_id.as_deref(),
-                        request_id: Some(request_id.as_str()),
-                    },
-                );
+                crate::hub_v1::strip_v3_tool_thinking_fields_at_resp03(payload, true);
                 if let Some(names) = context
                     .tool_thinking_turn_context
                     .original_custom_tool_names()
@@ -902,7 +785,6 @@ pub(crate) fn chat_direct_response_projection_hook(
     context: V3DirectResponseCompatContext,
 ) -> ResponseProjectionFuture {
     Box::pin(async move {
-        let request_id = raw.request_id().to_owned();
         let plan = context.compile_plan().map_err(|error| {
             raise_v3_source_via_err01(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -915,26 +797,15 @@ pub(crate) fn chat_direct_response_projection_hook(
             )
             .map(|(_, source)| source)
         })?;
-        let mut projection = project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
+        let mut projection = project_provider_raw_to_client_payload_with_plan_and_projection(
             raw,
             &plan,
             context.tool_thinking_enabled,
-            context.toolreason_client_projection,
-            context.toolreason_observation_session_id.as_deref(),
         )
         .await?;
         if context.tool_thinking_enabled {
             if let V3ProviderAttemptBody::Json(payload) = &mut projection.attempt_payload.body {
-                crate::hub_v1::map_v3_toolreason_to_reasoning_content_at_resp03_with_expected_model_and_context(
-                    payload,
-                    true,
-                    context.toolreason_client_projection,
-                    Some(context.canonical_model_id.as_str()),
-                    crate::hub_v1::V3ToolreasonObservationContext {
-                        session_id: context.toolreason_observation_session_id.as_deref(),
-                        request_id: Some(request_id.as_str()),
-                    },
-                );
+                crate::hub_v1::strip_v3_tool_thinking_fields_at_resp03(payload, true);
                 if let Some(names) = context
                     .tool_thinking_turn_context
                     .original_custom_tool_names()
@@ -1437,10 +1308,3 @@ pub(crate) fn responses_direct_error_hook(
 #[cfg(test)]
 #[path = "hooks_tests.rs"]
 mod tests;
-#[test]
-fn relay_sse_runtime_does_not_own_toolreason_parser() {
-    let source = include_str!("hub_v1/openai_chat_relay_runtime.rs");
-    assert!(!source.contains("map_v3_toolreason_stream_event_at_resp03"));
-    let sse_source = include_str!("hub_v1/openai_chat_relay_runtime_sse.rs");
-    assert!(!sse_source.contains("map_v3_toolreason_stream_event_at_resp03"));
-}

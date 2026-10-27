@@ -195,15 +195,11 @@ impl V3DirectProtocolCodec for V3AnthropicDirectCodec {
             }
         };
         let tool_thinking_enabled = context.tool_thinking_enabled;
-        let toolreason_client_projection = context.toolreason_client_projection;
-        let observation_session_id = context.toolreason_observation_session_id.clone();
         Box::pin(async move {
-            crate::shared::project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
+            crate::shared::project_provider_raw_to_client_payload_with_plan_and_projection(
                 raw,
                 &plan,
                 tool_thinking_enabled,
-                toolreason_client_projection,
-                observation_session_id.as_deref(),
             )
             .await
         })

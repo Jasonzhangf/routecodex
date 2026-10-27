@@ -5602,7 +5602,7 @@ features:
   status: source_controlled_pending_online_matrix
   change_risk: high
   owner_kind: rust_v3_chat_process_tool_thinking_hook
-  owner_scope: Resp03 is the sole semantic owner for Toolreason response compatibility, including provider model-identity instruction cleanup; Direct and Relay response paths only invoke or register this owner.
+  owner_scope: Resp03 is the sole semantic owner for provider model-identity instruction cleanup; Direct and Relay response paths only invoke or register this owner.
   owner_modules:
   - routecodex-v3-runtime
   owner_files:
@@ -5639,16 +5639,12 @@ features:
   resource_bindings:
   - v3.request.normal_payload
   - v3.request.tool_thinking_turn_context
-  - v3.response.tool_thinking_turn_result
   - v3.response.client_payload
   entry_symbols:
   - inject_v3_tool_thinking_guidance_at_req04
   - scrub_v3_provider_model_identity_instruction
   - scrub_v3_provider_model_identity_instructions
   - scrub_v3_provider_model_identity_instructions_from_typed_sse
-  - map_v3_toolreason_to_reasoning_content_at_resp03
-  - map_v3_toolreason_stream_event_at_resp03
-  - V3DirectSseContentConsumer::take_toolreason_reasoning_projection
   - strip_v3_tool_thinking_fields_from_json_at_resp03
   - responses_direct_prepare_before_send
   - V3ChatDirectCodec::prepare_before_send
@@ -5656,12 +5652,7 @@ features:
   - compile_v3_tool_thinking_turn_context_at_req04
   - restore_v3_tool_thinking_custom_calls_in_payload_at_resp03
   - recognized_v3_custom_tool_wrapper_input_at_resp03
-  - finalize_v3_toolreason_observation_at_resp03_with_context
-  - project_v3_toolreason_sse_chunk_at_resp03_with_projection_and_context
   pending_entry_symbols: []
-  legacy_entry_symbols_to_remove:
-  - strip_v3_toolreason_markers_at_resp03
-  - v3_json_contains_toolreason_marker_at_resp03
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/tool_thinking_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
@@ -5711,15 +5702,14 @@ features:
   - a parallel tool turn is OK only when every eligible native call is valid; mixed status produces one deterministic non-OK terminal result and no reasoning
   - provenance-matched custom restoration is an independent mechanical inverse and preserves valid custom input for every terminal status
   - Anthropic mechanical inverse, serialized custom parsing and typed-provenance restoration read one pure recognized-wrapper boundary; unknown business fields keep the complete value opaque and never authorize inner extraction or Tool-Thinking. The predicate reads shape only and does not run Resp03 governance from a codec.
-  - the typed turn result projects one separate normal reasoning item before the first native tool call without changing provider-native reasoning
   - visible IDs, 调用工具 text, ordinary reasoning, pending message text, and legacy fences are not identity or active sources; their parsers and replay paths are physically removed
   - Resp03 removes only the provider model-identity instruction shape identified by both canonical identity markers; ordinary client instructions and the legal response model field remain unchanged
   - Relay and Direct typed Responses SSE catalogs register the same Resp03 model-identity cleanup function; provider, generic SSE framing, handler, and client projection layers do not implement a second scrubber
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib req04_tool_thinking -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib resp03_ -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_toolreason -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib tool_thinking_custom -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue10a9b1d_ -- --nocapture --test-threads=1
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-mainline-caller-flow

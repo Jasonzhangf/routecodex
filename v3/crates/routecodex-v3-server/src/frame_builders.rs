@@ -129,7 +129,6 @@ pub(crate) async fn debug_dry_run(
                 server_id: state.server.id.clone(),
                 failure_session_scope,
                 request_id: dry_run_request_id,
-                toolreason_observation_session_id: Some("dry-run".to_string()),
                 payload: request_payload,
             },
             response_payload,

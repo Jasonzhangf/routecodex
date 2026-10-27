@@ -338,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn relay_resp03_projects_chat_delta_toolreason_after_canonical_conversion() {
+    fn relay_resp03_projects_chat_delta_native_reasoning_after_canonical_conversion() {
         let mut trace = Vec::new();
         let payload = project_json_response(
             Some("req-relay-delta-projection"),
@@ -380,10 +380,11 @@ mod tests {
             .and_then(Value::as_str)
             .expect("native arguments remain in client delta");
         assert_eq!(arguments, "{}");
-        assert_eq!(
-            payload.pointer("/choices/0/delta/reasoning_content"),
-            Some(&json!("调用工具 pwd：读取当前目录"))
-        );
+        // Synthetic tool-reason reasoning projection is retired; the relay only
+        // strips the registered ToolThinking auxiliary fields from arguments.
+        assert!(payload
+            .pointer("/choices/0/delta/reasoning_content")
+            .is_none());
         let encoded = serde_json::to_string(&payload).expect("client payload serializes");
         assert!(!encoded.contains("goal_alignment_confidence"));
         assert!(!encoded.contains("model_id"));

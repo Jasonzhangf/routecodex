@@ -47,9 +47,6 @@ pub struct V3AnthropicRelayRuntimeInput {
     pub server_id: String,
     pub failure_session_scope: V3ProviderFailureSessionScope,
     pub request_id: String,
-    /// Canonical console/request identity for Resp03 observation. This is a
-    /// diagnostic side-channel value distinct from the provider-failure scope.
-    pub toolreason_observation_session_id: Option<String>,
     pub payload: Value,
 }
 
@@ -562,12 +559,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         },
     };
     let attempt_budget = request_execution_control.attempt_budget();
-    response_hook_profile =
-        response_hook_profile.with_toolreason_observation_request_id(input.request_id.clone());
-    if let Some(session_id) = input.toolreason_observation_session_id.as_deref() {
-        response_hook_profile =
-            response_hook_profile.with_toolreason_observation_session_id(session_id.to_owned());
-    }
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3AnthropicRelayRuntimeError::StaticRegistry(error.to_string()))?;
     let mut trace = Vec::with_capacity(17);
@@ -878,9 +869,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let selected_target_model_id = selected.candidate.model_id.clone();
         let selected_target_compatibility_profile =
             selected.candidate.compatibility_profile.clone();
-        response_hook_profile = response_hook_profile
-            .clone()
-            .with_toolreason_expected_model_id(&selected_target_model_id);
         // VR 路由决策时算好的"保留响应密文"标记：仅 gpt 模型 + 单一 provider 候选时
         // 保留（Codex 客户端需要官方密文重建 reasoning 历史），其余 Resp03 一律剥离。
         // 该标记写入响应侧 profile，响应侧只消费此结果，不重复判定。
