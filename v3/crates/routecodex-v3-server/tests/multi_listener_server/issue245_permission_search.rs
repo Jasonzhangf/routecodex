@@ -231,7 +231,8 @@ async fn issue245_witness(stream: bool) {
         .expect("real function call");
     assert_eq!(call["call_id"], "call_issue245_continuation");
     assert_eq!(call["name"], "issue245_continuation");
-    let arguments: Value = serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+    let arguments_wire = call["arguments"].as_str().unwrap();
+    let arguments: Value = serde_json::from_str(arguments_wire).unwrap();
     assert_eq!(
         arguments,
         json!({"nonce":"ISSUE245_NONCE_0001", "query":"issue245 paired tool continuation"})
@@ -259,7 +260,7 @@ async fn issue245_witness(stream: bool) {
                 .iter()
                 .any(|call| call["id"] == "call_issue245_continuation"
                     && call["function"]["name"] == "issue245_continuation"
-                    && call["function"]["arguments"] == arguments))
+                    && call["function"]["arguments"].as_str() == Some(arguments_wire)))
     ));
     assert!(messages.iter().any(|message| message["role"] == "tool"
         && message["tool_call_id"] == "call_issue245_continuation"
