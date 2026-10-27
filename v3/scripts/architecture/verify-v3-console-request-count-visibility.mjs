@@ -268,9 +268,20 @@ const allowedIncludeUsage = [
 // the emitter name inside a comment or a string from being read as code.
 function maskCommentsAndStrings(source) {
   const out = Array.from(source);
+  // Second view with comment bodies blanked but string literal contents intact.
+  // Lane guards carry their protocol name inside a string literal
+  // (`entry_protocol == "anthropic"`), so that evidence needs the literals while
+  // still ignoring comments that merely mention a lanename.
+  const codeOut = Array.from(source);
   const blank = (from, to) => {
     for (let i = from; i < to; i += 1) {
       if (out[i] !== "\n") out[i] = " ";
+    }
+  };
+  const blankComment = (from, to) => {
+    blank(from, to);
+    for (let i = from; i < to; i += 1) {
+      if (codeOut[i] !== "\n") codeOut[i] = " ";
     }
   };
   const blockCommentEnd = (from) => {
@@ -343,12 +354,12 @@ function maskCommentsAndStrings(source) {
     if (c === "/" && n === "/") {
       const nl = source.indexOf("\n", i);
       const end = nl === -1 ? source.length : nl;
-      blank(i, end);
+      blankComment(i, end);
       i = end;
     } else if (c === "/" && n === "*") {
       const end = blockCommentEnd(i);
-      if (end === -1) return { masked: out.join(""), failed: true };
-      blank(i, end);
+      if (end === -1) return { masked: out.join(""), codeText: codeOut.join(""), failed: true };
+      blankComment(i, end);
       i = end;
     } else if (c === '"' || c === "b" || c === "r") {
       const opening = stringOpening(i);
@@ -357,7 +368,7 @@ function maskCommentsAndStrings(source) {
         continue;
       }
       const end = stringEnd(opening.open, opening.hashes);
-      if (end === -1) return { masked: out.join(""), failed: true };
+      if (end === -1) return { masked: out.join(""), codeText: codeOut.join(""), failed: true };
       blank(i, end + 1);
       i = end + 1;
     } else if (c === "'") {
@@ -372,7 +383,7 @@ function maskCommentsAndStrings(source) {
       i += 1;
     }
   }
-  return { masked: out.join(""), failed: false };
+  return { masked: out.join(""), codeText: codeOut.join(""), failed: false };
 }
 
 // Discover the source files that reference the emitter, excluding test modules.
@@ -393,7 +404,7 @@ function discoverEmitterSources() {
         const relative = path.relative(root, full).split(path.sep).join("/");
         const source = readRequired(relative);
         if (!source.includes(emitterName)) continue;
-        const { masked, failed } = maskCommentsAndStrings(source);
+        const { masked, codeText, failed } = maskCommentsAndStrings(source);
         if (failed) {
           failures.push(`${relative} has an unterminated comment or string literal`);
           continue;
@@ -438,9 +449,12 @@ function innermostBlockContaining(blocks, index) {
 }
 
 // The text immediately before a block's opening brace, up to the previous
-// statement boundary. Read from the unmasked source so string literals inside a
-// guard (`entry_protocol == "anthropic"`) stay visible.
-function blockGuardText(masked, source, openIndex) {
+// statement boundary. Structure (braces, parens) is scanned on the fully masked
+// text so a brace inside a string cannot skew the boundary, while the returned
+// text comes from the comment-stripped view so a guard
+// (`entry_protocol == "anthropic"`) stays visible but a comment mentioning the
+// lane name does not.
+function blockGuardText(masked, codeText, openIndex) {
   let i = openIndex - 1;
   let depth = 0;
   while (i >= 0) {
@@ -451,11 +465,12 @@ function blockGuardText(masked, source, openIndex) {
     } else if (depth === 0 && (ch === ";" || ch === "}" || ch === "{")) break;
     i -= 1;
   }
-  return source.slice(i + 1, openIndex);
+  return codeText.slice(i + 1, openIndex);
 }
 
-// The innermost function whose body encloses `index`, or null.
-function enclosingFunctionName(masked, blocks, functions, index) {
+// The innermost function whose body encloses `index`, or null. Returns the
+// [open, close) span of its body braces so callers can scan the whole function.
+function enclosingFunction(masked, blocks, functions, index) {
   let best = null;
   for (const fn of functions) {
     if (fn.index >= index) break;
@@ -464,22 +479,26 @@ function enclosingFunctionName(masked, blocks, functions, index) {
     const block = blocks.find((candidate) => candidate.open === open);
     if (block === undefined) continue;
     if (index > block.open && index < block.close) {
-      if (best === null || open > best.open) best = { name: fn.name, open };
+      if (best === null || open > best.open) best = { name: fn.name, open, close: block.close };
     }
   }
-  return best === null ? null : best.name;
+  return best;
 }
 
 // The anthropic lane must judge its client body with the typed is_sse() call,
 // never with the presence of a stream observation. Ownership is proven by any
-// one of three independent evidences, so a reverted or renamed lane must break
-// three unrelated things instead of one identifier:
+// one of four independent evidences, so a reverted, renamed, or rebinding lane
+// must break every unrelated signal at once:
 //   A. an in-scope `let <ident>[: <type>] = <expr>.client_body.is_sse();`
 //      binding — the identifier and an optional type annotation are free;
 //   B. the enclosing function name mentions anthropic;
-//   C. an enclosing block guard mentions the "anthropic" entry protocol.
+//   C. an enclosing block guard selects the "anthropic" entry protocol;
+//   D. the enclosing function body references the "anthropic" entry protocol as
+//      a string literal, and that function is not a multi-protocol dispatcher
+//      (no other protocol guard shares its body) — so renaming the function or
+//      the binding still leaves the lane branded inside its own body.
 // Returns the evidence label, or null when the lane is not anthropic.
-function anthropicLaneEvidenceAt(masked, source, emitIndex, blocks, functions, bindingIndexes) {
+function anthropicLaneEvidenceAt(masked, source, codeText, emitIndex, blocks, functions, bindingIndexes) {
   for (const bindingIndex of bindingIndexes) {
     if (bindingIndex > emitIndex) break;
     const block = innermostBlockContaining(blocks, bindingIndex);
@@ -487,16 +506,25 @@ function anthropicLaneEvidenceAt(masked, source, emitIndex, blocks, functions, b
       return "in-scope client_body.is_sse() binding";
     }
   }
-  const functionName = enclosingFunctionName(masked, blocks, functions, emitIndex);
-  if (functionName !== null && /anthropic/iu.test(functionName)) {
-    return `enclosing function ${functionName} names the anthropic lane`;
+  const fn = enclosingFunction(masked, blocks, functions, emitIndex);
+  if (fn === null) return null;
+  if (/anthropic/iu.test(fn.name)) {
+    return `enclosing function ${fn.name} names the anthropic lane`;
   }
   for (const block of blocks) {
     if (emitIndex > block.open && emitIndex < block.close) {
-      if (/"anthropic"/u.test(blockGuardText(masked, source, block.open))) {
+      if (/"anthropic"/u.test(blockGuardText(masked, codeText, block.open))) {
         return 'enclosing guard selects the "anthropic" entry protocol';
       }
     }
+  }
+  // Evidence D: the function body names the anthropic lane as a string literal,
+  // and the body is not shared with other protocols (otherwise every emit in a
+  // multi-protocol dispatcher would inherit the brand).
+  const body = codeText.slice(fn.open, fn.close + 1);
+  const ownsOtherProtocol = /entry_protocol\s*==\s*"(gemini|openai_chat|openai|responses)"/u.test(body);
+  if (!ownsOtherProtocol && /"anthropic"/u.test(body)) {
+    return 'enclosing function body references the "anthropic" entry protocol';
   }
   return null;
 }
@@ -560,7 +588,7 @@ const emitterSources = discoverEmitterSources();
 // client_body_is_sse binding, not any neighbouring function name.
 for (const relative of emitterSources) {
   const source = readRequired(relative);
-  const { masked, failed } = maskCommentsAndStrings(source);
+  const { masked, codeText, failed } = maskCommentsAndStrings(source);
   if (failed) {
     failures.push(`${relative} has an unterminated comment or string literal`);
     continue;
@@ -602,6 +630,7 @@ for (const relative of emitterSources) {
     const evidence = anthropicLaneEvidenceAt(
       masked,
       source,
+      codeText,
       match.index,
       blocks,
       functions,

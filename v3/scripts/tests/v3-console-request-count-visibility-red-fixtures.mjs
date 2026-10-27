@@ -430,6 +430,44 @@ pub(crate) fn probe_new_lane(
     diagnostic:
       /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
   },
+  {
+    // Triple kill: delete the binding, rename the owning function so its name no
+    // longer mentions anthropic, and regress the predicate. Binding (A), function
+    // name (B) and enclosing guard (C) all die together on this emit, so only the
+    // function-body evidence (D) can still see the lane. If it cannot, this
+    // regression ships silently.
+    name: "anthropic direct lane escapes after binding, name and guard all change",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source
+        .replace(
+          '        // include_usage answers "is the client response body not a stream". This\n        // lane populates stream_observation for both the JSON and the SSE\n        // closeout, so is_none() is not the client-body truth; the typed\n        // client_body.is_sse() is.\n        let client_body_is_sse = relay_output.client_body.is_sse();\n        let stream_console_finalizer = if client_body_is_sse {',
+          "        let stream_console_finalizer = if relay_output.client_body.is_sse() {",
+        )
+        .replace(
+          "                started_at,\n                !client_body_is_sse,\n            );",
+          "                started_at,\n                relay_output.stream_observation.is_none(),\n            );",
+        )
+        .replace(
+          "execute_v3_anthropic_direct_server_outcome",
+          "execute_v3_same_protocol_direct_server_outcome",
+        ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // A comment that mentions anthropic above another lane's guard is prose, not
+    // evidence. Reading unmasked text here would fail the gemini emit and turn an
+    // innocent explanatory comment into a CI break. Non-regression: must PASS.
+    name: "a comment naming anthropic must not brand another lane",
+    path: "v3/crates/routecodex-v3-server/src/endpoint_handlers.rs",
+    mutate: (source) =>
+      source.replace(
+        'if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {',
+        '// unlike "anthropic" the gemini lane keeps stream_observation\n        if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {',
+      ),
+    expectPass: true,
+  },
 ];
 
 const failures = [];
