@@ -21,11 +21,11 @@ fn v3_direct_admit_pinned_target(
         routecodex_v3_target::V3Target10ConcreteProviderSelected,
         Option<V3RuntimeProviderAdmission>,
     ),
-    V3ResponsesDirectRuntimeOutput,
+    Box<V3ResponsesDirectRuntimeOutput>,
 > {
     match try_admit_v3_selected_target(&selected) {
         Ok(Some(admission)) => Ok((selected, Some(admission))),
-        Ok(None) => Err(
+        Ok(None) => Err(Box::new(
             direct_runtime_helpers_stream::target_exhausted_output_with_observability(
                 crate::shared::direct_plain_error(
                     V3ErrorSourceKind::TargetPoolExhausted,
@@ -38,12 +38,14 @@ fn v3_direct_admit_pinned_target(
                 hook_registry,
                 None,
             ),
-        ),
-        Err(reason) => Err(direct_runtime_helpers_stream::source_failure_output(
-            runtime_source("V3Target10ConcreteProviderSelected", reason),
-            last_external_http.clone(),
-            trace.to_vec(),
-            hook_registry,
+        )),
+        Err(reason) => Err(Box::new(
+            direct_runtime_helpers_stream::source_failure_output(
+                runtime_source("V3Target10ConcreteProviderSelected", reason),
+                last_external_http.clone(),
+                trace.to_vec(),
+                hook_registry,
+            ),
         )),
     }
 }
@@ -651,7 +653,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                                     context.now_epoch_ms,
                                 )
                                 .available)
-                            .then(|| key)
+                            .then_some(key)
                     });
                 }
             }

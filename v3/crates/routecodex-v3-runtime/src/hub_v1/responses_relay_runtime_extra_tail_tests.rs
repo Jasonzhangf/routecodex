@@ -299,20 +299,22 @@ fn relay_runtime_failure_propagates_supplied_observability() {
     // 传入 Some(observability)，要求 output.observability 字段保留同一对象。
     // 反向：传 None 必须不引入新的 payload 字段；不破坏 Error06 控制面
     // 隔离（仍输出 JSON error body，error_chain 写齐）。
-    let mut observability = V3RuntimeObservability::default();
-    observability.entry_protocol = "responses".to_string();
-    observability.execution_mode = "relay".to_string();
-    observability.transport = "json".to_string();
-    observability.routing_group_id = Some("group-a".to_string());
-    observability.pool_id = Some("pool-a".to_string());
-    observability.provider_id = Some("provider-x".to_string());
-    observability.provider_key = Some("provider-x:key1:model-y".to_string());
-    observability.model_id = Some("model-y".to_string());
-    observability.wire_model = Some("model-y".to_string());
-    observability.provider_type = Some("openai_responses".to_string());
-    observability.attempts = Some(1);
-    observability.response_status = Some("error".to_string());
-    observability.provider_status = Some(598);
+    let observability = V3RuntimeObservability {
+        entry_protocol: "responses".to_string(),
+        execution_mode: "relay".to_string(),
+        transport: "json".to_string(),
+        routing_group_id: Some("group-a".to_string()),
+        pool_id: Some("pool-a".to_string()),
+        provider_id: Some("provider-x".to_string()),
+        provider_key: Some("provider-x:key1:model-y".to_string()),
+        model_id: Some("model-y".to_string()),
+        wire_model: Some("model-y".to_string()),
+        provider_type: Some("openai_responses".to_string()),
+        attempts: Some(1),
+        response_status: Some("error".to_string()),
+        provider_status: Some(598),
+        ..V3RuntimeObservability::default()
+    };
 
     let output = project_v3_responses_relay_runtime_failure(
         V3ResponsesRelayRuntimeError::RuntimeTiming("red-test propagation".to_string()),

@@ -26,7 +26,7 @@ fn write_record(root: &Path, bin_directory: &Path, record_path: &Path) {
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_anchor_leader_stays_alive_through_readiness_and_stop() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -84,7 +84,7 @@ async fn internal_hooksd_anchor_leader_stays_alive_through_readiness_and_stop() 
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_binary_starts_when_present_in_install_bin_directory() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -122,7 +122,7 @@ async fn internal_hooksd_binary_starts_when_present_in_install_bin_directory() {
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_receives_namespace_sockets_and_handlers_config() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -175,7 +175,7 @@ async fn internal_hooksd_receives_namespace_sockets_and_handlers_config() {
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_missing_binary_reports_hooks_unavailable_missing() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -202,7 +202,7 @@ async fn internal_hooksd_missing_binary_reports_hooks_unavailable_missing() {
 #[tokio::test]
 #[cfg(unix)]
 async fn missing_internal_hooksd_does_not_fall_back_to_legacy_supervisor() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -245,7 +245,7 @@ async fn missing_internal_hooksd_does_not_fall_back_to_legacy_supervisor() {
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_crash_before_readiness_reports_hooks_unavailable_crashed() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -274,7 +274,7 @@ async fn internal_hooksd_crash_before_readiness_reports_hooks_unavailable_crashe
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_crash_after_readiness_degrades_running_instance() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -337,7 +337,7 @@ async fn internal_hooksd_crash_after_readiness_degrades_running_instance() {
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_control_loss_degrades_running_instance_while_anchor_is_alive() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -451,7 +451,7 @@ end
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_invalid_health_response_degrades_running_instance() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -553,7 +553,7 @@ end
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_socket_loss_before_identity_capture_degrades_running_instance() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -622,7 +622,7 @@ sleep
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_replacement_socket_degrades_running_instance() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -760,7 +760,7 @@ end
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_wrong_protocol_health_degrades_running_instance() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -836,7 +836,7 @@ end
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_start_failure_removes_control_socket_after_owned_group_stops() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -881,7 +881,7 @@ async fn internal_hooksd_start_failure_removes_control_socket_after_owned_group_
 #[tokio::test]
 #[cfg(unix)]
 async fn stale_record_without_control_socket_identity_is_reaped_before_internal_start() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -937,7 +937,7 @@ async fn stale_record_without_control_socket_identity_is_reaped_before_internal_
 #[tokio::test]
 #[cfg(unix)]
 async fn stale_live_hooks_group_is_unavailable_instead_of_aborting_start() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -991,7 +991,7 @@ async fn stale_live_hooks_group_is_unavailable_instead_of_aborting_start() {
 #[tokio::test]
 #[cfg(unix)]
 async fn internal_hooksd_readiness_timeout_reports_hooks_unavailable_timeout() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");

@@ -322,7 +322,7 @@ fn build_v3_codex_model_metadata(
     let supported_reasoning_levels =
         build_v3_supported_reasoning_levels(&supported_reasoning_efforts, preset.is_some());
     let capability_projection = build_v3_model_capability_projection(capabilities, preset);
-    let mut item = Map::from_iter([
+    let item = Map::from_iter([
         ("id".to_string(), json!(visible_id)),
         ("object".to_string(), json!("model")),
         ("owned_by".to_string(), json!("provider")),

@@ -1,4 +1,5 @@
 use super::*;
+use crate::shared_direct_thinking_compat::normalize_v3_direct_thinking_json;
 
 #[test]
 fn direct_thinking_json_preserves_opaque_parts_and_refreshes_aggregate() {

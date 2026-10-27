@@ -389,7 +389,7 @@ targets = [{{ kind = "provider_model", provider = "signature", model = "signatur
                             && record["reason"] == "unmapped_target_protocol_field_unrepresentable"
                             && record["drop_site"]
                                 == "project_outbound_payload_for_target_protocol_inner_with_drops"
-                            && record["entry_port"] == port.to_string()
+                            && record["entry_port"] == port
                             && record["request_id"]
                                 .as_str()
                                 .is_some_and(|id| !id.is_empty())

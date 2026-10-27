@@ -234,7 +234,7 @@ pub(crate) fn responses_relay_response_hook_profile(
         .with_tool_thinking_turn_context(tool_thinking_turn_context)
         .with_toolreason_expected_model_id(expected_model_id)
         .with_toolreason_client_projection(toolreason_client_projection);
-    let profile = profile.with_toolreason_observation_request_id(request_id);
-    let profile = profile.with_toolreason_observation_session_id(session_id);
     profile
+        .with_toolreason_observation_request_id(request_id)
+        .with_toolreason_observation_session_id(session_id)
 }

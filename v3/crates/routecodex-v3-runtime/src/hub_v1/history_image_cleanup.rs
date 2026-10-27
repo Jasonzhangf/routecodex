@@ -220,11 +220,9 @@ fn strip_v3_embedded_image_bytes(value: &mut Value, changed: &mut bool) {
                 strip_v3_embedded_image_bytes(item, changed);
             }
         }
-        Value::String(text) => {
-            if is_v3_inline_image_reference(text) {
-                *text = V3_HISTORY_IMAGE_PLACEHOLDER.to_string();
-                *changed = true;
-            }
+        Value::String(text) if is_v3_inline_image_reference(text) => {
+            *text = V3_HISTORY_IMAGE_PLACEHOLDER.to_string();
+            *changed = true;
         }
         _ => {}
     }

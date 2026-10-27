@@ -339,8 +339,6 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
             )
         })?;
     let mut terminal_seen = false;
-    let mut business_decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
-    let mut has_business_content = false;
     let mut client_committed = false;
     // A declared tool lets the complete-attempt DSML owner harvest tool markup
     // out of the output text, so the probe must treat that opener as governed
@@ -404,11 +402,6 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
         if client_committed && terminal_frame {
             committed.hold_client_flush();
         }
-        has_business_content |= direct_sse_chunk_has_business_content(
-            provider_protocol,
-            &frame,
-            &mut business_decoder,
-        )?;
         for value in parse_direct_sse_json_frames(&frame) {
             commit_probe.observe_event(&value);
         }
@@ -478,15 +471,12 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                 )
             })?;
             if disposition == V3SseFrameDisposition::LegalCloseout {
-                if client_committed {
+                let has_business_content = if client_committed {
                     apply_complete_response_hook_preserving_client_prefix(
                         &mut committed,
                         response_hook,
                     )?;
-                    has_business_content = direct_sse_frames_have_business_content(
-                        provider_protocol,
-                        committed.frames(),
-                    );
+                    direct_sse_frames_have_business_content(provider_protocol, committed.frames())
                 } else {
                     let _ = rewrite_direct_sse_memory(&mut committed, manifest, request_id)
                         .map_err(|error| {
@@ -497,11 +487,8 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                             )
                         })?;
                     apply_complete_response_hook(&mut committed, response_hook)?;
-                    has_business_content = direct_sse_frames_have_business_content(
-                        provider_protocol,
-                        committed.frames(),
-                    );
-                }
+                    direct_sse_frames_have_business_content(provider_protocol, committed.frames())
+                };
                 if !has_business_content {
                     return Err(direct_sse_empty_attempt_failure());
                 }
@@ -541,10 +528,9 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                     )
                 })?;
         }
-        if client_committed {
+        let has_business_content = if client_committed {
             apply_complete_response_hook_preserving_client_prefix(&mut committed, response_hook)?;
-            has_business_content =
-                direct_sse_frames_have_business_content(provider_protocol, committed.frames());
+            direct_sse_frames_have_business_content(provider_protocol, committed.frames())
         } else {
             let _ = rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(
                 |error| {
@@ -556,9 +542,8 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                 },
             )?;
             apply_complete_response_hook(&mut committed, response_hook)?;
-            has_business_content =
-                direct_sse_frames_have_business_content(provider_protocol, committed.frames());
-        }
+            direct_sse_frames_have_business_content(provider_protocol, committed.frames())
+        };
         if !has_business_content {
             return Err(direct_sse_empty_attempt_failure());
         }
@@ -2164,6 +2149,9 @@ fn sdk_runtime_fault_output_with_observability_and_snapshots(
 #[cfg(test)]
 mod target_exhaustion_disposition_tests {
     use super::*;
+    use routecodex_v3_error::{
+        V3Error05RecoveryAdmissionWitness, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput,
+    };
 
     #[test]
     fn seeded_direct_source_fault_retains_prior_http_witness_and_original_cause() {

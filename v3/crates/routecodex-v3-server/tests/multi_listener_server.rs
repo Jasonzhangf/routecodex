@@ -9510,6 +9510,8 @@ async fn issue4aeb668_refill_exhaustion_keeps_prior_observations() {
     assert_refill_round_observations(true).await;
 }
 
+type ObservedCalls = Arc<(Arc<Mutex<Vec<Value>>>, bool)>;
+
 async fn assert_refill_round_observations(exhausted: bool) {
     let _guard = TEST_LOCK.lock().await;
     routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(None);
@@ -9517,7 +9519,7 @@ async fn assert_refill_round_observations(exhausted: bool) {
     let calls = Arc::new(Mutex::new(Vec::<Value>::new()));
     let state = Arc::new((calls.clone(), exhausted));
     let app = Router::new().route("/v1/responses", post(
-        |State(state): State<Arc<(Arc<Mutex<Vec<Value>>>, bool)>>,
+        |State(state): State<ObservedCalls>,
          axum::Json(body): axum::Json<Value>| async move {
             assert!(body["input"].is_array() || body["input"].is_string(), "provider requires Responses input: {body}");
             assert!(body.get("messages").is_none(), "conflicting Chat history: {body}");

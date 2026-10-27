@@ -382,11 +382,15 @@ fn provider_attempt_failure_survives_completed_meta_rebuild() {
     )
     .unwrap();
 
-    let mut failure_event = crate::V3RuntimeProviderFailureObservation::default();
-    failure_event.error_type = Some("provider_http_502".to_string());
-    failure_event.message = "provider returned HTTP 502".to_string();
-    let mut obs = crate::V3RuntimeObservability::default();
-    obs.provider_failure_events = vec![failure_event];
+    let failure_event = crate::V3RuntimeProviderFailureObservation {
+        error_type: Some("provider_http_502".to_string()),
+        message: "provider returned HTTP 502".to_string(),
+        ..Default::default()
+    };
+    let obs = crate::V3RuntimeObservability {
+        provider_failure_events: vec![failure_event],
+        ..Default::default()
+    };
 
     let mut failed_meta = meta_with_full("r-failure-then-success");
     failed_meta.error_category = Some("provider_http_502".to_string());
@@ -434,11 +438,15 @@ fn terminal_provider_attempt_failure_is_persisted_in_row() {
     )
     .unwrap();
 
-    let mut failure_event = crate::V3RuntimeProviderFailureObservation::default();
-    failure_event.error_type = Some("provider_http_503".to_string());
-    failure_event.message = "provider returned HTTP 503".to_string();
-    let mut obs = crate::V3RuntimeObservability::default();
-    obs.provider_failure_events = vec![failure_event];
+    let failure_event = crate::V3RuntimeProviderFailureObservation {
+        error_type: Some("provider_http_503".to_string()),
+        message: "provider returned HTTP 503".to_string(),
+        ..Default::default()
+    };
+    let obs = crate::V3RuntimeObservability {
+        provider_failure_events: vec![failure_event],
+        ..Default::default()
+    };
 
     let mut failed_meta = meta_with_full("r-failure-terminal");
     failed_meta.error_category = Some("provider_http_503".to_string());

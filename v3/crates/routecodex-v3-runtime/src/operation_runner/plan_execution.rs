@@ -60,9 +60,9 @@ pub(crate) struct V3PlanExecutionCompleted {
 
 pub(crate) enum V3PlanExecutionStop {
     Exhausted {
-        expanded: V3Target09CandidateSetExpanded,
+        expanded: Box<V3Target09CandidateSetExpanded>,
         exhaustion: V3TargetExhaustion,
-        source: Option<V3Error01SourceRaised>,
+        source: Option<Box<V3Error01SourceRaised>>,
     },
     Failed(V3Error01SourceRaised),
     OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
@@ -413,10 +413,10 @@ pub(crate) fn run_v3_plan_execution_operator(
         .take();
     match output {
         Some(PlanExecutionOperatorOutput::Failed(source)) => {
-            return Ok(V3PlanExecutionOutcome::Failed(source))
+            Ok(V3PlanExecutionOutcome::Failed(source))
         }
         Some(PlanExecutionOperatorOutput::OperatorFault(fault)) => {
-            return Ok(V3PlanExecutionOutcome::OperatorFault(fault))
+            Ok(V3PlanExecutionOutcome::OperatorFault(fault))
         }
         output => {
             let output = output.ok_or_else(|| {
@@ -584,9 +584,9 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
             exhaustion,
             source,
         }) => Err(V3PlanExecutionStop::Exhausted {
-            expanded,
+            expanded: Box::new(expanded),
             exhaustion,
-            source,
+            source: source.map(Box::new),
         }),
         Some(PlanExecutionOperatorOutput::Failed(source)) => {
             Err(V3PlanExecutionStop::Failed(source))
@@ -789,9 +789,9 @@ async fn run_v3_plan_execution_with_probes_unboxed(
                             Err(fault) => return Err(V3PlanExecutionStop::OperatorFault(fault)),
                         };
                         return Err(V3PlanExecutionStop::Exhausted {
-                            expanded,
+                            expanded: Box::new(expanded),
                             exhaustion,
-                            source,
+                            source: source.map(Box::new),
                         });
                     }
                     Err(error) => {
@@ -818,9 +818,9 @@ async fn run_v3_plan_execution_with_probes_unboxed(
                 source,
             } => {
                 return Err(V3PlanExecutionStop::Exhausted {
-                    expanded,
+                    expanded: Box::new(expanded),
                     exhaustion,
-                    source,
+                    source: source.map(Box::new),
                 });
             }
             V3PlanExecutionOutcome::Failed(source) => {
@@ -1363,7 +1363,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
     }
 
     fn three_tier_probe_manifest(listener: &TcpListener) -> V3Config05ManifestPublished {
-        let authoring = parse_v3_config_02_authoring(&format!(
+        let authoring = parse_v3_config_02_authoring(
             r#"
 version = 3
 [servers.test]
@@ -1407,8 +1407,8 @@ targets = [
   {{ kind = "provider_model", provider = "r05_cooled", model = "gpt-test", key = "key1", priority = 2 }},
   {{ kind = "provider_model", provider = "r05_later", model = "gpt-test", key = "key1", priority = 3 }},
 ]
-"#
-        ))
+"#,
+        )
         .unwrap();
         let mut manifest = compile_v3_config_05_manifest(authoring).unwrap();
         let base_url = format!("http://{}/v1", listener.local_addr().unwrap());

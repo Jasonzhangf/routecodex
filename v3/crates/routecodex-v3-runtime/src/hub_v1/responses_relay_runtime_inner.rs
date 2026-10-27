@@ -319,7 +319,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             &failed_candidates,
                             &request_local_busy_candidates,
                         ) {
-                            Ok(source) => source,
+                            Ok(source) => source.map(Box::new),
                             Err(fault) => {
                                 return Ok(provider_failure_output(
                                     V3ResponsesRelayProviderFailure::from(fault),
@@ -329,6 +329,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             }
                         },
                     };
+                    let source = source.map(|source| *source);
                     let failure = V3ResponsesRelayProviderFailure {
                         attempt_source: None,
                         status: 502,
@@ -488,7 +489,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 &failed_candidates,
                                 &request_local_busy_candidates,
                             ) {
-                                Ok(source) => source,
+                                Ok(source) => source.map(Box::new),
                                 Err(fault) => {
                                     return Ok(provider_failure_output(
                                         terminalize_v3_responses_relay_provider_failure(
@@ -501,6 +502,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 }
                             },
                         };
+                        let source = source.map(|source| *source);
                         let failure = V3ResponsesRelayProviderFailure {
                             attempt_source: None,
                             status: 502,

@@ -385,7 +385,7 @@ fn protocol_plan_failure_preserves_source_status_and_pool_exhausted() {
     .expect_err("process=chat with Direct-only policy must produce a real protocol-plan failure");
 
     let original_source = failure.source.clone();
-    let projected = project_v3_protocol_execution_plan_failure(failure)
+    let projected = project_v3_protocol_execution_plan_failure(*failure)
         .expect("a normal protocol-plan source must finish through Error02..06");
 
     assert_eq!(

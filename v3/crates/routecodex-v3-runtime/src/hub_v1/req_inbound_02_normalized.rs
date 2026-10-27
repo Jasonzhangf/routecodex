@@ -497,7 +497,7 @@ fn v3_hub_responses_effective_tool_declarations(
             "openai-responses",
         )?;
     let declarations = registry.source_tools(&hosted);
-    Ok((!declarations.is_empty()).then(|| Value::Array(declarations)))
+    Ok((!declarations.is_empty()).then_some(Value::Array(declarations)))
 }
 
 pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01(

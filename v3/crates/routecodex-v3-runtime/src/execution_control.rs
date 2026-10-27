@@ -81,7 +81,7 @@ impl Default for V3AttemptStoreLimits {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum V3AttemptStoreError {
+pub enum V3AttemptStoreError {
     ResidenceDeadlineExceeded(String),
     LocalResourceExhausted(String),
     InvalidAttemptState(String),
@@ -572,12 +572,15 @@ impl V3CommittedClientSseStream {
 
 struct V3ObservedCommittedSseStream {
     source: V3CommittedClientSseStream,
-    on_frame: Box<dyn Fn(&[u8]) + Send + Sync>,
-    on_terminal: Option<Box<dyn FnOnce(V3CommittedSseTerminal) + Send>>,
+    on_frame: V3CommittedSseFrameObserver,
+    on_terminal: Option<V3CommittedSseTerminalObserver>,
     /// Whether the protocol terminal frame has been yielded to the client.
     /// Drop uses this to preserve Completed versus Dropped semantics.
     terminal_frame_consumed: bool,
 }
+
+type V3CommittedSseFrameObserver = Box<dyn Fn(&[u8]) + Send + Sync>;
+type V3CommittedSseTerminalObserver = Box<dyn FnOnce(V3CommittedSseTerminal) + Send>;
 
 impl V3ObservedCommittedSseStream {
     fn finish(&mut self, terminal: V3CommittedSseTerminal) {

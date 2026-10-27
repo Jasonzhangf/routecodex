@@ -1,4 +1,8 @@
 use super::request_outbound_format::{
+    build_v3_openai_chat_standard_request_for_selected_web_search_mode,
+    build_v3_openai_chat_standard_request_from_chat_canonical,
+    build_v3_openai_responses_standard_request_for_selected_target,
+    build_v3_openai_responses_standard_request_from_chat_canonical,
     project_outbound_payload_for_target_protocol, V3OutboundTargetProtocol,
 };
 use super::*;
@@ -1075,7 +1079,7 @@ fn provider_req_compat_does_not_inject_output_cap_without_declaration() {
         );
         for field in protocol.1 {
             assert!(
-                wire.get(&field).is_none(),
+                wire.get(field).is_none(),
                 "no provider-declared cap means no injected {field} on {:?} wire: {wire}",
                 protocol.0
             );

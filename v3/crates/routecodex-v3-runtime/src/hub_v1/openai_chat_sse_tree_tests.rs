@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::json;
 
 #[test]
 fn chat_structured_arguments_survive_json_and_sse_normalization_without_string_repair() {
@@ -85,7 +86,6 @@ fn chat_sse_co_located_refusal_survives_materialization() {
         }
     }
 }
-use serde_json::json;
 
 struct RewriteChatHook {
     notified: bool,

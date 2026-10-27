@@ -9,7 +9,7 @@ use tempfile::TempDir;
 #[tokio::test]
 #[cfg(unix)]
 async fn default_install_record_mode_is_internal_hooksd() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -83,7 +83,7 @@ async fn default_install_record_mode_is_internal_hooksd() {
 #[tokio::test]
 #[cfg(unix)]
 async fn ready_hooks_sidecar_stop_removes_only_startup_owned_codexapp_socket() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new_in("/tmp").unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -140,7 +140,7 @@ async fn ready_hooks_sidecar_stop_removes_only_startup_owned_codexapp_socket() {
 #[tokio::test]
 #[cfg(unix)]
 async fn missing_install_record_is_a_true_noop() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("missing-install.json");
@@ -170,7 +170,7 @@ async fn missing_install_record_is_a_true_noop() {
 #[tokio::test]
 #[cfg(unix)]
 async fn disabled_supervisor_is_a_true_noop() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -288,6 +288,7 @@ fn status_lock_contention_is_bounded() {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .mode(0o600)
         .open(lock_path)
         .unwrap();
@@ -316,7 +317,7 @@ fn status_lock_contention_is_bounded() {
 #[tokio::test]
 #[cfg(unix)]
 async fn stopping_supervisor_during_slow_startup_is_bounded_and_cleans_owned_state() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -464,7 +465,7 @@ async fn abnormal_supervisor_exit_degrades_hooks_instead_of_failing_the_runtime(
     // readiness must leave the managed runtime Running with an explicit
     // degraded detail and must preserve lifecycle control resources. Only a
     // lifecycle error the supervisor actually reported may stay fatal.
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -712,7 +713,7 @@ async fn stale_generation_readiness_does_not_overwrite_new_generation_detail() {
 #[tokio::test]
 #[cfg(unix)]
 async fn supervisor_readiness_is_a_pending_barrier_until_protocol_ready() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -721,9 +722,7 @@ async fn supervisor_readiness_is_a_pending_barrier_until_protocol_ready() {
     fs::create_dir(&bin_directory).unwrap();
     fs::write(
         bin_directory.join("rccv3-hooksd"),
-        format!(
-            "#!/bin/sh\nsleep 1\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n"
-        ),
+        "#!/bin/sh\nsleep 1\nprintf '%s\\n' '{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
     )
     .unwrap();
     let mut permissions = fs::metadata(bin_directory.join("rccv3-hooksd"))
@@ -768,7 +767,7 @@ async fn supervisor_readiness_is_a_pending_barrier_until_protocol_ready() {
 #[tokio::test]
 #[cfg(unix)]
 async fn supervisor_timeout_force_reaps_owned_group_and_record() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");

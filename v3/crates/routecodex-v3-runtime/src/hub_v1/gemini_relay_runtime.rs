@@ -5,21 +5,17 @@ use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailureRetryPolicy,
 };
-use futures_util::StreamExt;
-use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
+use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderError, V3ProviderRequestHeader,
-    V3ProviderSseStream, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
-    V3Transport13ResponsesHttpRequest,
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderError, V3ProviderSseStream,
+    V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 pub type V3GeminiRelayClientStream = V3RelayProjectedSseStream;
@@ -672,14 +668,11 @@ fn project_json_response_with_source(
         && super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
             resp02.provider_payload(),
         );
-    match provider_protocol {
-        V3HubProviderWireProtocol::OpenAiChat => {
-            let canonical = super::responses_relay_runtime::build_v3_responses_provider_response_from_openai_chat_payload(
-                resp02.provider_payload(), chat_request,
-            ).map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?;
-            resp02.set_responses_semantic_payload(canonical);
-        }
-        _ => {}
+    if provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
+        let canonical = super::responses_relay_runtime::build_v3_responses_provider_response_from_openai_chat_payload(
+            resp02.provider_payload(), chat_request,
+        ).map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?;
+        resp02.set_responses_semantic_payload(canonical);
     }
     trace.push("ProviderRespCompat02ProviderCompat");
     trace.push("V3HubRespInbound02Normalized");

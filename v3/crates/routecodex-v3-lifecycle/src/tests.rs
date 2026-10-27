@@ -1,14 +1,13 @@
 use super::*;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::sync::Mutex;
 use tempfile::TempDir;
 
 #[cfg(unix)]
 #[path = "../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 
-pub(crate) static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static TEST_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 pub(crate) const TEST_HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
 
 #[cfg(unix)]
@@ -85,7 +84,7 @@ async fn control_response_broken_pipe_is_nonfatal() {
 #[tokio::test]
 #[cfg(unix)]
 async fn failed_hooks_stop_completes_main_lifecycle_and_reports_degraded_cleanup() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let port = std::net::TcpListener::bind(("127.0.0.1", 0))
@@ -138,7 +137,7 @@ async fn failed_hooks_stop_completes_main_lifecycle_and_reports_degraded_cleanup
 #[tokio::test]
 #[cfg(unix)]
 async fn native_exec_failure_retains_aggregate_and_hooks_owner() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let port = std::net::TcpListener::bind(("127.0.0.1", 0))
@@ -310,8 +309,8 @@ async fn live_hooks_group_does_not_block_forced_stop() {
     };
 
     let status = V3ManagedLifecycle::with_state_root(
-        &root.path().join("config.v3.toml"),
-        &root.path().join("state"),
+        root.path().join("config.v3.toml"),
+        root.path().join("state"),
     )
     .force_stop_after_graceful_timeout(&instance_dir, &declaration)
     .await
@@ -503,7 +502,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
 
 #[test]
 fn declaration_includes_enabled_admin_webui_listener() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     std::env::remove_var("ROUTECODEX_V3_ADMIN_BIND");
     let root = TempDir::new().unwrap();
@@ -559,7 +558,7 @@ fn admin_isolated_listeners(
 /// start refuses to run even though every business listener is free.
 #[test]
 fn issue850e916_admin_only_occupancy_is_not_business_unavailability() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     let business_port = free_business_port();
     let admin_placeholder = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let admin_port = admin_placeholder.local_addr().unwrap().port();
@@ -600,7 +599,7 @@ fn issue850e916_admin_only_occupancy_is_excluded_from_residual_pids() {
         }
     }
 
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     let root = TempDir::new().unwrap();
     let state = root.path().join("state");
     let business_port = free_business_port();
@@ -737,7 +736,7 @@ fn issue850e916_admin_only_occupancy_is_excluded_from_residual_pids() {
 /// be free. An occupied optional admin listener must not block that reap.
 #[test]
 fn issue850e916_admin_only_occupancy_does_not_block_orphan_reap() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     let root = TempDir::new().unwrap();
     let business_port = free_business_port();
     let admin_placeholder = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -780,7 +779,7 @@ fn issue850e916_admin_only_occupancy_does_not_block_orphan_reap() {
 /// starts, stops, or touches a foreign PID.
 #[test]
 fn guard_explicit_listener_pids_rejects_pid_listening_outside_target_ports() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     let first = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let second = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let first_port = first.local_addr().unwrap().port();
@@ -827,7 +826,7 @@ fn guard_explicit_listener_pids_rejects_pid_listening_outside_target_ports() {
 /// admin_webui port must be excluded from that same set.
 #[test]
 fn issue850e916_occupied_business_port_is_preserved_while_admin_is_excluded() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     let business_occupied = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let admin_occupied = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let business_port = business_occupied.local_addr().unwrap().port();
@@ -868,7 +867,7 @@ fn managed_test_declaration(
 
 #[test]
 fn deterministic_identity_and_unknown_state_fields_fail() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -894,7 +893,7 @@ fn deterministic_identity_and_unknown_state_fields_fail() {
 
 #[test]
 fn operation_lock_is_exclusive_and_auth_handle_is_required() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
     std::env::remove_var("V3_LIFECYCLE_TEST_KEY");
@@ -915,7 +914,7 @@ fn operation_lock_is_exclusive_and_auth_handle_is_required() {
 
 #[test]
 fn lifecycle_accepts_api_key_only_and_rejects_mixed_auth_handles() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
     let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
@@ -937,7 +936,7 @@ fn lifecycle_accepts_api_key_only_and_rejects_mixed_auth_handles() {
 
 #[test]
 fn state_projection_never_contains_resolved_secret() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret-value");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1011,7 +1010,7 @@ fn managed_child_reentry_removes_restart_plan_from_previous_control_identity() {
 
 #[test]
 fn restart_without_current_instance_state_fails_without_bootstrap() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let port_listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -1226,7 +1225,7 @@ fn exec_restart_reentry_adopts_changed_declaration_from_previous_owner() {
 
 #[test]
 fn published_declaration_mismatch_is_rejected_without_reaping() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1250,7 +1249,7 @@ fn published_declaration_mismatch_is_rejected_without_reaping() {
 
 #[test]
 fn terminal_state_allows_reaping_stale_release_executable_path_for_same_config_identity() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1281,7 +1280,7 @@ fn terminal_state_allows_reaping_stale_release_executable_path_for_same_config_i
 
 #[test]
 fn non_terminal_runtime_state_is_never_reaped_after_control_probe_failure() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1322,7 +1321,7 @@ fn non_terminal_runtime_state_is_never_reaped_after_control_probe_failure() {
 
 #[tokio::test]
 async fn stale_stopping_state_can_reach_owned_reap_after_child_exit() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1347,7 +1346,7 @@ async fn stale_stopping_state_can_reach_owned_reap_after_child_exit() {
 
 #[tokio::test]
 async fn active_stopping_child_is_not_reaped_when_listeners_have_closed() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1400,7 +1399,7 @@ async fn active_stopping_child_is_not_reaped_when_listeners_have_closed() {
 
 #[test]
 fn stale_running_state_allows_release_snapshot_executable_rollover_when_control_is_gone() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1459,7 +1458,7 @@ fn stale_running_state_allows_release_snapshot_executable_rollover_when_control_
 
 #[test]
 fn foreign_control_record_is_never_reaped_from_terminal_state() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1499,7 +1498,7 @@ fn foreign_control_record_is_never_reaped_from_terminal_state() {
 
 #[test]
 fn stopped_instance_state_allows_release_snapshot_executable_rollover() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1563,7 +1562,7 @@ fn stopped_instance_state_allows_release_snapshot_executable_rollover() {
 /// stopped cleanup`.
 #[test]
 fn orphan_control_socket_without_control_record_is_reaped_when_no_live_owner() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1597,7 +1596,7 @@ fn orphan_control_socket_without_control_record_is_reaped_when_no_live_owner() {
 /// The orphan-socket reap must not remove a socket a live owner still holds.
 #[test]
 fn orphan_control_socket_with_live_cached_pid_is_preserved() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1640,7 +1639,7 @@ fn orphan_control_socket_with_live_cached_pid_is_preserved() {
 
 #[test]
 fn running_instance_state_rejects_release_snapshot_executable_rollover() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1738,7 +1737,7 @@ fn restart_plan_keeps_true_snapshot_direct_for_snapall_restart() {
 
 #[test]
 fn default_snapshot_authorization_does_not_enable_sample_persistence() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);
@@ -1760,7 +1759,7 @@ fn default_snapshot_authorization_does_not_enable_sample_persistence() {
 
 #[test]
 fn configured_codex_samples_authorization_survives_managed_declaration() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);

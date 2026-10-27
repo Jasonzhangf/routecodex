@@ -259,7 +259,7 @@ async fn issue245_witness(stream: bool) {
                 .iter()
                 .any(|call| call["id"] == "call_issue245_continuation"
                     && call["function"]["name"] == "issue245_continuation"
-                    && call["function"]["arguments"] == arguments.to_string()))
+                    && call["function"]["arguments"] == arguments))
     ));
     assert!(messages.iter().any(|message| message["role"] == "tool"
         && message["tool_call_id"] == "call_issue245_continuation"

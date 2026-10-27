@@ -25,19 +25,17 @@ pub(crate) use provider_request_dry_run::{
 };
 mod provider_compat_shared;
 pub(crate) use provider_compat_shared::{
-    build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers,
     build_v3_provider_transport_request_for_protocol,
-    build_v3_provider_transport_request_from_parts, is_v3_gpt_canonical_model,
-    is_v3_retain_response_cipher, provider_protocol_compat_id,
-    provider_wire_protocol_for_provider_type, provider_wire_protocol_for_selected_candidate,
-    v3_provider_profile_requires_upstream_sse, V3ProviderWireTransportContext,
+    build_v3_provider_transport_request_from_parts, is_v3_retain_response_cipher,
+    provider_protocol_compat_id, provider_wire_protocol_for_provider_type,
+    provider_wire_protocol_for_selected_candidate, v3_provider_profile_requires_upstream_sse,
+    V3ProviderWireTransportContext,
 };
 mod relay_runtime_shared;
 pub(crate) use relay_runtime_shared::{
     bind_v3_selected_business_auth_kind, build_v3_relay_observability,
     build_v3_runtime_provider_failed_attempt_evidence_from_error,
     build_v3_runtime_provider_failed_attempt_evidence_from_response,
-    build_v3_runtime_provider_failed_attempt_evidence_no_response,
     build_v3_runtime_provider_failure_observation_from_policy_event, error_output,
     external_http_witness_from_provider_error, external_http_witness_head,
     extract_error_type_style, extract_message_type_style, handle_provider_failure,
@@ -48,8 +46,7 @@ pub(crate) use relay_runtime_shared::{
 };
 mod relay_runtime_core;
 pub(crate) use relay_runtime_core::{
-    execute_v3_relay_runtime_core, v3_relay_transport_response_timeout, V3RelayCoreError,
-    V3RelayProtocolCodec,
+    v3_relay_transport_response_timeout, V3RelayCoreError, V3RelayProtocolCodec,
 };
 mod responses_openai_codec;
 pub(crate) use responses_openai_codec::build_v3_chat_assistant_message_from_responses_output_item;
@@ -71,14 +68,10 @@ mod request_outbound_tool_id;
 pub(crate) use request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_for_selected_target;
 pub(crate) use request_outbound_format::{
     build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops,
-    build_v3_openai_chat_standard_request_for_selected_web_search_mode,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
-    build_v3_openai_chat_standard_request_from_chat_canonical,
     build_v3_openai_chat_standard_request_from_chat_canonical_recording,
-    build_v3_openai_responses_standard_request_for_selected_target,
     build_v3_openai_responses_standard_request_for_selected_target_with_drops,
     build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options,
-    build_v3_openai_responses_standard_request_from_chat_canonical,
     normalize_v3_openai_responses_provider_request_payload,
 };
 mod anthropic_codec_tool_projection;
@@ -115,7 +108,7 @@ mod provider_attempt_business_content;
 pub(crate) use provider_attempt_business_content::*;
 mod resp_chat_process_complete_chat_sse;
 pub(crate) use resp_chat_process_complete_chat_sse::{
-    projected_sse_has_business_content, V3RelayCompleteResponseError,
+    projected_sse_has_business_content, V3RelayCompleteResponseError, V3RelayCompleteResponseResult,
 };
 #[cfg(test)]
 mod provider_sse_json_codec_mcp_namespace_tests;
@@ -133,7 +126,7 @@ pub use server_resp_outbound_06_client_frame::*;
 mod relay_request;
 pub use relay_request::*;
 mod tool_thinking_hooks;
-pub use tool_thinking_hooks::*;
+pub(crate) use tool_thinking_hooks::*;
 mod anthropic_codec;
 pub use anthropic_codec::*;
 mod openai_chat_codec;
@@ -165,10 +158,7 @@ pub use resource_hooks::*;
 // The request-local declared namespace identity inverse used by the Direct
 // Responses response owner. Both share the single traversal in
 // `request_outbound_mcp_names` with the Relay and cross-protocol callers.
-pub(crate) use request_outbound_mcp_names::{
-    responses_mcp_dispatch_identities as responses_namespace_restore_identities,
-    restore_v3_responses_namespace_in_value as restore_v3_responses_namespace_identities,
-};
+pub(crate) use request_outbound_mcp_names::restore_v3_responses_namespace_in_value as restore_v3_responses_namespace_identities;
 
 #[cfg(test)]
 mod tests;

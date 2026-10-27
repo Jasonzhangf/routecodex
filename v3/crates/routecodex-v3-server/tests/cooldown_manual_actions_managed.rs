@@ -447,7 +447,7 @@ async fn zero_provider(
 ) -> Response<Body> {
     // A recovery probe carries an array input and the fixed probe text; a business
     // request carries its string marker. Keeping them apart is the whole point.
-    let probe = body.get("input").map_or(false, serde_json::Value::is_array)
+    let probe = body.get("input").is_some_and(serde_json::Value::is_array)
         || body.to_string().contains("ping; reply pong");
     if probe {
         *state.probes.lock().await += 1;

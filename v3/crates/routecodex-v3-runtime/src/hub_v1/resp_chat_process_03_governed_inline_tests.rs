@@ -1,4 +1,5 @@
 use super::*;
+use crate::hub_v1::provider_compat_shared::is_v3_gpt_canonical_model;
 
 #[test]
 fn resp03_candidate_association_think_removal_and_split() {

@@ -1,4 +1,3 @@
-pub(crate) use crate::shared_direct_thinking_compat::normalize_v3_direct_thinking_json;
 
 pub(crate) fn wrap_v3_direct_responses_thinking_tag_consumer_stream(
     source: V3ProviderAttemptSseStream,

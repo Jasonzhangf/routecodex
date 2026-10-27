@@ -138,7 +138,7 @@ pub(super) fn project_openai_chat_reasoning_effort_from_reasoning(
         effort.as_str(),
         "none" | "off" | "disabled" | "disable" | "false"
     ))
-    .then(|| Value::String(effort))
+    .then_some(Value::String(effort))
 }
 
 pub(super) fn project_openai_chat_reasoning_context_policy(

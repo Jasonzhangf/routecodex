@@ -5,13 +5,11 @@ use routecodex_v3_config::{
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    build_v3_error_01_source_raised_internal, build_v3_error_02_classified_from_v3_error_01,
-    build_v3_provider_failure_action_from_v3_error_02,
-    build_v3_provider_global_error_fingerprint_from_classified,
+    build_v3_error_01_source_raised_internal, build_v3_provider_failure_action_from_v3_error_02,
     build_v3_provider_global_failure_policy, is_v3_provider_pool_exhausted, V3Error01SourceRaised,
     V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorSourceKind, V3ExternalErrorKind,
+    V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
     adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease},
@@ -396,17 +394,9 @@ pub(crate) fn project_v3_client_disconnect(
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct V3RelayProviderFailureRetryPolicy {
     pub(crate) same_candidate_retries: usize,
-}
-
-impl Default for V3RelayProviderFailureRetryPolicy {
-    fn default() -> Self {
-        Self {
-            same_candidate_retries: 0,
-        }
-    }
 }
 
 impl V3RelayProviderFailureRetryPolicy {
@@ -1246,23 +1236,24 @@ fn terminal_projection_for(
     if !is_v3_provider_pool_exhausted(&decision.exhaustion) {
         if let Some(V3ProviderDispositionStepManifest::Project { public_code, .. }) = matched_policy
             .and_then(|policy| {
-                policy.path.iter().rev().find_map(|step| match step {
-                    V3ProviderDispositionStepManifest::Project { .. } => Some(step),
-                    _ => None,
-                })
+                policy
+                    .path
+                    .iter()
+                    .rev()
+                    .find(|step| matches!(step, V3ProviderDispositionStepManifest::Project { .. }))
             })
         {
             // Error06 owns the terminal HTTP status. Policy projection may only
             // customize the public error code without changing routing truth.
-            if let Some(public_code) = public_code {
-                if let Some(error) = projected
+            if let (Some(public_code), Some(error)) = (
+                public_code,
+                projected
                     .body
                     .as_object_mut()
                     .and_then(|body| body.get_mut("error"))
-                    .and_then(Value::as_object_mut)
-                {
-                    error.insert("code".to_string(), Value::String(public_code.clone()));
-                }
+                    .and_then(Value::as_object_mut),
+            ) {
+                error.insert("code".to_string(), Value::String(public_code.clone()));
             }
         }
     }
@@ -1498,7 +1489,7 @@ pub(crate) fn expand_v3_relay_target_candidates_from_opaque_hit(
 
 fn build_v3_relay_target_candidates(
     input: &V3RelayProviderTargetResolutionInput<'_>,
-) -> Result<V3Target09CandidateSetExpanded, V3RelayProviderTargetResolution> {
+) -> Result<V3Target09CandidateSetExpanded, Box<V3RelayProviderTargetResolution>> {
     let hit = resolve_v3_relay_opaque_target_once(
         input.manifest,
         input.server_id,
@@ -1507,18 +1498,22 @@ fn build_v3_relay_target_candidates(
         input.body,
         input.deterministic_sample,
     )
-    .map_err(|error| match error {
-        Ok(source) => V3RelayProviderTargetResolution::Failed(source),
-        Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
+    .map_err(|error| {
+        Box::new(match error {
+            Ok(source) => V3RelayProviderTargetResolution::Failed(source),
+            Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
+        })
     })?;
     expand_v3_relay_target_candidates_from_opaque_hit(
         input.manifest,
         hit,
         input.deterministic_sample,
     )
-    .map_err(|error| match error {
-        Ok(source) => V3RelayProviderTargetResolution::Failed(source),
-        Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
+    .map_err(|error| {
+        Box::new(match error {
+            Ok(source) => V3RelayProviderTargetResolution::Failed(source),
+            Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
+        })
     })
 }
 
@@ -1527,7 +1522,7 @@ pub(crate) fn resolve_v3_relay_target_outcome(
 ) -> V3RelayProviderTargetResolution {
     let expanded = match build_v3_relay_target_candidates(&input) {
         Ok(expanded) => expanded,
-        Err(resolution) => return resolution,
+        Err(resolution) => return *resolution,
     };
     let target = V3TargetInterpreter::default();
     let session_availability = input

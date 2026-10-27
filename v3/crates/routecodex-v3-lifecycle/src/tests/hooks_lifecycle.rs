@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 #[cfg(unix)]
 async fn fatal_runtime_failure_stops_supervisor_and_preserves_primary_error() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
@@ -40,7 +40,7 @@ async fn fatal_runtime_failure_stops_supervisor_and_preserves_primary_error() {
 #[tokio::test]
 #[cfg(unix)]
 async fn configured_hooks_sidecar_requires_ready_protocol_and_stops_by_explicit_pid() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -84,7 +84,7 @@ async fn configured_hooks_sidecar_requires_ready_protocol_and_stops_by_explicit_
 #[tokio::test]
 #[cfg(unix)]
 async fn delayed_hooks_stop_retries_owned_codexapp_socket_cleanup() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new_in("/tmp").unwrap();
     let instance_dir = root.path().join("instance");
     let socket_path = root.path().join("codexapp.sock");
@@ -117,7 +117,7 @@ async fn delayed_hooks_stop_retries_owned_codexapp_socket_cleanup() {
 #[tokio::test]
 #[cfg(unix)]
 async fn failed_hooks_sidecar_is_unavailable_without_removing_runtime_control() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -184,7 +184,7 @@ async fn failed_hooks_sidecar_is_unavailable_without_removing_runtime_control() 
 #[tokio::test]
 #[cfg(unix)]
 async fn failed_hooks_sidecar_forced_group_cleanup_removes_codexapp_socket() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");
@@ -249,7 +249,7 @@ async fn failed_hooks_sidecar_forced_group_cleanup_removes_codexapp_socket() {
 #[tokio::test]
 #[cfg(unix)]
 async fn failed_hooks_sidecar_cleans_descendant_after_wrapper_exits_before_readiness() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     let record_path = root.path().join("install.json");

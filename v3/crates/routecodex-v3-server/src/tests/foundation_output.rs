@@ -58,7 +58,7 @@ async fn foundation_nochain_fault_marks_model_no_response_and_keeps_control_diag
 
 #[test]
 fn foundation_pending_consumer_persists_exact_terminal_source_and_cause() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-foundation-pending-source-{}",
         std::process::id()

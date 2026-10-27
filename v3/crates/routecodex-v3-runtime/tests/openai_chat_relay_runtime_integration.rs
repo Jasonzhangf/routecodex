@@ -39,7 +39,7 @@ fn ensure_openai_chat_relay_test_state_dir() {
         std::env::set_var("ROUTECODEX_V3_STATE_DIR", &state_dir);
         std::env::set_var(
             "ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE",
-            &state_dir.join("provider-cooldowns.json"),
+            state_dir.join("provider-cooldowns.json"),
         );
     });
 }
@@ -2658,15 +2658,16 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
         secondary_availability.available && secondary_availability.blocked_scopes.is_empty(),
         "the final eligible failure must not mutate sibling health: {secondary_availability:?}"
     );
-    let first_captures = transport.captures.lock().unwrap();
-    assert_eq!(first_captures.len(), 1);
-    assert_eq!(first_captures[0].0, secondary);
-    assert_eq!(
-        first_captures[0].1,
-        "http://secondary.invalid/v1/chat/completions"
-    );
-    assert_eq!(first_captures[0].2["model"], "chat-wire-model");
-    drop(first_captures);
+    {
+        let first_captures = transport.captures.lock().unwrap();
+        assert_eq!(first_captures.len(), 1);
+        assert_eq!(first_captures[0].0, secondary);
+        assert_eq!(
+            first_captures[0].1,
+            "http://secondary.invalid/v1/chat/completions"
+        );
+        assert_eq!(first_captures[0].2["model"], "chat-wire-model");
+    }
 
     let deadline = provider_health
         .store()
@@ -2874,6 +2875,12 @@ async fn openai_chat_provider_probe_success_reselects_and_connects_provider() {
     .await
     .expect("successful provider probe must not hang")
     .expect("provider probe recovery must connect the provider");
+    let captured_url = {
+        let captured_url = transport.captured_url.lock().unwrap();
+        let captured_body = transport.captured_body.lock().unwrap();
+        assert!(captured_body.is_some());
+        captured_url.clone()
+    };
     let request = tokio::time::timeout(Duration::from_secs(2), probe_server)
         .await
         .expect("successful probe must reach the local provider listener")
@@ -2887,7 +2894,7 @@ async fn openai_chat_provider_probe_success_reselects_and_connects_provider() {
     assert!(output.error_chain.is_none());
     let expected_url = format!("{base_url}/chat/completions");
     assert_eq!(
-        transport.captured_url.lock().unwrap().as_deref(),
+        captured_url.as_deref(),
         Some(expected_url.as_str()),
         "a successful probe must be followed by the normal provider transport"
     );

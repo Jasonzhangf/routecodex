@@ -1,4 +1,7 @@
 use super::*;
+use crate::hub_v1::responses_relay_runtime::provider_response_stream_failure;
+use crate::hub_v1::responses_relay_runtime::responses_relay_runtime_inner::find_responses_tool_output_ids;
+use routecodex_v3_error::{V3ErrorHandlingCenter, V3ErrorHandlingCenterInput};
 
 #[path = "responses_relay_runtime_extra_tests_notifications.rs"]
 mod notification_tests;
@@ -1285,9 +1288,9 @@ async fn anthropic_provider_sse_preserves_native_reasoning_with_extra_provider_f
         let business = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"Visible answer\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n";
         let terminal = stream.find("event: message_delta").unwrap();
         let provider = Box::pin(stream::iter(vec![
-            Ok(stream[..terminal].as_bytes().to_vec()),
+            Ok(stream.as_bytes()[..terminal].to_vec()),
             Ok(business.as_bytes().to_vec()),
-            Ok(stream[terminal..].as_bytes().to_vec()),
+            Ok(stream.as_bytes()[terminal..].to_vec()),
         ]));
         let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
             V3HubProviderWireProtocol::Anthropic,

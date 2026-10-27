@@ -1,5 +1,5 @@
 //! Complete Responses Direct tool-envelope projection. No routing or error policy.
-use super::V3DirectResponseHookFailure;
+use super::{V3DirectResponseHookFailure, V3DirectResponseHookResult};
 use crate::tool_markup_parser::{
     scan_tool_markup, ParsedToolCall, ToolMarkupDeclarations, ToolMarkupIdentity, ToolMarkupKind,
     ToolMarkupParamKind, ToolMarkupSegment,
@@ -580,7 +580,7 @@ pub(crate) fn rewrite_v3_direct_dsml_attempt(
     frames: &[Vec<u8>],
     flushed: usize,
     context: &V3DirectDsmlContext,
-) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure> {
+) -> V3DirectResponseHookResult {
     use routecodex_v3_sse::{
         build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
     };

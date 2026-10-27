@@ -1222,9 +1222,9 @@ fn start_cli_server(config_path: &H2Config, _ports: Vec<u16>) -> CliProcess {
         // sandbox denies the real `$HOME/.rcc/codex-samples` retention lock, and
         // a scoped child must not touch shared user state.
         .env("HOME", temp_dir)
-        .env("TMPDIR", &temp_dir)
-        .env("TMP", &temp_dir)
-        .env("TEMP", &temp_dir)
+        .env("TMPDIR", temp_dir)
+        .env("TMP", temp_dir)
+        .env("TEMP", temp_dir)
         .env("ROUTECODEX_V3_STATE_DIR", &state_root)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

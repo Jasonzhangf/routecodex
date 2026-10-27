@@ -29,7 +29,7 @@ pub(crate) fn parse_v3_provider_sse_json_data(data: &str) -> Result<Option<Value
     // Error01，让 Direct 在客户端提交前按既有策略重新执行完整尝试。
     let normalized = escape_v3_sse_raw_control_characters(data);
     match serde_json::from_str(&normalized) {
-        Ok(value) => return Ok(Some(value)),
+        Ok(value) => Ok(Some(value)),
         Err(error) => Err(format!("provider SSE JSON payload is malformed: {error}")),
     }
 }

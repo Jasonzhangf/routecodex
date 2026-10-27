@@ -11,9 +11,8 @@ use crate::shared_custom_tool_function_sse::{
 };
 use futures_util::{stream, StreamExt};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
-    V3ExternalErrorKind, V3ExternalErrorLink, V3InternalErrorCode,
+    V3Error01SourceRaised, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3InternalErrorCode,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream,
@@ -25,7 +24,6 @@ use routecodex_v3_sse::{
 use routecodex_v3_virtual_router::V3VirtualRouterError;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::{Arc, Mutex};
 
 pub(crate) type V3DirectSourceError = Result<
     V3Error01SourceRaised,
@@ -518,7 +516,7 @@ async fn project_provider_raw_to_client_payload_inner(
         if deepseek_console_go {
             parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
         }
-        if let Some(profile) = provider_response_compat.as_deref() {
+        if let Some(profile) = provider_response_compat.as_ref() {
             parsed = match apply_direct_provider_response_compat(
                 parsed,
                 profile,

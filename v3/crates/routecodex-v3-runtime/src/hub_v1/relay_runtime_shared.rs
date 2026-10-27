@@ -1363,8 +1363,7 @@ mod tests {
             body: vec![],
             body_read_failure: Some("truncated body".into()),
         };
-        let last = Some(external_http_witness(&incomplete));
-        let latest = last.expect("the new response head is real evidence");
+        let latest = external_http_witness(&incomplete);
         assert_eq!(latest.status(), 400);
         assert_eq!(latest.body_read_failure(), Some("truncated body"));
         assert_ne!(latest, prior);

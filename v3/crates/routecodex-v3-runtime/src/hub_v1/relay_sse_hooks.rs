@@ -1,7 +1,6 @@
 use super::{
     V3OpenAiChatSseHookInput, V3OpenAiChatSseSemanticObject, V3OpenAiChatSseTreeError,
-    V3ResponsesSseContentRewrite, V3ResponsesSseHookInput, V3ResponsesSseSemanticObject,
-    V3ResponsesSseTreeError,
+    V3ResponsesSseHookInput, V3ResponsesSseSemanticObject, V3ResponsesSseTreeError,
 };
 
 /// Relay response business-hook catalog.
@@ -109,6 +108,7 @@ fn noop_chat_rewrite(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::V3ResponsesSseContentRewrite;
 
     fn rewrite_responses(
         semantic: &mut V3ResponsesSseSemanticObject,

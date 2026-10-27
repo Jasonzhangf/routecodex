@@ -9,7 +9,7 @@
 // 协议差异全部收敛在 `V3DirectProtocolCodec`。
 
 pub async fn execute_v3_direct_runtime_kernel_core<
-    C: V3DirectProtocolCodec,
+    C: V3DirectProtocolCodec + Send + Sync + 'static,
     T: ResponsesTransport + ?Sized + 'static,
 >(
     control: C::Control,
@@ -23,7 +23,6 @@ pub async fn execute_v3_direct_runtime_kernel_core<
     route_selection_event_sink: Option<&V3RuntimeRouteSelectionEventSink>,
 ) -> V3ResponsesDirectRuntimeOutput
 where
-    C: Send + Sync + 'static,
     C::Control: Clone + Send + Sync + 'static,
     C::Standardized: Send + Sync + 'static,
     C::Policy: Send + Sync + 'static,
@@ -46,7 +45,7 @@ where
 }
 
 pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
-    C: V3DirectProtocolCodec,
+    C: V3DirectProtocolCodec + Send + Sync + 'static,
     T: ResponsesTransport + ?Sized + 'static,
 >(
     control: C::Control,
@@ -61,7 +60,6 @@ pub async fn execute_v3_direct_runtime_kernel_core_with_key_catalog<
     request_key_catalog: &crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog,
 ) -> V3ResponsesDirectRuntimeOutput
 where
-    C: Send + Sync + 'static,
     C::Control: Clone + Send + Sync + 'static,
     C::Standardized: Send + Sync + 'static,
     C::Policy: Send + Sync + 'static,
@@ -82,7 +80,7 @@ where
 }
 
 async fn execute_v3_direct_runtime_kernel_core_resident<
-    C: V3DirectProtocolCodec,
+    C: V3DirectProtocolCodec + Send + Sync + 'static,
     T: ResponsesTransport + ?Sized + 'static,
 >(
     mut control: C::Control,
@@ -97,7 +95,6 @@ async fn execute_v3_direct_runtime_kernel_core_resident<
     request_key_catalog: &crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog,
 ) -> V3ResponsesDirectRuntimeOutput
 where
-    C: Send + Sync + 'static,
     C::Control: Clone + Send + Sync + 'static,
     C::Standardized: Send + Sync + 'static,
     C::Policy: Send + Sync + 'static,
@@ -205,7 +202,6 @@ where
     let mut last_external_http = None::<V3ExternalHttpWitness>;
     let mut send_attempts = 0usize;
     let mut pending_provider_action_recovery = None;
-    let mut provider_request_snapshot = None;
     let mut provider_response_snapshot = None;
     let mut provider_action_permit: Option<crate::provider_action_gate::V3ProviderActionPermit> =
         None;
@@ -276,7 +272,7 @@ where
                         &failed_candidates,
                         &request_local_busy_candidates,
                     ) {
-                        Ok(source) => source,
+                        Ok(source) => source.map(Box::new),
                         Err(fault) => {
                             return direct_runtime_helpers_stream::operator_fault_output(
                                 fault,
@@ -286,6 +282,7 @@ where
                         }
                     },
                 };
+                let source = source.map(|source| *source);
                 return direct_runtime_helpers_stream::target_exhausted_output_with_observability(
                     source.map_or_else(
                         || {
@@ -501,7 +498,7 @@ where
             }
         };
         trace.push("V3Transport13ResponsesHttpRequest");
-        provider_request_snapshot = Some(transport_request.provider_request_projection());
+        let provider_request_snapshot = Some(transport_request.provider_request_projection());
         if pending_provider_action_recovery.is_some() {
             drop(selected_admission.take());
         }

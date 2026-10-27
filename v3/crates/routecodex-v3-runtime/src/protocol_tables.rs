@@ -166,7 +166,7 @@ enum V3TableData {
 }
 
 #[derive(Debug)]
-struct V3ProtocolTables {
+pub(crate) struct V3ProtocolTables {
     tables: BTreeMap<String, V3TableData>,
 }
 
@@ -200,7 +200,7 @@ const TABLE_SOURCES: &[(&str, &str)] = &[
 static TABLES: OnceLock<Result<V3ProtocolTables, String>> = OnceLock::new();
 
 /// 加载并校验全部协议转换表（首次调用触发；校验失败 fail-fast 并缓存错误）。
-pub fn protocol_tables() -> Result<&'static V3ProtocolTables, String> {
+pub(crate) fn protocol_tables() -> Result<&'static V3ProtocolTables, String> {
     match TABLES.get_or_init(load_all_tables) {
         Ok(tables) => Ok(tables),
         Err(error) => Err(error.clone()),

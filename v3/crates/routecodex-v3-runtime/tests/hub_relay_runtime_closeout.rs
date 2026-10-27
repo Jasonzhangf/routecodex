@@ -40,7 +40,6 @@ fn issue0e129d0_source_terminal_survives_completed_observation() {
     assert_eq!(absent.snapshot().unwrap().finish_reason, None);
 }
 use std::{
-    collections::VecDeque,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
@@ -1611,7 +1610,7 @@ path = [
                             routecodex_v3_error::V3ProviderFailureSessionScope::new(
                                 group,
                                 group,
-                                &format!("issue720eb7f-{scoped}-{response_failure}-{group}"),
+                                format!("issue720eb7f-{scoped}-{response_failure}-{group}"),
                             )
                             .unwrap(),
                         request_id: "issue720eb7f".into(),

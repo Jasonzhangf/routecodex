@@ -500,6 +500,7 @@ fn extract_v3_anthropic_relay_usage_summary(
 #[cfg(test)]
 mod anthropic_client_sse_projection_tests {
     use super::*;
+    use routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS;
 
     #[tokio::test]
     async fn closeout_replay_uses_selected_provider_wire_protocol() {

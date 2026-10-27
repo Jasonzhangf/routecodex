@@ -67,7 +67,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
         routecodex_v3_sse::SseTransportLimits::default(),
     );
     let transducer = V3OpenAiChatAnthropicSseTransducer::new(false);
-    let request_id = request_id;
     Box::pin(futures_util::stream::unfold(
         (
             stream,

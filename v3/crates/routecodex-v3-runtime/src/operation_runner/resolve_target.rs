@@ -71,20 +71,16 @@ impl std::error::Error for V3ResolveTargetOperatorError {}
 
 struct ResolveTargetOperator {
     mode: V3ResolveTargetExecutionMode,
-    side_output: Arc<
-        Mutex<
-            Option<
-                Result<
-                    V3ResolveTargetSideOutput,
-                    Result<
-                        V3Error01SourceRaised,
-                        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
-                    >,
-                >,
-            >,
-        >,
-    >,
+    side_output: Arc<Mutex<Option<V3ResolveTargetSideOutputResult>>>,
 }
+
+type V3ResolveTargetSideOutputResult = Result<
+    V3ResolveTargetSideOutput,
+    Result<
+        V3Error01SourceRaised,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+>;
 
 impl Operator for ResolveTargetOperator {
     fn name(&self) -> &'static str {

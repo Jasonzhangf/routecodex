@@ -189,7 +189,7 @@ fn held_marker_suffix_len(text: &str) -> usize {
     for marker in [THINK_OPEN, THINK_CLOSE, THINKING_OPEN, THINKING_CLOSE] {
         let marker = marker.as_bytes();
         for len in 1..marker.len() {
-            if bytes.len() >= len && &bytes[bytes.len() - len..] == &marker[..len] {
+            if bytes.len() >= len && bytes[bytes.len() - len..] == marker[..len] {
                 held = held.max(len);
             }
         }
@@ -228,7 +228,7 @@ pub(crate) type V3RelayClientProjectionHandle =
 
 /// Projects Chat-protocol provider increments into Responses client frames and
 /// commits them at the first business frame.
-pub(crate) struct V3RelayChatClientStreamProjector {
+pub struct V3RelayChatClientStreamProjector {
     sink: V3CommittedClientFrameSink,
     budget: V3AttemptBudget,
     builder: Option<V3CommittedClientSseBuilder>,

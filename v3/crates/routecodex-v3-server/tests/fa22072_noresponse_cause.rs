@@ -652,8 +652,6 @@ async fn fa22072_chat_noresponse_cause_public_entry() {
         format!("prepare_exec_attempt={preparation:?}"),
     );
     drop(preparation);
-    drop(record);
-
     // Drain and stop every owned fixture resource before asserting, so the
     // expected RED panic cannot race the sample worker or the test HOME cleanup.
     let persist_failures = handle.shutdown().await;

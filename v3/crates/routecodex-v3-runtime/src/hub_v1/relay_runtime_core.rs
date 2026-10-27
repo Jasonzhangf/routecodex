@@ -34,10 +34,10 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderRequestHeader, V3ProviderResponseBody,
-    V3ProviderSseStream, V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
+    V3ProviderSseStream,
 };
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 enum V3RelayAttemptCollectFailure {
     ResponseGovernance(V3HubRelayResponseError),
@@ -648,7 +648,7 @@ where
                         &failed_candidates,
                         &request_local_busy_candidates,
                     ) {
-                        Ok(source) => source,
+                        Ok(source) => source.map(Box::new),
                         Err(fault) => {
                             return Ok(C::assemble_failure_output(
                                 super::relay_runtime_shared::provider_operator_fault_failure(fault),
@@ -658,6 +658,7 @@ where
                         }
                     },
                 };
+                let source = source.map(|source| *source);
                 let failure = C::request_failure_builder(
                     "V3Target10ConcreteProviderSelected",
                     "selected_target_exhausted",
@@ -771,7 +772,7 @@ where
                             &failed_candidates,
                             &request_local_busy_candidates,
                         ) {
-                            Ok(source) => source,
+                            Ok(source) => source.map(Box::new),
                             Err(fault) => {
                                 return Ok(C::assemble_failure_output(
                                     terminalize_provider_failure(
@@ -784,6 +785,7 @@ where
                             }
                         },
                     };
+                    let source = source.map(|source| *source);
                     let attempted_candidates = exhaustion.attempted_candidates;
                     let failure = C::request_failure_builder(
                         "V3Target10ConcreteProviderSelected",
@@ -2115,7 +2117,7 @@ where
             payload.clone(),
             transport,
             provider_health.clone(),
-            retry_policy.clone(),
+            retry_policy,
             Vec::new(),
             true,
             initial_handoff.take(),

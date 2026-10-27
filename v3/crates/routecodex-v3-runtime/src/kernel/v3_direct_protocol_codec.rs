@@ -8,23 +8,19 @@
 //! - direct 策略（`Policy` / `run_route`）
 //! - 出站 wire 与 transport（`run_request_projection` / `run_provider_transport`）
 //! - 协议控制面（续接与 web search 等，responses 实现，chat 等默认无）
+//!
 //! 骨架执行流程（路由 -> 选择 -> 决策 -> 策略 -> wire -> transport -> 发送 ->
 //! 响应投影 -> 客户端帧 + 失败策略循环）在 `crate::kernel::execute_v3_direct_runtime_kernel_core`
 //! 中只实现一份。
 use crate::kernel::direct_request_key_hooks::V3DirectRequestKeyHookCatalog;
 use crate::nodes::{V3ChatDirect11Policy, V3Req04StandardizedChat};
 use crate::{
-    direct_response_hooks::V3DirectResponseCompatContext, hooks::build_v3_provider_error_source,
-    operation_runner::V3Err01SourceInput, shared::V3DirectSourceResult,
+    direct_response_hooks::V3DirectResponseCompatContext, operation_runner::V3Err01SourceInput,
+    shared::V3DirectSourceResult,
 };
 use routecodex_v3_error::{V3Error01SourceRaised, V3ErrorSourceKind, V3InternalErrorCode};
-use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload, V3Provider12ResponsesWirePayload,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderResp14Raw,
-    V3ResponsesProviderTarget,
-};
+use routecodex_v3_provider_responses::{V3Provider12ResponsesWirePayload, V3ProviderResp14Raw};
 use routecodex_v3_target::V3Target10ConcreteProviderSelected;
-use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 

@@ -521,7 +521,7 @@ mod tests {
             raw_request_retention: 1,
             raw_response_retention: 1,
             event_retention: 16,
-            redaction: V3RedactionPolicy::default(),
+            redaction: V3RedactionPolicy,
         })
         .unwrap();
         let output = execute_v3_foundation_pending_runtime(
@@ -789,7 +789,7 @@ mod tests {
             raw_request_retention: 1,
             raw_response_retention: 1,
             event_retention: 16,
-            redaction: V3RedactionPolicy::default(),
+            redaction: V3RedactionPolicy,
         })
         .unwrap();
         fs::remove_file(&log_file).unwrap();
