@@ -501,8 +501,8 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                 20_000 + attempt as u64,
             )
             .available;
-        assert_eq!(
-            available, false,
+        assert!(
+            !available,
             "generic rejection must cool under the current typed threshold; attempt={attempt}"
         );
     }

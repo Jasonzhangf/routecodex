@@ -437,9 +437,9 @@ pub(super) fn responses_tool_output_as_anthropic_tool_result(
     Ok(Value::Object(result))
 }
 
-fn tool_result_explicit_is_error<'a>(
-    object: &'a Map<String, Value>,
-) -> Result<Option<&'a Value>, V3AnthropicCodecError> {
+fn tool_result_explicit_is_error(
+    object: &Map<String, Value>,
+) -> Result<Option<&Value>, V3AnthropicCodecError> {
     match object.get("routecodex_chat_extension") {
         None => Ok(None),
         Some(Value::Object(extension)) => Ok(extension.get("anthropic_tool_result_is_error")),
@@ -449,9 +449,9 @@ fn tool_result_explicit_is_error<'a>(
     }
 }
 
-fn chat_tool_result_status<'a>(
-    object: &'a Map<String, Value>,
-) -> Result<Option<&'a Value>, V3AnthropicCodecError> {
+fn chat_tool_result_status(
+    object: &Map<String, Value>,
+) -> Result<Option<&Value>, V3AnthropicCodecError> {
     match object.get("routecodex_chat_extension") {
         None => Ok(None),
         Some(Value::Object(extension)) => Ok(extension.get("responses_tool_output_status")),
@@ -935,9 +935,7 @@ fn responses_custom_tool_as_anthropic_compatibility_tool(
         None => None,
     };
     let compatibility_note = match tool.get("format") {
-        Some(Value::String(format)) if format == "custom" => format!(
-            "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: Anthropic does not natively enforce the source free-form custom-tool format; provide the exact raw string in the input field."
-        ),
+        Some(Value::String(format)) if format == "custom" => "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: Anthropic does not natively enforce the source free-form custom-tool format; provide the exact raw string in the input field.".to_string(),
         Some(Value::Object(format)) => {
             let format_type = format.get("type").and_then(Value::as_str).ok_or(
                 V3AnthropicCodecError::MalformedField {
@@ -945,9 +943,7 @@ fn responses_custom_tool_as_anthropic_compatibility_tool(
                 },
             )?;
             match format_type {
-                "text" if format.len() == 1 => format!(
-                    "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: Anthropic does not natively enforce the source free-form custom-tool format; provide the exact raw string in the input field."
-                ),
+                "text" if format.len() == 1 => "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: Anthropic does not natively enforce the source free-form custom-tool format; provide the exact raw string in the input field.".to_string(),
                 "grammar" if format.len() == 3 => {
                     let syntax = format
                         .get("syntax")
@@ -983,7 +979,7 @@ fn responses_custom_tool_as_anthropic_compatibility_tool(
     let description = source_description
         .map(|source| format!("{source}\n\n{compatibility_note}"))
         .unwrap_or_else(|| compatibility_note.clone());
-    let mut input_schema = json!({
+    let input_schema = json!({
         "type":"object",
         "properties":{
             "input":{

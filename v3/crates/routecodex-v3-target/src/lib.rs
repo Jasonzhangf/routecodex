@@ -141,8 +141,7 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderSchedulingReader
 {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
-        interface_id: &str,
+        identity: routecodex_v3_provider_responses::V3ProviderInterfaceIdentity<'_>,
         auth_alias: &str,
         model_id: &str,
         priority: i32,
@@ -150,15 +149,15 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderSchedulingReader
         now_ms: u64,
     ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
         let availability = self.availability.availability_for_interface(
-            provider_id,
-            interface_id,
+            identity.provider_id,
+            identity.interface_id,
             Some(auth_alias),
             Some(model_id),
             now_ms,
         );
         let mut projection = routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
-            provider_id,
-            interface_id,
+            identity.provider_id,
+            identity.interface_id,
             auth_alias,
             model_id,
             priority,
@@ -212,6 +211,15 @@ struct V3TargetExpansionScope {
     interface_filter: Option<String>,
 }
 
+/// Declared provider selector of one expansion target.
+#[derive(Debug, Clone, Copy)]
+struct V3TargetProviderSelectorRef<'a> {
+    provider_id: Option<&'a str>,
+    model_id: Option<&'a str>,
+    key: Option<&'a str>,
+    interface_id: Option<&'a str>,
+}
+
 impl V3TargetInterpreter {
     pub fn classify_kind(&self, route: V3Router07OpaqueTargetHitOnce) -> V3Target08KindClassified {
         V3Target08KindClassified { route }
@@ -240,10 +248,12 @@ impl V3TargetInterpreter {
             if let Some((provider_id, model_id)) = &entry.direct_provider_model {
                 match self.expand_provider(
                     manifest,
-                    Some(provider_id),
-                    Some(model_id),
-                    None,
-                    entry.interface.as_deref(),
+                    V3TargetProviderSelectorRef {
+                        provider_id: Some(provider_id),
+                        model_id: Some(model_id),
+                        key: None,
+                        interface_id: entry.interface.as_deref(),
+                    },
                     entry.priority,
                     entry.weight,
                     deterministic_sample,
@@ -484,8 +494,10 @@ impl V3TargetInterpreter {
                 .saturating_sub(route_tier_index);
             let route_priority = (route_tier_rank as i32).saturating_mul(1_000_000);
             let mut projection = scheduling.scheduling_projection_for_interface(
-                &candidate.provider_id,
-                &candidate.interface_id,
+                routecodex_v3_provider_responses::V3ProviderInterfaceIdentity::new(
+                    &candidate.provider_id,
+                    &candidate.interface_id,
+                ),
                 &candidate.auth_alias,
                 &candidate.model_id,
                 candidate.priority,
@@ -728,10 +740,12 @@ impl V3TargetInterpreter {
         match target.kind {
             V3RouteTargetKind::ProviderModel => self.expand_provider(
                 manifest,
-                target.provider.as_deref(),
-                target.model.as_deref(),
-                target.key.as_deref(),
-                target.interface.as_deref(),
+                V3TargetProviderSelectorRef {
+                    provider_id: target.provider.as_deref(),
+                    model_id: target.model.as_deref(),
+                    key: target.key.as_deref(),
+                    interface_id: target.interface.as_deref(),
+                },
                 target.priority.unwrap_or(0),
                 target.weight.unwrap_or(1),
                 sample,
@@ -795,10 +809,12 @@ impl V3TargetInterpreter {
             let nested = match target.kind {
                 V3RouteTargetKind::ProviderModel => self.expand_provider(
                     manifest,
-                    target.provider.as_deref(),
-                    target.model.as_deref().or(Some(forwarder.model.as_str())),
-                    target.key.as_deref(),
-                    target.interface.as_deref(),
+                    V3TargetProviderSelectorRef {
+                        provider_id: target.provider.as_deref(),
+                        model_id: target.model.as_deref().or(Some(forwarder.model.as_str())),
+                        key: target.key.as_deref(),
+                        interface_id: target.interface.as_deref(),
+                    },
                     target.priority.unwrap_or(0),
                     target.weight.unwrap_or(1),
                     sample.wrapping_add(index as u64),
@@ -831,15 +847,18 @@ impl V3TargetInterpreter {
     fn expand_provider(
         &self,
         manifest: &V3Config05ManifestPublished,
-        provider_id: Option<&str>,
-        model_id: Option<&str>,
-        key: Option<&str>,
-        interface_id: Option<&str>,
+        selector: V3TargetProviderSelectorRef<'_>,
         priority: i32,
         weight: u32,
         sample: u64,
         mut scope: V3TargetExpansionScope,
     ) -> Result<Vec<V3TargetCandidate>, V3TargetError> {
+        let V3TargetProviderSelectorRef {
+            provider_id,
+            model_id,
+            key,
+            interface_id,
+        } = selector;
         let provider_id = provider_id.ok_or(V3TargetError::ProviderTargetIncomplete)?;
         let provider = manifest
             .providers
@@ -1228,11 +1247,7 @@ fn context_window_exceeded_reason(
     candidate: &V3TargetCandidate,
 ) -> Option<String> {
     let max_context_tokens = candidate.max_context_tokens?;
-    let scaled_input_tokens = ((u128::from(request_input_tokens)
-        * u128::from(candidate.context_token_estimate_scale_bps)
-        + 9_999)
-        / 10_000)
-        .min(u128::from(u64::MAX)) as u64;
+    let scaled_input_tokens = scaled_context_input_tokens(candidate, request_input_tokens);
     (scaled_input_tokens > max_context_tokens).then(|| {
         format!(
             "{}:{}:{}:context_window_exceeded(input_tokens={},max_context_tokens={})",
@@ -1264,9 +1279,8 @@ fn context_window_near_limit_reason(
 }
 
 fn scaled_context_input_tokens(candidate: &V3TargetCandidate, request_input_tokens: u64) -> u64 {
-    ((u128::from(request_input_tokens) * u128::from(candidate.context_token_estimate_scale_bps)
-        + 9_999)
-        / 10_000)
+    (u128::from(request_input_tokens) * u128::from(candidate.context_token_estimate_scale_bps))
+        .div_ceil(10_000)
         .min(u128::from(u64::MAX)) as u64
 }
 

@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+    use routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest;
 
     #[test]
     fn settlement_tail_frame_after_done_is_ignored() {

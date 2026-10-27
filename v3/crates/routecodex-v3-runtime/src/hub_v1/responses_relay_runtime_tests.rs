@@ -1,5 +1,8 @@
 use super::*;
 use crate::execution_control::V3AttemptStoreError;
+use crate::hub_v1::request_outbound_format::build_v3_openai_chat_standard_request_from_chat_canonical;
+use crate::hub_v1::responses_relay_runtime::execute_v3_responses_relay_dry_run_runtime;
+use crate::hub_v1::responses_relay_runtime::responses_relay_runtime_inner::find_responses_tool_output_ids;
 use futures_util::stream;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use serde_json::json;
@@ -287,10 +290,7 @@ async fn target_protocol_unmapped_field_recovers_through_next_provider() {
     .expect("unmapped target field must enter provider recovery");
 
     assert_eq!(output.status, 200);
-    assert!(output
-        .node_trace
-        .iter()
-        .any(|node| *node == "V3TargetLocalReselected"));
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
     assert_eq!(
         *transport.provider_ids.lock().expect("provider ids"),
         vec!["openai_second"]

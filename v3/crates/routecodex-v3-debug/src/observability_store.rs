@@ -277,12 +277,8 @@ mod retention_tests {
         // A writer's unterminated trailing fragment is left for the next read...
         {
             let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
-            write!(
-                file,
-                "{}",
-                r#"{"schema_version":1,"row":{"request_key":"b""#
-            )
-            .unwrap();
+            file.write_all(r#"{"schema_version":1,"row":{"request_key":"b""#.as_bytes())
+                .unwrap();
         }
         let partial = v3_webui_observability_read_raw_rows_from(
             &path,
@@ -296,7 +292,7 @@ mod retention_tests {
         // ...and decoded once the writer terminates it.
         {
             let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
-            writeln!(file, "{}", "}}").unwrap();
+            file.write_all(b"}}\n").unwrap();
         }
         let completed = v3_webui_observability_read_raw_rows_from(
             &path,

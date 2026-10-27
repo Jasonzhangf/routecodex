@@ -590,11 +590,9 @@ async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_ter
     );
 
     let mut received = Vec::new();
-    loop {
-        match tokio::time::timeout(Duration::from_secs(5), body.next()).await {
-            Ok(Some(Ok(chunk))) => received.extend_from_slice(&chunk),
-            Ok(Some(Err(_))) | Err(_) | Ok(None) => break,
-        }
+    while let Ok(Some(Ok(chunk))) = tokio::time::timeout(Duration::from_secs(5), body.next()).await
+    {
+        received.extend_from_slice(&chunk);
     }
     let received = String::from_utf8_lossy(&received).to_string();
     assert!(

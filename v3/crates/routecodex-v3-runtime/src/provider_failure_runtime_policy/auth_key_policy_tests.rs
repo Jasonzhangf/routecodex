@@ -341,13 +341,12 @@ fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() 
         assert_eq!(record.failure_count, (now_ms - 99) as u32);
         assert_eq!(record.state, "cooldown");
     }
-    assert_eq!(
-        health
+    assert!(
+        !health
             .store()
             .scheduling_projection("primary", "key1", "gpt-test", 1, 1, 5_100)
             .expect("403 pre-probe scheduling projection")
-            .available,
-        false
+            .available
     );
     assert_eq!(
         health
@@ -439,9 +438,8 @@ targets = [
             .scheduling_projection("cc-anthropic", "key1", "opus-5", 100, 1, now_ms)
             .expect("Anthropic scheduling projection")
             .available;
-        assert_eq!(
-            model_available,
-            false,
+        assert!(
+            !model_available,
             "a response-body decode failure cools only the failed identity immediately; attempt={attempt}"
         );
         assert!(

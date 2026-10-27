@@ -512,7 +512,7 @@ async fn fa22072_direct_relay_captured_plan_and_exclusions_public_consumer() {
                 if original_source.is_none()
                     || alpha_sources.len() != 1
                     || serde_json::to_value(
-                        &alpha_sources
+                        alpha_sources
                             .first()
                             .and_then(|event| event.diagnostic_source.as_ref()),
                     )

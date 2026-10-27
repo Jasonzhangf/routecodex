@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn restart_plan_projects_a_validated_config_path_change_and_rejects_listener_drift() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");

@@ -1018,7 +1018,7 @@ async fn start_configured_hooks_sidecar_with_timeout_and_cancel(
     };
     let mut reader = tokio::io::BufReader::new(stdout);
     let readiness = tokio::select! {
-        _ = wait_for_sidecar_cancellation(cancel_rx.as_mut().map(|cancel_rx| &mut **cancel_rx)) => {
+        _ = wait_for_sidecar_cancellation(cancel_rx.as_deref_mut()) => {
             return finish_sidecar_start_failure(
                 V3LifecycleError::HooksSidecarStartCancelled,
                 Some(child),

@@ -1,4 +1,3 @@
-pub(crate) use crate::shared_direct_thinking_compat::normalize_v3_direct_thinking_json;
 
 pub(crate) fn wrap_v3_direct_responses_thinking_tag_consumer_stream(
     source: V3ProviderAttemptSseStream,
@@ -106,7 +105,7 @@ pub(crate) fn wrap_v3_direct_responses_thinking_tag_consumer_stream(
 
 fn rewrite_v3_direct_thinking_tag_sse_bytes(input: &[u8]) -> Result<Vec<u8>, String> {
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
-    let mut frames = decoder
+    let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(input))
         .map_err(|error| error.to_string())?;
     decoder.finish().map_err(|error| error.to_string())?;

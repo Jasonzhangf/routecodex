@@ -20,8 +20,8 @@ async fn websocket_sdk_fault_consumer_breaks_transport_and_retains_both_diagnost
         "client WebSocket event is missing type",
     );
     let fault = routecodex_v3_runtime::V3RelayErrorOperatorFault {
-        policy_failure: policy_source.clone(),
-        original_source: Some(original_source.clone()),
+        policy_failure: Box::new(policy_source.clone()),
+        original_source: Some(Box::new(original_source.clone())),
     };
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

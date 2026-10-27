@@ -4,8 +4,7 @@ use crate::direct_response_hooks::{
 };
 use crate::kernel::direct_request_key_hooks::{
     apply_v3_direct_request_key_hook, default_v3_direct_request_key_hook_catalog,
-    V3DirectRequestKeyEdits, V3DirectRequestKeyHookCatalog, V3DirectRequestKeyKind,
-    V3DirectRequestKeyMount, V3DirectRequestKeyView, V3DirectRequestProtocol,
+    V3DirectRequestKeyHookCatalog, V3DirectRequestProtocol,
 };
 use crate::kernel::V3DirectSseTypedHookCatalog;
 use crate::nodes::{
@@ -21,9 +20,9 @@ use crate::shared::{
     V3DirectSourceError, V3DirectSourceResult, V3ProviderAttemptBody, V3ProviderResponseProjection,
 };
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error01SourceRaised, V3Error05ExecutionDecision,
-    V3Error05RecoveryAdmissionWitness, V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind,
-    V3ExternalErrorLink, V3InternalErrorCode,
+    V3Error01SourceRaised, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
+    V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3InternalErrorCode,
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
@@ -442,8 +441,8 @@ fn apply_toolreason_sse_hook_with_stream_observation(
     if projection_authorized.is_some()
         && crate::hub_v1::v3_toolreason_projection_authorized_at_resp03(value, expected_model_id)
     {
-        if let Some(authorized) = projection_authorized.as_deref_mut() {
-            *authorized = true;
+        if let Some(authorized) = projection_authorized.as_mut() {
+            **authorized = true;
         }
     }
     let mut observation_error = None;
@@ -465,8 +464,8 @@ fn apply_toolreason_sse_hook_with_stream_observation(
         return Err(error);
     }
     if pending_reasons.iter().any(Option::is_some) {
-        if let Some(authorized) = projection_authorized.as_deref_mut() {
-            *authorized = true;
+        if let Some(authorized) = projection_authorized.as_mut() {
+            **authorized = true;
         }
     }
     Ok(())

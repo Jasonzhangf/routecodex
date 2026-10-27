@@ -1,4 +1,5 @@
 use super::*;
+use crate::hub_v1::provider_compat_shared::is_v3_gpt_canonical_model;
 
 #[test]
 fn resp03_candidate_association_think_removal_and_split() {
@@ -1529,9 +1530,8 @@ fn refill_continuation_responses_history_record_does_not_revert_refresh() {
         1,
         "the refreshed identity must stay single: {tools:?}"
     );
-    assert_eq!(
+    assert!(
         declared[0]["parameters"]["properties"]["fresh"].is_object(),
-        true,
         "the continuation must carry the refreshed schema: {tools:?}"
     );
     assert!(

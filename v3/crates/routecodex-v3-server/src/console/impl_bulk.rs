@@ -866,8 +866,6 @@ pub(crate) fn emit_v3_direct_frame_console_lines(
         frame.body,
         V3Server16Body::Sse(_) | V3Server16Body::CommittedSse(_)
     );
-    let default_observability = crate::V3RuntimeObservability::default();
-    let error_observability = observability.as_ref().unwrap_or(&default_observability);
     // Typed WebUI projection: terminal for non-SSE frames (Completed/Failed).
     // SSE streams defer terminal ownership to their console finalizer so the
     // final outcome (Completed/Failed/Cancelled) reflects stream closeout.

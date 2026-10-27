@@ -90,7 +90,7 @@ pub enum V3OpenAiChatSseTerminalState {
     Opaque,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct V3OpenAiChatSseReducerState {
     pub id: Option<String>,
     pub model: Option<String>,
@@ -142,7 +142,7 @@ impl V3OpenAiChatSseMaterializedChoice {
         let active_id_is_empty = active_index
             .and_then(|index| self.tool_calls.get(&index))
             .and_then(|call| call.call_id.as_deref())
-            .map_or(true, str::is_empty);
+            .is_none_or(str::is_empty);
         let materialized_index = if let Some(id) = incoming_id {
             let identity = (wire_index, id.to_string());
             if let Some(&index) = self.tool_call_by_wire_index_and_id.get(&identity) {
@@ -319,21 +319,6 @@ impl V3OpenAiChatSseMaterializedChoice {
             choice.entry(name.clone()).or_insert_with(|| value.clone());
         }
         Ok(Value::Object(choice))
-    }
-}
-
-impl Default for V3OpenAiChatSseReducerState {
-    fn default() -> Self {
-        Self {
-            id: None,
-            model: None,
-            created: None,
-            system_fingerprint: None,
-            choices: Vec::new(),
-            usage: None,
-            terminal: None,
-            extensions: Vec::new(),
-        }
     }
 }
 
@@ -1466,5 +1451,6 @@ fn parse_v3_openai_chat_json_usage(
     })
 }
 
+#[cfg(test)]
 #[path = "openai_chat_sse_tree_tests.rs"]
 mod tests;

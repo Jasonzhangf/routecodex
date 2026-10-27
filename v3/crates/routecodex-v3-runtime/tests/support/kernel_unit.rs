@@ -1,4 +1,9 @@
 use super::*;
+use crate::{
+    execute_v3_responses_relay_runtime_with_health_and_retry_policy,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRetryPolicy,
+    V3ResponsesRelayRuntimeInput,
+};
 use async_trait::async_trait;
 use routecodex_v3_config::*;
 use routecodex_v3_provider_responses::{
@@ -725,7 +730,7 @@ async fn direct_sse_strip_client_response_id_empties_nested_response_id() {
         true,
         V3HubProviderWireProtocol::Responses,
     );
-    let mut first = observed.next().await.unwrap().unwrap();
+    let first = observed.next().await.unwrap().unwrap();
     assert!(
         String::from_utf8_lossy(&first).contains("event: response.created"),
         "event line must be preserved"
@@ -2227,8 +2232,6 @@ targets = [{{ kind = "forwarder", id = "tcp", priority = 1 }}]
 
 #[tokio::test]
 async fn direct_sse_full_attempt_commit_rejects_eof_without_terminal() {
-    use futures_util::StreamExt;
-
     let source: V3ClientSseStream = Box::pin(stream::iter([Ok(
         b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
     )]));

@@ -963,9 +963,9 @@ impl V3ProviderActionWaiter {
                     return Ok(V3ProviderActionRecoveryTransition::Admitted(admission));
                 }
                 states.get(&self.key).and_then(|state| {
-                    if state.waiter_queue.front() != Some(&self.ticket) {
-                        None
-                    } else if group_has_active_admission {
+                    if state.waiter_queue.front() != Some(&self.ticket)
+                        || group_has_active_admission
+                    {
                         None
                     } else {
                         Some(state.next_admission_at.saturating_duration_since(now))

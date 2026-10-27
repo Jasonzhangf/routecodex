@@ -1,22 +1,16 @@
 use crate::direct_response_hooks::V3DirectResponseCompatBlock;
 use crate::hooks::{build_v3_provider_error_source, V3HookRegistry};
 use crate::hub_v1::{
-    build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
-    build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
-    build_v3_provider_resp_inbound_01_raw_with_compat_profile, record_v3_provider_sse_json_frame,
-    V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
-    V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile, V3HubTransportIntent,
-    V3ProviderRespInbound01RawContext, V3RuntimeObservability, V3RuntimeProviderFailureEventSink,
-    V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
-    V3RuntimeStreamObservation,
+    record_v3_provider_sse_json_frame, V3HubEntryProtocol, V3HubProviderWireProtocol,
+    V3RuntimeObservability, V3RuntimeProviderFailureEventSink, V3RuntimeProviderFailureObservation,
+    V3RuntimeRouteSelectionEventSink, V3RuntimeStreamObservation,
 };
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
-    admit_v3_selected_target_after_recovery, select_v3_target_with_session_then_global,
-    try_admit_v3_selected_target, V3AdmitAfterRecovery, V3ProviderFailureRuntimeHealth,
-    V3RuntimeProviderAdmission,
+    admit_v3_selected_target_after_recovery, try_admit_v3_selected_target, V3AdmitAfterRecovery,
+    V3ProviderFailureRuntimeHealth, V3RuntimeProviderAdmission,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
 use crate::shared::V3ProviderAttemptBody;
@@ -27,10 +21,9 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    is_v3_retryable_transient_source, V3Error01SourceRaised, V3Error05ExecutionAction,
-    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ExternalErrorKind, V3ExternalErrorLink, V3ExternalHttpWitness, V3ProviderFailureSessionScope,
+    V3Error01SourceRaised, V3Error05ExecutionAction, V3Error05ExecutionDecision,
+    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind,
+    V3ExternalErrorLink, V3ExternalHttpWitness, V3ProviderFailureSessionScope,
     V3ProviderTerminalDisposition, V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
@@ -39,13 +32,11 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseBodyKind, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
-    build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
-    build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
+    build_v3_sse_transport_in_01_raw_chunk,
     build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField, SseIncrementalDecoder,
-    SseTransportIn02DecodedFrame, SseTransportIn03ValidatedFrameStream, SseTransportLimits,
+    SseTransportIn03ValidatedFrameStream, SseTransportLimits,
 };
-use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
-use routecodex_v3_virtual_router::V3VirtualRouter;
+use routecodex_v3_target::V3TargetCandidate;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -53,6 +44,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 pub mod direct_request_key_hooks;
 mod direct_runtime_helpers_stream;
 pub(crate) use direct_runtime_helpers_stream::wrap_direct_sse_provider_event_json_observation_stream_with_compat as wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook;
+pub(crate) use direct_runtime_helpers_stream::*;
 mod direct_client_sse_collapse;
 mod direct_execution_control;
 mod direct_runtime_timing;
@@ -419,7 +411,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 &failed_candidates,
                                 &request_local_busy_candidates,
                             ) {
-                                Ok(source) => source,
+                                Ok(source) => source.map(Box::new),
                                 Err(fault) => {
                                     return direct_runtime_helpers_stream::operator_fault_output(
                                         fault,
@@ -429,6 +421,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 }
                             },
                         };
+                        let source = source.map(|source| *source);
                         return direct_runtime_helpers_stream::target_exhausted_output_with_observability(
                             source.map_or_else(
                                 || {
@@ -459,7 +452,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &hook_registry,
                 ) {
                     Ok((selected, admission)) => (selected, admission, None),
-                    Err(output) => return output,
+                    Err(output) => return *output,
                 }
             } else {
                 return direct_runtime_helpers_stream::source_failure_output(
@@ -1195,7 +1188,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 )
             }
             Err(Ok(source)) => {
-                let transport_source = source.clone();
+                let _transport_source = source.clone();
                 if provider_response_is_stream {
                     if let Err(error) = runtime_timing.finish_external() {
                         return direct_runtime_helpers_stream::source_failure_output_with_observability_and_snapshots(

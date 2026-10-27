@@ -5,21 +5,20 @@ use routecodex_v3_config::{
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    build_v3_error_01_source_raised_internal, build_v3_error_02_classified_from_v3_error_01,
-    build_v3_provider_failure_action_from_v3_error_02,
-    build_v3_provider_global_error_fingerprint_from_classified,
+    build_v3_error_01_source_raised_internal, build_v3_provider_failure_action_from_v3_error_02,
     build_v3_provider_global_failure_policy, is_v3_provider_pool_exhausted, V3Error01SourceRaised,
     V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorSourceKind, V3ExternalErrorKind,
+    V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
     adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease},
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
     V3ProviderFailureRecord, V3ProviderHealthListenerScope, V3ProviderHealthStore,
-    V3ProviderKeyHealthProjection, V3ProviderRecoveryKind, V3ProviderSchedulingProjection,
-    V3ProviderSchedulingReader, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
+    V3ProviderInterfaceIdentity, V3ProviderKeyHealthProjection, V3ProviderRecoveryKind,
+    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
+    V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
 use routecodex_v3_target::{
     V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
@@ -178,8 +177,8 @@ pub(crate) fn is_health_neutral_request_compat_failure(
 /// available as evidence when it already existed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3RelayErrorOperatorFault {
-    pub policy_failure: V3Error01SourceRaised,
-    pub original_source: Option<V3Error01SourceRaised>,
+    pub policy_failure: Box<V3Error01SourceRaised>,
+    pub original_source: Option<Box<V3Error01SourceRaised>>,
 }
 
 /// Run the canonical Source01 SDK once and preserve its two successful side
@@ -233,13 +232,13 @@ fn relay_error_operator_fault(
     original_source: Option<V3Error01SourceRaised>,
 ) -> V3RelayErrorOperatorFault {
     V3RelayErrorOperatorFault {
-        policy_failure: build_v3_error_01_source_raised(
+        policy_failure: Box::new(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Error06ClientProjected",
             code,
             message,
-        ),
-        original_source,
+        )),
+        original_source: original_source.map(Box::new),
     }
 }
 
@@ -249,7 +248,7 @@ pub(crate) fn relay_error_operator_fault_from_err01_source(
     runner_error: crate::operation_runner::OperationRunnerError,
 ) -> V3RelayErrorOperatorFault {
     V3RelayErrorOperatorFault {
-        policy_failure: build_v3_error_01_source_raised(
+        policy_failure: Box::new(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Error01SourceRaised",
             "err01_source_operator_sdk_failure",
@@ -257,8 +256,8 @@ pub(crate) fn relay_error_operator_fault_from_err01_source(
                 "Err01 operator failed ({}) while raising {source_stage}:{}",
                 runner_error.message, original_source.code
             ),
-        ),
-        original_source: Some(original_source),
+        )),
+        original_source: Some(Box::new(original_source)),
     }
 }
 
@@ -397,17 +396,9 @@ pub(crate) fn project_v3_client_disconnect(
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct V3RelayProviderFailureRetryPolicy {
     pub(crate) same_candidate_retries: usize,
-}
-
-impl Default for V3RelayProviderFailureRetryPolicy {
-    fn default() -> Self {
-        Self {
-            same_candidate_retries: 0,
-        }
-    }
 }
 
 impl V3RelayProviderFailureRetryPolicy {
@@ -515,17 +506,19 @@ struct V3SessionGlobalSchedulingReader<'health> {
 impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
-        interface_id: &str,
+        identity: V3ProviderInterfaceIdentity<'_>,
         auth_alias: &str,
         model_id: &str,
         priority: i32,
         base_weight: u32,
         now_ms: u64,
     ) -> V3ProviderSchedulingProjection {
-        let mut projection = self.global.scheduling_projection_for_interface(
+        let V3ProviderInterfaceIdentity {
             provider_id,
             interface_id,
+        } = identity;
+        let mut projection = self.global.scheduling_projection_for_interface(
+            identity,
             auth_alias,
             model_id,
             priority,
@@ -611,17 +604,19 @@ pub struct V3ProviderFailureRuntimeHealth {
 impl V3ProviderSchedulingReader for V3ProviderFailureRuntimeHealth {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
-        interface_id: &str,
+        identity: V3ProviderInterfaceIdentity<'_>,
         auth_alias: &str,
         model_id: &str,
         priority: i32,
         base_weight: u32,
         now_ms: u64,
     ) -> V3ProviderSchedulingProjection {
-        let mut projection = self.store.scheduling_projection_for_interface(
+        let V3ProviderInterfaceIdentity {
             provider_id,
             interface_id,
+        } = identity;
+        let mut projection = self.store.scheduling_projection_for_interface(
+            identity,
             auth_alias,
             model_id,
             priority,
@@ -846,8 +841,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
     attempt_source: Option<V3Error01SourceRaised>,
-    provider_status: Option<u16>,
-    provider_body_read_failure: Option<&str>,
+    _provider_status: Option<u16>,
+    _provider_body_read_failure: Option<&str>,
 ) -> Result<V3RelayProviderFailurePolicyResult, Result<String, V3RelayErrorOperatorFault>> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
     // Request-local provider failure exclusion is monotonic. Record it before
@@ -1243,23 +1238,24 @@ fn terminal_projection_for(
     if !is_v3_provider_pool_exhausted(&decision.exhaustion) {
         if let Some(V3ProviderDispositionStepManifest::Project { public_code, .. }) = matched_policy
             .and_then(|policy| {
-                policy.path.iter().rev().find_map(|step| match step {
-                    V3ProviderDispositionStepManifest::Project { .. } => Some(step),
-                    _ => None,
-                })
+                policy
+                    .path
+                    .iter()
+                    .rev()
+                    .find(|step| matches!(step, V3ProviderDispositionStepManifest::Project { .. }))
             })
         {
             // Error06 owns the terminal HTTP status. Policy projection may only
             // customize the public error code without changing routing truth.
-            if let Some(public_code) = public_code {
-                if let Some(error) = projected
+            if let (Some(public_code), Some(error)) = (
+                public_code,
+                projected
                     .body
                     .as_object_mut()
                     .and_then(|body| body.get_mut("error"))
-                    .and_then(Value::as_object_mut)
-                {
-                    error.insert("code".to_string(), Value::String(public_code.clone()));
-                }
+                    .and_then(Value::as_object_mut),
+            ) {
+                error.insert("code".to_string(), Value::String(public_code.clone()));
             }
         }
     }
@@ -1496,7 +1492,7 @@ pub(crate) fn expand_v3_relay_target_candidates_from_opaque_hit(
 
 fn build_v3_relay_target_candidates(
     input: &V3RelayProviderTargetResolutionInput<'_>,
-) -> Result<V3Target09CandidateSetExpanded, V3RelayProviderTargetResolution> {
+) -> Result<V3Target09CandidateSetExpanded, Box<V3RelayProviderTargetResolution>> {
     let hit = resolve_v3_relay_opaque_target_once(
         input.manifest,
         input.server_id,
@@ -1505,18 +1501,22 @@ fn build_v3_relay_target_candidates(
         input.body,
         input.deterministic_sample,
     )
-    .map_err(|error| match error {
-        Ok(source) => V3RelayProviderTargetResolution::Failed(source),
-        Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
+    .map_err(|error| {
+        Box::new(match error {
+            Ok(source) => V3RelayProviderTargetResolution::Failed(source),
+            Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
+        })
     })?;
     expand_v3_relay_target_candidates_from_opaque_hit(
         input.manifest,
         hit,
         input.deterministic_sample,
     )
-    .map_err(|error| match error {
-        Ok(source) => V3RelayProviderTargetResolution::Failed(source),
-        Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
+    .map_err(|error| {
+        Box::new(match error {
+            Ok(source) => V3RelayProviderTargetResolution::Failed(source),
+            Err(fault) => V3RelayProviderTargetResolution::OperatorFault(fault),
+        })
     })
 }
 
@@ -1525,7 +1525,7 @@ pub(crate) fn resolve_v3_relay_target_outcome(
 ) -> V3RelayProviderTargetResolution {
     let expanded = match build_v3_relay_target_candidates(&input) {
         Ok(expanded) => expanded,
-        Err(resolution) => return resolution,
+        Err(resolution) => return *resolution,
     };
     let target = V3TargetInterpreter::default();
     let session_availability = input

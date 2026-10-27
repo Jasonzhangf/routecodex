@@ -58,7 +58,6 @@ pub(crate) fn record_v3_webui_error_projection(
 ) -> Result<u64, String> {
     let (error_category, error_detail) = body
         .map(crate::v3_error_body_code_message)
-        .map(|(code, message)| (code, message))
         .unwrap_or_else(|| (format!("http_{status}"), format!("HTTP status {status}")));
     let request_key = build_v3_obs_request_key(port, request_id);
     let scope = V3ObsScope {

@@ -1,6 +1,4 @@
-use super::{
-    runtime_source, V3Error01SourceRaised, V3RuntimeStreamObservation, V3RuntimeTimingState,
-};
+use super::{runtime_source, V3RuntimeStreamObservation, V3RuntimeTimingState};
 
 pub(super) fn finish_v3_direct_runtime_timing(
     committed_client_sse: bool,

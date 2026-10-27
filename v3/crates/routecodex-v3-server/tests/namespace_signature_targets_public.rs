@@ -282,6 +282,7 @@ async fn run(target: &'static str) {
     let relay = r#"  { entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" },"#;
     let declaration = declaration.replace(direct, relay);
     let port = test_ports::free_port();
+    let entry_port = port.to_string();
     let execution = hub_v1_fixture::hub_v1_server_execution("signature");
     let source = format!(
         r#"
@@ -389,7 +390,7 @@ targets = [{{ kind = "provider_model", provider = "signature", model = "signatur
                             && record["reason"] == "unmapped_target_protocol_field_unrepresentable"
                             && record["drop_site"]
                                 == "project_outbound_payload_for_target_protocol_inner_with_drops"
-                            && record["entry_port"] == port.to_string()
+                            && record["entry_port"] == entry_port
                             && record["request_id"]
                                 .as_str()
                                 .is_some_and(|id| !id.is_empty())

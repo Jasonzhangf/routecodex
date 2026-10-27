@@ -237,7 +237,7 @@ mod tests {
         )
         .expect("external Err01 must execute through the canonical Error graph");
 
-        assert_eq!(source.external_error, Some(external_error));
+        assert_eq!(source.external_error.as_deref(), Some(&external_error));
         assert_eq!(payload["external_error"]["status"], 429);
         assert_eq!(
             payload["external_error"]["upstream_request_id"],

@@ -6,6 +6,9 @@
 use super::*;
 use tokio::sync::{mpsc, watch};
 
+type V3ListenerProbeFuture = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+type V3ListenerProbePreparation = (V3ListenerProbeFuture, oneshot::Sender<()>);
+
 /// One supervised recovery owner for one business listener.
 struct ListenerProbeOwner {
     probe: tokio::task::JoinHandle<()>,
@@ -17,16 +20,10 @@ impl ListenerProbeOwner {
         manifest: &Arc<V3Config05ManifestPublished>,
         health: &Arc<V3ResponsesRelayProviderHealthHandle>,
         resume: bool,
-    ) -> Result<
-        (
-            std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
-            oneshot::Sender<()>,
-        ),
-        String,
-    > {
+    ) -> Result<V3ListenerProbePreparation, String> {
         let runtime_health = health.runtime_health();
         let (shutdown, shutdown_rx) = oneshot::channel();
-        let future: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> = if resume {
+        let future: V3ListenerProbeFuture = if resume {
             Box::pin(
                 runtime_health
                     .aggregate_provider_probe_lifecycle_resume(Arc::clone(manifest), shutdown_rx)?,

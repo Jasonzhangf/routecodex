@@ -243,8 +243,8 @@ fn probe_acquisition_is_single_flight() {
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
         .is_some());
-    assert!(!store
+    assert!(store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
-        .is_some());
+        .is_none());
 }

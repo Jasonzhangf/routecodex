@@ -631,17 +631,14 @@ fn project_instance(
     served_config_path: &Path,
 ) -> ManagedInstanceProjection {
     let mut errors = Vec::new();
-    let declaration = record.declaration.as_ref().map_err(|error| {
-        errors.push(error.clone());
-        error
+    let declaration = record.declaration.as_ref().inspect_err(|error| {
+        errors.push(error.to_string());
     });
-    let status = record.status.as_ref().map_err(|error| {
-        errors.push(error.clone());
-        error
+    let status = record.status.as_ref().inspect_err(|error| {
+        errors.push(error.to_string());
     });
-    let pid_cache = record.pid_cache.as_ref().map_err(|error| {
-        errors.push(error.clone());
-        error
+    let pid_cache = record.pid_cache.as_ref().inspect_err(|error| {
+        errors.push(error.to_string());
     });
     let config_match = match declaration {
         Ok(declaration) => {

@@ -261,7 +261,7 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
     _model_id: Option<&str>,
     web_search_execution_mode: V3WebSearchExecutionMode,
     has_web_search_capability: bool,
-    drop_context: &V3ProjectionDropContext,
+    _drop_context: &V3ProjectionDropContext,
     drops: &mut Vec<V3ProjectionDropRecord>,
 ) -> Result<(), String> {
     let refreshed_provider_tool_names = validate_namespace_tool_dispatch_names(payload)?;
@@ -573,7 +573,7 @@ fn normalize_openai_chat_tool_search(
 
 fn normalize_openai_chat_function_tool(
     row: &Map<String, Value>,
-    path: &str,
+    _path: &str,
 ) -> Result<Value, String> {
     if let Some(function) = row.get("function").and_then(Value::as_object) {
         // Req04 owns the only Tool-Thinking schema compilation. Preserve the

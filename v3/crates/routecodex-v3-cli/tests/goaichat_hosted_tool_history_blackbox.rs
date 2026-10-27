@@ -171,7 +171,8 @@ fn anthropic_valid_tool_name(name: &str) -> bool {
 // cannot reach the expected provider acceptance.
 fn evaluate_custom_input(input: &str) -> i64 {
     let trimmed = input.trim();
-    let ops: [(char, fn(i64, i64) -> i64); 4] = [
+    type BinaryOp = fn(i64, i64) -> i64;
+    let ops: [(char, BinaryOp); 4] = [
         ('+', i64::wrapping_add),
         ('-', i64::wrapping_sub),
         ('*', i64::wrapping_mul),
@@ -797,7 +798,7 @@ async fn goaichat_responses_custom_alias_collisions_roundtrip_json_and_sse_black
         .build()
         .unwrap();
 
-    for (_index, stream) in [false, true].into_iter().enumerate() {
+    for stream in [false, true] {
         let mut payload = base_payload.clone();
         payload["stream"] = json!(stream);
         let first = client.post(&url).json(&payload).send().await;

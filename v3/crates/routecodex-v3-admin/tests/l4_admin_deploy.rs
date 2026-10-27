@@ -6,11 +6,10 @@ use routecodex_v3_config_mgmt::ConfigMgmtStore;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// PATH is process-global: the two restart-resolution tests must not interleave.
-static PATH_LOCK: Mutex<()> = Mutex::new(());
+static PATH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn temp_home(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -385,7 +384,7 @@ fn write_fake_cli(dir: &Path, args_record: &Path) -> PathBuf {
 
 #[tokio::test]
 async fn restart_reports_missing_executable_explicitly() {
-    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let _path_lock = PATH_LOCK.lock().await;
     let home = temp_home("restart-missing");
     let port = spawn_fake_health("whatever").await;
     let config_path = write_config(&home, "routecodex_v3_missing", "127.0.0.1", port);
@@ -425,7 +424,7 @@ async fn restart_reports_missing_executable_explicitly() {
 
 #[tokio::test]
 async fn restart_runs_resolved_cli_for_served_config() {
-    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let _path_lock = PATH_LOCK.lock().await;
     let home = temp_home("restart-run");
     let port = spawn_fake_health("whatever").await;
     let config_path = write_config(&home, "routecodex_v3_restart", "127.0.0.1", port);
@@ -470,7 +469,7 @@ async fn restart_runs_resolved_cli_for_served_config() {
 /// (`rccv3 restart -c <config>`), not the default-config instance.
 #[tokio::test]
 async fn reload_runs_resolved_cli_with_served_config_path() {
-    let _path_lock = PATH_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let _path_lock = PATH_LOCK.lock().await;
     let home = temp_home("reload-run");
     let port = spawn_fake_health("whatever").await;
     let config_path = write_config(&home, "routecodex_v3_reload", "127.0.0.1", port);

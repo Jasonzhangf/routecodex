@@ -151,8 +151,7 @@ fn put_all_candidates_in_provider_cooldown(
         health
             .store
             .record_provider_cooldown_failure_for_interface(
-                &candidate.provider_id,
-                &candidate.interface_id,
+                V3ProviderInterfaceIdentity::new(&candidate.provider_id, &candidate.interface_id),
                 Some(&candidate.auth_alias),
                 Some(&candidate.model_id),
                 "controlled cooldown-only exhaustion",
@@ -1208,7 +1207,7 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
         "default",
         "http://127.0.0.1:1/v1".to_string(),
     );
-    let mut third_provider = manifest
+    let third_provider = manifest
         .providers
         .get("second")
         .expect("second provider")

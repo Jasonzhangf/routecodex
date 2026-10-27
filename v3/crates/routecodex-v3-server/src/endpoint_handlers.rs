@@ -55,7 +55,7 @@ pub(crate) fn finish_v3_protocol_execution_plan_failure(
         routecodex_v3_error::V3Error06ClientProjected,
         routecodex_v3_runtime::V3RelayErrorOperatorFault,
     >,
-) -> Result<routecodex_v3_error::V3Error06ClientProjected, Response<Body>> {
+) -> Result<routecodex_v3_error::V3Error06ClientProjected, Box<Response<Body>>> {
     let projected = match projected {
         Ok(projected) => projected,
         Err(fault) => {
@@ -66,15 +66,15 @@ pub(crate) fn finish_v3_protocol_execution_plan_failure(
                 request_id,
                 &[],
                 Some(&fault.policy_failure),
-                fault.original_source.as_ref(),
+                fault.original_source.as_deref(),
             );
-            return Err(provider_terminal_response(
+            return Err(Box::new(provider_terminal_response(
                 state,
                 front_connection_identity,
                 routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
                 requested_stream,
                 terminal_evidence,
-            ));
+            )));
         }
     };
     Ok(projected)
@@ -277,10 +277,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     &request_id,
                     requested_stream,
                     terminal_evidence,
-                    project_v3_protocol_execution_plan_failure(failure),
+                    project_v3_protocol_execution_plan_failure(*failure),
                 ) {
                     Ok(projected) => projected,
-                    Err(response) => return response,
+                    Err(response) => return *response,
                 };
                 if projected.pool_exhausted {
                     // A selection-time pool exhaustion is a provider terminal:

@@ -557,7 +557,7 @@ async fn chat_relay_cross_protocol_real_upstream_http_503_never_reaches_client()
 /// instead of forwarding the non-terminal provider payload.
 #[tokio::test]
 async fn chat_direct_incomplete_provider_terminal_breaks_client_transport() {
-    let mut success = start_controlled_upstream(ProviderMode::Success).await;
+    let success = start_controlled_upstream(ProviderMode::Success).await;
     let mut incomplete_a = start_controlled_upstream(ProviderMode::NonTerminalAttempt).await;
     let mut incomplete_b = start_controlled_upstream(ProviderMode::NonTerminalAttempt).await;
     let ports = ChatPorts::allocate();
@@ -587,7 +587,7 @@ async fn chat_direct_incomplete_provider_terminal_breaks_client_transport() {
 /// client transport must break rather than receive the provider-derived frame.
 #[tokio::test]
 async fn chat_relay_cross_protocol_incomplete_provider_terminal_breaks_client_transport() {
-    let mut success = start_controlled_responses_upstream(ProviderMode::Success).await;
+    let success = start_controlled_responses_upstream(ProviderMode::Success).await;
     let mut incomplete_a =
         start_controlled_responses_upstream(ProviderMode::NonTerminalAttempt).await;
     let mut incomplete_b =
@@ -1052,10 +1052,10 @@ fn start_cli_server(config_path: &ChatConfig, _ports: Vec<u16>) -> CliProcess {
         .env("ROUTECODEX_V3_CHAT_SUCCESS_KEY", "chat-success-secret")
         .env("ROUTECODEX_V3_CHAT_FAILURE_A_KEY", "chat-failure-a-secret")
         .env("ROUTECODEX_V3_CHAT_FAILURE_B_KEY", "chat-failure-b-secret")
-        .env("HOME", &temp_dir)
-        .env("TMPDIR", &temp_dir)
-        .env("TMP", &temp_dir)
-        .env("TEMP", &temp_dir)
+        .env("HOME", temp_dir)
+        .env("TMPDIR", temp_dir)
+        .env("TMP", temp_dir)
+        .env("TEMP", temp_dir)
         .env("ROUTECODEX_V3_STATE_DIR", &state_root)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

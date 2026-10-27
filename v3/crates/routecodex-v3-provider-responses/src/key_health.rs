@@ -85,20 +85,35 @@ impl V3ProviderHealthProbePermit {
     }
 }
 
+/// Borrowed `(provider_id, interface_id)` pair shared by provider-health entry
+/// points that address one provider interface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct V3ProviderInterfaceIdentity<'a> {
+    pub provider_id: &'a str,
+    pub interface_id: &'a str,
+}
+
+impl<'a> V3ProviderInterfaceIdentity<'a> {
+    pub const fn new(provider_id: &'a str, interface_id: &'a str) -> Self {
+        Self {
+            provider_id,
+            interface_id,
+        }
+    }
+}
+
 pub trait V3ProviderSchedulingReader {
     fn scheduling_projection_for_interface(
         &self,
-        provider_id: &str,
-        interface_id: &str,
+        identity: V3ProviderInterfaceIdentity<'_>,
         auth_alias: &str,
         model_id: &str,
         priority: i32,
         base_weight: u32,
         now_ms: u64,
     ) -> V3ProviderSchedulingProjection {
-        let _ = interface_id;
         self.scheduling_projection(
-            provider_id,
+            identity.provider_id,
             auth_alias,
             model_id,
             priority,

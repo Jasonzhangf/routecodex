@@ -15,6 +15,12 @@ pub(crate) enum V3RelayCompleteResponseError {
     Store(crate::nodes::V3AttemptStoreError),
 }
 
+pub(crate) type V3RelayCompleteResponseResult =
+    Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError>;
+type V3RelayCompleteCarrierKey = (String, String);
+type V3RelayCompleteCarrierSpan = (usize, String, usize, usize);
+type V3RelayCompleteCarrier = (String, Vec<V3RelayCompleteCarrierSpan>);
+
 impl From<crate::nodes::V3AttemptStoreError> for V3RelayCompleteResponseError {
     fn from(error: crate::nodes::V3AttemptStoreError) -> Self {
         Self::Store(error)
@@ -72,7 +78,7 @@ pub(crate) fn projected_sse_has_business_content(
 fn govern_complete_chat_sse(
     frames: &[Vec<u8>],
     source_terminal: Option<usize>,
-) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError> {
+) -> V3RelayCompleteResponseResult {
     govern_complete_chat_sse_with_context(
         frames,
         source_terminal,
@@ -84,10 +90,9 @@ pub(crate) fn govern_complete_chat_sse_with_context(
     frames: &[Vec<u8>],
     source_terminal: Option<usize>,
     context: &V3HubRelaySerializedToolContext,
-) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3RelayCompleteResponseError> {
+) -> V3RelayCompleteResponseResult {
     let mut events = decode(frames).map_err(V3RelayCompleteResponseError::Processing)?;
-    let mut carriers: BTreeMap<(String, String), (String, Vec<(usize, String, usize, usize)>)> =
-        BTreeMap::new();
+    let mut carriers: BTreeMap<V3RelayCompleteCarrierKey, V3RelayCompleteCarrier> = BTreeMap::new();
     let mut used = HashSet::new();
     let mut next_indices = BTreeMap::<String, usize>::new();
     let mut opaque_choices = BTreeSet::new();

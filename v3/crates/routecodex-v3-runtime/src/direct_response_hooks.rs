@@ -20,6 +20,10 @@ pub(crate) use dsml::{
 mod commit_probe;
 pub(crate) use commit_probe::V3DirectPrefixCommitProbe;
 
+pub(crate) type V3DirectResponseHookAttempt = Option<(Vec<Vec<u8>>, usize)>;
+pub(crate) type V3DirectResponseHookResult =
+    Result<V3DirectResponseHookAttempt, V3DirectResponseHookFailure>;
+
 /// Where a governed text marker can appear. The thinking owner searches the
 /// whole text; the DSML owner only removes a label that is a complete line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,7 +81,7 @@ pub(crate) fn rewrite_v3_direct_complete_response_attempt(
     frames: &[Vec<u8>],
     flushed: usize,
     context: &V3DirectDsmlContext,
-) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure> {
+) -> V3DirectResponseHookResult {
     let serialized_tools = rewrite_v3_direct_dsml_attempt(frames, flushed, context)?;
     let normalized = serialized_tools
         .as_ref()

@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
 };
 use std::sync::Arc;
-use tokio::sync::{mpsc, Barrier, Mutex, Semaphore};
+use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::time::timeout;
 
 #[derive(Clone)]

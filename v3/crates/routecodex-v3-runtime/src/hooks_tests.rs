@@ -1,7 +1,12 @@
 use super::*;
+use crate::kernel::direct_request_key_hooks::{
+    V3DirectRequestKeyEdits, V3DirectRequestKeyKind, V3DirectRequestKeyMount,
+    V3DirectRequestKeyView,
+};
 use routecodex_v3_config::{
     V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3RouteTargetKind,
 };
+use routecodex_v3_error::build_v3_error_01_source_raised;
 use routecodex_v3_provider_responses::{V3ProviderHttpFailure, V3ProviderResponseHeader};
 use routecodex_v3_target::{V3Target10ConcreteProviderSelected, V3TargetCandidate};
 use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
@@ -132,22 +137,25 @@ fn responses_direct_static_hooks_are_registered() {
 #[test]
 fn direct_source_boundary_preserves_err01_operator_fault() {
     let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-        policy_failure: build_v3_error_01_source_raised(
+        policy_failure: Box::new(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Error01SourceRaised",
             "err01_source_operator_sdk_failure",
             "seeded Err01 failure",
-        ),
-        original_source: Some(build_v3_error_01_source_raised(
+        )),
+        original_source: Some(Box::new(build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3Provider12ResponsesWirePayload",
             "seeded_original_source",
             "seeded original source",
-        )),
+        ))),
     };
     let result: V3DirectSourceResult<()> = Err(Err(fault.clone()));
 
-    assert_eq!(result.unwrap_err().unwrap_err(), fault);
+    let Err(Err(actual_fault)) = result else {
+        panic!("direct source result must preserve the operator fault");
+    };
+    assert_eq!(actual_fault, fault);
 }
 
 #[test]
@@ -162,7 +170,10 @@ fn direct_source_boundary_preserves_sdk_source() {
     .expect("real Error01 SDK must raise an Internal source");
     let result: V3DirectSourceResult<()> = Err(Ok(source.clone()));
 
-    assert_eq!(result.unwrap_err().unwrap(), source);
+    let Err(Ok(actual_source)) = result else {
+        panic!("direct source result must preserve the typed source");
+    };
+    assert_eq!(actual_source, source);
     assert_eq!(
         source
             .internal_error

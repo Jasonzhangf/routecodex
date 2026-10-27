@@ -97,7 +97,7 @@ async fn sample_persistence_failure_http_roundtrip(listener_addr: std::net::Sock
 
 #[tokio::test]
 async fn managed_shutdown_records_sample_persistence_failure_with_hooks_cleanup_detail() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = TempDir::new().unwrap();
     let home = root.path().join("home");
     let _environment = SamplePersistenceTestEnvironment::new(&home);
@@ -169,7 +169,7 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
         );
         return;
     }
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.lock().await;
     let root = PathBuf::from(child_root.unwrap());
     let home = root.join("home");
     let _environment = SamplePersistenceTestEnvironment::new(&home);

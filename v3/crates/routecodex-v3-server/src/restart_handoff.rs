@@ -14,7 +14,6 @@ use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddr;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
@@ -204,7 +203,7 @@ impl V3FrontRequestLease {
     /// mode. The caller must provide the request-ingress pipeline identity;
     /// this constructor never derives it from payload, provider response, or
     /// logs.
-    pub fn from_responses_execution_plan(
+    pub(crate) fn from_responses_execution_plan(
         plan: &V3MetadataCenterExecutionPlan,
         request_id: impl Into<String>,
         pipeline_id: impl Into<String>,
@@ -265,9 +264,10 @@ impl V3FrontRequestLease {
         now: Instant,
         new_generation: u64,
     ) -> Self {
-        let mut frame_sequence = V3FrontFrameSequence::default();
-        frame_sequence.next_client_sequence = checkpoint.next_client_sequence;
-        frame_sequence.next_provider_sequence = checkpoint.next_provider_sequence;
+        let frame_sequence = V3FrontFrameSequence {
+            next_client_sequence: checkpoint.next_client_sequence,
+            next_provider_sequence: checkpoint.next_provider_sequence,
+        };
         let mut key = checkpoint.key.clone();
         key.generation = new_generation;
         Self {
@@ -903,16 +903,16 @@ impl V3StableFrontConnection {
     }
 
     pub async fn send_client_frame(&self, sequence: u64, frame: &[u8]) -> Result<(), String> {
-        let decision = self.lease.lock().expect("stable front lease lock");
-        if decision.deadline.is_expired(Instant::now()) {
-            return Err("stable front request deadline expired".to_string());
-        }
-        if decision.closeout_state != V3FrontCloseoutState::Open {
-            return Err("stable front request is already closed out".to_string());
-        }
-        let mut lease = decision;
-        let frame_decision = lease.frame_sequence.observe_client(sequence);
-        drop(lease);
+        let frame_decision = {
+            let mut lease = self.lease.lock().expect("stable front lease lock");
+            if lease.deadline.is_expired(Instant::now()) {
+                return Err("stable front request deadline expired".to_string());
+            }
+            if lease.closeout_state != V3FrontCloseoutState::Open {
+                return Err("stable front request is already closed out".to_string());
+            }
+            lease.frame_sequence.observe_client(sequence)
+        };
         if frame_decision != V3FrontFrameDecision::New {
             return Err(format!(
                 "client frame sequence rejected: {frame_decision:?}"
@@ -927,21 +927,25 @@ impl V3StableFrontConnection {
     }
 
     pub async fn send_client_terminal(&self, sequence: u64, frame: &[u8]) -> Result<(), String> {
-        let mut lease = self.lease.lock().expect("stable front lease lock");
-        if lease.deadline.is_expired(Instant::now()) {
-            return Err("stable front request deadline expired".to_string());
-        }
-        if lease.closeout_state != V3FrontCloseoutState::Open {
-            return Err("stable front terminal closeout already committed".to_string());
-        }
-        let frame_decision = lease.frame_sequence.observe_client(sequence);
+        let frame_decision = {
+            let mut lease = self.lease.lock().expect("stable front lease lock");
+            if lease.deadline.is_expired(Instant::now()) {
+                return Err("stable front request deadline expired".to_string());
+            }
+            if lease.closeout_state != V3FrontCloseoutState::Open {
+                return Err("stable front terminal closeout already committed".to_string());
+            }
+            let frame_decision = lease.frame_sequence.observe_client(sequence);
+            if frame_decision == V3FrontFrameDecision::New {
+                lease.closeout_state = V3FrontCloseoutState::TerminalSent;
+            }
+            frame_decision
+        };
         if frame_decision != V3FrontFrameDecision::New {
             return Err(format!(
                 "client frame sequence rejected: {frame_decision:?}"
             ));
         }
-        lease.closeout_state = V3FrontCloseoutState::TerminalSent;
-        drop(lease);
         self.command_tx
             .send(V3StableFrontConnectionCommand::SendClientFrame(
                 frame.to_vec(),

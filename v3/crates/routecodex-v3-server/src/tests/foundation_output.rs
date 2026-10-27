@@ -58,7 +58,7 @@ async fn foundation_nochain_fault_marks_model_no_response_and_keeps_control_diag
 
 #[test]
 fn foundation_pending_consumer_persists_exact_terminal_source_and_cause() {
-    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let _home_lock = TEST_HOME_LOCK.blocking_lock();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-foundation-pending-source-{}",
         std::process::id()
@@ -196,8 +196,8 @@ async fn http_boundary_sdk_fault_preserves_typed_source_cause_and_model_transpor
 
     let (policy_source, original_source) = foundation_fault_sources();
     let fault = routecodex_v3_runtime::V3RelayErrorOperatorFault {
-        policy_failure: policy_source.clone(),
-        original_source: Some(original_source.clone()),
+        policy_failure: Box::new(policy_source.clone()),
+        original_source: Some(Box::new(original_source.clone())),
     };
 
     let log = std::env::temp_dir().join(format!(

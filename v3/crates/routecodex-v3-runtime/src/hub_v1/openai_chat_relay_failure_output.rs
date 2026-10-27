@@ -22,8 +22,8 @@ pub(super) fn provider_failure_output(
             stream_observation: None,
             provider_snapshots: None,
             provider_failure_attempts,
-            diagnostic_source: Some(fault.policy_failure),
-            diagnostic_cause: fault.original_source,
+            diagnostic_source: Some(*fault.policy_failure),
+            diagnostic_cause: fault.original_source.map(|source| *source),
         };
     }
     let projected = failure
@@ -53,7 +53,7 @@ pub(super) fn error_output(
     source: routecodex_v3_error::V3Error01SourceRaised,
     status: u16,
     provider_id: &str,
-    mut trace: Vec<&'static str>,
+    trace: Vec<&'static str>,
 ) -> V3OpenAiChatRelayRuntimeOutput {
     let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
     error_output_from_projection(projected, trace)
@@ -80,8 +80,8 @@ pub(super) fn error_output_from_projection(
                 error_class: None,
                 error_detail: None,
                 provider_failure_attempts: Vec::new(),
-                diagnostic_source: Some(fault.policy_failure),
-                diagnostic_cause: fault.original_source,
+                diagnostic_source: Some(*fault.policy_failure),
+                diagnostic_cause: fault.original_source.map(|source| *source),
                 observability: None,
                 stream_observation: None,
                 provider_snapshots: None,
@@ -134,8 +134,8 @@ mod tests {
             Err(error),
         )
         .expect_err("an SDK fault must not become a fabricated Error06");
-        let policy_failure = fault.policy_failure.clone();
-        let original_source = fault
+        let policy_failure = *fault.policy_failure.clone();
+        let original_source = *fault
             .original_source
             .clone()
             .expect("the original source must remain the fault cause");
@@ -181,8 +181,8 @@ mod tests {
             Ok(None),
         )
         .expect_err("missing terminal Error06 is a typed SDK fault");
-        let diagnostic_source = fault.policy_failure.clone();
-        let diagnostic_cause = fault
+        let diagnostic_source = *fault.policy_failure.clone();
+        let diagnostic_cause = *fault
             .original_source
             .clone()
             .expect("the SDK fault keeps its original compat source");
@@ -219,8 +219,8 @@ mod tests {
             Ok(None),
         )
         .expect_err("Ok(None) must produce a typed operator fault");
-        let diagnostic_source = fault.policy_failure.clone();
-        let diagnostic_cause = fault
+        let diagnostic_source = *fault.policy_failure.clone();
+        let diagnostic_cause = *fault
             .original_source
             .clone()
             .expect("the real source must remain the fault cause");

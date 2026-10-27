@@ -160,7 +160,7 @@ pub(crate) fn openai_chat_relay_output_response(
         V3SseClientProtocol::OpenAiChat,
     );
     let stream = frame.content_type == "text/event-stream";
-    let mut builder = Response::builder()
+    let builder = Response::builder()
         .status(StatusCode::from_u16(status).expect("typed V3 OpenAI Chat Relay status"))
         .header(
             "content-type",
@@ -1008,7 +1008,7 @@ pub(crate) fn gemini_relay_output_response(
         V3SseClientProtocol::Gemini,
     );
     let stream = frame.content_type == "text/event-stream";
-    let mut builder = Response::builder()
+    let builder = Response::builder()
         .status(StatusCode::from_u16(status).expect("typed V3 Gemini Relay status"))
         .header(
             "content-type",
@@ -1052,7 +1052,7 @@ pub(crate) fn anthropic_relay_output_response(
         V3SseClientProtocol::Anthropic,
     );
     let stream = frame.content_type == "text/event-stream";
-    let mut builder = Response::builder()
+    let builder = Response::builder()
         .status(StatusCode::from_u16(status).expect("typed V3 Anthropic Relay status"))
         .header(
             "content-type",

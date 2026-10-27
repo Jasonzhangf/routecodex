@@ -255,7 +255,7 @@ fn chat_completion_with_memory_captures_chat_response() {
     assert_eq!(report.captured.len(), 1);
     assert_eq!(
         strip_memory_envelope_from_text(
-            &body["choices"][0]["message"]["content"].as_str().unwrap(),
+            body["choices"][0]["message"]["content"].as_str().unwrap(),
             &report
         ),
         "Preceeding chat answer."

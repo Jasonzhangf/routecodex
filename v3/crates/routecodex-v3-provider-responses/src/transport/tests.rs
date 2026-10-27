@@ -935,7 +935,7 @@ async fn transport_success_body_read_failure_is_a_network_failure() {
             assert_eq!(status, 200);
             assert!(
                 headers.iter().any(|header| {
-                    header.name == "content-type" && header.value == &b"application/json"[..]
+                    header.name == "content-type" && header.value == b"application/json"[..]
                 }),
                 "the received head must survive a failed body read: {headers:?}"
             );

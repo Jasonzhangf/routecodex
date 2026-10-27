@@ -5,8 +5,8 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_provider_responses::{
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
-    V3ProviderHealthStore, V3ProviderKeyHealthStore, V3ProviderRecoveryKind,
-    V3ProviderSchedulingProjection,
+    V3ProviderHealthStore, V3ProviderInterfaceIdentity, V3ProviderKeyHealthStore,
+    V3ProviderRecoveryKind, V3ProviderSchedulingProjection,
 };
 
 #[test]
@@ -1185,8 +1185,7 @@ fn provider_health_cooldown_is_isolated_between_interfaces() {
 
     let cooled_interface = store
         .scheduling_projection_for_key_with_interface(
-            "provider-a",
-            "responses",
+            V3ProviderInterfaceIdentity::new("provider-a", "responses"),
             "key-a",
             "model-a",
             1,
@@ -1196,8 +1195,7 @@ fn provider_health_cooldown_is_isolated_between_interfaces() {
         .expect("cooled interface projection");
     let sibling_interface = store
         .scheduling_projection_for_key_with_interface(
-            "provider-a",
-            "chat",
+            V3ProviderInterfaceIdentity::new("provider-a", "chat"),
             "key-a",
             "model-a",
             1,

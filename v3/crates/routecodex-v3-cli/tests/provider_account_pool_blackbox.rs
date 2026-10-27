@@ -180,17 +180,14 @@ async fn zen_429_hold_and_http_2xx_streaming_recovery_public() {
     // A later business request on the same model must not retry the held
     // account: it reselects the fallback account (which is itself down here),
     // so the request still terminates without a fabricated success.
-    match client
+    if let Ok(reply) = client
         .post(format!("{base}/v1/responses"))
         .json(&routed_request)
         .send()
         .await
     {
-        Ok(reply) => {
-            assert!(!reply.status().is_success());
-            let _ = reply.bytes().await;
-        }
-        Err(_) => {}
+        assert!(!reply.status().is_success());
+        let _ = reply.bytes().await;
     }
     assert_eq!(
         business.load(std::sync::atomic::Ordering::SeqCst),
@@ -295,9 +292,9 @@ struct Peer {
 
 #[derive(Clone, Copy)]
 enum Scenario {
-    FirstTenFail,
-    AllFail,
-    BudgetEightFail,
+    FirstTen,
+    All,
+    BudgetEight,
 }
 
 struct CounterEnvironment {
@@ -540,9 +537,9 @@ async fn peer_provider(
         })
         .expect("receipt channel must remain open");
     let should_fail = match peer.scenario {
-        Scenario::FirstTenFail => index <= 10,
-        Scenario::AllFail => true,
-        Scenario::BudgetEightFail => true,
+        Scenario::FirstTen => index <= 10,
+        Scenario::All => true,
+        Scenario::BudgetEight => true,
     };
     if !valid_payload {
         return (
@@ -785,7 +782,7 @@ async fn run_all_fail(mode: Mode) {
         .route(peer_route(mode), post(peer_provider))
         .with_state(Peer {
             receipts: receipts_tx,
-            scenario: Scenario::AllFail,
+            scenario: Scenario::All,
             send_count: Arc::new(AtomicUsize::new(0)),
             mode,
         });
@@ -843,7 +840,7 @@ async fn run_budget_eight(mode: Mode) {
         .route(peer_route(mode), post(peer_provider))
         .with_state(Peer {
             receipts: receipts_tx,
-            scenario: Scenario::BudgetEightFail,
+            scenario: Scenario::BudgetEight,
             send_count: Arc::new(AtomicUsize::new(0)),
             mode,
         });
@@ -895,12 +892,12 @@ async fn run_budget_eight(mode: Mode) {
 
 #[tokio::test]
 async fn pool_11_first_10_fail_11_succeeds_direct() {
-    run_json_sse_success(Scenario::FirstTenFail, Mode::Direct).await
+    run_json_sse_success(Scenario::FirstTen, Mode::Direct).await
 }
 
 #[tokio::test]
 async fn pool_11_first_10_fail_11_succeeds_relay() {
-    run_json_sse_success(Scenario::FirstTenFail, Mode::Relay).await
+    run_json_sse_success(Scenario::FirstTen, Mode::Relay).await
 }
 
 #[tokio::test]

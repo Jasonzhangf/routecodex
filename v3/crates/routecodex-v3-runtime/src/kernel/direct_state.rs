@@ -346,7 +346,7 @@ pub(crate) fn protocol_plan_operator_fault(
     node_trace: Vec<&'static str>,
 ) -> V3ResponsesProtocolExecutionPlanFailure {
     V3ResponsesProtocolExecutionPlanFailure {
-        source: fault.policy_failure.clone(),
+        source: *fault.policy_failure.clone(),
         node_trace,
         error_operator_fault: Some(fault),
     }

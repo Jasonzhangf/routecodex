@@ -12,17 +12,11 @@
 //! `provider_health` handle private. That is also the honest path: the operator
 //! creates a manual cooldown, then asks for a probe on it.
 
-use axum::{
-    body::Body, extract::State, http::StatusCode, response::Response, routing::post, Json, Router,
-};
 use routecodex_v3_config::V3ConfigStore;
 use routecodex_v3_server::spawn_v3_server_aggregate_with_admin;
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, env, fs, path::PathBuf, sync::Arc};
-use tokio::{
-    sync::{oneshot, Mutex},
-    time::{sleep, timeout, Duration},
-};
+use std::{env, fs, path::PathBuf};
+use tokio::time::{sleep, Duration};
 
 static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 

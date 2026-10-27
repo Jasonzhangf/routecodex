@@ -5,7 +5,7 @@ fn instance_residual_pids_are_discovered_even_when_ports_are_no_longer_listened(
     // 复现用户场景：`routecodex start` 抢占后，旧 run-managed-child 已释放端口
     // 但进程残留并保持 tty 前台进程组，导致 Ctrl+C 信号发到错误进程。
     // 当前实现只按 lsof 占用端口找 PID，找不到已释放端口的残留进程（红）。
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let _guard = TEST_ENV_LOCK.blocking_lock();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let (config, executable, state) = fixture(&root);

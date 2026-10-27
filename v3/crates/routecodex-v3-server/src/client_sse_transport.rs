@@ -730,7 +730,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_sse_transport_returns_the_runtime_outcome_unchanged_inside_one_interval() {
-        let (sender, outcome) = oneshot::channel();
+        let (sender, _outcome) = oneshot::channel();
         let task = tokio::spawn(async move {
             let _ = sender.send(());
         });

@@ -342,8 +342,8 @@ fn post_commit_sse_failure_enters_provider_cooldown_after_one_same_error() {
                 1,
                 v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
             );
-        assert_eq!(
-            projection.available, false,
+        assert!(
+            !projection.available,
             "one typed recoverable post-commit SSE failure must cool the exact identity"
         );
         assert!(projection

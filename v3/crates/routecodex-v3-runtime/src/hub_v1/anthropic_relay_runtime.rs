@@ -11,26 +11,19 @@ mod response_closeout;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     admit_v3_selected_target_after_recovery, project_v3_client_disconnect,
-    provider_runtime_failure_stage, run_v3_relay_provider_failure_policy,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3AdmitAfterRecovery, V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
+    provider_runtime_failure_stage, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3AdmitAfterRecovery,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
 };
 use futures_util::StreamExt;
 use response_closeout::{closeout_anthropic_relay_response, closeout_anthropic_relay_sse_response};
 use routecodex_v3_config::V3Config05ManifestPublished;
-use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
-};
+use routecodex_v3_error::{V3ErrorActionScope, V3ErrorSourceKind, V3ProviderFailureSessionScope};
 use routecodex_v3_provider_responses::V3ResponsesStreamIntent;
 use routecodex_v3_provider_responses::{
-    build_v3_anthropic_provider_request_header, build_v3_provider_12_responses_wire_payload,
-    build_v3_transport_13_responses_http_request_from_v3_provider_12,
-    is_v3_anthropic_provider_request_header_name, ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResponseBody,
-    V3ProviderSseStream, V3ResponsesProviderTarget,
+    build_v3_anthropic_provider_request_header, is_v3_anthropic_provider_request_header_name,
+    ResponsesTransport, V3ProviderError, V3ProviderResponseBody, V3ProviderSseStream,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_02_from_fields,
@@ -38,9 +31,8 @@ use routecodex_v3_sse::{
     build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField,
 };
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
-use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3AnthropicRelayRuntimeInput {
@@ -690,7 +682,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         &failed_candidates,
                         &request_local_busy_candidates,
                     ) {
-                        Ok(source) => source,
+                        Ok(source) => source.map(Box::new),
                         Err(fault) => {
                             return Ok(provider_failure_output(
                                 super::relay_runtime_shared::provider_operator_fault_failure(fault),
@@ -701,6 +693,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     }
                 }
             };
+            let source = source.map(|source| *source);
             let failure = provider_request_failure(
                 "V3Target10ConcreteProviderSelected",
                 "selected_target_exhausted",
@@ -819,7 +812,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                 &failed_candidates,
                                 &request_local_busy_candidates,
                             ) {
-                                Ok(source) => source,
+                                Ok(source) => source.map(Box::new),
                                 Err(fault) => {
                                     return Ok(provider_failure_output(
                                         terminalize_provider_failure(
@@ -832,6 +825,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                 }
                             },
                         };
+                    let source = source.map(|source| *source);
                     let attempted_candidates = exhaustion.attempted_candidates;
                     let failure = provider_request_failure(
                         "V3Target10ConcreteProviderSelected",
@@ -1297,7 +1291,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         trace.as_mut(),
                         // anthropic 整流缓冲：两种客户端传输都由这一份完整
                         // client_response 派生，因此 SSE 出口同样可以发布 round。
-                        refill.as_mut().map(|carrier| &mut **carrier),
+                        refill.as_deref_mut(),
                         move |finalized| {
                             project_v3_anthropic_client_response_for_provider(
                                 finalized,
@@ -1551,7 +1545,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     &input.request_id,
                     &response_hook_profile,
                     trace.as_mut(),
-                    refill.as_mut().map(|carrier| &mut **carrier),
+                    refill.as_deref_mut(),
                     move |finalized| {
                         if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
                             project_v3_anthropic_client_response_for_provider(

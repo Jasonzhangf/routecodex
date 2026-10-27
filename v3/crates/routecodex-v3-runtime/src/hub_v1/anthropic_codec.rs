@@ -834,7 +834,7 @@ fn strip_unmapped_responses_reasoning_extensions(input: &mut Value) {
 }
 
 fn reject_unmapped_anthropic_payload_extensions(
-    object: &Map<String, Value>,
+    _object: &Map<String, Value>,
     extension: Option<&Map<String, Value>>,
 ) -> Result<(), V3AnthropicCodecError> {
     let mut paths = Vec::new();

@@ -28,8 +28,8 @@ pub use health::{
     V3ProviderHealthStore, V3ProviderSessionAvailabilityReader, V3_COOLDOWN_MANUAL_MAX_MS,
 };
 pub use key_health::{
-    V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
-    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
+    V3ProviderHealthProbePermit, V3ProviderInterfaceIdentity, V3ProviderKeyHealthProjection,
+    V3ProviderKeyHealthStore, V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
 };
 pub use opencode_zen_headers::stamp_opencode_zen_dynamic_request_headers;
 pub use probe::{build_v3_provider_global_probe_request, build_v3_provider_global_request};

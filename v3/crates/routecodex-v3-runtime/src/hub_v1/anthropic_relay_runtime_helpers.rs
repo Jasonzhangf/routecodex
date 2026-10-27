@@ -396,8 +396,8 @@ fn provider_failure_output(
             error_chain: None,
             observability: None,
             provider_failure_attempts,
-            diagnostic_source: Some(fault.policy_failure),
-            diagnostic_cause: fault.original_source,
+            diagnostic_source: Some(*fault.policy_failure),
+            diagnostic_cause: fault.original_source.map(|source| *source),
             stream_observation: None,
             provider_snapshots: None,
         };
@@ -443,8 +443,8 @@ fn error_output_from_projection(
                 error_chain: None,
                 observability: None,
                 provider_failure_attempts: Vec::new(),
-                diagnostic_source: Some(fault.policy_failure),
-                diagnostic_cause: fault.original_source,
+                diagnostic_source: Some(*fault.policy_failure),
+                diagnostic_cause: fault.original_source.map(|source| *source),
                 stream_observation: None,
                 provider_snapshots: None,
             }
@@ -500,6 +500,7 @@ fn extract_v3_anthropic_relay_usage_summary(
 #[cfg(test)]
 mod anthropic_client_sse_projection_tests {
     use super::*;
+    use routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS;
 
     #[tokio::test]
     async fn closeout_replay_uses_selected_provider_wire_protocol() {
@@ -807,8 +808,8 @@ mod tests {
                 Ok(None),
             )
             .expect_err("Ok(None) must produce a typed operator fault");
-            let diagnostic_source = fault.policy_failure.clone();
-            let diagnostic_cause = fault
+            let diagnostic_source = *fault.policy_failure.clone();
+            let diagnostic_cause = *fault
                 .original_source
                 .clone()
                 .expect("the real source must remain the fault cause");
@@ -880,8 +881,8 @@ mod tests {
             Err(runner_error),
         )
         .expect_err("an SDK fault must remain a typed relay error projection fault");
-        let diagnostic_source = fault.policy_failure.clone();
-        let original_source = fault
+        let diagnostic_source = *fault.policy_failure.clone();
+        let original_source = *fault
             .original_source
             .clone()
             .expect("the real source must remain the fault cause");
@@ -926,8 +927,8 @@ mod tests {
             Ok(None),
         )
         .expect_err("missing terminal Error06 is a typed SDK fault");
-        let diagnostic_source = fault.policy_failure.clone();
-        let diagnostic_cause = fault
+        let diagnostic_source = *fault.policy_failure.clone();
+        let diagnostic_cause = *fault
             .original_source
             .clone()
             .expect("the SDK fault keeps its original source");
@@ -1011,8 +1012,8 @@ mod tests {
             Ok(None),
         )
         .expect_err("missing terminal Error06 must produce a typed SDK fault");
-        let diagnostic_source = fault.policy_failure.clone();
-        let diagnostic_cause = fault
+        let diagnostic_source = *fault.policy_failure.clone();
+        let diagnostic_cause = *fault
             .original_source
             .clone()
             .expect("the source fault preserves the canonical plain source");

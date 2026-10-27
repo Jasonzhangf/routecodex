@@ -1,15 +1,15 @@
 use super::*;
 use crate::hub_v1::{
     classify_v3_provider_sse_json_data, collect_v3_provider_sse_json_data,
-    is_v3_provider_sse_transport_keepalive_data, is_v3_provider_sse_transport_keepalive_frame,
-    V3ProviderResponsesJsonFrameOutcome,
+    is_v3_provider_sse_keepalive_text, is_v3_provider_sse_transport_keepalive_data,
+    is_v3_provider_sse_transport_keepalive_frame, V3ProviderResponsesJsonFrameOutcome,
 };
 use crate::kernel::direct_sse_consumers::{
     build_v3_sse_transport_error_source, V3DirectSseContentConsumer,
 };
 use crate::nodes::{V3SseAttemptFrame, V3SseAttemptStream, V3SseFrameDisposition};
 
-fn wrap_direct_sse_provider_event_json_observation_stream(
+pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream(
     source: V3ProviderAttemptSseStream,
     stream_observation: V3RuntimeStreamObservation,
     runtime_timing: V3RuntimeTimingState,
@@ -339,8 +339,6 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
             )
         })?;
     let mut terminal_seen = false;
-    let mut business_decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
-    let mut has_business_content = false;
     let mut client_committed = false;
     // A declared tool lets the complete-attempt DSML owner harvest tool markup
     // out of the output text, so the probe must treat that opener as governed
@@ -404,11 +402,6 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
         if client_committed && terminal_frame {
             committed.hold_client_flush();
         }
-        has_business_content |= direct_sse_chunk_has_business_content(
-            provider_protocol,
-            &frame,
-            &mut business_decoder,
-        )?;
         for value in parse_direct_sse_json_frames(&frame) {
             commit_probe.observe_event(&value);
         }
@@ -478,15 +471,12 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                 )
             })?;
             if disposition == V3SseFrameDisposition::LegalCloseout {
-                if client_committed {
+                let has_business_content = if client_committed {
                     apply_complete_response_hook_preserving_client_prefix(
                         &mut committed,
                         response_hook,
                     )?;
-                    has_business_content = direct_sse_frames_have_business_content(
-                        provider_protocol,
-                        committed.frames(),
-                    );
+                    direct_sse_frames_have_business_content(provider_protocol, committed.frames())
                 } else {
                     let _ = rewrite_direct_sse_memory(&mut committed, manifest, request_id)
                         .map_err(|error| {
@@ -497,11 +487,8 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                             )
                         })?;
                     apply_complete_response_hook(&mut committed, response_hook)?;
-                    has_business_content = direct_sse_frames_have_business_content(
-                        provider_protocol,
-                        committed.frames(),
-                    );
-                }
+                    direct_sse_frames_have_business_content(provider_protocol, committed.frames())
+                };
                 if !has_business_content {
                     return Err(direct_sse_empty_attempt_failure());
                 }
@@ -541,10 +528,9 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                     )
                 })?;
         }
-        if client_committed {
+        let has_business_content = if client_committed {
             apply_complete_response_hook_preserving_client_prefix(&mut committed, response_hook)?;
-            has_business_content =
-                direct_sse_frames_have_business_content(provider_protocol, committed.frames());
+            direct_sse_frames_have_business_content(provider_protocol, committed.frames())
         } else {
             let _ = rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(
                 |error| {
@@ -556,9 +542,8 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                 },
             )?;
             apply_complete_response_hook(&mut committed, response_hook)?;
-            has_business_content =
-                direct_sse_frames_have_business_content(provider_protocol, committed.frames());
-        }
+            direct_sse_frames_have_business_content(provider_protocol, committed.frames())
+        };
         if !has_business_content {
             return Err(direct_sse_empty_attempt_failure());
         }
@@ -1299,7 +1284,7 @@ fn materialize_direct_responses_terminal_usage(frame: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
-fn test_direct_sse_attempt_stream(
+pub(crate) fn test_direct_sse_attempt_stream(
     source: V3ClientSseStream,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> V3SseAttemptStream {
@@ -1774,8 +1759,8 @@ pub(crate) fn operator_fault_output_with_observability_and_snapshots(
     V3ResponsesDirectRuntimeOutput {
         observability,
         terminal_disposition: Some(V3ProviderTerminalDisposition::NoResponse),
-        diagnostic_source: Some(fault.policy_failure),
-        diagnostic_cause: fault.original_source,
+        diagnostic_source: Some(*fault.policy_failure),
+        diagnostic_cause: fault.original_source.map(|source| *source),
         stream_observation: None,
         provider_request_snapshot,
         provider_response_snapshot,
@@ -1882,8 +1867,8 @@ pub(crate) fn policy_failure_output_with_observability(
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
     sdk_runtime_fault_output_with_observability_and_snapshots(
-        failure.original_source,
-        failure.policy_failure,
+        *failure.original_source,
+        *failure.policy_failure,
         last_external_http,
         node_trace,
         observability,
@@ -2164,6 +2149,9 @@ fn sdk_runtime_fault_output_with_observability_and_snapshots(
 #[cfg(test)]
 mod target_exhaustion_disposition_tests {
     use super::*;
+    use routecodex_v3_error::{
+        V3Error05RecoveryAdmissionWitness, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput,
+    };
 
     #[test]
     fn seeded_direct_source_fault_retains_prior_http_witness_and_original_cause() {
@@ -2187,8 +2175,8 @@ mod target_exhaustion_disposition_tests {
         let output = source_failure_output(
             Err(
                 crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-                    policy_failure: policy_failure.clone(),
-                    original_source: Some(original.clone()),
+                    policy_failure: Box::new(policy_failure.clone()),
+                    original_source: Some(Box::new(original.clone())),
                 },
             ),
             Some(witness.clone()),
@@ -2269,8 +2257,8 @@ mod target_exhaustion_disposition_tests {
             "Error01 operator failed",
         );
         let fault = crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault {
-            policy_failure: policy_failure.clone(),
-            original_source: Some(original.clone()),
+            policy_failure: Box::new(policy_failure.clone()),
+            original_source: Some(Box::new(original.clone())),
         };
         let witness = V3ExternalHttpWitness::new(
             429,
@@ -2677,7 +2665,7 @@ pub(crate) fn relay_handoff_output(
     }
 }
 
-fn debug_error_output(
+pub(crate) fn debug_error_output(
     stage: &'static str,
     error: V3DebugError,
     hook_registry: &V3HookRegistry,
@@ -2694,7 +2682,7 @@ fn debug_error_output(
     )
 }
 
-fn client_payload_debug_value(payload: &V3Resp15ClientPayload) -> Value {
+pub(crate) fn client_payload_debug_value(payload: &V3Resp15ClientPayload) -> Value {
     match &payload.body {
         V3ClientBody::Json(value) => value.clone(),
         V3ClientBody::Bytes(bytes) => json!({
@@ -2754,7 +2742,7 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderAvailabilityReader
     }
 }
 
-fn candidate_key(candidate: &V3TargetCandidate) -> String {
+pub(crate) fn candidate_key(candidate: &V3TargetCandidate) -> String {
     availability_key(
         &candidate.provider_id,
         &candidate.interface_id,
@@ -2778,7 +2766,7 @@ fn availability_key(
     )
 }
 
-fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
+pub(crate) fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
     candidates: &[V3TargetCandidate],
     availability: &R,
     failed_candidates: &BTreeSet<String>,
@@ -2807,7 +2795,7 @@ fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
         .count()
 }
 
-fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
+pub(crate) fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
     candidates: &[V3TargetCandidate],
     availability: &R,
     failed_candidates: &BTreeSet<String>,
@@ -2834,7 +2822,7 @@ fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
         .map(candidate_key)
 }
 
-fn require_static_hooks(hook_registry: &V3HookRegistry) {
+pub(crate) fn require_static_hooks(hook_registry: &V3HookRegistry) {
     for hook in [
         "ResponsesDirectRouteHook",
         "ResponsesDirectRequestProjectionHook",
@@ -2865,14 +2853,14 @@ pub(crate) fn direct_runtime_allowed_execution_modes(
         .unwrap_or_else(|| vec!["direct".to_string()])
 }
 
-fn total_attempts(
+pub(crate) fn total_attempts(
     accumulator: &V3RuntimeObservabilityAccumulator,
     current_leg_attempts: usize,
 ) -> usize {
     accumulator.attempts().saturating_add(current_leg_attempts)
 }
 
-fn validate_initial_direct_plan(
+pub(crate) fn validate_initial_direct_plan(
     has_initial_target: bool,
     has_initial_protocol_decision: bool,
 ) -> Result<(), &'static str> {

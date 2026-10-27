@@ -1,5 +1,8 @@
 use super::*;
-use routecodex_v3_error::{V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderRecoveryKind};
+use routecodex_v3_error::{
+    build_v3_error_02_classified_from_v3_error_01, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3ProviderRecoveryKind,
+};
 
 fn source(kind: V3ErrorSourceKind, code: &str, status: u16) -> V3Error01SourceRaised {
     if kind == V3ErrorSourceKind::RuntimeFailure {

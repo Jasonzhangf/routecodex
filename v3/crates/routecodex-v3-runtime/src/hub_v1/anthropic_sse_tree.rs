@@ -307,23 +307,20 @@ impl V3AnthropicSseReducerState {
                 _ => None,
             };
             if let Some(kind) = kind {
-                self.blocks.insert(
+                self.blocks.entry(index).or_insert(V3AnthropicSseBlock {
                     index,
-                    V3AnthropicSseBlock {
-                        index,
-                        kind,
-                        id: None,
-                        name: None,
-                        text: String::new(),
-                        input_json: String::new(),
-                        input: None,
-                        thinking: String::new(),
-                        signature: None,
-                        redacted_data: None,
-                        stopped: false,
-                        extensions: Vec::new(),
-                    },
-                );
+                    kind,
+                    id: None,
+                    name: None,
+                    text: String::new(),
+                    input_json: String::new(),
+                    input: None,
+                    thinking: String::new(),
+                    signature: None,
+                    redacted_data: None,
+                    stopped: false,
+                    extensions: Vec::new(),
+                });
             }
         }
         let block = self
@@ -689,7 +686,7 @@ fn apply_delta(
                 .ok_or(V3AnthropicSseTreeError::SignatureDeltaRequired)?;
             block.signature = Some(signature.to_owned());
         }
-        delta_type => block.extensions.extend(object_extensions(delta, &["type"])),
+        _ => block.extensions.extend(object_extensions(delta, &["type"])),
     }
     Ok(())
 }

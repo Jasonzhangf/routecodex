@@ -2,40 +2,33 @@ use super::common::V3ChatProcessRefillDisposition;
 use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
-    provider_runtime_failure_stage, run_v3_relay_provider_failure_policy,
+    project_v3_client_disconnect, provider_runtime_failure_stage,
     v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
-    V3RelayProviderTargetResolutionInput, V3RuntimeProviderAdmission,
+    V3RuntimeProviderAdmission,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};
 use crate::{project_v3_debug_failure, V3ResponsesProtocolExecutionPlan};
 use futures_util::StreamExt;
-use routecodex_v3_config::{
-    V3Config05ManifestPublished, V3ProviderErrorActionPolicyManifest,
-    V3ProviderErrorMatcherManifest,
-};
+use routecodex_v3_config::{V3Config05ManifestPublished, V3ProviderErrorActionPolicyManifest};
 use routecodex_v3_debug::V3DebugError;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
+    V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness, V3ErrorActionScope,
+    V3ErrorSourceKind, V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload, v3_provider_auth_handle_from_manifest_entry,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle, V3ProviderError,
-    V3ProviderHealthListenerScope, V3ProviderHealthStore, V3ProviderResp14Raw,
-    V3ProviderResponseBody, V3ProviderResponseHeader, V3ResponsesProviderTarget,
-    V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
+    v3_provider_auth_handle_from_manifest_entry, ReqwestResponsesTransport, ResponsesTransport,
+    V3ProviderAuthHandle, V3ProviderError, V3ProviderHealthListenerScope, V3ProviderHealthStore,
+    V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
+    V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
-    build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
+    build_v3_sse_transport_in_01_raw_chunk, SseIncrementalDecoder, SseTransportLimits,
 };
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[path = "responses_relay_runtime/relay_client_frames.rs"]
@@ -54,9 +47,6 @@ mod responses_relay_runtime_inner;
 mod responses_relay_types;
 use responses_relay_runtime_inner::{
     execute_v3_responses_relay_runtime_inner, execute_v3_responses_relay_runtime_inner_with_refill,
-};
-pub(crate) use responses_relay_runtime_inner::{
-    find_responses_tool_output_ids, V3ResponsesRelayToolOutputIds,
 };
 pub use responses_relay_types::*;
 // Provider health store 保持 opaque：health handle 归 Provider runtime boundary
@@ -108,20 +98,20 @@ impl V3ResponsesRelayProviderHealthHandle {
 }
 pub(super) use responses_openai_chat_conversion::build_v3_responses_provider_response_from_openai_chat_payload;
 pub(crate) use responses_openai_chat_conversion::build_v3_responses_reasoning_item_from_openai_chat_message;
-pub(crate) use responses_openai_chat_conversion::V3OpenAiChatToolCallProjection;
-use responses_openai_chat_conversion::*;
-use responses_relay_dry_run::*;
+#[cfg(test)]
+pub(crate) use responses_relay_dry_run::execute_v3_responses_relay_dry_run_runtime;
 pub use responses_relay_dry_run::{
     execute_v3_responses_relay_dry_run_orchestration_outcome,
     project_v3_responses_relay_runtime_failure,
 };
+#[cfg(test)]
+pub(crate) use responses_relay_failures::provider_response_stream_failure;
 pub(crate) use responses_relay_failures::provider_response_stream_relay_failure;
 use responses_relay_failures::{
     allowed_execution_modes_for_relay_server, error_output,
     is_v3_responses_provider_response_failure, provider_failure_output,
     provider_failure_output_with_observation, provider_http_failure,
-    provider_request_relay_failure, provider_response_hook_failure,
-    provider_response_stream_failure, provider_runtime_failure, server_routing_group,
+    provider_request_relay_failure, provider_response_hook_failure, provider_runtime_failure,
     terminalize_v3_responses_relay_provider_failure,
 };
 use responses_relay_json_hooks::*;
@@ -944,8 +934,7 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_
                     }
                 }
             }
-            let terminal_frame_index;
-            if failed {
+            let terminal_frame_index = if failed {
                 frames.push(build_v3_runtime_sse_json_frame(
                     "response.failed",
                     &json!({
@@ -953,7 +942,7 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_
                         "response": response,
                     }),
                 ));
-                terminal_frame_index = frames.len() - 1;
+                frames.len() - 1
             } else {
                 let terminal_response = project_v3_responses_client_completed_response(&response);
                 let terminal_event = match status {
@@ -968,8 +957,8 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_
                         "response": terminal_response,
                     }),
                 ));
-                terminal_frame_index = frames.len() - 1;
-            }
+                frames.len() - 1
+            };
             let mut committed =
                 crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
                     .map_err(|error| error.to_string())?;
@@ -1301,8 +1290,10 @@ mod tests {
     use super::*;
     use crate::provider_failure_runtime_policy::{
         resolve_v3_relay_target_outcome, V3RelayProviderTargetResolution,
+        V3RelayProviderTargetResolutionInput,
     };
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+    use routecodex_v3_error::build_v3_error_01_source_raised;
 
     fn operator_fault_manifest() -> V3Config05ManifestPublished {
         let source = r#"

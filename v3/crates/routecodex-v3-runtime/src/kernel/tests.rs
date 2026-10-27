@@ -288,8 +288,8 @@ fn direct_source_fault_preserves_http_witness_observability_and_snapshots() {
         Ok(None),
     )
     .expect_err("missing terminal Error06 is a typed SDK fault");
-    let diagnostic_source = fault.policy_failure.clone();
-    let diagnostic_cause = fault
+    let diagnostic_source = *fault.policy_failure.clone();
+    let diagnostic_cause = *fault
         .original_source
         .clone()
         .expect("the SDK fault keeps its original source");
@@ -356,7 +356,7 @@ fn protocol_plan_operator_fault_keeps_original_cause_without_running_error_proje
     let returned = project_v3_protocol_execution_plan_failure(failure)
         .expect_err("an operator fault must not become a successful Error06 projection");
     assert_eq!(returned, fault);
-    assert_eq!(returned.original_source, Some(original));
+    assert_eq!(returned.original_source.as_deref(), Some(&original));
 }
 
 #[test]
@@ -385,7 +385,7 @@ fn protocol_plan_failure_preserves_source_status_and_pool_exhausted() {
     .expect_err("process=chat with Direct-only policy must produce a real protocol-plan failure");
 
     let original_source = failure.source.clone();
-    let projected = project_v3_protocol_execution_plan_failure(failure)
+    let projected = project_v3_protocol_execution_plan_failure(*failure)
         .expect("a normal protocol-plan source must finish through Error02..06");
 
     assert_eq!(
@@ -402,7 +402,7 @@ fn protocol_plan_failure_preserves_source_status_and_pool_exhausted() {
     );
     assert_eq!(projected.diagnostic_source, original_source);
     assert_eq!(projected.status, 598);
-    assert_eq!(projected.pool_exhausted, false);
+    assert!(!projected.pool_exhausted);
     assert_eq!(
         projected.chain,
         routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
@@ -517,8 +517,8 @@ fn direct_provider_failure_blocks_after_configured_threshold() {
             .store()
             .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 200)
             .expect("direct health projection");
-        assert_eq!(
-            projection.available, false,
+        assert!(
+            !projection.available,
             "one typed recoverable 502 failure cools the exact identity"
         );
     }

@@ -6,12 +6,11 @@ pub use manual::V3_COOLDOWN_MANUAL_MAX_MS;
 
 use crate::global_cooldown::V3ProviderCooldownFailureClass;
 use crate::key_health::{
-    V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderSchedulingProjection,
-    V3ProviderSchedulingReader,
+    V3ProviderHealthProbePermit, V3ProviderInterfaceIdentity, V3ProviderKeyHealthProjection,
+    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
 };
 use crate::probe_backoff::{
-    adaptive_probe_interval_ms, long_probe_backoff_ms, probe_backoff_ms,
-    provider_failure_cooldown_ms, MAX_PROBE_INTERVAL_MS,
+    long_probe_backoff_ms, probe_backoff_ms, provider_failure_cooldown_ms, MAX_PROBE_INTERVAL_MS,
 };
 use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key_for_interface, resolve_provider_cooldown_probe_key_for_interface,
@@ -800,8 +799,7 @@ impl V3ProviderHealthStore {
     ) -> Result<V3ProviderFailureRecord, V3ProviderHealthError> {
         self.record_provider_transient_bypass_in_session_for_interface(
             failure_session_scope,
-            provider_id,
-            "default",
+            V3ProviderInterfaceIdentity::new(provider_id, "default"),
             auth_alias,
             model_id,
             reason,
@@ -812,13 +810,16 @@ impl V3ProviderHealthStore {
     pub fn record_provider_transient_bypass_in_session_for_interface(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
-        provider_id: &str,
-        interface_id: &str,
+        identity: V3ProviderInterfaceIdentity<'_>,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         reason: Option<&str>,
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, V3ProviderHealthError> {
+        let V3ProviderInterfaceIdentity {
+            provider_id,
+            interface_id,
+        } = identity;
         let provider_key = provider_key_label(provider_id, interface_id, auth_alias, model_id);
         let key = provider_failure_session_key_for_interface(
             failure_session_scope,
@@ -1042,8 +1043,7 @@ impl V3ProviderHealthStore {
         cooldown_ms: u64,
     ) -> Result<(), V3ProviderHealthError> {
         self.record_provider_cooldown_failure_for_interface(
-            provider_id,
-            "default",
+            V3ProviderInterfaceIdentity::new(provider_id, "default"),
             auth_alias,
             model_id,
             reason,
@@ -1054,14 +1054,17 @@ impl V3ProviderHealthStore {
 
     pub fn record_provider_cooldown_failure_for_interface(
         &self,
-        provider_id: &str,
-        interface_id: &str,
+        identity: V3ProviderInterfaceIdentity<'_>,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         reason: &str,
         now_ms: u64,
         cooldown_ms: u64,
     ) -> Result<(), V3ProviderHealthError> {
+        let V3ProviderInterfaceIdentity {
+            provider_id,
+            interface_id,
+        } = identity;
         let blocked_until_ms = now_ms.saturating_add(cooldown_ms.max(1));
         let mut state = self
             .state
@@ -1752,8 +1755,7 @@ impl V3ProviderHealthStore {
         _now_ms: u64,
     ) -> Result<V3ProviderSchedulingProjection, String> {
         self.scheduling_projection_for_key_with_interface(
-            provider_id,
-            "default",
+            V3ProviderInterfaceIdentity::new(provider_id, "default"),
             auth_alias,
             model_id,
             priority,
@@ -1764,14 +1766,17 @@ impl V3ProviderHealthStore {
 
     pub fn scheduling_projection_for_key_with_interface(
         &self,
-        provider_id: &str,
-        interface_id: &str,
+        identity: V3ProviderInterfaceIdentity<'_>,
         auth_alias: &str,
         model_id: &str,
         priority: i32,
         base_weight: u32,
         _now_ms: u64,
     ) -> Result<V3ProviderSchedulingProjection, String> {
+        let V3ProviderInterfaceIdentity {
+            provider_id,
+            interface_id,
+        } = identity;
         let key = provider_cooldown_probe_key_for_interface(
             provider_id,
             interface_id,

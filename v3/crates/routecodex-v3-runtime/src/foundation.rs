@@ -120,8 +120,8 @@ pub fn foundation_output_from_error_sdk_result(
             error_chain: Vec::new(),
             node_trace: fault_node_trace,
             stopped_before_provider_send: true,
-            diagnostic_source: Some(fault.policy_failure),
-            diagnostic_cause: fault.original_source,
+            diagnostic_source: Some(*fault.policy_failure),
+            diagnostic_cause: fault.original_source.map(|source| *source),
         },
     }
 }
@@ -521,7 +521,7 @@ mod tests {
             raw_request_retention: 1,
             raw_response_retention: 1,
             event_retention: 16,
-            redaction: V3RedactionPolicy::default(),
+            redaction: V3RedactionPolicy,
         })
         .unwrap();
         let output = execute_v3_foundation_pending_runtime(
@@ -582,13 +582,13 @@ mod tests {
         )
         .unwrap();
         let fault = V3RelayErrorOperatorFault {
-            policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+            policy_failure: Box::new(routecodex_v3_error::build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3Error06ClientProjected",
                 "relay_error_operator_sdk_failure",
                 "synthetic Error06 operator failure",
-            ),
-            original_source: Some(original_source.clone()),
+            )),
+            original_source: Some(Box::new(original_source.clone())),
         };
         let output = foundation_output_from_error_sdk_result(
             "V3Debug01NodeEventRegistered",
@@ -647,13 +647,13 @@ mod tests {
         )
         .expect("fault fixture source must be canonical");
         let fault = V3RelayErrorOperatorFault {
-            policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+            policy_failure: Box::new(routecodex_v3_error::build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3Error06ClientProjected",
                 "relay_error_operator_sdk_failure",
                 "synthetic HTTP boundary Error06 failure",
-            ),
-            original_source: Some(original_source.clone()),
+            )),
+            original_source: Some(Box::new(original_source.clone())),
         };
         let output = foundation_output_from_error_sdk_result(
             "V3Server03HttpRequestRaw",
@@ -789,7 +789,7 @@ mod tests {
             raw_request_retention: 1,
             raw_response_retention: 1,
             event_retention: 16,
-            redaction: V3RedactionPolicy::default(),
+            redaction: V3RedactionPolicy,
         })
         .unwrap();
         fs::remove_file(&log_file).unwrap();

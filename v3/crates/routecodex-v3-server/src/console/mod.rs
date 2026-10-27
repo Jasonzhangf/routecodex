@@ -88,7 +88,7 @@ pub(crate) fn truncate_display_width_middle(value: &str, width: usize) -> String
     }
     assert!(width >= 3, "v3 console truncation width must fit marker");
     let remaining_width = width - 3;
-    let prefix_width = (remaining_width + 1) / 2;
+    let prefix_width = remaining_width.div_ceil(2);
     let suffix_width = remaining_width / 2;
 
     let mut prefix = String::new();

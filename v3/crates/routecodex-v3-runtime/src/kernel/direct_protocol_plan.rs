@@ -3,16 +3,16 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     raw: V3Server03HttpRequestRaw,
     provider_health: impl Into<V3ProviderFailureRuntimeHealth>,
     now_epoch_ms: u64,
-) -> Result<V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure> {
+) -> Result<V3ResponsesProtocolExecutionPlan, Box<V3ResponsesProtocolExecutionPlanFailure>> {
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
     let standardized = match build_v3_req_04_standardized_responses_from_v3_server_03(raw) {
         Ok(standardized) => standardized,
         Err(error) => {
             trace.push("V3Req04StandardizedResponses");
-            return Err(protocol_plan_source_failure(
+            return Err(Box::new(protocol_plan_source_failure(
                 runtime_source("V3Req04StandardizedResponses", error),
                 trace,
-            ));
+            )));
         }
     };
     trace.push("V3Req04StandardizedResponses");
@@ -21,13 +21,13 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         .get("previous_response_id")
         .is_some_and(|value| !value.is_null())
     {
-        return Err(protocol_plan_source_failure(
+        return Err(Box::new(protocol_plan_source_failure(
             runtime_source(
                 "V3HubReqInbound02Normalized",
                 "protocol execution plan only handles non-continuation responses requests",
             ),
             trace,
-        ));
+        )));
     }
     let allowed_modes = match manifest
         .servers
@@ -36,7 +36,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     {
         Some(execution) => execution.allowed_modes.clone(),
         None => {
-            return Err(protocol_plan_source_failure(
+            return Err(Box::new(protocol_plan_source_failure(
                 runtime_source(
                     "V3Execution11ProtocolDecision",
                     format!(
@@ -45,7 +45,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
                     ),
                 ),
                 trace,
-            ))
+            )))
         }
     };
     let request_is_compaction = standardized.request_purpose.is_compaction()
@@ -80,16 +80,18 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         ) {
             Ok(value) => value,
             Err(crate::operation_runner::V3ResolveTargetOperatorError::Typed(source)) => {
-                return Err(protocol_plan_failure(source, trace))
+                return Err(Box::new(protocol_plan_failure(source, trace)))
             }
             Err(crate::operation_runner::V3ResolveTargetOperatorError::OperatorFault(fault)) => {
-                return Err(crate::kernel::protocol_plan_operator_fault(fault, trace))
+                return Err(Box::new(crate::kernel::protocol_plan_operator_fault(
+                    fault, trace,
+                )))
             }
             Err(crate::operation_runner::V3ResolveTargetOperatorError::Runner(error)) => {
-                return Err(protocol_plan_source_failure(
+                return Err(Box::new(protocol_plan_source_failure(
                     runtime_source("V3Router07OpaqueTargetHitOnce", error),
                     trace,
-                ))
+                )))
             }
         };
     trace.extend([
@@ -124,7 +126,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
                 exhaustion,
                 ..
             }) => {
-                return Err(protocol_plan_source_failure(
+                return Err(Box::new(protocol_plan_source_failure(
                     crate::shared::direct_plain_error(
                         V3ErrorSourceKind::TargetPoolExhausted,
                         "V3Target10ConcreteProviderSelected",
@@ -135,14 +137,18 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
                         ),
                     ),
                     trace,
-                ))
+                )))
             }
             Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Failed(source)) => {
-                return Err(protocol_plan_failure(source, trace))
+                return Err(Box::new(protocol_plan_failure(source, trace)))
             }
             Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::OperatorFault(
                 fault,
-            )) => return Err(crate::kernel::protocol_plan_operator_fault(fault, trace)),
+            )) => {
+                return Err(Box::new(crate::kernel::protocol_plan_operator_fault(
+                    fault, trace,
+                )))
+            }
         };
     trace.push("V3Target08KindClassified");
     trace.push("V3Target09CandidateSetExpanded");
@@ -155,7 +161,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         preplan.protocol_decision.mode,
     ) {
         Ok(keys) => keys,
-        Err(source) => return Err(protocol_plan_source_failure(source, trace)),
+        Err(source) => return Err(Box::new(protocol_plan_source_failure(source, trace))),
     };
     Ok(V3ResponsesProtocolExecutionPlan {
         decision: preplan.protocol_decision,
@@ -552,9 +558,7 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         .and_then(|captured| captured.clone())
         .map(|request| debug.project_verbatim(request))
         .unwrap_or_else(|| json!(null));
-    let dry_run_status = if response_replay {
-        output.client_payload.status
-    } else if provider_request.is_null() {
+    let dry_run_status = if response_replay || provider_request.is_null() {
         output.client_payload.status
     } else {
         200
