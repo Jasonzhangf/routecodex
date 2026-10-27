@@ -36,6 +36,10 @@ fn classify_provider_probe_failure(
         _ => None,
     };
     let status = http.as_ref().map(|(status, _)| *status);
+    let probe_provider_id = http
+        .as_ref()
+        .map(|(_, provider_id)| provider_id.clone())
+        .unwrap_or_else(|| "n/a".to_string());
     let source = if let Some((status, provider_id)) = http {
         let code = crate::hooks::source_code_for_external_provider_error(&error);
         let message = format!("{error:?}");
@@ -61,7 +65,12 @@ fn classify_provider_probe_failure(
     let projection = serde_json::to_value(&source).map_err(|error| error.to_string())?;
     let classified = classify_v3_provider_health_source_via_err02(projection, source)
         .map_err(|error| format!("provider probe Error02 failed: {error:?}"))?;
-    eprintln!("provider health probe error chain: {classified:?}");
+    eprintln!(
+        "provider health probe error: provider={} status={} class={}",
+        probe_provider_id,
+        status.map_or(0, |value| value),
+        classified.class,
+    );
     let action = apply_v3_internal_provider_failure_policy(
         build_v3_provider_failure_action_from_v3_error_02(&classified),
         "V3ProviderResp14Raw",
