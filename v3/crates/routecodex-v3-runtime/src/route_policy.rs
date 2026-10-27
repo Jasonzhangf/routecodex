@@ -473,4 +473,32 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             .expect("compact action");
         assert_eq!(action.route_pool, "compact");
     }
+
+    #[test]
+    fn ordinary_repeated_turns_never_override_route_pool() {
+        // Ordinary routing is bound to the current turn only: route policy keeps
+        // no cross-request history, so a run of identical non-compaction turns
+        // must never select or promote a route pool.
+        let state = V3RoutePolicyRuntimeState::default();
+        let manifest = manifest();
+        let scope = scope();
+        let observation = V3RouteTurnObservation::default();
+        for request in 0..5u64 {
+            let (classified, pending) = state
+                .evaluate_request(
+                    &manifest,
+                    classified(),
+                    scope.clone(),
+                    &format!("ordinary-{request}"),
+                    observation.clone(),
+                    request,
+                )
+                .expect("evaluate");
+            assert_eq!(
+                classified.route_policy_pool, None,
+                "current turn without a matching policy must not select a route pool"
+            );
+            pending.commit::<String>().expect("commit");
+        }
+    }
 }

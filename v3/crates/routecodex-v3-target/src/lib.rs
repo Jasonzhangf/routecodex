@@ -1,8 +1,8 @@
 use routecodex_v3_config::{
-    internal::is_v3_builtin_catalog_model, V3Config05ManifestPublished, V3ForwarderTargetManifest,
-    V3ProviderModelManifest, V3ProviderRequestCleanupAuthoringConfig, V3ReasoningEffort,
-    V3ResponsesTransportKind, V3RouteGroupManifest, V3RoutePoolManifest, V3RoutePoolTargetManifest,
-    V3RouteTargetKind, V3SelectionStrategy, V3WebSearchExecutionMode,
+    V3Config05ManifestPublished, V3ForwarderTargetManifest,
+    V3ProviderRequestCleanupAuthoringConfig, V3ReasoningEffort, V3ResponsesTransportKind,
+    V3RouteGroupManifest, V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
+    V3WebSearchExecutionMode,
 };
 use routecodex_v3_provider_responses::{V3ProviderAvailabilityReader, V3ProviderSchedulingReader};
 use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTargetHitOnce};
@@ -113,8 +113,6 @@ pub enum V3TargetError {
         provider_id: String,
         interface_id: String,
     },
-    #[error("requested model {model_id} has no candidate in the selected target plan")]
-    RequestedModelUnavailable { model_id: String },
     #[error("selected target has no concrete candidates")]
     CandidateSetEmpty,
 }
@@ -207,7 +205,6 @@ struct V3TargetExpansionScope {
     pool_ids: Vec<String>,
     default_pool_member: bool,
     required_capabilities: Vec<String>,
-    requested_model_filter: Option<String>,
     visible_model_ids: Vec<String>,
     interface_filter: Option<String>,
 }
@@ -232,8 +229,6 @@ impl V3TargetInterpreter {
         let mut last_error = None;
         let route_required_capabilities =
             selected_route_required_capabilities(group, &classified.route);
-        let requested_model_filter =
-            selected_route_requested_model_filter(manifest, group, &classified.route);
         for (plan_index, entry) in classified.route.target_plan.iter().enumerate() {
             // `provider.model` direct entries carry their own provider/model
             // pin and have no manifest pool to consult.
@@ -252,7 +247,6 @@ impl V3TargetInterpreter {
                         pool_ids: vec![entry.pool_id.clone()],
                         default_pool_member: false,
                         required_capabilities: Vec::new(),
-                        requested_model_filter: None,
                         visible_model_ids: Vec::new(),
                         interface_filter: entry.interface.clone(),
                     },
@@ -312,7 +306,6 @@ impl V3TargetInterpreter {
                     pool_ids: vec![entry.pool_id.clone()],
                     default_pool_member: entry.pool_id == "default",
                     required_capabilities,
-                    requested_model_filter: requested_model_filter.clone(),
                     visible_model_ids: Vec::new(),
                     interface_filter: entry.interface.clone(),
                 },
@@ -767,12 +760,9 @@ impl V3TargetInterpreter {
             .get(forwarder_id)
             .filter(|forwarder| forwarder.enabled)
             .ok_or_else(|| V3TargetError::ForwarderMissing(forwarder_id.to_string()))?;
-        // The forwarder model is the configured client-visible target identity. Validation
-        // still happens at the provider layer after the nested wire model is resolved.
-        // visible_model_ids must stay symmetric with `pool_targets_route_model`'s
-        // Forwarder branch (forwarder.model / aliases / targets[].model); otherwise a
-        // requested model matched by the route-model predicate is filtered out during
-        // expansion and the selected target falsely exhausts into a no-candidate 503.
+        // The forwarder model is the configured client-visible target identity.
+        // Validation still happens at the provider layer after the nested wire
+        // model is resolved.
         push_unique_visible_model_id(&mut scope.visible_model_ids, &forwarder.model);
         for alias in &forwarder.aliases {
             push_unique_visible_model_id(&mut scope.visible_model_ids, alias);
@@ -864,14 +854,6 @@ impl V3TargetInterpreter {
         } else {
             scope.visible_model_ids.clone()
         };
-        if !requested_model_matches_visible_ids(
-            scope.requested_model_filter.as_deref(),
-            &visible_model_ids,
-        ) {
-            return Err(requested_model_unavailable_error(
-                scope.requested_model_filter.as_deref(),
-            ));
-        }
         scope.path.push(format!("provider:{provider_id}"));
         let entries = if let Some(key) = key {
             vec![provider
@@ -1047,87 +1029,18 @@ fn selected_route_required_capabilities(
     capabilities.into_iter().collect()
 }
 
-fn selected_route_requested_model_filter(
-    manifest: &V3Config05ManifestPublished,
-    group: &V3RouteGroupManifest,
-    route: &V3Router07OpaqueTargetHitOnce,
-) -> Option<String> {
-    let requested = route
-        .request_client_model
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    // Only configured built-in Codex catalog models may use the legacy
-    // requested-model exemption. Unknown gpt-* names must still be rejected.
-    if is_v3_builtin_catalog_model(requested) {
-        return None;
-    }
-    let pool = group.pools.get(&route.pool_id);
-    let pool_is_explicit_model_pool = route.pool_id != "default"
-        && pool
-            .and_then(|pool| pool.match_rule.as_ref())
-            .is_some_and(|rule| rule.models.iter().any(|model| model.trim() == requested));
-    if pool_is_explicit_model_pool {
-        return None;
-    }
-    if pool.is_some_and(|pool| pool_targets_route_model(manifest, pool, requested)) {
-        Some(requested.to_string())
-    } else {
-        None
-    }
-}
-
-fn pool_targets_route_model(
-    manifest: &V3Config05ManifestPublished,
-    pool: &V3RoutePoolManifest,
-    requested: &str,
-) -> bool {
-    pool.targets.iter().any(|target| match target.kind {
-        V3RouteTargetKind::ProviderModel => {
-            target
-                .model
-                .as_deref()
-                .is_some_and(|model| model.trim() == requested)
-                || target.provider.as_deref().is_some_and(|provider_id| {
-                    manifest.providers.get(provider_id).is_some_and(|provider| {
-                        provider
-                            .models
-                            .values()
-                            .any(|model| model_visible_name_matches(model, requested))
-                    })
-                })
-        }
-        V3RouteTargetKind::Forwarder => target
-            .id
-            .as_deref()
-            .and_then(|id| manifest.forwarders.get(id))
-            .is_some_and(|forwarder| {
-                forwarder.model.trim() == requested
-                    || forwarder
-                        .aliases
-                        .iter()
-                        .any(|alias| alias.trim() == requested)
-                    || forwarder.targets.iter().any(|target| {
-                        target
-                            .model
-                            .as_deref()
-                            .is_some_and(|model| model.trim() == requested)
-                    })
-            }),
-    })
-}
-
-fn model_visible_name_matches(model: &V3ProviderModelManifest, requested: &str) -> bool {
-    model.id == requested || model.aliases.iter().any(|alias| alias == requested)
-}
-
 fn normalized_model_visible_ids(
     model_id: &str,
-    _aliases: &[String],
+    aliases: &[String],
     wire_name: Option<&str>,
 ) -> Vec<String> {
     let mut ids = Vec::new();
     push_unique_visible_model_id(&mut ids, model_id);
+    // Aliases are client-visible names of the same provider model. Record
+    // them, but never let them filter the selected route pool.
+    for alias in aliases {
+        push_unique_visible_model_id(&mut ids, alias);
+    }
     // wire_name is the upstream wire model identity: a client requesting the
     // wire name must be able to match this provider's model even when its
     // local model id differs (e.g. distinct web_search execution mode
@@ -1144,31 +1057,6 @@ fn push_unique_visible_model_id(ids: &mut Vec<String>, value: &str) {
         return;
     }
     ids.push(value.to_string());
-}
-
-fn requested_model_matches_visible_ids(
-    requested_model: Option<&str>,
-    visible_model_ids: &[String],
-) -> bool {
-    let Some(requested_model) = requested_model
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return true;
-    };
-    visible_model_ids
-        .iter()
-        .any(|visible_id| visible_id.trim() == requested_model)
-}
-
-fn requested_model_unavailable_error(requested_model: Option<&str>) -> V3TargetError {
-    V3TargetError::RequestedModelUnavailable {
-        model_id: requested_model
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("<unknown>")
-            .to_string(),
-    }
 }
 
 fn merge_candidate_route_provenance(

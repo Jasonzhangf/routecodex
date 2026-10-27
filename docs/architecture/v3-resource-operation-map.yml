@@ -422,7 +422,10 @@ resources:
     identity: [serverId, entryProtocol, clientModel, capabilities, inputTokens]
     semantic_contract:
       target_hard_capabilities: [multimodal, vision, search, web_search]
-      route_signals: [text, tools, tool_outputs, reasoning, thinking, coding, longcontext, local_materialization]
+      route_signal_scope: current_turn_only
+      route_signals: [text, tools, tool_outputs, reasoning, thinking, coding, local_materialization]
+      historical_signal_scope: forbidden
+      longcontext_candidate: retained_current_turn_but_unconfigured
       previous_response_id_rule: non-null previous_response_id is rejected before routing and is never a model capability
       rule: route_signals may select a route/pool but must not become Target capability_mismatch; only target_hard_capabilities can reject a candidate for semantic loss
     allowed_writers: [build_v3_router_request_facts_from_v3_req_04]
@@ -436,8 +439,17 @@ resources:
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-virtual-router
     owner_node: V3Router06RoutePoolResolved
-    identity: [serverId, routeGroupId, matchedPoolId, defaultPoolId, orderedOpaqueTargets]
+    identity: [serverId, routeGroupId, matchedPoolId, orderedOpaqueTargets]
     semantic_contract:
+      classification_scope: current_turn_only
+      pool_selection: fixed_order_first_configured_non_empty_match
+      classification_order: [web_search, multimodal, longcontext, coding, thinking, search, tools, default]
+      longcontext_candidate: retained_current_turn_optional_pool
+      single_pool_plan: true
+      optional_pools: absent_or_empty_skipped
+      default_pool: required_non_empty
+      cross_pool_default_append: forbidden
+      implicit_capability_pool: forbidden
       priority_order: lower numeric priority tiers precede every higher numeric tier
       weighted_scope: SWRR applies only within one equal-priority tier
       state_scope: [serverId, routeGroupId, poolId, priority]
@@ -1806,6 +1818,11 @@ resources:
     owner_node: V3HubReqExecution05Planned
     identity: [requestId, entryProtocol, currentTurnId]
     payload_contract: explicit_typed_facts_only
+    semantic_contract:
+      current_turn_boundary: structural_user_and_tool_segment
+      historical_images: ignored_for_classification
+      historical_tools: ignored_for_classification
+      business_history: preserved_without_classification_cleanup
     allowed_writers: [build_v3_current_turn_route_facts]
     allowed_readers: [classify_route, V3HubReqTarget06Resolved]
     forbidden_writers: [V3HubReqInbound02Normalized, V3HubReqChatProcess04Governed, routecodex-v3-sse, routecodex-v3-server, routecodex-v3-provider-responses]
@@ -2316,6 +2333,7 @@ resources:
       route_pool_only: true
       provider_model_fields: forbidden
       vr_reentry: forbidden
+      historical_classification_override: forbidden
     allowed_writers: [evaluate_v3_route_policies, V3RoutePolicyRuntimeState::evaluate_request]
     allowed_readers: [V3RoutePolicyRuntimeState::evaluate_request, V3VirtualRouter::resolve_route_pool_plan]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload, protocol.metadata]
