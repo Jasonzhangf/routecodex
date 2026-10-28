@@ -233,6 +233,7 @@ features:
   required_positive:
   - Ordered outer tiers compile to deterministic descending internal priority values (`N..1`), because current V3 Target selects the maximum numeric priority.
   - Omitted weights in one multi-member tier compile to equal weights.
+  - A pool may declare `selection = { strategy = "sticky" }`; it parses, projects into the Manifest pool selection, and round-trips while the default priority selection stays omitted from serialized output.
   - Different TOML table ordering and explicit equal weights produce the same normalized authoring and Manifest output.
   - The projected authoring enters the existing Config03, Config04, and Config05 functions without a second compiler.
   - Exact basename config.toml selects V3UserConfigStore once in the Config owner and server status consumes its loaded snapshot.
@@ -1511,27 +1512,43 @@ features:
   - Target expands nested forwarders and performs all internal availability reselection
   - Router cannot import Provider availability and Target cannot mutate Provider health
   - P5 Runtime stops before Provider send and only full selected-target exhaustion enters Error01-Error06
-  - Request image/media facts survive trailing tool/function outputs and are carried to Target as multimodal/vision requirements
-  - The default tier may omit media requirements only as the last tier after multimodal tiers are absent or exhausted; ProviderReqCompat then projects images to deterministic session placeholders for a selected text-only target
-  - Router preserves default opaque entries with their distinct capability contract; Target deduplicates only equally eligible candidates and selects an available captured vision candidate before text-only default projection
+  - Current-turn image/media facts survive trailing tool/function outputs of the same
+    turn and are carried to Target as multimodal/vision requirements; earlier-turn
+    images never classify the current request
+  - The selected pool's candidates are expanded and reselected inside that single pool;
+    no default-tier media projection and no cross-pool default floor is appended after a
+    matched multimodal pool
   - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools and tool_search calls become routing facts, while web_search requires strict current-turn keyword intent or an explicit model call and never activates from a declaration alone
-  - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding/longcontext
+  - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding
       never hard-reject a candidate
-  - After genuine web_search/search and multimodal/vision capability validation, Target10 preserves configured candidate order among candidates within their declared context window; an omitted max_context_tokens compiles to the documented 200000-token default. The scaled context estimate is advisory ordering evidence only: a candidate at or above its declared window, including explicit direct pins and the default-pool floor, stays selectable and is never marked context_window_exceeded or skipped before availability/transport; provider health and request-local provider-failure exclusion remain the explicit switch inputs and the real provider owns the context verdict
+  - After genuine web_search/search and multimodal/vision capability validation, Target10 preserves configured candidate order among candidates within their declared context window; an omitted max_context_tokens compiles to the documented 200000-token default. The scaled context estimate is advisory ordering evidence only: a candidate at or above its declared window, including explicit direct pins, stays selectable and is never marked context_window_exceeded or skipped before availability/transport; provider health and request-local provider-failure exclusion remain the explicit switch inputs and the real provider owns the context verdict
   - A candidate at 90 percent through 100 percent of its context window remains eligible, is demoted only below normal candidates in the same route tier, and still outranks every lower route tier
   - Request/provider compatibility failures are candidate-scoped across providerId+interfaceId+authAlias+modelId and remain health-neutral, so sibling interfaces/models in the same provider remain selectable; transport and provider-health failures are interface-scoped across all auth keys/models for the failed provider+interface, while persistent cooldown remains provider-interface-key-model scoped
   - A cooldown or request-local failure on one interface never excludes a sibling interface of the same provider; the fallback request remains able to select the sibling interface with its own endpoint and transport contract
   - A non-null previous_response_id is rejected before routing; it never selects an exact-pin target, local restore, or Target model capability
   - OpenAI Responses request.reasoning is aliased to the thinking route fact before pool matching
-  - Target dedupe retains optional/default provenance; the default floor is only a last-resort context-admission fallback and never overrides health cooldown or request-local provider-failure exclusion
-  - Within a captured route plan, route-tier order is applied before candidate priority; candidate priority/weight/health select only among candidates in the same eligible route tier, so the default floor cannot overtake a matched semantic tier by numeric priority alone
+  - Target dedupe retains provenance inside the single captured pool; no classified request
+    ever appends default or another pool after its matched pool, and in-pool tier order is
+    applied before candidate priority so no lower-tier or default candidate can overtake
+    the matched pool's remaining candidates
+  - Ordinary classification evaluates configured non-empty pools in fixed order
+    (hosted web_search, multimodal, longcontext, coding, thinking, search, tools, default), skips
+    absent/empty optional pools, never builds implicit capability pools, and keeps
+    default as the required non-empty no-match endpoint. A retained longcontext
+    candidate is skipped when its pool is absent or empty.
+  - A matched pool that temporarily loses all candidates waits or probes through the
+    declared recovery path inside that same pool; only genuine declared exhaustion ends
+    the request transport without client error payload or fabricated success, and a
+    different classification pool is never consulted
   - Server-scoped provider schedules default to Asia/Shanghai, accept a configured IANA timezone and cross-midnight daily windows, and use one-based tiers where one is highest priority
   - Schedule adjustments apply only within the selected route pool and never bypass provider health/cooldown or enter request, provider, client, metadata, or debug control payloads
   - A provider model may declare a timezone-aligned availability window with guarded edges; outside it the candidate is excluded from Target10 selection as a hard admission input with an availability_inactive diagnostic, never as a fallback tier, and the exclusion never mutates provider health
   - One shared admission basis decides selection, the direct send gate, remaining-candidate accounting and recovery probes, so a candidate that Target10 admitted is never refused at send and a window-inactive sibling never counts as an alternative or inflates the single-candidate automatic-cooldown exemption
   - A recovery or periodic probe is never sent outside the target model's declared availability window, and a pool whose every candidate is outside its window reaches exhaustion without waiting for the window
+  - A pool may declare selection strategy sticky: Target10 then keeps one primary and one standby provider per server+routingGroup+sessionId+pool binding, keyed by providerId+authAlias+modelId. The same session keeps its primary across attempts, uses the standby only when the primary is unusable, and rolls primary/standby only on a health or cooldown exclusion, never on a request-local provider failure; recovery is lazy and never pulls the session back. A fresh session takes the least-held primary in that pool so different sessions spread instead of stacking on the heaviest member, and a single-member pool keeps an empty standby. Sticky state is process-lifetime in-memory per pool with no cross-pool association, and a request without a client control session id creates no binding and keeps the previous selection behavior. Sticky only orders candidates the unchanged health/cooldown/availability/priority rules already admitted, inside the same eligible route tier.
   required_gates:
   - npm run test:v3-p5-router-target
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target sticky -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target multi_interface_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test provider_multi_interface_controlled -- --nocapture
@@ -1564,7 +1581,8 @@ features:
   status: source_bound_cli_replay_verified
   change_risk: high
   owner_kind: rust_project_v3
-  owner_scope: Full V3 request-fact pool matching, immutable optional-plus-default plan, one-shot opaque handoff, and Target-local plan exhaustion
+  owner_scope: Full V3 request-fact pool matching with one fixed-order classified pool,
+    one-shot opaque handoff, and Target-local plan exhaustion
   owner_modules:
   - v3/crates/routecodex-v3-virtual-router
   - v3/crates/routecodex-v3-target
@@ -1587,16 +1605,26 @@ features:
   - priority, priority-tiered smooth-weighted-round-robin (SWRR), and listener/group/pool isolated round-robin ordering; weighted state is isolated by listener/group/pool/priority, selection state persists
     across requests via the process-shared router, and peek ordering never advances it
   - high-weight higher-priority-number targets cannot win while any lower-priority-number target remains session-available; when the full lower tier is unavailable only that session advances
-  - optional/default semantic target deduplication without second Router hit
-  - Target internal Forwarder expansion and availability reselection across the captured plan
-  - non-built-in requested model ids use explicit `match.models` pools as inbound-to-target mapping declarations; default/no-explicit-model paths filter Target candidates by configured target model ids,
-    ignore provider aliases for runtime matching, and fail explicitly when no configured candidate matches
+  - single-pool target deduplication without second Router hit
+  - Target internal Forwarder expansion and availability reselection across the captured
+    single-pool plan
+  - non-built-in requested model ids never select or filter an ordinary pool through
+    `match.models`; only a valid `provider.model` string creates a direct target pin,
+    and every other model string uses current-turn classification without Target
+    requested-model alias matching
   - '`provider.model` direct routing follows V2 semantics: the client model splits on its first dot into an existing enabled provider id (unknown provider falls back to normal classification), aliases resolve
     to the canonical model id (an enabled provider that declares no such model also falls back to normal classification), unmet vision/multimodal requirements fail fast, health cooldowns are reported but never veto the pin while request-local
     exclusions still block, and /v1/models exposes every enabled provider model as a provider.model direct id'
   required_contract:
-  - default pool is explicit, non-empty, and captured during the original route decision
-  - virtual-router dry-run projects reasoning, defaultFloorProtected, routeResult, and an alias-only target object, and never advances round-robin/SWRR selection state
+  - Ordinary classification selects the first configured non-empty pool in the fixed
+    order hosted web_search, multimodal, longcontext, coding, thinking, search, tools, default; the
+    default pool is explicit, non-empty, and is the no-match endpoint rather than an
+    appended fallback after another matched pool
+  - Optional classification pools may be absent or empty and are skipped; no implicit
+    capability pool is built from provider declarations; no longcontext pool is
+    configured for ordinary requests, so a retained longcontext candidate is skipped
+  - virtual-router dry-run projects reasoning, routeResult, and an alias-only target
+    object, and never advances round-robin/SWRR selection state
   - Virtual Router cannot read Provider health/error or expand Forwarders/providers/keys/models
   - Target cannot re-enter Virtual Router after the opaque handoff
   - selection plan is non-Clone and cannot be consumed twice
@@ -1605,8 +1633,14 @@ features:
   - routing facts carry no continuation owner; a non-null previous_response_id fails before ordinary priority/weight allocation
   required_integration:
   - Runtime request facts select a non-default pool
-  - optional Provider failure continues through the captured default floor with one Router hit
-  - total plan exhaustion enters the global Error chain
+  - A controlled upstream on the classified pool fails to a second same-pool candidate
+    and succeeds; no lower-priority pool and no default pool records an upstream attempt
+  - Cooldown and recovery stay in the same classified pool; total same-pool exhaustion
+    enters the global Error chain and terminates the request transport without client
+    error payload or fabricated success
+  - A public-entry request with an earlier-turn image and current text-only user content
+    is classified without multimodal and without historical-image cleanup; the same
+    current-turn image on the same public entry still selects the multimodal pool
   - multi-listener CLI replay proves cursor and routing-group isolation
   required_gates:
   - npm run verify:v3-architecture-docs
@@ -1940,14 +1974,27 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   required_unit:
   - current-turn typed facts classify deterministically.
-  - normalized historical image placeholders cannot create multimodal route facts; the latest retained image carrier survives text-only reminders.
+  - Current-turn images classify multimodal; an image from an earlier user turn followed
+    by a later text-only user turn does not classify multimodal, and historical
+    images preserved as business history never create multimodal facts.
   - business text and tool arguments cannot create routing/control state.
   required_reverse:
-  - changing only earlier image carriers leaves route classification unchanged after history normalization.
+  - changing only earlier image carriers leaves current-turn route classification unchanged,
+    without destructive historical-image cleanup as the classification mechanism.
   - changing only request prose leaves route/control facts unchanged.
+  required_positive:
+  - Current-turn tool results and current-turn images continue to provide the same-turn
+    classification signals on Responses, OpenAI Chat, and Gemini normalized entries; earlier
+    tool turns provide none.
+  - hosted web_search and multimodal both present on the same current turn select
+    hosted web_search first; coding precedes thinking; search precedes tools; the fixed
+    order holds across configured optional-pool combinations.
+  - A valid explicit `provider.model` reaches the pinned target while current-turn image,
+    web-search, and historical-policy signals are present.
   required_gates:
   - npm run test:route-classifier-semantics
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server single_pool_public_blackbox
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
@@ -3280,12 +3327,17 @@ features:
   completion_rule:
     source: protocol_tables unit tests and architecture CI pass; tables fail-fast on schema violation and never enter provider/client payload.
 - feature_id: v3.history_image_cleanup
-  status: active_latest_image_preservation
+  status: retired_for_ordinary_classification
   change_risk: medium
-  owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: history_image_cleanup owns the stateless latest-carrier image normalization rule. Relay invokes it from Chat Process Req04 in relay_request.rs; Inbound remains lossless and does not rewrite payload. Direct reaches it only through its existing registered request standardization/hook path. ProviderReqCompat06 preserves representable latest images and paired tool receipts independently of target capability metadata.
+  owner_kind: retired_v3_runtime_chat_process_gate
+  owner_scope: Ordinary request classification no longer depends on destructive
+    historical-image rewriting. The earlier latest-carrier placeholder rule must
+    not be used to keep historical images out of current-turn classification or
+    to drop business history. If a target protocol cannot represent an image, the
+    projection stays at the adjacent ProviderReqCompat owner and keeps complete
+    opaque data. Current-turn image detection is owned by the route-classifier
+    current-turn fact builder.
   owner_modules:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   required_gates:
@@ -3296,7 +3348,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib transient_stage_code_classifier
   completion_rule:
-    source: Runtime tests and public HTTP image_input_blackbox cases pass for Chat, Responses and Anthropic; latest images and tool identity survive even when multimodal metadata is absent or its route is cooled, and older images are placeholders. Live 7777 blind-image tool write/read/follow-up cases match hidden visual ground truth, while the no-image control returns NO_IMAGE.
+    source: Runtime tests and public HTTP image_input_blackbox cases pass for Chat, Responses and Anthropic; complete original history images and paired tool receipts survive standardization and reach the selected provider without placeholder rewriting, while current-turn image detection stays independent in the typed route facts. ProviderReqCompat preserves representable images and paired tool receipts independently of target capability metadata.
 - feature_id: v3.direct_runtime_kernel_core
   status: active_skeleton
   change_risk: critical
@@ -3309,6 +3361,10 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib target_recovery_does_not_reselect_ineligible_candidate
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server issue44cc3af_inactive_window_does_not_spin_or_block_http
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server issue44cc3af_first_byte_stall_keeps_sibling_requests_independent
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-cli --test managed_lifecycle inactive_recovery_requests_do_not_block_sigint_exit
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_direct_transport_header_timeout_keeps_120_second_budget
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_transport_header_timeout_keeps_120_second_budget
   - npm run verify:v3-architecture-ci
@@ -3565,14 +3621,18 @@ features:
   required_positive:
   - Current turn is included in the bounded history window.
   - New user input resets prior task tool statistics.
-  - Search pool ratio reaches the 8/10 boundary.
-  - One turn with multiple tool errors counts once.
+  - Search-pool ratio observations remain typed history evidence only and no longer
+    switch an ordinary request out of its fixed-order matched pool.
+  - Tool-error turn observations remain typed history evidence only and no longer switch
+    an ordinary request out of its fixed-order matched pool.
   - Runtime commits a completed request once and discards an incomplete request without polluting history.
   - Provider failure-shaped response content is excluded from tool execution error facts.
   - Compact action selects independent compact route pool.
   required_negative:
   - Provider failure does not enter tool execution error facts.
   - Route policy action cannot carry provider/model fields.
+  - A history-derived route-policy action cannot override the current-turn fixed-order
+    matched pool; only the registered compact route object may be selected by policy.
   - Same-precedence policy ambiguity fails explicitly.
   - Control facts do not enter normal payload or protocol metadata.
   required_gates:
@@ -4102,7 +4162,7 @@ features:
   - candidate behavior is13of20 scoped; remaining7 are inverse projection and all6globalError nodes. Whole-graph execution, Native Direct payload migration, independent review, and main merge are not inferred
   - every inbound direction_bindings source names a path in that protocol's raw source inventory; outbound Chat sources are not constrained to wire inventory paths
   - Responses request.input[].type is read per input array item, and the selected request branch remains paired with that same request's typed inverse provenance for the response projection
-  - the target request design assigns historical image placeholders to Chat Process request governance after lossless normalization, retaining current-turn images and stable historical placeholders for tool-only replay
+  - the target request design keeps complete historical image bytes and paired tool receipts intact through Chat Process request governance after lossless normalization; current-turn image routing remains typed current-turn facts and no placeholder rule drops business history
   - this SDK migration leaves Anthropic/Gemini Direct behavior with its existing owners
   negative_assertions:
   - a protocol profile cannot authorize a field path absent from the source inventory

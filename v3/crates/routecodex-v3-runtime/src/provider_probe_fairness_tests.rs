@@ -150,6 +150,18 @@ async fn business(
     model: String,
     marker: &str,
 ) -> crate::kernel::V3ResponsesDirectRuntimeOutput {
+    // Failure probes need a specific primary and a fallback in one pool.
+    // Ordinary model aliases no longer select pools, so make that pool the
+    // default for this individual fixture request instead.
+    let manifest = if let Some(id) = model.strip_suffix("-failure") {
+        let mut request_manifest = (*manifest).clone();
+        let group = request_manifest.route_groups.get_mut("fairness").unwrap();
+        let targets = group.pools[id].targets.clone();
+        group.pools.get_mut("default").unwrap().targets = targets;
+        Arc::new(request_manifest)
+    } else {
+        manifest
+    };
     let request_id = format!("{model}-{marker}");
     let scope = V3ProviderFailureSessionScope::new("chat", "fairness", &request_id)
         .unwrap()

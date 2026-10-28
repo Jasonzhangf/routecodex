@@ -639,6 +639,21 @@ fn compile_providers(
                 "provider {id} sse_first_frame_timeout_ms must not exceed request_timeout_ms"
             )));
         }
+        // Only the pre-first-byte budget is capped. `request_timeout_ms` owns the
+        // whole request lifetime, so a long streaming response may legitimately
+        // exceed it; capping that value would cut healthy streams.
+        if !provider.local {
+            if let Some(sse_first_frame_timeout_ms) = provider.sse_first_frame_timeout_ms {
+                if sse_first_frame_timeout_ms > V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS {
+                    return Err(validation(format!(
+                        "provider {id} sse_first_frame_timeout_ms {sse_first_frame_timeout_ms} \
+                         exceeds the {}ms remote first-byte budget; declare local = true only when \
+                         the provider runs on this machine.",
+                        V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS
+                    )));
+                }
+            }
+        }
         let auth = compile_auth(&id, provider.auth)?;
         let mut models = compile_models(&id, provider.models)?;
         let interfaces = compile_provider_interfaces(
@@ -708,6 +723,7 @@ fn compile_providers(
                 compatibility_profile,
                 headers: provider.headers,
                 features: provider.features,
+                local: provider.local,
                 request_timeout_ms: provider.request_timeout_ms,
                 sse_first_frame_timeout_ms: Some(
                     provider
@@ -1148,11 +1164,6 @@ fn compile_route_groups(
                 .into_iter()
                 .map(|(pool_id, pool)| {
                     require_id("route pool", &pool_id)?;
-                    if pool.targets.is_empty() {
-                        return Err(validation(format!(
-                            "route group {group_id} pool {pool_id} is empty"
-                        )));
-                    }
                     let mut targets = Vec::new();
                     let match_rule = match (pool_id.as_str(), pool.match_rule) {
                         ("default", Some(_)) => {
@@ -1287,38 +1298,6 @@ fn compile_route_policies(
                         )));
                     }
                     V3RouteConditionManifest::CurrentCompaction
-                }
-                V3RouteConditionAuthoringConfig::SearchPoolTurnRatioAtLeast {
-                    window_turns,
-                    numerator,
-                    denominator,
-                } => {
-                    if *window_turns == 0 || *denominator == 0 || numerator > denominator {
-                        return Err(validation(format!(
-                            "route group {group_id} route policy {} has invalid search ratio",
-                            policy.id
-                        )));
-                    }
-                    V3RouteConditionManifest::SearchPoolTurnRatioAtLeast {
-                        window_turns: *window_turns,
-                        numerator: *numerator,
-                        denominator: *denominator,
-                    }
-                }
-                V3RouteConditionAuthoringConfig::ToolExecutionErrorTurnsAtLeast {
-                    window_turns,
-                    count,
-                } => {
-                    if *window_turns == 0 || *count > *window_turns {
-                        return Err(validation(format!(
-                            "route group {group_id} route policy {} has invalid tool error window",
-                            policy.id
-                        )));
-                    }
-                    V3RouteConditionManifest::ToolExecutionErrorTurnsAtLeast {
-                        window_turns: *window_turns,
-                        count: *count,
-                    }
                 }
             };
             Ok(V3RoutePolicyManifest {

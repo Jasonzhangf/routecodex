@@ -1062,6 +1062,7 @@ features:
   - routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-target/src/lib.rs
+  - v3/crates/routecodex-v3-target/src/sticky.rs
   - v3/crates/routecodex-v3-config/src/types.rs
   - v3/crates/routecodex-v3-config/src/provider_priority_schedule.rs
   - v3/crates/routecodex-v3-config/src/user_config.rs
@@ -1106,6 +1107,9 @@ features:
   - V3TargetInterpreter::classify_kind
   - V3TargetInterpreter::expand_candidates
   - V3TargetInterpreter::select_available
+  - select_available_with_health_sticky
+  - V3StickySelectionState::select
+  - V3StickySelectionScope::new
   - V3TargetInterpreter::route_tier_index
   - V3TargetInterpreter::provider_priority_schedule_priority
   - V3ProviderPriorityScheduleAuthoringConfig::validate
@@ -1169,13 +1173,21 @@ features:
   - npm run build:v3-cli
   - git diff --check
   required_contract:
-  - Request image/media facts are normal request data and must enter V3RouterRequestFacts
-    as multimodal/vision before pool matching.
+  - Request image/media facts from the current turn are normal request data and must enter
+    V3RouterRequestFacts as multimodal/vision before pool matching; earlier-turn images
+    never classify the current request.
   - Request tool facts include top-level tools and Responses additional_tools; Codex
     coding tools set coding and tool_search sets search from current-turn calls.
     web_search route activation requires strict current-user keyword intent or an
     explicit current-turn model web-search call; exposed tool declarations alone
     never set the web_search route or capability.
+  - Ordinary route classification consumes only the current turn and evaluates configured
+    non-empty pools in the fixed order hosted web_search, multimodal, longcontext, coding, thinking,
+    search, tools, default. The first matching pool is the only captured pool; no implicit
+    capability pool is built and no default or other pool is appended after it.
+  - Absent or empty optional pools are skipped without rejecting the request; the default
+    pool remains required and non-empty. The longcontext capability is retained and
+    its pool is skipped when absent or empty.
   - V3Router07OpaqueTargetHitOnce carries request route facts to Target as route/pool
     selection signals; route selection is not model capability filtering.
   - 'Target hard capability_mismatch is allowed only for capabilities the selected
@@ -1186,20 +1198,20 @@ features:
     and a candidate whose max_context_tokens is below request_input_tokens is marked
     context_window_exceeded and skipped before availability/transport. A candidate at 90
     percent through 100 percent remains eligible, is demoted only below normal candidates
-    in the same route tier, and still outranks every lower route tier. Explicit direct pins
-    and the default-pool floor remain last-resort eligible with the typed overflow reason,
-    while Provider availability/health and request-local provider-failure exclusion remain
-    explicit switch inputs.
-  - Tools, tool_outputs, reasoning/thinking, coding, longcontext, and
+    in the same route tier, and still outranks every lower route tier inside the captured
+    pool. Explicit direct pins remain eligible only inside their resolved direct plan;
+    Provider availability/health and request-local provider-failure exclusion remain
+    explicit switch inputs and no default-pool floor is appended after a matched pool.
+  - Tools, tool_outputs, reasoning/thinking, coding, and
     local_materialization are route/protocol signals; they may steer pool choice but
     must not mark a candidate as capability_mismatch.
   - previous_response_id is rejected before routing and is never treated as a model
     capability or provider-selection signal.
   - OpenAI Responses request.reasoning is also exposed as the thinking route fact
     so configs using either vocabulary route the same request.
-  - Target candidate dedupe preserves pool provenance, required capabilities, and
-    default-pool membership; the default floor is only a last-resort context-admission
-    fallback and never overrides health cooldown or request-local failure exclusion.
+  - Target candidate dedupe preserves pool provenance and required capabilities inside
+    the single captured pool; no default floor is appended after a matched pool and no
+    recovery or health change crosses into another classification pool.
   - Target09-to-Target10 selection first reads the session-scoped availability projection
     and request-local Error03 candidate exclusions; global availability may revive
     a multi-candidate plan only after no nonfailed session alternative remains.
@@ -1211,11 +1223,10 @@ features:
   - A Server-preplanned Target10 is revalidated from its captured Target09 candidate
     set at Direct kernel entry, so a provider cooled between planning and transport
     cannot bypass a currently available same-session alternative.
-  - For non-built-in requested model ids, explicit `match.models` pools declare inbound-model
-    to target mapping and the provider-wire hook rewrites outbound `body.model` to
-    the selected target wire model; only default/no-explicit-model paths are filtered
-    by configured target model ids to prevent wrong-model default success, and provider
-    aliases do not authorize runtime matching.
+  - Non-built-in requested model ids never select or filter an ordinary pool through
+    `match.models`; only a valid `provider.model` string creates a direct target plan.
+    Provider aliases and `match.models` remain configuration declarations, not runtime
+    routing truth for ordinary classification.
   runtime_status: owner_queryability_bound_to_existing_p5_source
 - feature_id: v3.models_capability_catalog
   owner_crates:
@@ -2233,16 +2244,25 @@ features:
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
   required_contract:
-  - Non-built-in requested model ids are carried on V3Router07OpaqueTargetHitOnce;
-    explicit model routes map inbound model to declared targets, while default/no-explicit-model
-    paths are filtered by configured target model ids before provider send. Provider
-    aliases are not runtime routing truth.
+  - A valid explicit `provider.model` string is carried as a direct target pin and is
+    the only model-driven target handoff; every other model string, virtual catalog
+    entry, and `auto` value uses current-turn classification and is not filtered or
+    selected by `match.models`. Provider aliases are not runtime routing truth.
+  - Ordinary classification resolves one fixed-order first match among configured
+    non-empty pools and captures exactly that pool; it never builds implicit capability
+    pools and never appends default or another pool after the match.
+  - Optional pools may be absent or empty and are skipped; the default pool is required,
+    non-empty, and remains the only no-match endpoint for ordinary requests.
+  - The longcontext capability is retained; an absent or empty longcontext pool is
+    skipped and cannot preempt a configured lower-order pool.
   - '`provider.model` direct routing pins a provider only when the segment before the
     first `.` is an enabled provider id that declares that model or one of its aliases.
     Every other client model string — no dot, an unknown provider segment, or an enabled
     provider that declares no such model — falls back to normal classification, the same
     path `auto` and virtual catalog entry names take. Only a resolved direct model that
     cannot serve the request media requirement fails explicitly without rerouting.'
+  - Explicit `provider.model` is a direct target handoff, not a classification; it cannot
+    be reshaped by historical policy, sticky state, or the current-turn classification order.
   - The stable gpt-5.5 Codex client surface remains a capability/priority-routed built-in
     selector and is not narrowed to one provider model.
   - 'Weighted selection is priority-first: only equal-minimum-priority targets participate
@@ -4722,21 +4742,22 @@ features:
   runtime_status: source_controlled_runtime_boundary_verified
 
 - feature_id: v3.history_image_cleanup
-  status: active_latest_image_preservation
+  status: retired_for_ordinary_classification
   change_risk: medium
-  owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: history_image_cleanup owns the stateless latest-carrier image
-    normalization rule. Relay invokes it from Chat Process Req04 in
-    relay_request.rs; Inbound remains lossless and does not rewrite payload.
-    Direct reaches it only through its existing registered request
-    standardization/hook path. ProviderReqCompat06 preserves representable
-    latest images, including paired tool image receipts and complete bytes.
+  owner_kind: retired_v3_runtime_chat_process_gate
+  owner_scope: Ordinary request classification no longer depends on destructive
+    historical-image rewriting. The earlier latest-carrier placeholder rule must
+    not be used to keep historical images out of current-turn classification or
+    to drop business history. If a target protocol cannot represent an image, the
+    projection stays at the adjacent ProviderReqCompat owner and keeps complete
+    opaque data. Current-turn image detection is owned by the route-classifier
+    current-turn fact builder.
   owner_crates:
   - routecodex-v3-runtime
   owner_files:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   allowed_paths:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   forbidden_paths:
@@ -4749,7 +4770,8 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_preserves_representable_latest_image
-  runtime_status: source_controlled_runtime_boundary_verified
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
+  runtime_status: retired_no_active_runtime_path
 
 - feature_id: v3.direct_runtime_kernel_core
   status: active_skeleton
@@ -5238,6 +5260,15 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
+  required_contract:
+  - History-based pool switching (search-pool ratio and tool-execution-error turns)
+    is retired for ordinary requests; these observations may no longer move a request
+    into another classification pool.
+  - The only retained route-policy selection is the registered compaction route object;
+    its selection stays inside the compact owner and does not form a second ordinary
+    classification order.
+  - Route-policy state remains typed control state; it never enters request, response,
+    provider, client, or metadata payloads.
   migration_target: rust
   runtime_status: source_controlled_runtime_pending_live_replay
 
