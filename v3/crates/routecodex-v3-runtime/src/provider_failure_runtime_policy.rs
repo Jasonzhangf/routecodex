@@ -1071,14 +1071,25 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 // reselect. Request-local/health-neutral failures and 429 also keep
                 // their existing behavior; 429 keeps its rate-limit lane and the
                 // shared holder applies the same hold to it from the identity count.
-                let multi_identity_hold =
-                    if status >= 400 && !is_request_local_compat_failure && status != 429 {
-                        crate::provider_action_gate::v3_provider_action_multi_identity_hold(
-                            selected.distinct_identity_count,
-                        )
-                    } else {
-                        None
-                    };
+                // "Real" means the upstream provider actually answered with an
+                // error status. Use the real upstream HTTP status
+                // (`provider_status`), not the synthesized policy `status`: a 200
+                // that merely failed to decode into deliverable business content
+                // is a local response-processing problem and must keep its
+                // immediate reselect. A missing upstream status (transport/local
+                // failure) is also not a real provider attempt failure.
+                let real_provider_failure =
+                    matches!(provider_status, Some(s) if (400..600).contains(&s));
+                let multi_identity_hold = if real_provider_failure
+                    && !is_request_local_compat_failure
+                    && provider_status != Some(429)
+                {
+                    crate::provider_action_gate::v3_provider_action_multi_identity_hold(
+                        selected.distinct_identity_count,
+                    )
+                } else {
+                    None
+                };
                 let recovery = if is_request_local_compat_failure || status != 429 {
                     None
                 } else {

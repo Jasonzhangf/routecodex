@@ -1103,23 +1103,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
-        // Attempt-budget exhaustion is a recovery state, not a request
-        // endpoint: wait out the request residence deadline the same way the
-        // sibling relays do, so a still-recoverable request never projects a
-        // proxy execution-control error to the model client.
-        let transport_attempt =
-            crate::provider_failure_runtime_policy::admit_v3_provider_transport_attempt(
-                &attempt_budget,
-                &mut selected_admission,
-                &mut _rate_limit_permit,
-                &mut _provider_action_permit,
-            )
-            .await
-            .map_err(|error| {
-                V3AnthropicRelayRuntimeError::Target(format!(
-                    "V3ExecutionAttemptBudget rejected provider transport attempt: {error}"
-                ))
-            })?;
+        let transport_attempt = attempt_budget.admit_transport_attempt().map_err(|error| {
+            V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
+        })?;
         let transport_request = match selected_admission.take() {
             Some(admission) => {
                 transport_request.with_pre_acquired_admission(admission.into_lease())
