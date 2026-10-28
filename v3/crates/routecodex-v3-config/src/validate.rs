@@ -1148,11 +1148,6 @@ fn compile_route_groups(
                 .into_iter()
                 .map(|(pool_id, pool)| {
                     require_id("route pool", &pool_id)?;
-                    if pool.targets.is_empty() {
-                        return Err(validation(format!(
-                            "route group {group_id} pool {pool_id} is empty"
-                        )));
-                    }
                     let mut targets = Vec::new();
                     let match_rule = match (pool_id.as_str(), pool.match_rule) {
                         ("default", Some(_)) => {
@@ -1287,38 +1282,6 @@ fn compile_route_policies(
                         )));
                     }
                     V3RouteConditionManifest::CurrentCompaction
-                }
-                V3RouteConditionAuthoringConfig::SearchPoolTurnRatioAtLeast {
-                    window_turns,
-                    numerator,
-                    denominator,
-                } => {
-                    if *window_turns == 0 || *denominator == 0 || numerator > denominator {
-                        return Err(validation(format!(
-                            "route group {group_id} route policy {} has invalid search ratio",
-                            policy.id
-                        )));
-                    }
-                    V3RouteConditionManifest::SearchPoolTurnRatioAtLeast {
-                        window_turns: *window_turns,
-                        numerator: *numerator,
-                        denominator: *denominator,
-                    }
-                }
-                V3RouteConditionAuthoringConfig::ToolExecutionErrorTurnsAtLeast {
-                    window_turns,
-                    count,
-                } => {
-                    if *window_turns == 0 || *count > *window_turns {
-                        return Err(validation(format!(
-                            "route group {group_id} route policy {} has invalid tool error window",
-                            policy.id
-                        )));
-                    }
-                    V3RouteConditionManifest::ToolExecutionErrorTurnsAtLeast {
-                        window_turns: *window_turns,
-                        count: *count,
-                    }
                 }
             };
             Ok(V3RoutePolicyManifest {

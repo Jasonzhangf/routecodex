@@ -1719,6 +1719,38 @@ fn rejects_longcontext_pool_without_min_input_tokens() {
 }
 
 #[test]
+fn non_default_pool_without_targets_requires_match() {
+    let mut empty_pool = parse_v3_config_02_authoring(FULL_CONFIG).unwrap();
+    let search = empty_pool
+        .route_groups
+        .get_mut("primary")
+        .unwrap()
+        .pools
+        .get_mut("search")
+        .unwrap();
+    search.targets.clear();
+    let manifest = compile_v3_config_05_manifest(empty_pool).unwrap();
+    assert!(manifest.route_groups["primary"].pools["search"]
+        .targets
+        .is_empty());
+
+    let mut missing_match = parse_v3_config_02_authoring(FULL_CONFIG).unwrap();
+    let search = missing_match
+        .route_groups
+        .get_mut("primary")
+        .unwrap()
+        .pools
+        .get_mut("search")
+        .unwrap();
+    search.targets.clear();
+    search.match_rule = None;
+    let error = compile_v3_config_05_manifest(missing_match).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("non-default pool search must declare match"));
+}
+
+#[test]
 fn enforces_default_and_non_default_pool_match_contracts() {
     let default_match = FULL_CONFIG.replace(
         "[route_groups.primary.pools.default]\nselection = { strategy = \"priority\" }",

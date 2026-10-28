@@ -164,7 +164,7 @@ fn opaque_helper_leaves_request_body_unchanged() {
 }
 
 #[test]
-fn opaque_helper_uses_facts_to_select_matching_pool() {
+fn opaque_helper_does_not_route_by_model_match_pool() {
     let manifest = req03_opaque_manifest("req03_opaque_facts");
 
     let matched = req03_body("client-responses");
@@ -176,27 +176,15 @@ fn opaque_helper_uses_facts_to_select_matching_pool() {
         &matched,
         0,
     )
-    .expect("matched-model hit");
-    assert_eq!(hit.pool_id, "client_responses");
-    // The matched pool leads the plan and the default pool stays as fallback.
-    assert_eq!(hit.target_plan[0].pool_id, "client_responses");
-    assert_eq!(hit.target_plan[1].pool_id, "default");
-
-    let unmatched = req03_body("some-other-model");
-    let hit = resolve_v3_relay_opaque_target_once(
-        &manifest,
-        "req03_opaque_facts",
-        "responses",
-        "/v1/responses",
-        &unmatched,
-        0,
-    )
     .expect("default-pool hit");
-    assert_eq!(hit.pool_id, "default");
+    assert_eq!(
+        hit.pool_id, "default",
+        "a model-only match rule is not an inbound route; the current-turn classifier picks the pool"
+    );
     assert_eq!(
         hit.target_plan.len(),
         2,
-        "the unmatched request must fall back to both default targets"
+        "the default pool must keep both of its targets"
     );
 }
 

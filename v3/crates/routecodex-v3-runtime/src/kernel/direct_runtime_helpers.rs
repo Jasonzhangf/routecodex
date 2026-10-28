@@ -869,6 +869,10 @@ targets = [
     }
 }
 
+fn is_direct_first_byte_timeout_code(code: &str) -> bool {
+    code == V3_TRANSIENT_TRANSPORT_HANG_CODE || code == "provider_response_sse_first_event_timeout"
+}
+
 pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
     context: &V3DirectProviderFailurePolicyContext<'_, R>,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
@@ -924,9 +928,23 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             ))
         }
     };
-    let request_local_excluded = BTreeSet::from([failed_key.clone()]);
+    let provider_first_byte_hang = is_direct_first_byte_timeout_code(&source.code);
+    let request_local_excluded = if provider_first_byte_hang {
+        let mut excluded = BTreeSet::from([failed_key.clone()]);
+        if let Some(candidates) = expanded_candidates {
+            excluded.extend(
+                candidates
+                    .iter()
+                    .filter(|candidate| candidate.provider_id == selected.candidate.provider_id)
+                    .map(candidate_key),
+            );
+        }
+        excluded
+    } else {
+        BTreeSet::from([failed_key.clone()])
+    };
     let mut failed_with_current = state.failed_candidates.clone();
-    failed_with_current.extend(request_local_excluded);
+    failed_with_current.extend(request_local_excluded.iter().cloned());
     let mut remaining = expanded_candidates.map_or(0, |expanded_candidates| {
         remaining_available_candidates(
             expanded_candidates,
@@ -996,6 +1014,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             crate::provider_failure_runtime_policy::select_v3_target_with_session_then_global(
                 &routecodex_v3_target::V3TargetInterpreter::default(),
                 expanded.clone(),
+                context.failure_session_scope,
                 context.availability,
                 context.provider_health,
                 &failed_with_current,
@@ -1013,7 +1032,11 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             .as_ref()
             .map(|alternative| candidate_key(&alternative.candidate));
     }
-    if !rate_limited && (is_health_neutral_failure || remaining == 0) {
+    if provider_first_byte_hang {
+        state
+            .failed_candidates
+            .extend(request_local_excluded.iter().cloned());
+    } else if !rate_limited && (is_health_neutral_failure || remaining == 0) {
         state.failed_candidates.insert(failed_key.clone());
     }
     // Requirement `routecodex-last-provider-failure-terminal-policy`

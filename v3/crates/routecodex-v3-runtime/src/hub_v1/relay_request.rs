@@ -266,9 +266,6 @@ fn govern_chat_request_at_req04(
 ) -> Result<Box<GovernChatRequestSideOutput>, V3HubRelayRequestError> {
     events.push(V3HubRelayRequestHookEvent::Req04Entry);
     let current_payload_start = 0usize;
-    super::normalize_v3_history_image_placeholders(Arc::make_mut(
-        &mut normalized.previous.payload.0,
-    ));
     if normalized.entry_protocol() == V3HubEntryProtocol::Responses
         && profile.memory_raw_capture_enabled()
         && !normalized.memory_raw_capture_guidance_injected
@@ -855,5 +852,63 @@ mod tests {
                 V3HubRelayRequestHookEvent::Req04Exit,
             ]
         );
+    }
+
+    #[test]
+    fn govern_chat_request_req04_preserves_history_image_bytes_and_tool_pairing() {
+        let payload = json!({
+            "model": "gpt-5.5",
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "text", "text": "look"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,HISTORY_USER"}}
+                ]},
+                {"role": "assistant", "content": null, "tool_calls": [{
+                    "id": "call_read",
+                    "type": "function",
+                    "function": {"name": "read_image", "arguments": "{}"}
+                }]},
+                {"role": "tool", "tool_call_id": "call_read", "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,HISTORY_TOOL"}}
+                ]},
+                {"role": "assistant", "content": "done"},
+                {"role": "user", "content": "now explain it"}
+            ],
+            "tools": [{
+                "type": "function",
+                "function": {"name": "read_image", "parameters": {"type": "object", "properties": {}}}
+            }]
+        });
+        let captured = normalized_chat(payload.clone());
+        let side_output = Arc::new(Mutex::new(None));
+
+        let output = run_v3_single_node_operator(
+            V3OperationGraph::Request,
+            "govern_chat_request",
+            payload,
+            GovernChatRequestOperator {
+                normalized: captured,
+                profile: V3HubRequestHookProfile::enabled(),
+                events: Vec::new(),
+                side_output: side_output.clone(),
+            },
+        )
+        .expect("govern_chat_request must accept the caller's Value");
+
+        assert_eq!(
+            output["messages"][0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,HISTORY_USER",
+            "Relay Req04 must not replace history-turn user image bytes"
+        );
+        assert_eq!(
+            output["messages"][2]["tool_call_id"], "call_read",
+            "history tool pairing must survive Relay Req04"
+        );
+        assert_eq!(
+            output["messages"][2]["content"][0]["image_url"]["url"],
+            "data:image/png;base64,HISTORY_TOOL",
+            "history tool image bytes must survive Relay Req04"
+        );
+        assert_eq!(output["messages"][4]["content"], "now explain it");
     }
 }

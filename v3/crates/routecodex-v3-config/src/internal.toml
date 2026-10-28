@@ -98,15 +98,15 @@ match = { precedence = 20, required_capabilities = ["web_search"] }
 targets = []
 
 [route_groups.routecodex_v3_4444.pools.search]
-match = { precedence = 21, entry_protocol = "responses" }
+match = { precedence = 21, required_capabilities = ["search"] }
 targets = []
 
 [route_groups.routecodex_v3_4444.pools.thinking]
-match = { precedence = 2, entry_protocol = "responses" }
+match = { precedence = 2, required_capabilities = ["thinking"] }
 targets = []
 
 [route_groups.routecodex_v3_4444.pools.coding]
-match = { precedence = 3, entry_protocol = "responses" }
+match = { precedence = 3, required_capabilities = ["coding"] }
 targets = []
 
 [route_groups.routecodex_v3_4444.pools.tools]

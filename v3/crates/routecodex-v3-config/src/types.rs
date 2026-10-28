@@ -788,15 +788,6 @@ pub struct V3RoutePolicyAuthoringConfig {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum V3RouteConditionAuthoringConfig {
     CurrentCompaction,
-    SearchPoolTurnRatioAtLeast {
-        window_turns: usize,
-        numerator: usize,
-        denominator: usize,
-    },
-    ToolExecutionErrorTurnsAtLeast {
-        window_turns: usize,
-        count: usize,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -870,6 +861,16 @@ pub struct V3SelectionPolicy {
     pub strategy: V3SelectionStrategy,
 }
 
+impl V3SelectionPolicy {
+    pub fn is_sticky(&self) -> bool {
+        matches!(self.strategy, V3SelectionStrategy::Sticky)
+    }
+
+    pub fn is_default(&self) -> bool {
+        self.strategy == V3SelectionStrategy::Priority
+    }
+}
+
 impl Default for V3SelectionPolicy {
     fn default() -> Self {
         Self {
@@ -884,6 +885,7 @@ pub enum V3SelectionStrategy {
     Priority,
     Weighted,
     RoundRobin,
+    Sticky,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

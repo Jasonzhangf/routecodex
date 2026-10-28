@@ -305,25 +305,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     } else {
         (None, None)
     };
-    let route_policy_policies = match crate::route_policy::compile_route_policies(
-        manifest,
-        &route_policy_scope.routing_group_id,
-    ) {
-        Ok(policies) => policies,
-        Err(error) => {
-            return direct_runtime_helpers_stream::source_failure_output(
-                runtime_source("V3Router05RequestClassified", error),
-                None,
-                trace,
-                &hook_registry,
-            )
-        }
-    };
     let standardized_request_id = standardized.request_id.clone();
     let standardized_server_id = standardized.server_id.clone();
     let commit_route_policy = |_receipt: &V3AttemptSuccessReceipt| -> Result<(), String> {
         match route_policy_pending.as_ref() {
-            Some(pending) => pending.commit(&route_policy_policies, now_epoch_ms),
+            Some(pending) => pending.commit::<String>(),
             None => Ok(()),
         }
     };

@@ -399,6 +399,7 @@ pub(crate) fn step_v3_target_planning_sync(
         match select_v3_target_with_session_then_global(
             &target,
             expanded.clone(),
+            failure_session_scope,
             &provider_health.session_bound_availability(failure_session_scope),
             provider_health,
             request_local_excluded_candidates,
@@ -412,6 +413,7 @@ pub(crate) fn step_v3_target_planning_sync(
         match select_v3_target_with_session_then_global(
             &target,
             expanded.clone(),
+            failure_session_scope,
             &provider_health.session_bound_availability(failure_session_scope),
             provider_health,
             request_local_excluded_candidates,

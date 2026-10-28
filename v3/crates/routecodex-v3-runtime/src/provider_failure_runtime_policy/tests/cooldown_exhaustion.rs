@@ -1346,13 +1346,20 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
         .iter_mut()
         .find(|candidate| candidate.provider_id == "first")
         .expect("first candidate");
-    first.pool_ids = vec!["client_responses".to_string()];
+    let initial_pool_id = expanded
+        .route
+        .target_plan
+        .first()
+        .expect("initial target plan")
+        .pool_id
+        .clone();
+    first.pool_ids = vec![initial_pool_id];
     let second = expanded
         .candidates
         .iter_mut()
         .find(|candidate| candidate.provider_id == "second")
         .expect("second candidate");
-    second.pool_ids = vec!["default".to_string()];
+    second.pool_ids = vec!["fallback".to_string()];
     let mut third = second.clone();
     third.provider_id = "third".to_string();
     third.pool_ids = vec!["emergency".to_string()];
@@ -1367,13 +1374,14 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
     expanded.route.target_plan.push(
         routecodex_v3_virtual_router::V3Router07OpaqueTargetPlanEntry {
             tier_index: 1,
-            pool_id: "default".to_string(),
+            pool_id: "fallback".to_string(),
             target_index: 0,
             target_kind: target_kind.clone(),
             target_id: None,
             interface: None,
             priority: 1,
             weight: 1,
+            session_sticky: false,
             direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),
         },
     );
@@ -1387,6 +1395,7 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
             interface: None,
             priority: 1,
             weight: 1,
+            session_sticky: false,
             direct_provider_model: Some(("third".to_string(), "gpt-test".to_string())),
         },
     );
@@ -1534,13 +1543,20 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
         .iter_mut()
         .find(|candidate| candidate.provider_id == first_provider)
         .expect("first candidate");
-    first.pool_ids = vec!["client_responses".to_string()];
+    let initial_pool_id = expanded
+        .route
+        .target_plan
+        .first()
+        .expect("initial target plan")
+        .pool_id
+        .clone();
+    first.pool_ids = vec![initial_pool_id];
     let second = expanded
         .candidates
         .iter_mut()
         .find(|candidate| candidate.provider_id == "second")
         .expect("second candidate");
-    second.pool_ids = vec!["default".to_string()];
+    second.pool_ids = vec!["fallback".to_string()];
     let target_kind = expanded
         .route
         .target_plan
@@ -1551,13 +1567,14 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
     expanded.route.target_plan.push(
         routecodex_v3_virtual_router::V3Router07OpaqueTargetPlanEntry {
             tier_index: 1,
-            pool_id: "default".to_string(),
+            pool_id: "fallback".to_string(),
             target_index: 0,
             target_kind,
             target_id: None,
             interface: None,
             priority: 1,
             weight: 1,
+            session_sticky: false,
             direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),
         },
     );
@@ -1812,13 +1829,20 @@ async fn busy_preferred_candidate_reselects_later_tier_without_capacity_wait() {
         .iter_mut()
         .find(|candidate| candidate.provider_id == first_provider)
         .expect("first candidate");
-    first.pool_ids = vec!["client_responses".to_string()];
+    let initial_pool_id = expanded
+        .route
+        .target_plan
+        .first()
+        .expect("initial target plan")
+        .pool_id
+        .clone();
+    first.pool_ids = vec![initial_pool_id];
     let second = expanded
         .candidates
         .iter_mut()
         .find(|candidate| candidate.provider_id == "second")
         .expect("second candidate");
-    second.pool_ids = vec!["default".to_string()];
+    second.pool_ids = vec!["fallback".to_string()];
     let target_kind = expanded
         .route
         .target_plan
@@ -1829,13 +1853,14 @@ async fn busy_preferred_candidate_reselects_later_tier_without_capacity_wait() {
     expanded.route.target_plan.push(
         routecodex_v3_virtual_router::V3Router07OpaqueTargetPlanEntry {
             tier_index: 1,
-            pool_id: "default".to_string(),
+            pool_id: "fallback".to_string(),
             target_index: 0,
             target_kind,
             target_id: None,
             interface: None,
             priority: 1,
             weight: 1,
+            session_sticky: false,
             direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),
         },
     );

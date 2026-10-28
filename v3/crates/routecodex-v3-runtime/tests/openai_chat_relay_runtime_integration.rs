@@ -4372,7 +4372,7 @@ impl ResponsesTransport for AnthropicWebSearchWireTransport {
 }
 
 #[test]
-fn routing_latest_image_attachment_survives_text_only_turns() {
+fn routing_only_current_turn_image_drives_multimodal() {
     let chat_history_image_then_text = json!({
         "model": "deepseek-v4-flash",
         "messages": [
@@ -4411,7 +4411,7 @@ fn routing_latest_image_attachment_survives_text_only_turns() {
             "chat history image + current text",
             &chat_history_image_then_text,
             "openai_chat",
-            true,
+            false,
         ),
         (
             "chat current turn image",
@@ -4423,7 +4423,7 @@ fn routing_latest_image_attachment_survives_text_only_turns() {
             "responses history image + current text",
             &responses_history_image_then_text,
             "responses",
-            true,
+            false,
         ),
     ];
     for (label, body, entry, expect_multimodal) in cases {

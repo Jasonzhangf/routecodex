@@ -416,6 +416,15 @@ async fn direct_generic_provider_http_400_reselects_untried_sibling_model() {
 async fn direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_wait() {
     let routing_group = "direct_provider_compat_terminal";
     let mut manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
+    // The controller is process-shared; isolate this test's provider identity
+    // so another test's legitimate lease cannot contaminate the zero assertion.
+    let provider_id = "direct_terminal_lease_test";
+    let mut provider = manifest.providers.remove("first").unwrap();
+    provider.id = provider_id.into();
+    manifest.providers.insert(provider_id.into(), provider);
+    for target in &mut manifest.forwarders.get_mut("responses").unwrap().targets {
+        target.provider = Some(provider_id.into());
+    }
     manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap().attempt_store.residence_timeout_ms = 300;
     let raw = V3Server03HttpRequestRaw {
         request_purpose: V3RequestPurpose::Conversation,
@@ -439,7 +448,7 @@ async fn direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_w
         0,
     )
     .expect("protocol plan");
-    assert_eq!(plan.decision.target.candidate.provider_id, "first");
+    assert_eq!(plan.decision.target.candidate.provider_id, provider_id);
     assert_eq!(plan.decision.target.candidate.model_id, "test");
 
     let execution = execute_v3_responses_direct_runtime_kernel_core(
@@ -454,7 +463,7 @@ async fn direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_w
         "last HTTP400 remains pending inside its original residence budget");
     assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
     assert_eq!(V3AdaptiveConcurrencyController::process_shared()
-        .snapshot("first:key").unwrap().total_provider_in_flight, 0,
+        .snapshot("direct_terminal_lease_test:key").unwrap().total_provider_in_flight, 0,
         "pending request releases its failed business lease");
     let output = tokio::time::timeout(Duration::from_secs(3), execution).await
         .expect("original residence ends only this request");
@@ -725,11 +734,6 @@ id = "compact-purpose"
 precedence = 10
 condition = { kind = "current_compaction" }
 action = { select_route_pool = "compact" }
-[[route_groups.default.route_policies]]
-id = "search-history"
-precedence = 20
-condition = { kind = "search_pool_turn_ratio_at_least", window_turns = 10, numerator = 8, denominator = 10 }
-action = { select_route_pool = "thinking" }
 [route_groups.default.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "primary", model = "primary-model", key = "key", priority = 1 }]
@@ -737,10 +741,6 @@ targets = [{ kind = "provider_model", provider = "primary", model = "primary-mod
 route_object = "compact"
 selection = { strategy = "priority" }
 match = { precedence = 5, entry_protocol = "responses" }
-targets = [{ kind = "provider_model", provider = "primary", model = "primary-model", key = "key", priority = 1 }]
-[route_groups.default.pools.thinking]
-selection = { strategy = "priority" }
-match = { precedence = 6, entry_protocol = "responses" }
 targets = [{ kind = "provider_model", provider = "primary", model = "primary-model", key = "key", priority = 1 }]
 "#,
     )

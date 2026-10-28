@@ -187,7 +187,6 @@ where
     *C::body_mut(&mut standardized) = resolved_request;
     let route_policy_pending = resolved_target.route_policy_pending;
     let route_policy_scope = resolved_target.route_policy_scope;
-    let route_policy_group_id = resolved_target.opaque_hit.routing_group_id.clone();
     trace.extend([
         "V3Router05RequestClassified",
         "V3Router06RoutePoolResolved",
@@ -1690,21 +1689,9 @@ where
                 &crate::hooks::register_responses_direct_hooks(),
             );
         }
-        let policies =
-            match crate::route_policy::compile_route_policies(manifest, &route_policy_group_id) {
-                Ok(policies) => policies,
-                Err(error) => {
-                    return direct_runtime_helpers_stream::source_failure_output(
-                        runtime_source("V3Router06RoutePoolResolved", error),
-                        last_external_http.clone(),
-                        trace,
-                        &crate::hooks::register_responses_direct_hooks(),
-                    )
-                }
-            };
         if let Err(error) = route_policy_pending
             .as_ref()
-            .map(|pending| pending.commit(&policies, now_epoch_ms))
+            .map(|pending| pending.commit::<String>())
             .transpose()
         {
             return direct_runtime_helpers_stream::source_failure_output(

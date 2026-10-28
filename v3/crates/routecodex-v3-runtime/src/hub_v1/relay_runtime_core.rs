@@ -1419,7 +1419,7 @@ where
                 );
                 if let Some(pending) = route_policy_pending.as_ref() {
                     pending
-                        .commit_manifest_now(manifest)
+                        .commit::<String>()
                         .map_err(V3RelayCoreError::Target)?;
                 }
                 observability.provider_failure_events = std::mem::take(failure_events);
@@ -1702,7 +1702,7 @@ where
                     );
                     if let Some(pending) = route_policy_pending.as_ref() {
                         pending
-                            .commit_manifest_now(manifest)
+                            .commit::<String>()
                             .map_err(V3RelayCoreError::Target)?;
                     }
                     observability.provider_failure_events = std::mem::take(failure_events);
@@ -2090,7 +2090,7 @@ where
                 );
                 if let Some(pending) = route_policy_pending.as_ref() {
                     pending
-                        .commit_manifest_now(manifest)
+                        .commit::<String>()
                         .map_err(V3RelayCoreError::Target)?;
                 }
                 observability.provider_failure_events = std::mem::take(failure_events);

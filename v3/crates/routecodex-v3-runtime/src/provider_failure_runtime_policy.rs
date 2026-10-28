@@ -22,8 +22,8 @@ use routecodex_v3_provider_responses::{
     V3ProviderSchedulingReader, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
 use routecodex_v3_target::{
-    V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
-    V3TargetExhaustion, V3TargetInterpreter,
+    V3StickySelectionScope, V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected,
+    V3TargetCandidate, V3TargetExhaustion, V3TargetInterpreter,
 };
 use routecodex_v3_virtual_router::{V3Router07OpaqueTargetHitOnce, V3VirtualRouter};
 use serde_json::Value;
@@ -491,6 +491,7 @@ pub(crate) enum V3RelayProviderTargetResolution {
 pub(crate) fn select_v3_target_with_session_then_global(
     target: &V3TargetInterpreter,
     expanded: V3Target09CandidateSetExpanded,
+    failure_session_scope: &V3ProviderFailureSessionScope,
     session_availability: &dyn V3ProviderAvailabilityReader,
     global_availability: &V3ProviderFailureRuntimeHealth,
     request_local_excluded_candidates: &BTreeSet<String>,
@@ -502,7 +503,37 @@ pub(crate) fn select_v3_target_with_session_then_global(
         global: global_availability,
         excluded: request_local_excluded_candidates,
     };
-    target.select_available_with_health(expanded, &reader, now_ms, deterministic_sample)
+    // Sticky selection needs a session that outlives one request. A request
+    // without a client session header keeps its existing pool strategy.
+    let Some(sticky) = sticky_scope_for(failure_session_scope) else {
+        return target.select_available_with_health(
+            expanded,
+            &reader,
+            now_ms,
+            deterministic_sample,
+        );
+    };
+    target.select_available_with_health_sticky(
+        expanded,
+        &reader,
+        now_ms,
+        deterministic_sample,
+        &sticky,
+    )
+}
+
+/// Builds the sticky scope for a session that genuinely spans requests.
+fn sticky_scope_for(
+    failure_session_scope: &V3ProviderFailureSessionScope,
+) -> Option<V3StickySelectionScope> {
+    if !failure_session_scope.is_client_session() {
+        return None;
+    }
+    Some(V3StickySelectionScope::new(
+        failure_session_scope.server_id(),
+        failure_session_scope.routing_group(),
+        failure_session_scope.session_id(),
+    ))
 }
 
 struct V3SessionGlobalSchedulingReader<'health> {
@@ -835,6 +866,7 @@ async fn reselect_from_captured_target_plan(
     match select_v3_target_with_session_then_global(
         &V3TargetInterpreter::default(),
         expanded,
+        &context.failure_session_scope,
         &context
             .provider_health
             .session_bound_availability(&context.failure_session_scope),
@@ -1731,6 +1763,7 @@ pub(crate) fn resolve_v3_relay_target_outcome(
     match select_v3_target_with_session_then_global(
         &target,
         expanded.clone(),
+        input.failure_session_scope,
         &session_availability,
         input.provider_health,
         input.request_local_excluded_candidates,
