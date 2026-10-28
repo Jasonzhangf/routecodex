@@ -3119,3 +3119,53 @@ fn multi_interface_missing_or_disabled_pin_is_typed_interface_error() {
         } if provider_id == "multi" && interface_id == "chat"
     ));
 }
+
+#[test]
+fn distinct_declared_identity_count_deduplicates_repeated_identity_declarations() {
+    // Recovery-hold budgeting must count distinct full provider.model.key
+    // identities, not raw declarations. A pool that declares the same identity
+    // twice is still a sole identity, and a cooled identity still counts.
+    let mut manifest = provider_priority_schedule_manifest();
+    let target = V3TargetInterpreter::default();
+    let expanded = expanded_with(&manifest, &target, 0);
+    let declared = expanded.candidates.len();
+    assert_eq!(
+        V3TargetInterpreter::distinct_declared_identity_count(&expanded.candidates),
+        declared,
+        "one declaration per identity must count each identity once"
+    );
+
+    let mut duplicated = expanded.candidates.clone();
+    let mut repeated = duplicated[0].clone();
+    repeated.model_capabilities.push("vision".to_string());
+    duplicated.push(repeated);
+    assert_eq!(
+        V3TargetInterpreter::distinct_declared_identity_count(&duplicated),
+        declared,
+        "a repeated declaration of one identity must not inflate the identity count"
+    );
+
+    let mut manifest_two_models = provider_priority_schedule_manifest();
+    manifest_two_models
+        .providers
+        .get_mut("b")
+        .unwrap()
+        .models
+        .get_mut("m")
+        .unwrap()
+        .availability = Some(routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+        timezone: "Asia/Shanghai".into(),
+        guard_minutes: 0,
+        periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
+            start: "00:00".into(),
+            end: "00:01".into(),
+        }],
+    });
+    let expanded_two_models = expanded_with(&manifest_two_models, &target, 0);
+    assert_eq!(
+        V3TargetInterpreter::distinct_declared_identity_count(&expanded_two_models.candidates),
+        expanded_two_models.candidates.len(),
+        "an availability-inactive identity must still count as a declared identity"
+    );
+    let _ = &mut manifest;
+}

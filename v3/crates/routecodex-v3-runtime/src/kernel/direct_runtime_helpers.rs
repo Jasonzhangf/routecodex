@@ -696,6 +696,7 @@ targets = [
                 .find(|candidate| candidate.provider_id == "a")
                 .expect("provider a candidate")
                 .clone(),
+            distinct_identity_count: 1,
             candidate_count: 1,
             unavailable_candidates: Vec::new(),
             attempts: 1,
@@ -787,6 +788,10 @@ targets = [
                 .find(|candidate| candidate.provider_id == "a")
                 .expect("provider a candidate")
                 .clone(),
+            distinct_identity_count:
+                routecodex_v3_target::V3TargetInterpreter::distinct_declared_identity_count(
+                    &expanded.candidates,
+                ),
             candidate_count: expanded.candidates.len(),
             unavailable_candidates: Vec::new(),
             attempts: 1,
@@ -1011,6 +1016,21 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     if !rate_limited && (is_health_neutral_failure || remaining == 0) {
         state.failed_candidates.insert(failed_key.clone());
     }
+    // Requirement `routecodex-last-provider-failure-terminal-policy`
+    // (`req-20261027-single-identity-recovery`): after any real provider attempt
+    // failure, a target that declares several distinct identities continues to
+    // the next attempt only after the flat multi-identity hold. The hold is
+    // executed once by the shared recovery holder
+    // (`wait_for_error05_recovery`), so this failure carries a recovery witness
+    // instead of reselecting immediately. Request-local/health-neutral failures
+    // keep their immediate reselect, and a 429 already carries its own witness.
+    let multi_identity_hold = if !rate_limited && !is_health_neutral_failure && remaining > 0 {
+        crate::provider_action_gate::v3_provider_action_multi_identity_hold(
+            selected.distinct_identity_count,
+        )
+    } else {
+        None
+    };
     // Health changes are allowed only after the captured target proves that
     // another eligible, untried identity can take this request.
     let health_record = if is_health_neutral_failure || (remaining == 0 && !rate_limited) {
@@ -1086,20 +1106,26 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         Some(record) => Some(record.recovery_witness().map_err(|error| {
             direct_policy_failure(&source, "V3ProviderActionGateAdmission", error)
         })?),
-        None if remaining > 0 && is_health_neutral_failure => Some(
-            routecodex_v3_error::V3Error05RecoveryAdmissionWitness::new(
-                context.failure_session_scope.clone(),
-                failed_key.clone(),
-                source.code.clone(),
-                1,
+        // Request-local compatibility reselects and the multi-identity hold both
+        // need a recovery witness naming the failed identity. Neither carries a
+        // lane admission, so neither grants or consumes provider capacity.
+        None if remaining > 0 && (is_health_neutral_failure || multi_identity_hold.is_some()) => {
+            Some(
+                routecodex_v3_error::V3Error05RecoveryAdmissionWitness::new(
+                    context.failure_session_scope.clone(),
+                    failed_key.clone(),
+                    source.code.clone(),
+                    1,
+                )
+                .map_err(|error| {
+                    direct_policy_failure(&source, "V3ProviderActionGateAdmission", error)
+                })?,
             )
-            .map_err(|error| {
-                direct_policy_failure(&source, "V3ProviderActionGateAdmission", error)
-            })?,
-        ),
+        }
         None => None,
     };
-    let target_recovery_pending = context.expanded.is_some_and(|expanded| {
+    let target_recovery_pending = multi_identity_hold.is_none()
+        && context.expanded.is_some_and(|expanded| {
         (!rate_limited && !is_health_neutral_failure)
             || (remaining == 0
                 && crate::provider_failure_runtime_policy::v3_exhaustion_is_cooldown_only(
@@ -1135,11 +1161,14 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             &health_record,
             "switch_provider",
             next_provider_key,
-            Some(
-                recovery_record
-                    .as_ref()
-                    .map_or(0, |record| record.minimum_delay_ms),
-            ),
+            Some(multi_identity_hold.map_or_else(
+                || {
+                    recovery_record
+                        .as_ref()
+                        .map_or(0, |record| record.minimum_delay_ms)
+                },
+                |hold| hold.as_millis() as u64,
+            )),
         ));
         return Ok(V3DirectProviderFailurePolicyResult {
             decision,

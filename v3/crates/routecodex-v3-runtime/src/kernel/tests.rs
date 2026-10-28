@@ -24,6 +24,7 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
     let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
         route: plan.expanded.route.clone(),
         candidate: plan.expanded.candidates[0].clone(),
+        distinct_identity_count: 2,
         candidate_count: 2,
         unavailable_candidates: vec![],
         attempts: 1,
@@ -132,6 +133,7 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
     let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
         route: plan.expanded.route.clone(),
         candidate: plan.expanded.candidates[0].clone(),
+        distinct_identity_count: 2,
         candidate_count: 2,
         unavailable_candidates: vec![],
         attempts: 1,

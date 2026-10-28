@@ -592,6 +592,39 @@ where
                     trace.push("V3ProviderActionGateConsumedReevaluation");
                     continue;
                 }
+                Ok(V3ProviderActionRecoveryTransition::BudgetExpired(_)) => {
+                    pending_provider_action_recovery = None;
+                    retry_selected = Some(selected);
+                    trace.push("V3ProviderActionGateRecoveryBudgetExpired");
+                    continue;
+                }
+                Ok(V3ProviderActionRecoveryTransition::MultiIdentityHoldElapsed(_)) => {
+                    // The flat storm-avoidance hold only paused this request. The
+                    // replacement was resolved before it, so continue with that
+                    // attempt instead of selecting again.
+                    pending_provider_action_recovery = None;
+                    drop(provider_action_permit.take());
+                    provider_action_permit_target = None;
+                    selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
+                        V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
+                        V3AdmitAfterRecovery::Busy => {
+                            let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                            failed_candidates.insert(busy_key.clone());
+                            request_local_busy_candidates.insert(busy_key);
+                            trace.push("V3ProviderActionGateRecoveryBusy");
+                            continue;
+                        }
+                        V3AdmitAfterRecovery::Failed(reason) => {
+                            return direct_runtime_helpers_stream::source_failure_output(
+                                runtime_source("V3Target10ConcreteProviderSelected", reason),
+                                last_external_http.clone(),
+                                trace,
+                                &crate::hooks::register_responses_direct_hooks(),
+                            )
+                        }
+                    };
+                    trace.push("V3ProviderActionGateMultiIdentityHoldElapsed");
+                }
                 Err(error) => {
                     return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3ProviderActionGateAdmission", error),

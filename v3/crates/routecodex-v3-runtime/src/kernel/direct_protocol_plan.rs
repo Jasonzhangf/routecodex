@@ -334,6 +334,10 @@ pub(crate) fn protocol_candidate_keys_for_decision_mode(
         let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
             route: expanded.route.clone(),
             candidate: candidate.clone(),
+            distinct_identity_count:
+                routecodex_v3_target::V3TargetInterpreter::distinct_declared_identity_count(
+                    &expanded.candidates,
+                ),
             candidate_count: expanded.candidates.len(),
             unavailable_candidates: Vec::new(),
             attempts: 1,

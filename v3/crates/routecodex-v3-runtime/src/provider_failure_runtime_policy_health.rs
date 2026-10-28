@@ -1005,6 +1005,30 @@ impl V3ProviderFailureRuntimeHealth {
                 "provider observation exceeded original request residence deadline".to_string()
             })?;
         }
+        // Requirement `routecodex-last-provider-failure-terminal-policy`
+        // (`req-20261027-single-identity-recovery`): a target that declares
+        // more than one distinct `provider.model.key` identity holds a flat
+        // declared window after a real attempt failure before it continues
+        // selecting or attempting. The window is a floor, so an available
+        // healthy alternative never waives it, and it is one sleep bounded by
+        // the original residence deadline, so it never extends itself. This
+        // hold exists only to keep concurrent sessions from storming the
+        // failed identity: it records no provider failure and mutates no lane.
+        if let Some(hold) = crate::provider_action_gate::v3_provider_action_multi_identity_hold(
+            selected.distinct_identity_count,
+        ) {
+            let ticket =
+                crate::provider_action_gate::V3ProviderActionRecoveryTicket::from_recovery_witness(
+                    witness,
+                )?;
+            let hold_until = (std::time::Instant::now() + hold).min(deadline);
+            tokio::time::sleep_until(tokio::time::Instant::from_std(hold_until)).await;
+            // The replacement was resolved before this hold, so the caller must
+            // continue with that attempt instead of selecting again.
+            return Ok(V3ProviderActionRecoveryTransition::MultiIdentityHoldElapsed(
+                ticket,
+            ));
+        }
         let provider_scope = V3ProviderActionProviderScope::new(
             witness.failure_session_scope(),
             v3_relay_provider_candidate_key_parts(
@@ -1016,8 +1040,13 @@ impl V3ProviderFailureRuntimeHealth {
         )?;
         tokio::time::timeout_at(
             tokio::time::Instant::from_std(deadline),
-            self.action_gate
-                .wait_for_recovery_witness(witness, provider_scope),
+            self.action_gate.wait_for_recovery_witness_with_budget(
+                witness,
+                provider_scope,
+                crate::provider_action_gate::v3_provider_action_recovery_budget(
+                    selected.distinct_identity_count,
+                ),
+            ),
         )
         .await
         .map_err(|_| "provider action wait exceeded request residence deadline".to_string())?

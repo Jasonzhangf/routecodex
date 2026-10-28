@@ -6858,7 +6858,7 @@ chains:
       to_node: V3ProviderActionGateAdmission
       caller_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
       caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      callee_symbol: V3ProviderActionGate::wait_for_recovery_witness
+      callee_symbol: V3ProviderActionGate::wait_for_recovery_witness_with_budget
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate

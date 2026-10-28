@@ -1005,7 +1005,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 ),
             };
         let provider_request_snapshot = transport_request.provider_request_projection();
-        let _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
+        let mut _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
             admission.take_rate_limit_control(&mut pending_provider_action_recovery)
         });
         if pending_provider_action_recovery.is_some() {
@@ -1068,14 +1068,58 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     trace.push("V3ProviderActionGateConsumedReevaluation");
                     continue;
                 }
+                V3ProviderActionRecoveryTransition::BudgetExpired(_) => {
+                    pending_provider_action_recovery = None;
+                    retry_selected = Some(selected);
+                    trace.push("V3ProviderActionGateRecoveryBudgetExpired");
+                    continue;
+                }
+                V3ProviderActionRecoveryTransition::MultiIdentityHoldElapsed(_) => {
+                    // The flat storm-avoidance hold only paused this request. The
+                    // replacement was resolved before it, so continue with that
+                    // attempt instead of selecting again.
+                    pending_provider_action_recovery = None;
+                    drop(_provider_action_permit.take());
+                    provider_action_permit_target = None;
+                    match admit_v3_selected_target_after_recovery(&selected) {
+                        V3AdmitAfterRecovery::Admitted(admission) => {
+                            selected_admission = Some(admission)
+                        }
+                        V3AdmitAfterRecovery::Busy => {
+                            let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                            failed_candidates.insert(busy_key.clone());
+                            request_local_busy_candidates.insert(busy_key);
+                            trace.push("V3ProviderActionGateRecoveryBusy");
+                            continue;
+                        }
+                        V3AdmitAfterRecovery::Failed(reason) => {
+                            return Err(V3AnthropicRelayRuntimeError::Target(reason))
+                        }
+                    }
+                    trace.push("V3ProviderActionGateMultiIdentityHoldElapsed");
+                }
             }
         }
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
-        let transport_attempt = attempt_budget.admit_transport_attempt().map_err(|error| {
-            V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
-        })?;
+        // Attempt-budget exhaustion is a recovery state, not a request
+        // endpoint: wait out the request residence deadline the same way the
+        // sibling relays do, so a still-recoverable request never projects a
+        // proxy execution-control error to the model client.
+        let transport_attempt =
+            crate::provider_failure_runtime_policy::admit_v3_provider_transport_attempt(
+                &attempt_budget,
+                &mut selected_admission,
+                &mut _rate_limit_permit,
+                &mut _provider_action_permit,
+            )
+            .await
+            .map_err(|error| {
+                V3AnthropicRelayRuntimeError::Target(format!(
+                    "V3ExecutionAttemptBudget rejected provider transport attempt: {error}"
+                ))
+            })?;
         let transport_request = match selected_admission.take() {
             Some(admission) => {
                 transport_request.with_pre_acquired_admission(admission.into_lease())

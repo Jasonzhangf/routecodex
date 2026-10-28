@@ -48,14 +48,12 @@ impl V3RuntimeProviderAdmission {
         &mut self,
         pending: &mut Option<V3Error05RecoveryAdmissionWitness>,
     ) -> Option<crate::provider_action_gate::V3ProviderActionPermit> {
-        // A 429 witness belongs to the failed identity, not its replacement.
-        // Target admission has already selected and reserved the new identity.
-        if pending
-            .as_ref()
-            .is_some_and(|w| w.normalized_error_family() == "provider_http_429")
-        {
-            *pending = None;
-        }
+        // The pending recovery witness is owned by the shared recovery holder
+        // (`V3ProviderFailureRuntimeHealth::wait_for_error05_recovery`), which
+        // alone knows both the failed identity and the newly selected one. Do
+        // not discard a 429 witness here: a multi-identity target must still
+        // observe its flat storm-avoidance hold before attempting the
+        // replacement, and a sole identity reuses this same witness.
         if pending.is_none() {
             *pending = self.rate_limit_recovery.take();
         }
