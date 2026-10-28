@@ -1078,24 +1078,26 @@ fn inactive_recovery_requests_do_not_block_sigint_exit() {
     let marker = "[route_groups.default.pools.default]";
     assert_eq!(source.matches(marker).count(), 1);
     fs::write(&config, source.replacen(marker, &availability, 1)).unwrap();
-    let mut server = OwnedServer(managed_test_command(env!("CARGO_BIN_EXE_rccv3"), &state_root)
-        .args(["start", "--config"])
-        .arg(&config)
-        .env("HOME", &home)
-        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
-        .env(
-            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
-            request_counter_file(&state_root),
-        )
-        .env(
-            "ROUTECODEX_V3_ADMIN_BIND",
-            format!("127.0.0.1:{}", free_port()),
-        )
-        .env("V3_MANAGED_TEST_KEY", SECRET)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap());
+    let mut server = OwnedServer(
+        managed_test_command(env!("CARGO_BIN_EXE_rccv3"), &state_root)
+            .args(["start", "--config"])
+            .arg(&config)
+            .env("HOME", &home)
+            .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+            .env(
+                "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+                request_counter_file(&state_root),
+            )
+            .env(
+                "ROUTECODEX_V3_ADMIN_BIND",
+                format!("127.0.0.1:{}", free_port()),
+            )
+            .env("V3_MANAGED_TEST_KEY", SECRET)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
     for port in ports {
         wait_port(port, true);
     }

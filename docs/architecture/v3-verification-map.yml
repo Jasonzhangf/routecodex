@@ -3354,6 +3354,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib target_recovery_does_not_reselect_ineligible_candidate
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server issue44cc3af_inactive_window_does_not_spin_or_block_http
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server issue44cc3af_first_byte_stall_keeps_sibling_requests_independent
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-cli --test managed_lifecycle inactive_recovery_requests_do_not_block_sigint_exit
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_direct_transport_header_timeout_keeps_120_second_budget
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_transport_header_timeout_keeps_120_second_budget

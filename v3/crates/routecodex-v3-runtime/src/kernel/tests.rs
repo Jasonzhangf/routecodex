@@ -835,3 +835,21 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
         );
     }
 }
+
+#[test]
+fn responses_direct_transport_header_timeout_keeps_120_second_budget() {
+    let manifest =
+        provider_concurrency_two_key_then_other_provider_manifest("remote_a", "remote_b", 80);
+    assert_eq!(
+        super::default_transport::responses_direct_transport_response_timeout(
+            &manifest, "remote_a"
+        ),
+        Duration::from_millis(60_000),
+        "a provider without an explicit override keeps the published default"
+    );
+    assert_eq!(
+        super::default_transport::responses_direct_transport_response_timeout(&manifest, "absent"),
+        Duration::from_millis(120_000),
+        "a missing provider entry keeps the remote first-byte budget"
+    );
+}

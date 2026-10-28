@@ -541,12 +541,18 @@ pub struct V3ProviderAuthoringConfig {
     pub compatibility_profile: Option<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+    /// Declares a provider that serves on this machine (for example a local
+    /// model runtime). Only a declared local provider may exceed the remote
+    /// first-byte budget below.
+    #[serde(default)]
+    pub local: bool,
     /// per-request 总超时（毫秒）；默认 60_000（60s）。
     #[serde(default = "default_provider_request_timeout_ms")]
     pub request_timeout_ms: u64,
     /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30_000（30s）。
-    /// 本地慢部署（如 dwarfstar 缓存未命中可数分钟出首帧）按 provider 配置
-    /// 放宽，避免 idle 误杀；大多数 provider 无需配置。
+    /// Remote providers are capped at 120_000 by compile-time validation.
+    /// A declared local provider may raise it (for example a local runtime with
+    /// minutes of cold-start latency); most providers need no configuration.
     #[serde(default, alias = "sseFirstFrameTimeoutMs")]
     pub sse_first_frame_timeout_ms: Option<u64>,
     #[serde(default)]
@@ -557,6 +563,14 @@ pub struct V3ProviderAuthoringConfig {
 pub fn default_provider_request_timeout_ms() -> u64 {
     60_000
 }
+
+/// Upper bound for any remote provider's pre-first-byte wait, expressed through
+/// the SSE first-frame timeout. A remote provider that produces no first frame
+/// within this budget is a failed candidate, not a request to keep waiting.
+/// Only a provider declared `local = true` may exceed it. The whole-request
+/// `request_timeout_ms` is a separate budget and is not capped here, so a long
+/// healthy stream is not cut off.
+pub const V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS: u64 = 120_000;
 
 /// provider SSE 首帧/帧间隔超时默认值（毫秒）：30s。
 pub fn default_provider_sse_first_frame_timeout_ms() -> u64 {
@@ -1205,6 +1219,9 @@ pub struct V3ProviderManifest {
     pub reasoning_effort: Option<V3ReasoningEffort>,
     pub compatibility_profile: Option<String>,
     pub features: BTreeMap<String, bool>,
+    /// Declares a provider served on this machine. Only such a provider may
+    /// exceed the remote first-byte budget.
+    pub local: bool,
     /// per-request 总超时（毫秒）
     pub request_timeout_ms: u64,
     /// provider SSE 首帧/帧间隔超时（毫秒）；None = 默认 30s。

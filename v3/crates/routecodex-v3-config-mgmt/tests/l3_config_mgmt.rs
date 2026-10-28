@@ -218,6 +218,7 @@ fn provider_file_write_then_read_roundtrip() {
             compatibility_profile: None,
             models: Default::default(),
             v3: None,
+            local: None,
             timeout: None,
             sse_first_frame_timeout_ms: None,
             headers: Default::default(),

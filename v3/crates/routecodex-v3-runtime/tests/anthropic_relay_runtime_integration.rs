@@ -757,8 +757,18 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
 #[tokio::test]
 async fn provider_error_enters_error01_06_without_success_projection() {
     let scope = "anthropic_provider_terminal";
-    let output = execute_v3_anthropic_relay_runtime(
-        &manifest(scope),
+    let mut manifest = manifest(scope);
+    manifest
+        .servers
+        .get_mut(scope)
+        .expect("anthropic relay test server")
+        .execution
+        .as_mut()
+        .expect("execution policy")
+        .attempt_store
+        .residence_timeout_ms = 500;
+    let error = execute_v3_anthropic_relay_runtime(
+        &manifest,
         V3AnthropicRelayRuntimeInput {
             server_id: scope.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -774,32 +784,15 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         &ErrorTransport,
     )
     .await
-    .unwrap();
-    assert_eq!(output.status, 502);
-    assert_eq!(output.client_response["error"]["message"], "network error");
-    assert_eq!(output.client_response["error"]["code"], "network_error");
+    .expect_err("a 429-only pool must remain recoverable until the residence bound");
     assert!(
-        output.client_response["error"].get("stage").is_none()
-            && output.client_response["error"].get("class").is_none()
-            && output.client_response["error"].get("error_node").is_none()
-            && output.client_response["error"].get("decision").is_none()
-            && output.client_response["error"]
-                .get("target_exhausted")
-                .is_none()
-            && output.client_response["error"]
-                .get("external_error")
-                .is_none(),
-        "Error06 body must not carry control-plane fields: {}",
-        output.client_response["error"]
+        matches!(
+            &error,
+            routecodex_v3_runtime::V3AnthropicRelayRuntimeError::Target(message)
+                if message.contains("provider action wait exceeded request residence deadline")
+        ),
+        "429 must wait for recovery and terminate only at the declared residence bound: {error}"
     );
-    assert!(
-        output.client_response["error"].get("type").is_none(),
-        "provider raw Anthropic error body must not bypass ErrorErr06 projection: {}",
-        output.client_response
-    );
-    assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
-    assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
-    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
 }
 
 #[tokio::test]
@@ -1087,8 +1080,18 @@ async fn responses_sse_strips_untyped_signature_from_anthropic_client_governance
 #[tokio::test]
 async fn responses_sse_without_terminal_fails_before_anthropic_success_projection() {
     let scope = "anthropic_terminal_missing";
+    let mut manifest = manifest(scope);
+    manifest
+        .servers
+        .get_mut(scope)
+        .expect("anthropic relay test server")
+        .execution
+        .as_mut()
+        .expect("execution policy")
+        .attempt_store
+        .residence_timeout_ms = 500;
     let output = execute_v3_anthropic_relay_runtime(
-        &manifest(scope),
+        &manifest,
         V3AnthropicRelayRuntimeInput {
             server_id: scope.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -1108,7 +1111,7 @@ async fn responses_sse_without_terminal_fails_before_anthropic_success_projectio
         &ResponsesThinkingSseWithoutTerminalTransport,
     )
     .await
-    .expect("provider codec failure must project through the standard error chain");
+    .expect("SSE without a terminal must terminate at the residence bound");
 
     assert_eq!(output.status, 502);
     assert_eq!(output.client_response["error"]["code"], "network_error");
@@ -1125,6 +1128,18 @@ async fn responses_sse_without_terminal_fails_before_anthropic_success_projectio
                 "V3Error06ClientProjected",
             ][..]
         )
+    );
+    assert!(
+        output
+            .terminal_disposition
+            .as_ref()
+            .is_some_and(|disposition| {
+                matches!(
+                    disposition,
+                    routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+                )
+            }),
+        "a terminal-less provider stream must break the client transport without error semantics: {output:?}"
     );
 }
 
