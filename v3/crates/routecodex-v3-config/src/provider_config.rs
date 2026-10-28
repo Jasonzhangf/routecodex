@@ -162,6 +162,7 @@ pub(crate) fn compile_provider_directory(
                 reasoning_effort: v3.reasoning_effort,
                 compatibility_profile,
                 features: v3.features,
+                local: provider.local.unwrap_or(false),
                 request_timeout_ms: provider
                     .timeout
                     .unwrap_or(DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS),
@@ -500,6 +501,10 @@ pub struct V2ProviderConfig {
     pub models: BTreeMap<String, V2ProviderModelConfig>,
     #[serde(default)]
     pub v3: Option<V2ProviderV3Config>,
+    /// Declares a local provider served on this machine. Only a declared local
+    /// provider may exceed the remote first-byte budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<bool>,
     /// per-request 总超时（毫秒）；默认 60_000（60s）。覆盖连接、响应头等待与 body 读取。
     #[serde(default)]
     pub timeout: Option<u64>,

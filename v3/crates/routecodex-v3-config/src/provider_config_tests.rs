@@ -117,6 +117,7 @@ id = "test-provider"
 enabled = true
 type = "openai"
 baseURL = "http://127.0.0.1:9999/v1"
+local = true
 timeout = 900000
 defaultModel = "model"
 
@@ -157,6 +158,7 @@ id = "test-provider"
 enabled = true
 type = "openai"
 baseURL = "http://127.0.0.1:9999/v1"
+local = true
 timeout = 900000
 defaultModel = "model"
 
@@ -212,6 +214,7 @@ id = "test-provider"
 enabled = true
 type = "openai"
 baseURL = "http://127.0.0.1:9999/v1"
+local = true
 defaultModel = "model"
 sse_first_frame_timeout_ms = 600000
 
@@ -444,6 +447,7 @@ fn generate_v2_provider_config_file_writes_camel_case_keys() {
             compatibility_profile: None,
             models: BTreeMap::new(),
             v3: None,
+            local: None,
             timeout: None,
             sse_first_frame_timeout_ms: None,
             headers: BTreeMap::new(),
