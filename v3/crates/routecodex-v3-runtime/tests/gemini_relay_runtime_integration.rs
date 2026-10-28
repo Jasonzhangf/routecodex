@@ -513,8 +513,18 @@ impl ResponsesTransport for MalformedErrorTransport {
 #[tokio::test]
 async fn provider_error_enters_error01_06_without_success_projection() {
     let server_id = "gemini_provider_error_projection";
-    let output = execute_v3_gemini_relay_runtime(
-        &manifest_for_action_gate_scope(server_id),
+    let mut manifest = manifest_for_action_gate_scope(server_id);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .expect("gemini relay test server")
+        .execution
+        .as_mut()
+        .expect("execution policy")
+        .attempt_store
+        .residence_timeout_ms = 500;
+    let error = execute_v3_gemini_relay_runtime(
+        &manifest,
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -533,36 +543,15 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         &ErrorTransport,
     )
     .await
-    .unwrap();
-    assert_eq!(output.status, 502);
-    let client_response = match output.client_body {
-        V3GeminiRelayClientBody::Json(value) => value,
-        V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON error body"),
-    };
-    assert_eq!(client_response["error"]["message"], "network error");
-    assert_eq!(client_response["error"]["code"], "network_error");
-    assert_eq!(
-        output
-            .node_trace
-            .iter()
-            .find(|node| **node == "V3ProviderReqOutbound09TransportRequest"),
-        Some(&"V3ProviderReqOutbound09TransportRequest")
-    );
+    .expect_err("a 429-only Gemini pool must remain recoverable until the residence bound");
     assert!(
-        output
-            .error_chain
-            .as_ref()
-            .is_some_and(|chain| chain.contains(&"V3Error03TargetLocalAction")),
-        "provider failure must retain its typed classification chain"
+        matches!(
+            &error,
+            routecodex_v3_runtime::V3GeminiRelayRuntimeError::Target(message)
+                if message.contains("provider action wait exceeded request residence deadline")
+        ),
+        "provider failure must wait for recovery and terminate only at the declared residence bound: {error}"
     );
-    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
-    assert!(
-        client_response["error"].get("status").is_none(),
-        "provider raw Gemini status must not bypass ErrorErr06 projection: {client_response}"
-    );
-    assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
-    assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
-    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
 }
 
 #[tokio::test]

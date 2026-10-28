@@ -58,17 +58,25 @@ export function assertClientResult(clientResult, expected, entryProtocol, deps =
     && (result.observation ?? result.observed ?? result.parsed) !== undefined;
 
   if (transport === 'closed' && !committed) {
-    if (hasStatus) diagnostics.push(`expected closed transport but received status ${result.status}`);
-    if (hasHeaders) diagnostics.push('expected closed transport but received response headers');
-    if (hasBytes) diagnostics.push('expected closed transport but received response body bytes');
-    if (hasBody) diagnostics.push('expected closed transport but received a parsed response body');
-    if (hasObservation) diagnostics.push('expected closed transport but received a parsed observation');
+    const sseKeepaliveClose = isSseKeepaliveOnlyClose(result, contentType, bodyText);
+    if (!sseKeepaliveClose) {
+      if (hasStatus) diagnostics.push(`expected closed transport but received status ${result.status}`);
+      if (hasHeaders) diagnostics.push('expected closed transport but received response headers');
+      if (hasBytes) diagnostics.push('expected closed transport but received response body bytes');
+      if (hasBody) diagnostics.push('expected closed transport but received a parsed response body');
+      if (hasObservation) diagnostics.push('expected closed transport but received a parsed observation');
+    }
     // A product-side socket close and a client-side abort both surface as
     // `closed`. Only the product close is acceptable when the case expects a
     // closed transport, so a client timeout/abort/overrun must not pass as one.
     const errorCode = result.error_detail?.code ?? result.error_code;
     if (['ETIMEDOUT', 'ABORT_ERR', 'RESPONSE_TOO_LARGE'].includes(errorCode)) {
       diagnostics.push(`expected product socket close but the test client stopped: ${errorCode}`);
+    }
+    if (sseKeepaliveClose) {
+      if (!(result.closed === true || result.aborted === true)) {
+        diagnostics.push('expected product socket close but the transport was not observably closed');
+      }
     }
     return { ok: diagnostics.length === 0, diagnostics: dedupe(diagnostics) };
   }
@@ -162,6 +170,16 @@ function completeReceiptDiagnostics(result) {
     diagnostics.push('client transport closed before completion');
   }
   return diagnostics;
+}
+
+function isSseKeepaliveOnlyClose(result, contentType, bodyText) {
+  if (result.status !== 200) return false;
+  if (!String(contentType ?? '').toLowerCase().includes('text/event-stream')) return false;
+  return !bodyText
+    .split(/\r\n|\n|\r/)
+    .map((line) => line.trimStart())
+    .filter((line) => line.length > 0)
+    .some((line) => !line.startsWith(':'));
 }
 
 // Interpret the actual wire representation once. Supplied observations cannot
