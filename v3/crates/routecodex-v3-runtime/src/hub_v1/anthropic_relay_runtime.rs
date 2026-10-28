@@ -1005,7 +1005,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 ),
             };
         let provider_request_snapshot = transport_request.provider_request_projection();
-        let _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
+        let mut _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
             admission.take_rate_limit_control(&mut pending_provider_action_recovery)
         });
         if pending_provider_action_recovery.is_some() {
@@ -1067,6 +1067,36 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     retry_selected = Some(selected);
                     trace.push("V3ProviderActionGateConsumedReevaluation");
                     continue;
+                }
+                V3ProviderActionRecoveryTransition::BudgetExpired(_) => {
+                    pending_provider_action_recovery = None;
+                    retry_selected = Some(selected);
+                    trace.push("V3ProviderActionGateRecoveryBudgetExpired");
+                    continue;
+                }
+                V3ProviderActionRecoveryTransition::MultiIdentityHoldElapsed(_) => {
+                    // The flat storm-avoidance hold only paused this request. The
+                    // replacement was resolved before it, so continue with that
+                    // attempt instead of selecting again.
+                    pending_provider_action_recovery = None;
+                    drop(_provider_action_permit.take());
+                    provider_action_permit_target = None;
+                    match admit_v3_selected_target_after_recovery(&selected) {
+                        V3AdmitAfterRecovery::Admitted(admission) => {
+                            selected_admission = Some(admission)
+                        }
+                        V3AdmitAfterRecovery::Busy => {
+                            let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                            failed_candidates.insert(busy_key.clone());
+                            request_local_busy_candidates.insert(busy_key);
+                            trace.push("V3ProviderActionGateRecoveryBusy");
+                            continue;
+                        }
+                        V3AdmitAfterRecovery::Failed(reason) => {
+                            return Err(V3AnthropicRelayRuntimeError::Target(reason))
+                        }
+                    }
+                    trace.push("V3ProviderActionGateMultiIdentityHoldElapsed");
                 }
             }
         }

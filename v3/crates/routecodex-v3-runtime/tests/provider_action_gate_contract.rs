@@ -1,9 +1,10 @@
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_runtime::{
-    V3ProviderActionGate, V3ProviderActionGateKey, V3ProviderActionGateMode,
-    V3ProviderActionProviderScope, V3ProviderActionRecoveryTransition,
+    v3_provider_action_recovery_budget, V3ProviderActionGate, V3ProviderActionGateKey,
+    V3ProviderActionGateMode, V3ProviderActionProviderScope, V3ProviderActionRecoveryTransition,
     V3_PROVIDER_ACTION_ISOLATED_DELAY_MS, V3_PROVIDER_ACTION_MEDIUM_DELAY_MS,
-    V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS,
+    V3_PROVIDER_ACTION_RECOVERY_ALTERNATIVE_IDENTITY_BUDGET_MS,
+    V3_PROVIDER_ACTION_RECOVERY_SOLE_IDENTITY_BUDGET_MS, V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS,
 };
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
@@ -15,6 +16,132 @@ fn key(error_family: &str) -> V3ProviderActionGateKey {
         "provider-a:key-a:model-a",
         error_family,
     )
+}
+
+#[test]
+fn recovery_budget_is_one_minute_for_a_sole_identity_and_three_seconds_otherwise() {
+    assert_eq!(V3_PROVIDER_ACTION_RECOVERY_SOLE_IDENTITY_BUDGET_MS, 60_000);
+    assert_eq!(
+        V3_PROVIDER_ACTION_RECOVERY_ALTERNATIVE_IDENTITY_BUDGET_MS,
+        3_000
+    );
+    assert_eq!(
+        v3_provider_action_recovery_budget(0),
+        Duration::from_millis(60_000)
+    );
+    assert_eq!(
+        v3_provider_action_recovery_budget(1),
+        Duration::from_millis(60_000)
+    );
+    assert_eq!(
+        v3_provider_action_recovery_budget(2),
+        Duration::from_millis(3_000)
+    );
+}
+
+#[tokio::test]
+async fn recovery_wait_releases_at_its_budget_instead_of_holding_forever() {
+    let gate = V3ProviderActionGate::default();
+    let failed = key("provider_http_503");
+    let failure = gate
+        .record_failure(&failed)
+        .expect("record provider failure");
+    let witness = failure.recovery_witness().expect("recovery witness");
+
+    let started = Instant::now();
+    let transition = tokio::time::timeout(
+        Duration::from_secs(5),
+        gate.wait_for_recovery_witness_with_budget(
+            &witness,
+            failed.provider_scope.clone(),
+            Duration::from_millis(150),
+        ),
+    )
+    .await
+    .expect("recovery hold exceeded its declared budget")
+    .expect("recovery wait transition");
+    assert!(
+        matches!(
+            transition,
+            V3ProviderActionRecoveryTransition::BudgetExpired(_)
+        ),
+        "an unrecoverable hold must release at its budget, never block the request"
+    );
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
+#[tokio::test]
+async fn recovery_wait_releases_at_its_budget_while_the_same_identity_holds_an_admission() {
+    let gate = V3ProviderActionGate::default();
+    let failed = key("provider_http_503");
+    let failure = gate
+        .record_failure(&failed)
+        .expect("record provider failure");
+    let witness = failure.recovery_witness().expect("recovery witness");
+    let holding_admission = gate
+        .wait_for_active_failure(failed.clone())
+        .await
+        .expect("holding provider action admission");
+
+    let started = Instant::now();
+    let transition = tokio::time::timeout(
+        Duration::from_secs(5),
+        gate.wait_for_recovery_witness_with_budget(
+            &witness,
+            failed.provider_scope.clone(),
+            Duration::from_millis(150),
+        ),
+    )
+    .await
+    .expect("an owned same-identity admission must bound, not indefinitely block, the hold")
+    .expect("recovery wait transition");
+    assert!(
+        matches!(
+            transition,
+            V3ProviderActionRecoveryTransition::BudgetExpired(_)
+        ),
+        "the production stall branch must release at its budget, got {transition:?}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(5));
+
+    drop(holding_admission);
+}
+
+#[tokio::test]
+async fn same_identity_success_still_releases_before_the_budget() {
+    let gate = V3ProviderActionGate::default();
+    let failed = key("provider_http_503");
+    let failure = gate
+        .record_failure(&failed)
+        .expect("record provider failure");
+    let witness = failure.recovery_witness().expect("recovery witness");
+
+    let waiting_gate = gate.clone();
+    let waiting_scope = failed.provider_scope.clone();
+    let started = Instant::now();
+    let waiter = tokio::spawn(async move {
+        waiting_gate
+            .wait_for_recovery_witness_with_budget(&witness, waiting_scope, Duration::from_secs(60))
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    gate.record_success(&failed)
+        .expect("record provider success");
+    let transition = waiter
+        .await
+        .expect("waiter task completes")
+        .expect("recovery wait transition");
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "same-identity success must release the hold well before its budget"
+    );
+    assert!(
+        matches!(
+            transition,
+            V3ProviderActionRecoveryTransition::ReleasedBySuccess(_)
+        ),
+        "same-identity success must release the hold as ReleasedBySuccess, got {transition:?}"
+    );
 }
 
 #[test]

@@ -57,8 +57,14 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::new();
+    // Each failure target declares two distinct identities (the failing
+    // `{id}.recovery` and the `fairness_spare` spare), so the mandated
+    // multi-identity storm-avoidance hold
+    // (`req-20261027-single-identity-recovery`) makes one request spend its
+    // flat three seconds before the spare attempt. The budget below only has to
+    // exceed that hold; independence and exactly-once counting stay asserted.
     timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(10),
         futures_util::future::join_all(ids.iter().map(|id| fail(port, id))),
     )
     .await

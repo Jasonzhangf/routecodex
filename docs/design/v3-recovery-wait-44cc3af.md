@@ -175,17 +175,48 @@ flowchart TD
 
 User contract: 429 is backpressure, not sufficient health failure. Cross-session provider success preserves provider health. A full or all-cooled target waits with increasing backoff, preserving key eligibility and client cancellation, before final health review and terminal exhaustion. Original errors remain in the Error chain. No synthetic business completion.
 
-## Current correction: identity eligibility before waiting
+## Current correction (requirement v2): multi-identity storm-avoidance hold
+
+`.appsdk/requirements.json` `routecodex-last-provider-failure-terminal-policy` v2
+(`req-20261027-single-identity-recovery`) supersedes the "immediate reselect"
+behavior in the next section. It requires, verbatim: after a real provider attempt
+failure, a target declaring more than one distinct `provider.model.key` identity
+waits three seconds before it continues selecting or attempting; a target
+declaring exactly one identity waits for another session's real business success
+on that same identity, or at most one minute, whichever comes first. The product
+owner's binding ruling: the wait exists to avoid a provider error storm, so an
+implementation that cannot avoid the storm is wrong.
+
+Consequences:
+
+- "The current request immediately reselects a healthy alternative after 429"
+  and "A429→healthyB is an immediate typed reselect" describe the prior
+  behavior. Under requirement v2 a multi-identity target spends the flat
+  three-second window before the replacement attempt, even when a healthy
+  alternative is already eligible. The window is a floor, not an upper bound;
+  it records no provider failure and mutates no lane.
+- Exact-identity constraint is unchanged: only the identity that actually failed
+  is constrained; a 429 belongs to the failed identity, not its replacement, and
+  no other identity's success, probe or header-only response early-releases it.
+- A sole-identity target keeps the identity-bound wait: real business success on
+  the same identity releases early, otherwise one minute.
+- The wait is a single sleep bounded by the original request residence deadline.
+  It never extends the request, never counts as a provider failure, never
+  authorizes termination, and SSE transport keepalive continues during it.
+
+## Identity eligibility before waiting (prior acceptance, superseded for the
+multi-identity error case)
 
 The user rejected the4937candidate because new requests waited on a selected
 429identity while other healthy candidates were available. Production has been
-restored to the verified4935pair. This correction supersedes the earlier
+restored to the verified4935pair. That correction superseded the earlier
 unconditional pre-send-wait interpretation below; those sections describe the
-previous implementation and its regression history, not the new acceptance.
+previous implementation and its regression history. Requirement v2 then replaced
+immediate reselect for multi-identity targets; see the section above.
 
 Only the exact `provider.model.key` (and declared interface identity) that returned
 429 is constrained. Its backoff is not a server, route, pool or request-wide gate.
-The current request immediately reselects a healthy alternative after429. Later
+Outside the requirement-v2 hold, the current request reselects a healthy alternative after429. Later
 requests skip that constrained identity and independently use eligible B/C or
 otherkeys/models, preserving their configured concurrency. Only a request with
 no eligible alternative waits, without holding a business-capacity lease.
@@ -213,7 +244,8 @@ flowchart TD
 ```
 
 Each admission round is SESE. New rounds reuse the captured target; they do not
-reenter Router. A429→healthyB is an immediate typed reselect, not admission to A's
+reenter Router. Under requirement v2, A429→healthyB first spends the flat
+three-second multi-identity hold, then reselects B; it is not admission to A's
 waiting lane followed by a B send. Selection/admission must avoid a read-then-wait
 race that queues a burst on A while B is usable. Due recovery for A is coordinated
 only on A and remains cancellable; real matching success restores normal A

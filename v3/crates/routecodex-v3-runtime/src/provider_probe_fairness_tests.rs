@@ -234,8 +234,11 @@ async fn witness(startup: bool) {
         .cloned()
         .collect();
     for id in &failing_ids {
+        // The fixture fails a real attempt on a multi-identity target, so the
+        // request now spends the mandated 3 s storm-avoidance hold before the
+        // eligible fallback delivers. The prior 2 s budget predates that hold.
         let result = timeout(
-            Duration::from_secs(2),
+            Duration::from_secs(10),
             business(
                 manifest.clone(),
                 health.clone(),
