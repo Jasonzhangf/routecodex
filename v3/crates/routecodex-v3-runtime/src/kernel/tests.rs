@@ -27,6 +27,10 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
     let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
         route: plan.expanded.route.clone(),
         candidate: plan.expanded.candidates[0].clone(),
+        distinct_identity_count:
+            routecodex_v3_target::V3TargetInterpreter::distinct_declared_identity_count(
+                &plan.expanded.candidates,
+            ),
         candidate_count: plan.expanded.candidates.len(),
         unavailable_candidates: Vec::new(),
         attempts: 1,
