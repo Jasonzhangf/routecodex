@@ -1,6 +1,108 @@
 use super::*;
 use axum::response::IntoResponse;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn issue44cc3af_inactive_window_does_not_spin_or_block_http() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("44cc3af-inactive-window");
+    std::env::set_var("V3_P6_TEST_KEY", "test-key");
+    let (good_url, mut good_requests, good_release, good_shutdown) =
+        start_controlled_held_upstream().await;
+    let mut manifest = concurrency_switch_manifest("http://127.0.0.1:9/v1", &good_url);
+    use_native_direct_responses(&mut manifest);
+    let ids: Vec<String> = manifest.providers.keys().cloned().collect();
+    let minute = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        / 60)
+        % 1440;
+    let format_minute = |minute: u64| format!("{:02}:{:02}", minute / 60, minute % 60);
+    let availability = routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+        timezone: "UTC".into(),
+        guard_minutes: 0,
+        periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
+            start: format_minute((minute + 3) % 1440),
+            end: format_minute((minute + 4) % 1440),
+        }],
+    };
+    manifest
+        .providers
+        .get_mut(&ids[0])
+        .unwrap()
+        .models
+        .get_mut("test")
+        .unwrap()
+        .availability = Some(availability);
+    manifest
+        .forwarders
+        .get_mut("concurrency")
+        .unwrap()
+        .targets
+        .retain(|target| target.provider.as_deref() == Some(ids[0].as_str()));
+    let good_model = format!("{}.test", ids[1]);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let mut waiting = Vec::new();
+    for _ in 0..2 {
+        let client = client.clone();
+        let base = base.clone();
+        waiting.push(tokio::spawn(async move {
+            let response = client
+                .post(format!("{base}/v1/responses"))
+                .header("session-id", "independent")
+                .json(&json!({"model":"client-test","input":"waiting","stream":true}))
+                .send()
+                .await?;
+            response.text().await
+        }));
+    }
+    for request in &mut waiting {
+        assert!(
+            timeout(Duration::from_millis(100), request).await.is_err(),
+            "inactive route must wait before retry"
+        );
+    }
+    assert!(
+        good_requests.try_recv().is_err(),
+        "waiting requests must not reach the unrelated provider"
+    );
+    let good_client = client.clone();
+    let endpoint = format!("{base}/v1/responses");
+    let healthy = tokio::spawn(async move {
+        good_client
+            .post(endpoint)
+            .header("session-id", "independent")
+            .json(&json!({"model":good_model,"input":"held","stream":true}))
+            .send()
+            .await
+            .unwrap()
+    });
+    timeout(Duration::from_secs(2), good_requests.recv())
+        .await
+        .expect("independent request must reach healthy provider")
+        .unwrap();
+    good_release.add_permits(1);
+    let response = timeout(Duration::from_secs(2), healthy)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_responses_sse_delivered_business_text(
+        &response.text().await.unwrap(),
+        "held response released",
+    );
+    for request in waiting {
+        request.abort();
+    }
+    timeout(Duration::from_secs(2), handle.shutdown())
+        .await
+        .expect("waiting requests must not block shutdown");
+    good_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
 #[tokio::test]
 async fn issue44cc3af_all_tried_transport_failure_waits_for_recovered_peer() {
     assert_all_tried_transport_failure_recovers(false, false).await;

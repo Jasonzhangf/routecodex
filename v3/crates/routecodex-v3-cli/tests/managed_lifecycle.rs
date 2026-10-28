@@ -1046,6 +1046,86 @@ fn assert_start_stdout(output: &Output, label: &str) {
 }
 
 #[test]
+fn inactive_recovery_requests_do_not_block_sigint_exit() {
+    struct OwnedServer(Child);
+    impl Drop for OwnedServer {
+        fn drop(&mut self) {
+            if matches!(self.0.try_wait(), Ok(None)) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+    }
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let ports = [free_port(), free_port()];
+    let config = write_config_with_debug(&root, ports, false, false);
+    let source = fs::read_to_string(&config).unwrap();
+    let minute = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        / 60)
+        % 1440;
+    let minute_text = |minute: u64| format!("{:02}:{:02}", minute / 60, minute % 60);
+    let availability = format!(
+        "[providers.test.models.test.availability]\ntimezone = \"UTC\"\nperiods = [{{ start = \"{}\", end = \"{}\" }}]\n[route_groups.default.pools.default]",
+        minute_text((minute + 3) % 1440), minute_text((minute + 4) % 1440)
+    );
+    let marker = "[route_groups.default.pools.default]";
+    assert_eq!(source.matches(marker).count(), 1);
+    fs::write(&config, source.replacen(marker, &availability, 1)).unwrap();
+    let mut server = OwnedServer(managed_test_command(env!("CARGO_BIN_EXE_rccv3"), &state_root)
+        .args(["start", "--config"])
+        .arg(&config)
+        .env("HOME", &home)
+        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(&state_root),
+        )
+        .env(
+            "ROUTECODEX_V3_ADMIN_BIND",
+            format!("127.0.0.1:{}", free_port()),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap());
+    for port in ports {
+        wait_port(port, true);
+    }
+    let body = r#"{"model":"client-test","input":"wait","stream":true}"#;
+    let request = format!("POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
+    let mut clients = Vec::new();
+    for _ in 0..16 {
+        let mut client = TcpStream::connect(("127.0.0.1", ports[0])).unwrap();
+        client.write_all(request.as_bytes()).unwrap();
+        clients.push(client);
+    }
+    sleep(Duration::from_millis(300));
+    let pid = server.0.id();
+    assert_eq!(unsafe { libc::kill(pid as libc::pid_t, libc::SIGINT) }, 0);
+    let exited = wait_for_child_exit(&mut server.0, Duration::from_secs(5));
+    if !exited {
+        server.0.kill().unwrap();
+        let _ = server.0.wait();
+    }
+    assert!(
+        exited,
+        "test-owned foreground RCC must exit after SIGINT while requests wait"
+    );
+    drop(clients);
+    for port in ports {
+        wait_port(port, false);
+    }
+}
+
+#[test]
 fn temporary_config_managed_child_exits_after_config_removal() {
     let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();

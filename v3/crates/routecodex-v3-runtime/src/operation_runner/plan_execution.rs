@@ -16,7 +16,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
 use routecodex_v3_target::{
     V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
-    V3TargetExhaustion,
+    V3TargetExhaustion, V3TargetInterpreter,
 };
 use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
 use serde_json::Value;
@@ -1018,6 +1018,7 @@ pub(crate) async fn wait_for_target_recovery(
             .filter(|candidate| {
                 let key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate);
                 !permanent.contains(&key) && !busy.contains(&key)
+                    && V3TargetInterpreter::candidate_admitted(candidate, now_ms)
                     && availability.availability_for_interface(
                         &candidate.provider_id, &candidate.interface_id,
                         Some(&candidate.auth_alias), Some(&candidate.model_id), now_ms,
@@ -1040,6 +1041,8 @@ pub(crate) async fn wait_for_target_recovery(
                 })
         });
         if recovered_alternative {
+            *excluded = permanent;
+            busy.clear();
             return Ok(true);
         }
         tokio::select! {
@@ -1246,6 +1249,45 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         assert!(
             matches!(masked, V3PlanExecutionOutcome::Exhausted { .. }),
             "a preferred candidate must not escape its current exhausted-scan mask"
+        );
+    }
+
+    #[tokio::test]
+    async fn target_recovery_does_not_reselect_ineligible_candidate() {
+        let manifest = test_manifest("r05_ineligible_recovery");
+        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+        let scope = V3ProviderFailureSessionScope::new("test", "default", "ineligible").unwrap();
+        let request = json!({"model":"client-model", "input":"opaque"});
+        let (_, mut expanded) = preplan_test_input(&manifest, &scope, &request);
+        expanded.candidates[0].model_capabilities = vec!["text".into()];
+        expanded.candidates[0].required_capabilities = vec!["vision".into()];
+        let now_ms =
+            crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                .unwrap();
+        assert!(!V3TargetInterpreter::candidate_admitted(
+            &expanded.candidates[0],
+            now_ms
+        ));
+        let budget =
+            crate::execution_control::V3AttemptBudget::from_manifest(&manifest, "test").unwrap();
+        let mut excluded = BTreeSet::new();
+        let mut busy = BTreeSet::new();
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            wait_for_target_recovery(
+                &expanded,
+                &health,
+                &scope,
+                &mut excluded,
+                &mut busy,
+                now_ms,
+                &budget,
+            ),
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "an ineligible candidate must not immediately trigger reselection"
         );
     }
 
