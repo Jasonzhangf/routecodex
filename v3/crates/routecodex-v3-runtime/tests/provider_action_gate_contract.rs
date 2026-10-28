@@ -21,7 +21,10 @@ fn key(error_family: &str) -> V3ProviderActionGateKey {
 #[test]
 fn recovery_budget_is_one_minute_for_a_sole_identity_and_three_seconds_otherwise() {
     assert_eq!(V3_PROVIDER_ACTION_RECOVERY_SOLE_IDENTITY_BUDGET_MS, 60_000);
-    assert_eq!(V3_PROVIDER_ACTION_RECOVERY_ALTERNATIVE_IDENTITY_BUDGET_MS, 3_000);
+    assert_eq!(
+        V3_PROVIDER_ACTION_RECOVERY_ALTERNATIVE_IDENTITY_BUDGET_MS,
+        3_000
+    );
     assert_eq!(
         v3_provider_action_recovery_budget(0),
         Duration::from_millis(60_000)
@@ -40,7 +43,9 @@ fn recovery_budget_is_one_minute_for_a_sole_identity_and_three_seconds_otherwise
 async fn recovery_wait_releases_at_its_budget_instead_of_holding_forever() {
     let gate = V3ProviderActionGate::default();
     let failed = key("provider_http_503");
-    let failure = gate.record_failure(&failed).expect("record provider failure");
+    let failure = gate
+        .record_failure(&failed)
+        .expect("record provider failure");
     let witness = failure.recovery_witness().expect("recovery witness");
 
     let started = Instant::now();
@@ -69,7 +74,9 @@ async fn recovery_wait_releases_at_its_budget_instead_of_holding_forever() {
 async fn recovery_wait_releases_at_its_budget_while_the_same_identity_holds_an_admission() {
     let gate = V3ProviderActionGate::default();
     let failed = key("provider_http_503");
-    let failure = gate.record_failure(&failed).expect("record provider failure");
+    let failure = gate
+        .record_failure(&failed)
+        .expect("record provider failure");
     let witness = failure.recovery_witness().expect("recovery witness");
     let holding_admission = gate
         .wait_for_active_failure(failed.clone())
@@ -104,7 +111,9 @@ async fn recovery_wait_releases_at_its_budget_while_the_same_identity_holds_an_a
 async fn same_identity_success_still_releases_before_the_budget() {
     let gate = V3ProviderActionGate::default();
     let failed = key("provider_http_503");
-    let failure = gate.record_failure(&failed).expect("record provider failure");
+    let failure = gate
+        .record_failure(&failed)
+        .expect("record provider failure");
     let witness = failure.recovery_witness().expect("recovery witness");
 
     let waiting_gate = gate.clone();
@@ -112,15 +121,12 @@ async fn same_identity_success_still_releases_before_the_budget() {
     let started = Instant::now();
     let waiter = tokio::spawn(async move {
         waiting_gate
-            .wait_for_recovery_witness_with_budget(
-                &witness,
-                waiting_scope,
-                Duration::from_secs(60),
-            )
+            .wait_for_recovery_witness_with_budget(&witness, waiting_scope, Duration::from_secs(60))
             .await
     });
     tokio::time::sleep(Duration::from_millis(25)).await;
-    gate.record_success(&failed).expect("record provider success");
+    gate.record_success(&failed)
+        .expect("record provider success");
     let transition = waiter
         .await
         .expect("waiter task completes")

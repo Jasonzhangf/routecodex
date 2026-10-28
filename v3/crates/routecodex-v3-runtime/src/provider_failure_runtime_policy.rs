@@ -1073,12 +1073,12 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 // shared holder applies the same hold to it from the identity count.
                 let multi_identity_hold =
                     if status >= 400 && !is_request_local_compat_failure && status != 429 {
-                    crate::provider_action_gate::v3_provider_action_multi_identity_hold(
-                        selected.distinct_identity_count,
-                    )
-                } else {
-                    None
-                };
+                        crate::provider_action_gate::v3_provider_action_multi_identity_hold(
+                            selected.distinct_identity_count,
+                        )
+                    } else {
+                        None
+                    };
                 let recovery = if is_request_local_compat_failure || status != 429 {
                     None
                 } else {
@@ -1143,7 +1143,9 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                                 .map_err(v3_relay_provider_policy_ordinary_error)?,
                         )
                     },
-                    !is_request_local_compat_failure && status != 429 && multi_identity_hold.is_none(),
+                    !is_request_local_compat_failure
+                        && status != 429
+                        && multi_identity_hold.is_none(),
                 )
                 .map_err(Err)?;
                 if is_request_local_compat_failure {

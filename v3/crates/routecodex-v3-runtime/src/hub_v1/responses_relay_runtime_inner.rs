@@ -835,8 +835,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 selected_admission = Some(admission)
                             }
                             V3AdmitAfterRecovery::Busy => {
-                                let busy_key =
-                                    v3_relay_provider_candidate_key(&selected.candidate);
+                                let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
                                 failed_candidates.insert(busy_key.clone());
                                 request_local_busy_candidates.insert(busy_key);
                                 trace.push("V3ProviderActionGateRecoveryBusy");

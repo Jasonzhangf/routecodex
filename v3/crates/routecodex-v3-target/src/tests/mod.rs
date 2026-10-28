@@ -3683,14 +3683,16 @@ fn distinct_declared_identity_count_deduplicates_repeated_identity_declarations(
         .models
         .get_mut("m")
         .unwrap()
-        .availability = Some(routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
-        timezone: "Asia/Shanghai".into(),
-        guard_minutes: 0,
-        periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
-            start: "00:00".into(),
-            end: "00:01".into(),
-        }],
-    });
+        .availability = Some(
+        routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+            timezone: "Asia/Shanghai".into(),
+            guard_minutes: 0,
+            periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
+                start: "00:00".into(),
+                end: "00:01".into(),
+            }],
+        },
+    );
     let expanded_two_models = expanded_with(&manifest_two_models, &target, 0);
     assert_eq!(
         V3TargetInterpreter::distinct_declared_identity_count(&expanded_two_models.candidates),

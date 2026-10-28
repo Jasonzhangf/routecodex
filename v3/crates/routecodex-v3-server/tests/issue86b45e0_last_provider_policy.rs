@@ -87,11 +87,7 @@ impl Entry {
         Self::start_with_b_failure(two, false).await
     }
     async fn start_with_b_failure(two: bool, b_fail: bool) -> Self {
-        let (a_port, a, a_task) = peer(
-            FailMode::ServiceUnavailable,
-            "A",
-        )
-        .await;
+        let (a_port, a, a_task) = peer(FailMode::ServiceUnavailable, "A").await;
         let (b_port, b, b_task) = peer(
             if b_fail {
                 FailMode::ServiceUnavailable
@@ -428,7 +424,10 @@ targets = [{{ kind = "provider_model", provider = "a", model = "wire-a", key = "
         .await
         .unwrap();
     let elapsed = started.elapsed();
-    let calls = (a.calls.load(Ordering::SeqCst), b.calls.load(Ordering::SeqCst));
+    let calls = (
+        a.calls.load(Ordering::SeqCst),
+        b.calls.load(Ordering::SeqCst),
+    );
     let pool = reqwest::get(format!("{}/_routecodex/health/cooldown-pool", base))
         .await
         .unwrap()
@@ -536,7 +535,10 @@ targets = [{{ kind = "provider_model", provider = "a", model = "wire-a", key = "
         .await
         .unwrap();
     let elapsed = started.elapsed();
-    let calls = (a.calls.load(Ordering::SeqCst), b.calls.load(Ordering::SeqCst));
+    let calls = (
+        a.calls.load(Ordering::SeqCst),
+        b.calls.load(Ordering::SeqCst),
+    );
     let pool = reqwest::get(format!("{}/_routecodex/health/cooldown-pool", base))
         .await
         .unwrap()
@@ -645,7 +647,10 @@ targets = [{{ kind = "provider_model", provider = "a", model = "wire-a", key = "
         .await
         .unwrap();
     let elapsed = started.elapsed();
-    let calls = (a.calls.load(Ordering::SeqCst), b.calls.load(Ordering::SeqCst));
+    let calls = (
+        a.calls.load(Ordering::SeqCst),
+        b.calls.load(Ordering::SeqCst),
+    );
     let pool = reqwest::get(format!("{}/_routecodex/health/cooldown-pool", base))
         .await
         .unwrap()

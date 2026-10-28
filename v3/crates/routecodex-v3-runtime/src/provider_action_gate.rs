@@ -38,9 +38,8 @@ pub fn v3_provider_action_recovery_budget(candidate_count: usize) -> Duration {
 /// distinct `provider.model.key` identity. `None` for a sole identity, whose
 /// recovery stays identity-bound (same-identity real success or its budget).
 pub fn v3_provider_action_multi_identity_hold(distinct_identity_count: usize) -> Option<Duration> {
-    (distinct_identity_count > 1).then(|| {
-        Duration::from_millis(V3_PROVIDER_ACTION_RECOVERY_ALTERNATIVE_IDENTITY_BUDGET_MS)
-    })
+    (distinct_identity_count > 1)
+        .then(|| Duration::from_millis(V3_PROVIDER_ACTION_RECOVERY_ALTERNATIVE_IDENTITY_BUDGET_MS))
 }
 
 #[cfg(test)]
@@ -492,9 +491,14 @@ impl V3ProviderActionGate {
                 ));
             }
         }
-        self.register_waiter(ticket.key().clone(), true, Some(ticket.generation()), Some(budget))?
-            .wait_recovery()
-            .await
+        self.register_waiter(
+            ticket.key().clone(),
+            true,
+            Some(ticket.generation()),
+            Some(budget),
+        )?
+        .wait_recovery()
+        .await
     }
 
     pub fn record_success(&self, key: &V3ProviderActionGateKey) -> Result<(), String> {
@@ -845,9 +849,9 @@ impl V3ProviderActionWaiter {
             V3ProviderActionRecoveryTransition::Consumed(_) => {
                 Err("provider action waiter recovery lane was already consumed".to_string())
             }
-            V3ProviderActionRecoveryTransition::BudgetExpired(_) => Err(
-                "provider action waiter recovery budget expired without admission".to_string(),
-            ),
+            V3ProviderActionRecoveryTransition::BudgetExpired(_) => {
+                Err("provider action waiter recovery budget expired without admission".to_string())
+            }
             // The flat multi-identity hold is applied by the shared recovery
             // holder, not by a gate waiter, so a waiter never observes it.
             V3ProviderActionRecoveryTransition::MultiIdentityHoldElapsed(_) => Err(
