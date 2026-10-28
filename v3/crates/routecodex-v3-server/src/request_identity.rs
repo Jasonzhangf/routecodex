@@ -52,6 +52,27 @@ pub(crate) fn next_v3_console_request_identity(
         .next_request_identity(&entry, provider, &model)
 }
 
+/// Commits the request success count exactly once for one allocated identity.
+///
+/// The allocation itself never counts, so every error terminal (entry
+/// validation, error frames, provider exhaustion, SSE failure or disconnect)
+/// leaves `totalCount`/`windowCount` untouched. This call is the only writer of
+/// the success counts, and the identity's commit claim makes repeated or
+/// retried terminal paths idempotent.
+pub(crate) fn commit_v3_console_request_success(
+    state: &V3ListenerState,
+    identity: &V3AllocatedRequestIdentity,
+) -> Result<(), String> {
+    if !identity.claim_success_commit() {
+        return Ok(());
+    }
+    state
+        .request_counter
+        .lock()
+        .map_err(|_| "V3 request id counter lock is poisoned".to_string())?
+        .commit_request_success()
+}
+
 pub(crate) fn format_v3_request_id_entry(endpoint: &str) -> String {
     let raw = endpoint.to_ascii_lowercase();
     if raw.contains("/v1/responses") {

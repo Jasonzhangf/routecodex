@@ -1477,11 +1477,14 @@ fn request_id_from_line(line: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-fn request_counter_suffix_from_line(line: &str) -> Option<(u64, u64)> {
-    let request_id = request_id_from_line(line)?;
-    let mut parts = request_id.rsplit('-');
-    let daily = parts.next()?.parse::<u64>().ok()?;
+fn request_count_cell_from_line(line: &str) -> Option<(u64, u64)> {
+    let plain = strip_ansi(line);
+    let start = plain.find("[#")? + 2;
+    let rest = &plain[start..];
+    let end = rest.find(']')?;
+    let mut parts = rest[..end].split('/');
     let total = parts.next()?.parse::<u64>().ok()?;
+    let daily = parts.next()?.parse::<u64>().ok()?;
     Some((total, daily))
 }
 
@@ -2758,17 +2761,17 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
         started_lines.len() >= 3,
         "top-level start must show every request start, got:\n{start_stdout}"
     );
-    let request_counters = started_lines
+    let request_count_cells = started_lines
         .iter()
         .take(2)
-        .filter_map(|line| request_counter_suffix_from_line(line))
+        .map(|line| request_count_cell_from_line(line))
         .collect::<Vec<_>>();
     assert_eq!(
-        request_counters,
-        vec![(1, 1), (2, 2)],
-        "visible request ids must use production total/daily suffix counters, got:\n{start_stdout}"
+        request_count_cells,
+        vec![Some((1, 1)), Some((2, 2))],
+        "each successful request must render its predicted total/daily count cell, got:\n{start_stdout}"
     );
-    for line in started_lines.iter().take(2) {
+    for (index, line) in started_lines.iter().take(2).enumerate() {
         let request_id = request_id_from_line(line).unwrap();
         assert!(
             request_id.starts_with("openai-responses-router-test-")
@@ -2779,16 +2782,25 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
             request_id.contains('T'),
             "request id must include production timestamp, got {request_id}"
         );
+        assert!(
+            request_id.ends_with(&format!("-{}", index + 1)),
+            "request id must end with the monotonic allocation sequence, got {request_id}"
+        );
     }
-    let invalid_error_id = start_stderr
+    let invalid_error_line = start_stderr
         .lines()
         .find(|line| strip_ansi(line).contains("❌ [/v1/responses]"))
-        .and_then(request_id_from_line)
+        .expect("invalid JSON must produce an error line");
+    let invalid_error_id = request_id_from_line(invalid_error_line)
         .expect("invalid JSON error line must include a request id");
     assert!(
         invalid_error_id.starts_with("openai-responses-router-unknown-")
-            && invalid_error_id.ends_with("-3-3"),
-        "pre-body errors must still allocate production-shaped total/daily request id, got stderr:\n{start_stderr}"
+            && invalid_error_id.ends_with("-3"),
+        "pre-body errors must consume the next allocation sequence, got stderr:\n{start_stderr}"
+    );
+    assert!(
+        !strip_ansi(invalid_error_line).contains("[#"),
+        "error lines must not render a request count cell, got stderr:\n{start_stderr}"
     );
     let unknown_path_error_id = start_stderr
         .lines()
@@ -2797,10 +2809,35 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
         .expect("unknown path error line must include a request id");
     assert!(
         unknown_path_error_id.starts_with("openai-chat-router-unknown-")
-            && unknown_path_error_id.ends_with("-4-4")
+            && unknown_path_error_id.ends_with("-4")
             && !plain_start_stderr.contains("❌ [unknown]")
             && !plain_start_stderr.contains("request pre-request failed"),
-        "404 errors must use endpoint path and continuous production-shaped request id, got stderr:\n{start_stderr}"
+        "404 errors must use endpoint path and consume the next allocation sequence, got stderr:\n{start_stderr}"
+    );
+    let before_restart = started_lines
+        .iter()
+        .take(2)
+        .filter(|line| strip_ansi(line).contains("[#"))
+        .count();
+    assert_eq!(
+        before_restart, 2,
+        "the two successful dry-run requests must each render a count cell, got:\n{start_stdout}"
+    );
+    let counter = serde_json::from_slice::<Value>(
+        &std::fs::read(request_counter_file(&state_root)).expect("request counter file must exist"),
+    )
+    .expect("request counter file must be JSON");
+    assert_eq!(
+        counter["totalCount"], 3,
+        "only the three delivered dry-run responses may count, got {counter}"
+    );
+    assert_eq!(
+        counter["windowCount"], 3,
+        "only the three delivered dry-run responses may count in the local day, got {counter}"
+    );
+    assert_eq!(
+        counter["sequence"], 5,
+        "every request including both error terminals must consume one sequence, got {counter}"
     );
     let first_color = leading_ansi_color(started_lines[0]).expect("first session must be colored");
     let second_color =

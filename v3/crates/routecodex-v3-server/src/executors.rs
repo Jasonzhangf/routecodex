@@ -671,6 +671,29 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
         ) {
             return response;
         }
+        // include_usage answers "is the client response body not a stream". This
+        // lane populates stream_observation for both the JSON and the SSE
+        // closeout, so is_none() is not the client-body truth; the typed
+        // client_body.is_sse() is.
+        let client_body_is_sse = relay_output.client_body.is_sse();
+        let stream_console_finalizer = if client_body_is_sse {
+            match (
+                relay_output.stream_observation.clone(),
+                relay_output.observability.clone(),
+            ) {
+                (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {
+                    context: console_context.clone(),
+                    status: relay_output.status,
+                    node_trace: relay_output.node_trace.clone(),
+                    observability,
+                    stream_observation,
+                    started_at,
+                }),
+                _ => None,
+            }
+        } else {
+            None
+        };
         if let Some(observability) = relay_output.observability.as_ref() {
             emit_v3_observability_console_lines(
                 &console_context,
@@ -678,7 +701,7 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
                 &relay_output.node_trace,
                 observability,
                 started_at,
-                true,
+                !client_body_is_sse,
             );
         }
         let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(
@@ -688,7 +711,11 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
             &request_id,
             &relay_output,
         );
-        let response = anthropic_relay_output_response(relay_output, requested_stream);
+        let response = anthropic_relay_output_response(
+            relay_output,
+            stream_console_finalizer,
+            requested_stream,
+        );
         return match client_response_capture {
             Some(capture) => capture.defer_into(response),
             None => response,
@@ -1037,6 +1064,7 @@ pub(crate) fn gemini_relay_output_response(
 
 pub(crate) fn anthropic_relay_output_response(
     output: V3AnthropicRelayRuntimeOutput,
+    stream_console_finalizer: Option<V3SseConsoleFinalizer>,
     requested_stream: bool,
 ) -> Response<Body> {
     if output.error_chain.is_some() {
@@ -1064,7 +1092,10 @@ pub(crate) fn anthropic_relay_output_response(
         );
     let body = match frame.body {
         V3Server16Body::Sse(client_stream) => v3_live_client_sse_body(client_stream, None),
-        V3Server16Body::CommittedSse(client_stream) => v3_client_sse_body(client_stream, None),
+        V3Server16Body::CommittedSse(client_stream) => v3_client_sse_body(
+            wrap_v3_committed_relay_sse_console_stream(client_stream, stream_console_finalizer),
+            None,
+        ),
         V3Server16Body::Json(client_response) => Body::from(
             serde_json::to_vec(&client_response).expect("typed V3 Anthropic Relay projection"),
         ),

@@ -1566,6 +1566,12 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                     error,
                 );
             }
+            // include_usage answers "is the client response body not a stream".
+            // This lane populates stream_observation for both the JSON and the
+            // SSE closeout, so is_none() is not the client-body truth; the typed
+            // client_body.is_sse() is. client_body is consumed by
+            // into_v3_resp_15_client_payload, so read the flag before the emit.
+            let client_body_is_sse = output.client_body.is_sse();
             if let Some(observability) = output.observability.as_ref() {
                 let mut console_observability = observability.clone();
                 if let Err(error) = merge_v3_runtime_stream_observation(
@@ -1584,10 +1590,30 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                         &output.node_trace,
                         &console_observability,
                         started_at,
-                        true,
+                        !client_body_is_sse,
                     );
                 }
             }
+            let stream_console_finalizer = if client_body_is_sse {
+                match (
+                    output.stream_observation.clone(),
+                    output.observability.clone(),
+                ) {
+                    (Some(stream_observation), Some(observability)) => {
+                        Some(V3SseConsoleFinalizer {
+                            context: console_context.clone(),
+                            status: output.status,
+                            node_trace: output.node_trace.clone(),
+                            observability,
+                            stream_observation,
+                            started_at,
+                        })
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
             let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(
                 &state,
                 entry_protocol,
@@ -1595,7 +1621,8 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                 &request_id,
                 &output,
             );
-            let response = anthropic_relay_output_response(output, requested_stream);
+            let response =
+                anthropic_relay_output_response(output, stream_console_finalizer, requested_stream);
             return match client_response_capture {
                 Some(capture) => capture.defer_into(response),
                 None => response,

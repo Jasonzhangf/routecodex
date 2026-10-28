@@ -1900,12 +1900,8 @@ fn test_v3_console_emission_context(
     headers: &HeaderMap,
     payload: &Value,
 ) -> V3ConsoleEmissionContext {
-    let request_identity = V3AllocatedRequestIdentity {
-        request_id: request_id.to_string(),
-        pipeline_id: format!("pipeline-{request_id}"),
-        total_count: 1,
-        daily_count: 1,
-    };
+    let request_identity =
+        V3AllocatedRequestIdentity::for_test(request_id, &format!("pipeline-{request_id}"), 1, 1);
     build_v3_console_emission_context(
         state,
         entry_protocol,
@@ -2374,6 +2370,8 @@ fn request_identity_allocation_keeps_persisted_and_typed_counts_atomic() {
         loaded: false,
     };
 
+    // Allocation only reserves the monotonic sequence and predicts the count
+    // this request would have after a success commit.
     let first = counter
         .next_request_identity("openai-responses", "router", "gpt-5.5")
         .unwrap();
@@ -2382,19 +2380,24 @@ fn request_identity_allocation_keeps_persisted_and_typed_counts_atomic() {
         .unwrap();
 
     assert_eq!((first.total_count, first.daily_count), (1, 1));
-    assert_eq!((second.total_count, second.daily_count), (2, 2));
-    assert!(
-        first
-            .request_id
-            .ends_with(&format!("-{}-{}", first.total_count, first.daily_count)),
-        "{first:?}"
-    );
-    assert!(
-        second
-            .request_id
-            .ends_with(&format!("-{}-{}", second.total_count, second.daily_count)),
-        "{second:?}"
-    );
+    assert_eq!((second.total_count, second.daily_count), (1, 1));
+    assert!(first.request_id.ends_with("-1"), "{first:?}");
+    assert!(second.request_id.ends_with("-2"), "{second:?}");
+    assert_ne!(first.request_id, second.request_id);
+
+    let persisted = read_v3_request_counter_state(&state_file);
+    assert_eq!(persisted["version"], json!(2));
+    assert_eq!(persisted["totalCount"], json!(0));
+    assert_eq!(persisted["windowCount"], json!(0));
+    assert_eq!(persisted["sequence"], json!(2));
+
+    // Everything allocated above stays an error-only request, so only the
+    // success commit may move the counts.
+    counter.commit_request_success().unwrap();
+    let persisted = read_v3_request_counter_state(&state_file);
+    assert_eq!(persisted["totalCount"], json!(1));
+    assert_eq!(persisted["windowCount"], json!(1));
+    assert_eq!(persisted["sequence"], json!(2));
 
     let mut reloaded = V3RequestIdCounter {
         state_file: state_file.clone(),
@@ -2404,9 +2407,150 @@ fn request_identity_allocation_keeps_persisted_and_typed_counts_atomic() {
     let third = reloaded
         .next_request_identity("openai-responses", "router", "gpt-5.5")
         .unwrap();
-    assert_eq!((third.total_count, third.daily_count), (3, 3));
+    assert_eq!((third.total_count, third.daily_count), (2, 2));
+    assert!(third.request_id.ends_with("-3"), "{third:?}");
 
     std::fs::remove_file(state_file).unwrap();
+}
+
+#[test]
+fn request_identity_success_commit_is_idempotent_and_skips_error_terminals() {
+    let log_file = test_v3_console_log_file("request-counter-success-commit");
+    let state = test_v3_listener_state(&log_file, 5555);
+    let state_file = state.request_counter.lock().unwrap().state_file.clone();
+
+    let success_identity = allocate_v3_console_request_identity(
+        &state,
+        "/v1/responses",
+        Some(&json!({"model": "gpt-5.5"})),
+    )
+    .unwrap();
+    commit_v3_console_request_success(&state, &success_identity).unwrap();
+    // Provider retries, provider switches and repeated completion frames all
+    // reach the same allocation, so a second commit must be a no-op.
+    commit_v3_console_request_success(&state, &success_identity).unwrap();
+
+    // An allocation whose terminal turns out to be an error is never committed
+    // by the success-only caller, so it stays a pure allocation.
+    let error_identity = allocate_v3_console_request_identity(
+        &state,
+        "/v1/responses",
+        Some(&json!({"model": "gpt-5.5"})),
+    )
+    .unwrap();
+
+    let persisted = read_v3_request_counter_state(&state_file);
+    assert_eq!(persisted["totalCount"], json!(1));
+    assert_eq!(persisted["windowCount"], json!(1));
+    assert_eq!(persisted["sequence"], json!(2));
+    assert_eq!(
+        (success_identity.total_count, success_identity.daily_count),
+        (1, 1)
+    );
+    assert_eq!(
+        (error_identity.total_count, error_identity.daily_count),
+        (2, 2)
+    );
+
+    std::fs::remove_file(&state_file).unwrap();
+}
+
+#[test]
+fn request_identity_commit_rolls_local_day_and_keeps_total_monotonic() {
+    let _tz_guard = TEST_TZ_LOCK.lock().unwrap();
+    let state_file = std::env::temp_dir().join(format!(
+        "routecodex-v3-request-counter-rollover-{}-{}.json",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(
+        &state_file,
+        serde_json::to_vec(&json!({
+            "version": 2,
+            "totalCount": 41,
+            "windowCount": 7,
+            "windowKey": "19700101",
+            "sequence": 41,
+            "updatedAt": "1970-01-01T00:00:00.000Z",
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let mut counter = V3RequestIdCounter {
+        state_file: state_file.clone(),
+        state: V3RequestCounterState::default(),
+        loaded: false,
+    };
+
+    let identity = counter
+        .next_request_identity("openai-responses", "router", "gpt-5.5")
+        .unwrap();
+    assert_eq!(identity.daily_count, 1, "{identity:?}");
+    assert_eq!(identity.total_count, 42, "{identity:?}");
+    assert!(identity.request_id.ends_with("-42"), "{identity:?}");
+
+    counter.commit_request_success().unwrap();
+    let persisted = read_v3_request_counter_state(&state_file);
+    assert_eq!(persisted["totalCount"], json!(42));
+    assert_eq!(persisted["windowCount"], json!(1));
+    assert_eq!(persisted["sequence"], json!(42));
+
+    std::fs::remove_file(state_file).unwrap();
+}
+
+#[test]
+fn request_identity_loads_version1_counter_without_reusing_request_ids() {
+    let _tz_guard = TEST_TZ_LOCK.lock().unwrap();
+    let state_file = std::env::temp_dir().join(format!(
+        "routecodex-v3-request-counter-v1-{}-{}.json",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(
+        &state_file,
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "totalCount": 41,
+            "windowCount": 7,
+            "windowKey": v3_request_id_clock_now().unwrap().local_date_key,
+            "updatedAt": "2026-01-01T00:00:00.000Z",
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let mut counter = V3RequestIdCounter {
+        state_file: state_file.clone(),
+        state: V3RequestCounterState::default(),
+        loaded: false,
+    };
+
+    let identity = counter
+        .next_request_identity("openai-responses", "router", "gpt-5.5")
+        .unwrap();
+    // The historical success counts stay the baseline, and the migration
+    // sequence starts above them so old request ids cannot repeat.
+    assert_eq!(identity.total_count, 42, "{identity:?}");
+    assert_eq!(identity.daily_count, 8, "{identity:?}");
+    assert!(identity.request_id.ends_with("-42"), "{identity:?}");
+
+    counter.commit_request_success().unwrap();
+    let persisted = read_v3_request_counter_state(&state_file);
+    assert_eq!(persisted["version"], json!(2));
+    assert_eq!(persisted["totalCount"], json!(42));
+    assert_eq!(persisted["windowCount"], json!(8));
+    assert_eq!(persisted["sequence"], json!(42));
+
+    std::fs::remove_file(state_file).unwrap();
+}
+
+fn read_v3_request_counter_state(state_file: &std::path::Path) -> Value {
+    serde_json::from_slice(&std::fs::read(state_file).unwrap()).unwrap()
 }
 
 #[test]
@@ -2717,12 +2861,12 @@ fn startup_console_uses_the_same_layered_builder() {
 
 #[test]
 fn console_layering_keeps_request_debug_fields_off_human_headline() {
-    let request_identity = V3AllocatedRequestIdentity {
-        request_id: "openai-responses-router-gpt-5.5-sample-669944-7581".to_string(),
-        pipeline_id: "pipeline-console-layering".to_string(),
-        total_count: 669_944,
-        daily_count: 7_581,
-    };
+    let request_identity = V3AllocatedRequestIdentity::for_test(
+        "openai-responses-router-gpt-5.5-sample-669944-7581",
+        "pipeline-console-layering",
+        669_944,
+        7_581,
+    );
     let headline = render_v3_request_console_block(&V3ConsoleRequestHeadline {
         endpoint: "/v1/responses",
         route: "longcontext",
@@ -2757,24 +2901,15 @@ fn console_layering_keeps_request_debug_fields_off_human_headline() {
 
 #[test]
 fn console_request_count_keeps_following_human_fields_aligned() {
-    let short = V3AllocatedRequestIdentity {
-        request_id: "short".to_string(),
-        pipeline_id: "pipeline-short".to_string(),
-        total_count: 1,
-        daily_count: 1,
-    };
-    let current = V3AllocatedRequestIdentity {
-        request_id: "current".to_string(),
-        pipeline_id: "pipeline-current".to_string(),
-        total_count: 669_944,
-        daily_count: 7_581,
-    };
-    let oversized = V3AllocatedRequestIdentity {
-        request_id: "oversized".to_string(),
-        pipeline_id: "pipeline-oversized".to_string(),
-        total_count: 12_345_678_901_234,
-        daily_count: 123_456,
-    };
+    let short = V3AllocatedRequestIdentity::for_test("short", "pipeline-short", 1, 1);
+    let current =
+        V3AllocatedRequestIdentity::for_test("current", "pipeline-current", 669_944, 7_581);
+    let oversized = V3AllocatedRequestIdentity::for_test(
+        "oversized",
+        "pipeline-oversized",
+        12_345_678_901_234,
+        123_456,
+    );
 
     let short_cell = format_v3_console_request_count(&short);
     let current_cell = format_v3_console_request_count(&current);
@@ -2802,12 +2937,12 @@ fn console_request_count_keeps_following_human_fields_aligned() {
 
 #[test]
 fn console_layering_promotes_response_facts_before_debug_details() {
-    let request_identity = V3AllocatedRequestIdentity {
-        request_id: "openai-responses-router-gpt-5.5-sample-669944-7581".to_string(),
-        pipeline_id: "pipeline-response-layering".to_string(),
-        total_count: 669_944,
-        daily_count: 7_581,
-    };
+    let request_identity = V3AllocatedRequestIdentity::for_test(
+        "openai-responses-router-gpt-5.5-sample-669944-7581",
+        "pipeline-response-layering",
+        669_944,
+        7_581,
+    );
     let headline = render_v3_response_console_block(&V3ConsoleResponseHeadline {
         endpoint: "/v1/responses",
         status: 200,
@@ -4373,6 +4508,154 @@ async fn relay_sse_console_finalizer_prints_usage_for_chat_wire_finish_reason_te
 }
 
 #[tokio::test]
+async fn relay_sse_console_finalizer_commits_count_only_on_completed_terminal() {
+    // The relay SSE lane must not count when the response is handed to the
+    // client: counting before the first SSE byte would count a stream the
+    // client never finished. The commit belongs to the completion terminal,
+    // and a dropped stream is an error terminal that never counts.
+    let log_file = test_v3_console_log_file("relay-console-sse-count-terminal");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 5555);
+    let state_file = state.request_counter.lock().unwrap().state_file.clone();
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "anthropic",
+        "/v1/messages",
+        "req-relay-console-sse-count",
+        &headers,
+        &json!({"model":"claude-3-5-sonnet","stream":true}),
+    );
+    let stream_observation = test_runtime_stream_observation_from_provider_event_json(json!({
+        "id":"chatcmpl_1",
+        "object":"chat.completion.chunk",
+        "choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}],
+        "usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}
+    }));
+    let mut observability = test_direct_observability(Vec::new());
+    observability.execution_mode = "relay".to_string();
+    observability.response_status = Some("streaming".to_string());
+
+    // A real allocation reserves the monotonic sequence and a unique request id
+    // without moving the success counts.
+    let identity = next_v3_console_request_identity(
+        &state,
+        "/v1/messages",
+        Some(&json!({"model":"claude-3-5-sonnet"})),
+    )
+    .unwrap();
+    assert!(identity.request_id.ends_with("-1"), "{identity:?}");
+    let after_allocate = read_v3_request_counter_state(&state_file);
+    assert_eq!(after_allocate["sequence"], json!(1), "{after_allocate}");
+    assert_eq!(after_allocate["totalCount"], json!(0), "{after_allocate}");
+    assert_eq!(after_allocate["windowCount"], json!(0), "{after_allocate}");
+
+    // The streaming emit must not commit: the stream observation is present, so
+    // the caller passes include_usage=false and the commit is deferred.
+    emit_v3_observability_console_lines(
+        &context,
+        200,
+        &["V3Resp15ClientPayload"],
+        &observability,
+        Instant::now(),
+        false,
+    );
+    let after_streaming_emit = read_v3_request_counter_state(&state_file);
+    assert_eq!(
+        after_streaming_emit["totalCount"],
+        json!(0),
+        "the streaming emitter must not commit a success count before the stream terminal: {after_streaming_emit}"
+    );
+
+    let finalizer = V3SseConsoleFinalizer {
+        context,
+        status: 200,
+        node_trace: vec!["V3HubRespOutbound05ClientSemantic"],
+        observability,
+        stream_observation,
+        started_at: Instant::now(),
+    };
+    let mut stream = wrap_v3_committed_relay_sse_console_stream(
+        test_committed_anthropic_sse(json!([
+            {"event":"message_start","data":{"type":"message_start","message":{
+                "id":"msg_1","type":"message","role":"assistant","model":"claude-3-5-sonnet",
+                "content":[],"stop_reason":null,"stop_sequence":null,
+                "usage":{"input_tokens":10,"output_tokens":0}}}},
+            {"event":"content_block_delta","data":{"type":"content_block_delta","index":0,
+                "delta":{"type":"text_delta","text":"ok"}}},
+            {"event":"message_stop","data":{"type":"message_stop"}}
+        ])),
+        Some(finalizer),
+    );
+    // Read a non-terminal frame only, then drop the stream: the client
+    // disconnected before the terminal, so this must stay a pure allocation.
+    let first = stream.next().await.unwrap();
+    assert!(!first.is_empty());
+    drop(stream);
+    let after_drop = read_v3_request_counter_state(&state_file);
+    assert_eq!(
+        after_drop["totalCount"],
+        json!(0),
+        "a dropped relay SSE stream must never commit the success count: {after_drop}"
+    );
+    assert_eq!(
+        after_drop["windowCount"],
+        json!(0),
+        "a dropped relay SSE stream must never move the window count: {after_drop}"
+    );
+    assert_eq!(
+        after_drop["sequence"],
+        json!(1),
+        "a dropped relay SSE stream is still one allocation: {after_drop}"
+    );
+
+    // A stream that reaches its terminal commits exactly once.
+    let context = test_v3_console_emission_context(
+        &state,
+        "anthropic",
+        "/v1/messages",
+        "req-relay-console-sse-count-complete",
+        &headers,
+        &json!({"model":"claude-3-5-sonnet","stream":true}),
+    );
+    let mut completed_observability = test_direct_observability(Vec::new());
+    completed_observability.execution_mode = "relay".to_string();
+    completed_observability.response_status = Some("streaming".to_string());
+    let finalizer = V3SseConsoleFinalizer {
+        context,
+        status: 200,
+        node_trace: vec!["V3HubRespOutbound05ClientSemantic"],
+        observability: completed_observability,
+        stream_observation: test_runtime_stream_observation_from_provider_event_json(json!({
+            "id":"chatcmpl_1",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}],
+            "usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}
+        })),
+        started_at: Instant::now(),
+    };
+    let mut stream = wrap_v3_committed_relay_sse_console_stream(
+        test_committed_anthropic_sse(json!([
+            {"event":"message_start","data":{"type":"message_start","message":{
+                "id":"msg_2","type":"message","role":"assistant","model":"claude-3-5-sonnet",
+                "content":[],"stop_reason":null,"stop_sequence":null,
+                "usage":{"input_tokens":10,"output_tokens":0}}}},
+            {"event":"message_stop","data":{"type":"message_stop"}}
+        ])),
+        Some(finalizer),
+    );
+    while stream.next().await.is_some() {}
+    let persisted = read_v3_request_counter_state(&state_file);
+    assert_eq!(persisted["totalCount"], json!(1), "{persisted}");
+    assert_eq!(persisted["windowCount"], json!(1), "{persisted}");
+
+    let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+    assert!(log.contains("event=completed"), "{log}");
+    let _ = std::fs::remove_file(&log_file);
+    let _ = std::fs::remove_file(&state_file);
+}
+
+#[tokio::test]
 async fn front_io_sse_error_aborts_without_error_event() {
     let stream: V3IoSseStream =
         Box::pin(stream::iter(vec![Err::<Vec<u8>, _>(std::io::Error::new(
@@ -5324,7 +5607,7 @@ async fn anthropic_relay_output_consumes_typed_sealed_sse_body() {
         terminal_disposition: None,
     };
 
-    let response = anthropic_relay_output_response(output, false);
+    let response = anthropic_relay_output_response(output, None, false);
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get("content-type").unwrap(),

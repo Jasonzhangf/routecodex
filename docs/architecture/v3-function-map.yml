@@ -4072,12 +4072,15 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-server/src/lib.rs
   owner_scope: V3 Server owns one aggregate-shared request counter handle, one typed
-    request identity allocation, and the request/response console count projection.
+    request identity allocation, and the request/response console count projection;
+    the success count increments only at a confirmed success terminal.
   resource_bindings:
   - v3.server.request_identity
   entry_symbols:
   - V3AllocatedRequestIdentity
   - V3RequestIdCounter::next_request_identity
+  - V3RequestIdCounter::commit_request_success
+  - commit_v3_console_request_success
   - spawn_v3_server_aggregate
   - next_v3_console_request_identity
   - render_v3_request_console_block
@@ -4090,14 +4093,19 @@ features:
   - v3-console-count-04
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/request_id.rs
+  - v3/crates/routecodex-v3-server/src/request_identity.rs
+  - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+  - v3/crates/routecodex-v3-server/src/tests/mod.rs
+  - v3/crates/routecodex-v3-server/tests/request_count_success_only_public.rs
   - docs/goals/v3-console-request-count-visibility-test-design.md
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/manifests/v3.console_request_count_visibility.mainline.yml
-  - scripts/architecture/verify-v3-console-request-count-visibility.mjs
-  - scripts/tests/v3-console-request-count-visibility-red-fixtures.mjs
+  - v3/scripts/architecture/verify-v3-console-request-count-visibility.mjs
+  - v3/scripts/tests/v3-console-request-count-visibility-red-fixtures.mjs
   - package.json
   - .github/workflows/test.yml
   forbidden_paths:
