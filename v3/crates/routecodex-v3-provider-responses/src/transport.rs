@@ -32,7 +32,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_tungstenite::{
@@ -48,7 +48,6 @@ type ResponsesWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type SharedResponsesWebSocket = Arc<Mutex<Option<ResponsesWebSocket>>>;
 mod cancellation;
 mod probe;
-use probe::is_rate_limited;
 mod request_metadata;
 pub use request_metadata::V3ProviderRequestHeader;
 use request_metadata::{normalize_provider_header_name, V3ProviderHttpAuthCarrier};
@@ -199,14 +198,6 @@ impl V3Transport13ResponsesRequest {
             }
         }
     }
-}
-
-fn current_epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| {
-            duration.as_millis().min(u64::MAX as u128) as u64
-        })
 }
 
 impl V3Transport13ResponsesRequest {
@@ -942,7 +933,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 .await
             }
         };
-        let now_ms = current_epoch_ms();
         match result {
             Ok(raw) => {
                 if raw.body_kind() == crate::raw_response::V3ProviderResponseBodyKind::Sse {
@@ -1000,26 +990,9 @@ impl ResponsesTransport for ProviderResponsesTransport {
                             reason,
                         })?;
                 }
-                if is_rate_limited(&error) {
-                    if was_probe {
-                        drop(
-                            permit_guard
-                                .with_probe_result(V3AdaptiveConcurrencyProbeResult::RateLimited),
-                        );
-                    } else {
-                        permit_guard.observe_rate_limit(now_ms).map_err(|reason| {
-                            V3ProviderError::InternalTransport {
-                                request_id: request_id.clone(),
-                                provider_id: provider_id.clone(),
-                                lane: V3ProviderInternalTransportLane::Response,
-                                reason,
-                            }
-                        })?;
-                        drop(permit_guard);
-                    }
-                } else {
-                    drop(permit_guard);
-                }
+                // This is a business attempt, even if admission used a probe slot.
+                // Its error must release that slot without changing shared capacity.
+                drop(permit_guard);
                 Err(error)
             }
         }
