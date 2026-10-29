@@ -12115,10 +12115,10 @@ async fn refill_concurrent_cancel_public() {
 
 /// db1f482 public-entry regression: an HTTP 200 OpenAI Chat SSE head with one
 /// partial business delta and no semantic terminal is a typed provider
-/// transport failure. The last eligible exact identity must stay health-neutral,
-/// and the client must see only a detectable termination with no provider error
+/// transport failure. The failed auth identity must be excluded while the
+/// untried auth identity serves the follow-up request, with no provider error
 /// payload or fabricated success.
-async fn assert_public_execution_mode(base: &str, expected_mode: &str) {
+async fn assert_public_execution_mode(base: &str, expected_mode: &str, expected_requests: usize) {
     let logs: Value = client()
         .get(format!("{base}/_routecodex/debug/logs"))
         .send()
@@ -12139,8 +12139,8 @@ async fn assert_public_execution_mode(base: &str, expected_mode: &str) {
         .collect();
     assert_eq!(
         events.len(),
-        1,
-        "public request must enter exactly once with its actual mode: {logs}"
+        expected_requests,
+        "public requests must enter with their actual mode: {logs}"
     );
     assert_eq!(
         events[0]["details"]["execution_mode"], expected_mode,
@@ -12152,6 +12152,10 @@ async fn assert_public_execution_mode(base: &str, expected_mode: &str) {
 async fn db1f482_truncated_openai_chat_sse_public_case(execution_mode: &str, content: &str) {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
+    const KEY1_ENV: &str = "DB1F482_PUBLIC_KEY1";
+    const KEY2_ENV: &str = "DB1F482_PUBLIC_KEY2";
+    std::env::set_var(KEY1_ENV, "db1f482-key1-secret");
+    std::env::set_var(KEY2_ENV, "db1f482-key2-secret");
     let partial = format!(
         "data: {}\n\n",
         json!({
@@ -12166,7 +12170,21 @@ async fn db1f482_truncated_openai_chat_sse_public_case(execution_mode: &str, con
             }]
         })
     );
-    let (endpoint, handle, mut captures, _, shutdown) = start_entry_configured(
+    let healthy = format!(
+        "data: {}\n\ndata: [DONE]\n\n",
+        json!({
+            "id": "chatcmpl_healthy",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "wire-test",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "healthy"},
+                "finish_reason": "stop"
+            }]
+        })
+    );
+    let (endpoint, handle, mut captures, headers, shutdown) = start_entry_configured(
         "openai_chat",
         "chat",
         StatusCode::OK,
@@ -12174,19 +12192,21 @@ async fn db1f482_truncated_openai_chat_sse_public_case(execution_mode: &str, con
         partial.clone(),
         EntryOptions {
             health_enabled: true,
-            attempt_bodies: vec![partial],
+            attempt_bodies: vec![partial, healthy.clone(), healthy.clone()],
             auth_entries: vec![
-                ("key1".into(), KEY_ENV.into()),
-                ("key2".into(), KEY_ENV.into()),
+                ("key1".into(), KEY1_ENV.into()),
+                ("key2".into(), KEY2_ENV.into()),
             ],
-            pin_key: Some("key1".into()),
+            pin_key: None,
+            capture_headers: true,
             execution_mode: Some(execution_mode.to_string()),
             ..EntryOptions::default()
         },
     )
     .await;
+    let mut headers = headers.expect("db1f482 fixture must capture provider auth headers");
     let base = endpoint.trim_end_matches("/v1/responses");
-    let consumed = consume_response(
+    let first = consume_response(
         client()
             .post(format!("{base}/v1/chat/completions"))
             .json(&json!({
@@ -12199,55 +12219,97 @@ async fn db1f482_truncated_openai_chat_sse_public_case(execution_mode: &str, con
     )
     .await;
     assert!(
-        consumed.transport_error.is_some(),
-        "{execution_mode}: truncated stream must terminate detectably: {consumed:?}"
+        first.transport_error.is_none(),
+        "{execution_mode}: truncated first key must reselect to the healthy second key: {first:?}"
     );
     assert!(
-        consumed.status.is_none() || consumed.status == Some(StatusCode::OK),
-        "{execution_mode}: no client HTTP error number: {consumed:?}"
+        first.status == Some(StatusCode::OK),
+        "{execution_mode}: the healthy second key must complete: {first:?}"
     );
     assert!(
-        !consumed.body.contains("[DONE]"),
-        "{execution_mode}: no fabricated terminal: {consumed:?}"
+        first.body.contains("healthy"),
+        "{execution_mode}: the healthy second key must deliver visible business content: {first:?}"
     );
     assert!(
-        !consumed.body.contains("\"finish_reason\":\"stop\""),
-        "{execution_mode}: no fabricated success: {consumed:?}"
+        !first.body.contains("partial"),
+        "{execution_mode}: the truncated first attempt must not leak into the client body: {first:?}"
     );
-    assert_no_error_payload(&consumed.body);
-    assert_public_execution_mode(base, execution_mode).await;
+    let followup_content = format!("{content} follow-up");
+    let second = consume_response(
+        client()
+            .post(format!("{base}/v1/chat/completions"))
+            .json(&json!({
+                "model": "test.test",
+                "messages": [{"role": "user", "content": followup_content}],
+                "stream": true
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    assert!(
+        second.transport_error.is_none(),
+        "{execution_mode}: the untried key must serve the follow-up: {second:?}"
+    );
+    assert!(
+        second.status == Some(StatusCode::OK),
+        "{execution_mode}: the follow-up must complete: {second:?}"
+    );
+    assert!(
+        second.body.contains("healthy"),
+        "{execution_mode}: the follow-up must deliver visible business content: {second:?}"
+    );
+    assert!(
+        first.body.contains("[DONE]") && second.body.contains("[DONE]"),
+        "{execution_mode}: only the healthy provider terminal may reach the client"
+    );
+    assert_no_error_payload(&first.body);
+    assert_no_error_payload(&second.body);
+    assert_public_execution_mode(base, execution_mode, 2).await;
 
-    let health: Value = client()
-        .get(format!("{base}/_routecodex/health/cooldown-pool"))
-        .send()
+    let first_auth = headers.recv().await.expect("first provider auth header");
+    let reselected_auth = headers.recv().await.expect("reselect provider auth header");
+    let followup_auth = headers
+        .recv()
         .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let entries = health["entries"].as_array().unwrap();
+        .expect("follow-up provider auth header");
     assert!(
-        entries.iter().any(|row| {
-            row["provider_id"] == "test" && row["auth_alias"] == "key1" && row["model_id"] == "test"
-        }),
-        "{execution_mode}: truncated HTTP 200 must cool the exact failed identity: {health}"
+        (first_auth.contains("db1f482-key1-secret")
+            || first_auth.contains("db1f482-key2-secret"))
+            && (reselected_auth.contains("db1f482-key1-secret")
+                || reselected_auth.contains("db1f482-key2-secret")),
+        "{execution_mode}: both auth identities must be observed: first={first_auth:?} reselected={reselected_auth:?}"
     );
     assert!(
-        entries.iter().all(|row| row["auth_alias"] != "key2"),
-        "{execution_mode}: the untried key must stay routable: {health}"
+        first_auth != reselected_auth,
+        "{execution_mode}: truncated HTTP 200 must reselect the untried auth identity: first={first_auth:?} reselected={reselected_auth:?}"
+    );
+    assert_eq!(
+        followup_auth, reselected_auth,
+        "{execution_mode}: the failed exact auth identity must stay excluded while the untried identity stays routable"
     );
     stop_entry(handle, shutdown).await;
-    let mut attempts = 0;
+    let mut first_attempts = 0;
+    let mut followup_attempts = 0;
     while let Some(capture) = captures.recv().await {
-        if capture.to_string().contains(content) {
-            attempts += 1;
+        let wire = capture.to_string();
+        if wire.contains(&followup_content) {
+            followup_attempts += 1;
+        } else if wire.contains(content) {
+            first_attempts += 1;
         }
     }
     assert_eq!(
-        attempts, 1,
-        "{execution_mode}: the pinned candidate must be attempted exactly once before terminal"
+        first_attempts, 2,
+        "{execution_mode}: the first request must try the truncated key, then one untried key"
+    );
+    assert_eq!(
+        followup_attempts, 1,
+        "{execution_mode}: the follow-up must use only the untried key"
     );
     std::env::remove_var(KEY_ENV);
+    std::env::remove_var(KEY1_ENV);
+    std::env::remove_var(KEY2_ENV);
 }
 
 #[tokio::test]
@@ -12335,7 +12397,7 @@ async fn db1f482_relay_client_disconnect_keeps_candidate_health_neutral_at_publi
             .is_err(),
         "client disconnect must not start another provider attempt"
     );
-    assert_public_execution_mode(base, "relay").await;
+    assert_public_execution_mode(base, "relay", 1).await;
     let health: Value = client()
         .get(format!("{base}/_routecodex/health/cooldown-pool"))
         .send()

@@ -61,7 +61,7 @@ endpoints = ["openai_chat"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
-attempt_store = {{}}
+attempt_store = {{ residence_timeout_ms = 300 }}
 [providers.{scope}]
 type = "openai_chat"
 base_url = "http://{scope}.invalid/v1"
@@ -206,25 +206,21 @@ async fn openai_chat_truncated_200_cools_exact_identity_when_it_is_the_last_cand
     let body = drain(&mut output).await;
     let attempts = output.provider_failure_attempts.clone();
 
+    let runtime_health = provider_health.runtime_health();
     let now = u64::MAX;
-    let exact =
-        provider_health
-            .store()
-            .availability(scope, Some("key1"), Some("chat-wire-model"), now);
+    let exact = runtime_health.availability(scope, Some("key1"), Some("chat-wire-model"), now);
     assert!(
         !exact.available,
         "a truncated HTTP 200 SSE body must cool the exact provider identity even without an alternative: attempts={attempts:?} body={body}"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability(scope, Some("key1"), Some("other-model"), now)
             .available,
         "another model under the same provider and key must stay routable"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability(scope, Some("other-key"), Some("chat-wire-model"), now)
             .available,
         "another key under the same provider and model must stay routable"
@@ -248,31 +244,28 @@ async fn openai_chat_truncated_200_switches_without_cooling_other_identities() {
         output.node_trace
     );
 
+    let runtime_health = provider_health.runtime_health();
     let now = u64::MAX;
     assert!(
-        !provider_health
-            .store()
+        !runtime_health
             .availability(scope, Some("key1"), Some("chat-wire-model"), now)
             .available,
         "the exact failed identity must be cooled"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability(scope, Some("key1"), Some("other-model"), now)
             .available,
         "another model under the same provider and key must stay routable"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability(scope, Some("other-key"), Some("chat-wire-model"), now)
             .available,
         "another key under the same provider and model must stay routable"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability(
                 &format!("{scope}_secondary"),
                 Some("key1"),
