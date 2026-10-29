@@ -764,6 +764,127 @@ fn observed_error_not_exposed_marker_is_idempotent_and_never_fabricates_a_chain(
     assert!(merged.chain.is_empty());
 }
 
+/// A typed NoResponse terminal explicitly has no provider HTTP status. A typed
+/// terminal with `provider_status: None` must clear the row's inherited status
+/// from an earlier provider attempt; a legacy lane that supplies no typed
+/// terminal facts keeps the existing incoming-or-previous merge.
+#[test]
+fn provider_status_none_clears_only_typed_terminal_inheritance() {
+    let observability = V3WebuiObservability::new();
+    let scope = |port| V3ObsScope {
+        port,
+        workdir: None,
+        session: None,
+    };
+
+    let attempt = V3ObsRequestMeta {
+        request_id: "req-typed-clear".to_string(),
+        endpoint: "/v1/responses".to_string(),
+        provider_id: Some("primary".to_string()),
+        provider_status: Some(502),
+        error_category: Some("provider_http_502".to_string()),
+        observed_error: Some(V3ObsErrorTruth {
+            source: "provider_attempt_failure".to_string(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let typed_none = V3ObsRequestMeta {
+        request_id: "req-typed-clear".to_string(),
+        endpoint: "/v1/responses".to_string(),
+        provider_id: Some("fallback".to_string()),
+        provider_status: None,
+        terminal_typed_status_cleared: true,
+        error_category: Some("request_residence_deadline_exceeded".to_string()),
+        observed_error: Some(V3ObsErrorTruth {
+            source: "error06_projection".to_string(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let key = build_v3_obs_request_key(6000, "req-typed-clear");
+    record(
+        &observability,
+        V3ObsEventType::ProviderAttemptFailed,
+        &key,
+        scope(6000),
+        attempt,
+    )
+    .unwrap();
+    record(
+        &observability,
+        V3ObsEventType::Failed,
+        &key,
+        scope(6000),
+        typed_none,
+    )
+    .unwrap();
+    let row = observability
+        .rows()
+        .unwrap()
+        .get(&key)
+        .cloned()
+        .expect("the typed terminal row");
+    assert_eq!(
+        row.meta.provider_status, None,
+        "a typed NoResponse terminal must clear the earlier attempt's 502"
+    );
+    assert_eq!(
+        row.meta.provider_id.as_deref(),
+        Some("fallback"),
+        "the terminal keeps the typed terminal's provider identity"
+    );
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("request_residence_deadline_exceeded"),
+        "the typed terminal's category must not be replaced by the attempt row"
+    );
+
+    // Legacy lane: a terminal meta with no typed terminal facts keeps the
+    // existing `incoming.or(previous)` behavior for provider_status.
+    let observability = V3WebuiObservability::new();
+    let key = build_v3_obs_request_key(6000, "req-legacy-keep");
+    let legacy_attempt = V3ObsRequestMeta {
+        request_id: "req-legacy-keep".to_string(),
+        endpoint: "/v1/responses".to_string(),
+        provider_status: Some(503),
+        ..Default::default()
+    };
+    let legacy_terminal = V3ObsRequestMeta {
+        request_id: "req-legacy-keep".to_string(),
+        endpoint: "/v1/responses".to_string(),
+        provider_status: None,
+        ..Default::default()
+    };
+    record(
+        &observability,
+        V3ObsEventType::ProviderAttemptFailed,
+        &key,
+        scope(6000),
+        legacy_attempt,
+    )
+    .unwrap();
+    record(
+        &observability,
+        V3ObsEventType::Failed,
+        &key,
+        scope(6000),
+        legacy_terminal,
+    )
+    .unwrap();
+    let row = observability
+        .rows()
+        .unwrap()
+        .get(&key)
+        .cloned()
+        .expect("the legacy terminal row");
+    assert_eq!(
+        row.meta.provider_status,
+        Some(503),
+        "a legacy lane with no typed facts keeps the previous provider status"
+    );
+}
+
 /// The non-terminal provider-attempt snapshot is diagnostic and never outranks a
 /// terminal Error06 observation, in either arrival order.
 #[test]

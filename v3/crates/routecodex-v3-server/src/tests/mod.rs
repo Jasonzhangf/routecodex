@@ -843,6 +843,250 @@ async fn responses_direct_policy_failure_consumer_preserves_cause_and_transport_
     fs::remove_dir_all(root).unwrap();
 }
 
+/// Build a Responses Direct provider terminal outcome whose client status is the
+/// projected Error06 status while the typed provider terminal facts stay
+/// explicit. The ledger projection must derive `provider_status` and
+/// `error_category` from these typed facts, not blindly from the client status.
+fn make_provider_terminal_output(
+    disposition: routecodex_v3_error::V3ProviderTerminalDisposition,
+    source: routecodex_v3_error::V3Error01SourceRaised,
+    status: u16,
+) -> routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
+    routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
+        client_payload: V3Resp15ClientPayload {
+            status,
+            headers: BTreeMap::new(),
+            body: V3ClientBody::Json(json!({"error": {"code": "unused_client_payload"}})),
+        },
+        terminal_disposition: Some(disposition),
+        diagnostic_source: Some(source),
+        diagnostic_cause: None,
+        provider_request_snapshot: None,
+        provider_response_snapshot: None,
+        node_trace: vec!["V3Error05ExecutionDecision", "V3Error06ClientProjected"],
+        error_chain: Some(routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS.to_vec()),
+        observability: Some(test_direct_observability(Vec::new())),
+        stream_observation: None,
+        protocol_relay_handoff: None,
+    }
+}
+
+fn publish_terminal_outcome(
+    state: &Arc<V3ListenerState>,
+    request_id: &str,
+    output: routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput,
+) {
+    let mut output = output;
+    let terminal =
+        responses_direct_server_outcome::take_responses_direct_terminal_outcome(&mut output)
+            .expect("terminal outcome");
+    terminal.publish_observations(state, None, "responses", "/v1/responses", request_id);
+}
+
+/// Sub-form 1: a provider attempt delivered 2xx business content, then the
+/// client closed. The terminal is a client disconnect, so the ledger must record
+/// a distinct cancelled terminal with no fabricated provider HTTP 502.
+#[tokio::test]
+async fn client_cancelled_direct_terminal_is_cancelled_not_provider_502() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-client-cancel-ledger-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
+
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
+        "V3ServerRespOutbound06ClientFrame",
+        "client_disconnect",
+        "client disconnected after provider delivery",
+    );
+    let output = make_provider_terminal_output(
+        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        source,
+        499,
+    );
+    publish_terminal_outcome(&state, "req-client-cancel-ledger", output);
+
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
+        .get(&build_v3_obs_request_key(5555, "req-client-cancel-ledger"))
+        .expect("client cancel must record a terminal ledger row");
+    assert_eq!(row.event_type, "request.cancelled", "{}", row.event_type);
+    assert_eq!(
+        row.meta.provider_status, None,
+        "a no-response client cancel has no provider HTTP status"
+    );
+    assert_ne!(row.meta.provider_status, Some(502));
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("client_disconnect"),
+        "client cancel keeps its typed source category"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Sub-form 1 live shape: the post-commit client cancel surfaces as a provider
+/// transport source, so the terminal writer is not skipped. Even then the
+/// no-response disposition means no provider HTTP status and no `http_502`.
+#[tokio::test]
+async fn delivered_then_cancelled_no_response_is_not_provider_502() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-delivered-cancel-ledger-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
+
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_transport_error",
+        "provider stream ended after the client closed",
+    );
+    let output = make_provider_terminal_output(
+        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        source,
+        502,
+    );
+    publish_terminal_outcome(&state, "req-delivered-cancel-ledger", output);
+
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
+        .get(&build_v3_obs_request_key(
+            5555,
+            "req-delivered-cancel-ledger",
+        ))
+        .expect("delivered-then-cancelled terminal must record a ledger row");
+    assert_eq!(
+        row.meta.provider_status, None,
+        "a no-response terminal must not record the projected 502 as the provider status"
+    );
+    assert_ne!(row.meta.provider_status, Some(502));
+    assert_ne!(
+        row.meta.error_category.as_deref(),
+        Some("http_502"),
+        "a no-response terminal must not be labeled http_502"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Sub-form 2: a provider response-body decode/operation timeout reaches
+/// `NoResponse` with `provider_response_body_error`. The ledger must name that
+/// typed transport terminal instead of fabricating a provider HTTP 502.
+#[tokio::test]
+async fn provider_response_body_timeout_is_typed_transport_terminal_not_502() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-body-timeout-ledger-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
+
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_response_body_error",
+        "provider inferai transport failed: error decoding response body: operation timed out",
+    );
+    let output = make_provider_terminal_output(
+        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        source,
+        502,
+    );
+    publish_terminal_outcome(&state, "req-body-timeout-ledger", output);
+
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
+        .get(&build_v3_obs_request_key(5555, "req-body-timeout-ledger"))
+        .expect("body timeout terminal must record a ledger row");
+    assert_eq!(
+        row.meta.provider_status, None,
+        "a no-response body timeout has no provider HTTP status"
+    );
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("provider_response_body_error"),
+        "the typed transport code owns the category"
+    );
+    assert_ne!(row.meta.provider_status, Some(502));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Inverse guard: a genuine provider HTTP 502 attempt still records 502. The
+/// fix must not flatten the honest 502 family.
+#[tokio::test]
+async fn genuine_provider_http_502_terminal_still_records_502() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-genuine-502-ledger-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
+
+    let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_http_502",
+        "provider returned HTTP 502",
+        routecodex_v3_error::V3ExternalErrorLink {
+            kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+            status: Some(502),
+            code: Some("HTTP_502".to_string()),
+            provider_id: Some("provider-a".to_string()),
+            upstream_request_id: None,
+            message: Some("provider returned HTTP 502".to_string()),
+        },
+    );
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        502,
+        vec![("content-type".to_string(), b"application/json".to_vec())],
+        b"{\"error\":\"upstream\"}".to_vec(),
+    );
+    let output = make_provider_terminal_output(
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        source,
+        502,
+    );
+    publish_terminal_outcome(&state, "req-genuine-502-ledger", output);
+
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
+        .get(&build_v3_obs_request_key(5555, "req-genuine-502-ledger"))
+        .expect("genuine 502 terminal must record a ledger row");
+    assert_eq!(
+        row.meta.provider_status,
+        Some(502),
+        "a real provider HTTP 502 keeps its provider status"
+    );
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("http_502"),
+        "a real provider HTTP 502 keeps the honest http_502 category"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[tokio::test]
 async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06() {
     let _home_lock = TEST_HOME_LOCK.lock().unwrap();

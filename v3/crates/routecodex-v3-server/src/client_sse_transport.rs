@@ -35,6 +35,7 @@ use routecodex_v3_sse::{
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -42,6 +43,40 @@ use tokio::task::JoinHandle;
 
 /// The transport-only keepalive comment carried by the committed client channel.
 const V3_CLIENT_SSE_KEEPALIVE_COMMENT: &str = " keepalive";
+
+/// Recording hook for a client that disconnects after the committed client
+/// channel already delivered business bytes but before the runtime outcome
+/// exists.
+///
+/// The transport owns the disconnect fact: only it sees the committed channel
+/// drop. The recorder that turns that fact into a typed terminal row is injected
+/// by the request owner, which holds the request identity and the console
+/// ingress. The transport never builds the ledger row itself.
+pub(crate) type V3ClientDisconnectRecorder = Box<dyn FnOnce() + Send>;
+
+/// Shared slot that lets the still-running request install its recorder after it
+/// allocates the request identity. The transport keeps its own clone, so the
+/// recorder survives the runtime task abort that the disconnect triggers.
+#[derive(Clone, Default)]
+pub(crate) struct V3ClientDisconnectSlot {
+    recorder: Arc<Mutex<Option<V3ClientDisconnectRecorder>>>,
+}
+
+impl V3ClientDisconnectSlot {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn set(&self, recorder: V3ClientDisconnectRecorder) {
+        if let Ok(mut slot) = self.recorder.lock() {
+            *slot = Some(recorder);
+        }
+    }
+
+    fn take(&self) -> Option<V3ClientDisconnectRecorder> {
+        self.recorder.lock().ok().and_then(|mut slot| slot.take())
+    }
+}
 
 /// Accept the client SSE channel while the runtime worker still buffers the
 /// provider attempt.
@@ -72,6 +107,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
     finalize_runtime_outcome: Box<dyn FnOnce(Response<Body>) -> Response<Body> + Send>,
     keepalive_interval: Duration,
     client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
+    client_disconnect_slot: Option<V3ClientDisconnectSlot>,
 ) -> Response<Body> {
     let mut runtime_outcome = runtime_outcome;
     let mut client_frame_receiver = client_frame_receiver;
@@ -133,6 +169,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
                 prefix_frames,
                 keepalive_interval,
                 client_wire_capture,
+                client_disconnect_slot,
             )
         }
         V3ClientSseAcceptRace::CommittedFrame(frame) => {
@@ -158,6 +195,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
                 prefix_frames,
                 keepalive_interval,
                 client_wire_capture,
+                client_disconnect_slot,
             )
         }
         V3ClientSseAcceptRace::KeepaliveDeadline => {
@@ -173,6 +211,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
                 Vec::new(),
                 keepalive_interval,
                 client_wire_capture,
+                client_disconnect_slot,
             )
         }
     }
@@ -191,6 +230,7 @@ fn commit_v3_client_sse_channel(
     prefix_frames: Vec<Vec<u8>>,
     keepalive_interval: Duration,
     client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
+    client_disconnect_slot: Option<V3ClientDisconnectSlot>,
 ) -> Response<Body> {
     let mut interval = tokio::time::interval_at(
         tokio::time::Instant::now() + keepalive_interval,
@@ -206,6 +246,7 @@ fn commit_v3_client_sse_channel(
         client_frame_prefix: prefix_frames.into(),
         client_frame_emitted: false,
         client_wire_capture: client_wire_capture.clone(),
+        client_disconnect_slot,
         interval,
         keepalive_chunk: build_v3_sse_transport_out_04_keepalive_comment(
             V3_CLIENT_SSE_KEEPALIVE_COMMENT,
@@ -266,6 +307,8 @@ struct V3ClientSseChannelStream {
     /// Hands the client-response sample recorder from the runtime outcome to the
     /// transport boundary wrapper that owns the final client wire.
     client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
+    /// Owns the recorder that writes the committed-then-cancelled terminal row.
+    client_disconnect_slot: Option<V3ClientDisconnectSlot>,
     interval: tokio::time::Interval,
     keepalive_chunk: Vec<u8>,
     /// Set when a chunk was just handed to the client transport. The next poll
@@ -516,6 +559,28 @@ impl Stream for V3ClientSseChannelStream {
 
 impl Drop for V3ClientSseChannelStream {
     fn drop(&mut self) {
+        // A client that goes away after the committed prefix reached it but while
+        // the runtime outcome is still pending never reaches the runtime closeout:
+        // the abort below drops the runtime task first. Record that disconnect
+        // terminal here. A resolved or already-closed outcome is left to the
+        // existing finalizer so the terminal row is written exactly once.
+        let outcome_still_pending = matches!(
+            self.outcome.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        );
+        let record_disconnect = matches!(self.state, V3ClientSseChannelState::AwaitOutcome { .. })
+            && self.client_frame_emitted
+            && self.outcome_task.is_some()
+            && outcome_still_pending;
+        if record_disconnect {
+            if let Some(recorder) = self
+                .client_disconnect_slot
+                .as_ref()
+                .and_then(V3ClientDisconnectSlot::take)
+            {
+                recorder();
+            }
+        }
         if let Some(task) = self.outcome_task.take() {
             task.abort();
         }
@@ -573,6 +638,7 @@ mod tests {
             client_frame_prefix: std::collections::VecDeque::new(),
             client_frame_emitted: false,
             client_wire_capture: None,
+            client_disconnect_slot: None,
             interval,
             keepalive_chunk: b": keepalive\n\n".to_vec(),
             flush_yield: false,
@@ -764,6 +830,7 @@ mod tests {
             Box::new(|outcome| outcome),
             Duration::from_millis(50),
             None,
+            None,
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -856,6 +923,7 @@ mod tests {
             Box::new(|outcome| outcome),
             Duration::from_millis(50),
             None,
+            None,
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -886,6 +954,7 @@ mod tests {
             Some(frames),
             Box::new(|outcome| outcome),
             Duration::from_millis(500),
+            None,
             None,
         )
         .await;

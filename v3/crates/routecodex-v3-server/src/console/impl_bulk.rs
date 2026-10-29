@@ -1260,6 +1260,7 @@ pub(crate) fn emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
                     error_chain: &projected.chain,
                     health_action: projected.health_action.as_ref(),
                     upstream_request_id: None,
+                    ..Default::default()
                 },
             ) {
                 emit_v3_webui_projection_failure(context, &error);
