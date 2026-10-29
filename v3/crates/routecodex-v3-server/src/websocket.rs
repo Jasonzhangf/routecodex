@@ -136,10 +136,12 @@ fn record_responses_websocket_provider_terminal_evidence(
 /// The server reads the client socket concurrently with the in-flight
 /// request so a legal client Close can cancel a long recovery wait. Text and
 /// Binary events read during that wait are held in arrival order and are
-/// never treated as a second in-flight request. Once either bound is reached
-/// the session stops polling the socket, which reapplies TCP read
-/// backpressure to the peer without dropping a queued business message or
-/// terminating the recoverable request.
+/// never treated as a second in-flight request. Once the event-count limit or
+/// the retained-payload stop-reading threshold is reached the session stops
+/// polling the socket, which reapplies TCP read backpressure to the peer
+/// without dropping a queued business message or terminating the recoverable
+/// request. The message that crosses the byte threshold is retained in full,
+/// so retained payload can exceed that threshold by at most one message.
 const MAX_HELD_CLIENT_EVENTS: usize = 32;
 const MAX_HELD_CLIENT_EVENT_BYTES: usize = 4 * 1024 * 1024;
 
