@@ -15,6 +15,7 @@ use routecodex_v3_config::{
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
 use std::os::unix::fs::PermissionsExt;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -2522,6 +2523,87 @@ async fn start_controlled_terminal_upstream_with_body(
             .unwrap();
     });
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+#[derive(Clone)]
+struct SwitchableUpstreamState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+    mode: Arc<AtomicUsize>,
+}
+
+/// Controlled provider that returns a recoverable 429 while `mode` is 0 and a
+/// completed JSON response while `mode` is 1. The test flips the mode to let
+/// one pending recovery wait settle deterministically.
+async fn controlled_switchable_upstream(
+    State(state): State<Arc<SwitchableUpstreamState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body))
+        .unwrap();
+    if state.mode.load(Ordering::SeqCst) == 0 {
+        Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header("content-type", "application/json")
+            .header("retry-after", "17")
+            .body(Body::from(
+                r#"{"error":{"type":"rate_limit_error","message":"slow down","param":"upstream"}}"#,
+            ))
+            .unwrap()
+    } else {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"id":"resp_json","status":"completed","output_text":"ok","output":[{"type":"output_text","text":"ok"}]}"#,
+            ))
+            .unwrap()
+    }
+}
+
+async fn start_controlled_switchable_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    Arc<AtomicUsize>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let mode = Arc::new(AtomicUsize::new(0));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_switchable_upstream))
+        .route(
+            "/v1/responses/compact",
+            post(controlled_switchable_upstream),
+        )
+        .route(
+            "/v1beta/models/*operation",
+            post(controlled_switchable_upstream),
+        )
+        .route("/v1/messages", post(controlled_switchable_upstream))
+        .route("/v1/chat/completions", post(controlled_switchable_upstream))
+        .with_state(Arc::new(SwitchableUpstreamState {
+            captures: captures_tx,
+            mode: Arc::clone(&mode),
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (
+        format!("http://{address}/v1"),
+        captures_rx,
+        mode,
+        shutdown_tx,
+    )
 }
 
 async fn controlled_anthropic_wire_upstream(
@@ -8938,10 +9020,12 @@ async fn responses_inbound_websocket_429_wait_cancels_without_further_business_a
     socket.send(Message::Close(None)).await.unwrap();
     let closed = timeout(Duration::from_secs(3), socket.next())
         .await
-        .expect("client cancellation must be observed while recovery is pending");
+        .expect("client cancellation must be observed while recovery is pending")
+        .expect("client Close must be answered before the server releases the socket")
+        .expect("server Close acknowledgement must be a valid frame");
     assert!(
-        matches!(closed, None | Some(Err(_)) | Some(Ok(Message::Close(_)))),
-        "cancelled request must not emit business or error data: {closed:?}"
+        matches!(closed, Message::Close(_)),
+        "client Close must complete the WebSocket close handshake: {closed:?}"
     );
     assert!(
         timeout(Duration::from_secs(2), captures.recv())
@@ -8950,6 +9034,258 @@ async fn responses_inbound_websocket_429_wait_cancels_without_further_business_a
         "the cancelled request must not start another provider business attempt"
     );
 
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_429_wait_cancels_direct_without_further_business_attempts() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_terminal_upstream(StatusCode::TOO_MANY_REQUESTS).await;
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "secret-ws-direct-cancel-429");
+    let handle = spawn_v3_server_aggregate(responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &provider_base_url,
+        r#""direct", "relay""#,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"client-test","input":"direct cancel during 429"})
+                .to_string(),
+        ))
+        .await
+        .unwrap();
+    let first = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("the Direct request must reach the provider")
+        .expect("the controlled provider capture must remain open");
+    assert_eq!(first.body["model"], "wire-protocol");
+    assert!(
+        timeout(Duration::from_millis(200), socket.next())
+            .await
+            .is_err(),
+        "recoverable Direct provider failure must not project data or close the WebSocket"
+    );
+
+    socket.send(Message::Close(None)).await.unwrap();
+    let closed = timeout(Duration::from_secs(3), socket.next())
+        .await
+        .expect("Direct client cancellation must be observed while recovery is pending")
+        .expect("client Close must be answered before the server releases the socket")
+        .expect("server Close acknowledgement must be a valid frame");
+    assert!(
+        matches!(closed, Message::Close(_)),
+        "Direct client Close must complete the WebSocket close handshake: {closed:?}"
+    );
+    assert!(
+        timeout(Duration::from_secs(2), captures.recv())
+            .await
+            .is_err(),
+        "the cancelled Direct request must not start another provider business attempt"
+    );
+
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_429_wait_bounds_held_events_and_preserves_order() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, mode, shutdown) =
+        start_controlled_switchable_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429-bounded-held");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let marker_of = |capture: &ProviderCapture| -> String {
+        capture.body["input"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| {
+                panic!(
+                    "provider request must carry the relay input marker: {}",
+                    capture.body
+                )
+            })
+            .to_string()
+    };
+
+    // Cancellation still works while the held-event queue is below its bound.
+    {
+        mode.store(0, Ordering::SeqCst);
+        let mut request = endpoint.clone().into_client_request().unwrap();
+        request.headers_mut().insert(
+            "openai-beta",
+            HeaderValue::from_static("responses_websockets=2026-02-06"),
+        );
+        let (mut socket, handshake) = connect_async(request).await.unwrap();
+        assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+        socket
+            .send(Message::Text(
+                json!({"type":"response.create","model":"client-test","input":"cancel-marker"})
+                    .to_string(),
+            ))
+            .await
+            .unwrap();
+        let cancelled = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .expect("the cancelling request must reach the provider")
+            .expect("the provider capture channel must remain open");
+        assert_eq!(marker_of(&cancelled), "cancel-marker");
+        for index in 0..3 {
+            socket
+                .send(Message::Text(
+                    json!({
+                        "type":"response.create",
+                        "model":"client-test",
+                        "input": format!("cancel-held-{index}")
+                    })
+                    .to_string(),
+                ))
+                .await
+                .unwrap();
+        }
+        socket.send(Message::Close(None)).await.unwrap();
+        let closed = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .expect("client cancellation must be observed below the held-event bound")
+            .expect("client Close must be answered before the socket is released")
+            .expect("server Close acknowledgement must be a valid frame");
+        assert!(
+            matches!(closed, Message::Close(_)),
+            "client Close must complete the WebSocket close handshake: {closed:?}"
+        );
+        assert!(
+            timeout(Duration::from_secs(1), captures.recv())
+                .await
+                .is_err(),
+            "cancellation must not start a business attempt for the request or its held events"
+        );
+    }
+
+    // Fill the held-event bound during a recovery wait, then let the first
+    // request settle and assert the queued events are served in order and not
+    // dropped. A sibling session must stay live throughout.
+    mode.store(0, Ordering::SeqCst);
+    let mut main_request = endpoint.clone().into_client_request().unwrap();
+    main_request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut main_socket, main_handshake) = connect_async(main_request).await.unwrap();
+    assert_eq!(main_handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    let mut sibling_request = endpoint.into_client_request().unwrap();
+    sibling_request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut sibling_socket, sibling_handshake) = connect_async(sibling_request).await.unwrap();
+    assert_eq!(sibling_handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    main_socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"client-test","input":"m0"}).to_string(),
+        ))
+        .await
+        .unwrap();
+    let first = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("the overflow request must reach the provider")
+        .expect("the provider capture channel must remain open");
+    assert_eq!(marker_of(&first), "m0");
+    assert!(
+        timeout(Duration::from_millis(200), main_socket.next())
+            .await
+            .is_err(),
+        "a recoverable provider failure must not project data or close the WebSocket"
+    );
+    sibling_socket
+        .send(Message::Ping(vec![7, 7, 7]))
+        .await
+        .unwrap();
+    let sibling_message = timeout(Duration::from_secs(3), sibling_socket.next())
+        .await
+        .expect("a sibling session must remain live during another session's recovery wait")
+        .expect("a sibling session must not be closed")
+        .unwrap();
+    assert!(matches!(sibling_message, Message::Pong(payload) if payload == vec![7, 7, 7]));
+
+    let held_markers: Vec<String> = (1..=40).map(|index| format!("m{index}")).collect();
+    for (offset, marker) in held_markers.iter().enumerate() {
+        let event = json!({
+            "type":"response.create",
+            "model":"client-test",
+            "input": marker
+        })
+        .to_string();
+        if offset % 2 == 0 {
+            main_socket.send(Message::Text(event)).await.unwrap();
+        } else {
+            main_socket
+                .send(Message::Binary(event.into_bytes()))
+                .await
+                .unwrap();
+        }
+    }
+    // Held events must not be promoted to business attempts while the first
+    // request is still recovering; only retries of that same request may run.
+    while let Ok(Some(capture)) = timeout(Duration::from_millis(200), captures.recv()).await {
+        assert_eq!(
+            marker_of(&capture),
+            "m0",
+            "held client events must not start business attempts before the in-flight request settles"
+        );
+    }
+
+    // Settle the first request; the bounded held events must then be served in
+    // arrival order with none dropped.
+    mode.store(1, Ordering::SeqCst);
+    let mut served = Vec::new();
+    while served.len() < held_markers.len() {
+        let capture = timeout(Duration::from_secs(20), captures.recv())
+            .await
+            .expect("bounded held client events must eventually be served")
+            .expect("the provider capture channel must remain open");
+        let marker = marker_of(&capture);
+        if marker == "m0" {
+            assert!(
+                served.is_empty(),
+                "the original request must settle before held events are served"
+            );
+            continue;
+        }
+        served.push(marker);
+    }
+    assert_eq!(
+        served, held_markers,
+        "held client events must be served in arrival order without silent drops"
+    );
+    assert!(
+        captures.try_recv().is_err(),
+        "no extra provider business attempt may start beyond the bounded held events"
+    );
+
+    let _ = sibling_socket.close(None).await;
+    let _ = main_socket.close(None).await;
     handle.shutdown().await;
     let _ = shutdown.send(());
     std::env::remove_var("V3_P6_TEST_KEY");

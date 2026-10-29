@@ -2,7 +2,7 @@ use crate::*;
 use axum::body::Body;
 use axum::extract::{Extension, Request, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, Response, StatusCode};
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -131,6 +131,50 @@ fn record_responses_websocket_provider_terminal_evidence(
 }
 
 // feature_id: v3.responses_inbound_websocket_proxy
+/// Upper bounds for client events held while one request is in flight.
+///
+/// The server reads the client socket concurrently with the in-flight
+/// request so a legal client Close can cancel a long recovery wait. Text and
+/// Binary events read during that wait are held in arrival order and are
+/// never treated as a second in-flight request. Once either bound is reached
+/// the session stops polling the socket, which reapplies TCP read
+/// backpressure to the peer without dropping a queued business message or
+/// terminating the recoverable request.
+const MAX_HELD_CLIENT_EVENTS: usize = 32;
+const MAX_HELD_CLIENT_EVENT_BYTES: usize = 4 * 1024 * 1024;
+
+#[derive(Default)]
+struct HeldClientEvents {
+    events: VecDeque<Message>,
+    bytes: usize,
+}
+
+impl HeldClientEvents {
+    fn push(&mut self, message: Message) {
+        self.bytes += responses_websocket_message_retained_size(&message);
+        self.events.push_back(message);
+    }
+
+    fn pop_front(&mut self) -> Option<Message> {
+        let message = self.events.pop_front()?;
+        self.bytes -= responses_websocket_message_retained_size(&message);
+        Some(message)
+    }
+
+    fn at_bound(&self) -> bool {
+        self.events.len() >= MAX_HELD_CLIENT_EVENTS || self.bytes >= MAX_HELD_CLIENT_EVENT_BYTES
+    }
+}
+
+fn responses_websocket_message_retained_size(message: &Message) -> usize {
+    match message {
+        Message::Text(text) => text.len(),
+        Message::Binary(bytes) | Message::Ping(bytes) | Message::Pong(bytes) => bytes.len(),
+        Message::Close(Some(frame)) => frame.reason.len(),
+        Message::Close(None) => 0,
+    }
+}
+
 pub(crate) async fn responses_websocket_session(
     state: Arc<V3ListenerState>,
     headers: HeaderMap,
@@ -138,9 +182,7 @@ pub(crate) async fn responses_websocket_session(
     pending_owner_symbol: Option<String>,
     mut socket: WebSocket,
 ) {
-    // Client events read while a request is in flight are held here so they
-    // keep their original order after that request finishes.
-    let mut held_client_events: VecDeque<Message> = VecDeque::new();
+    let mut held_client_events = HeldClientEvents::default();
     loop {
         let message = match held_client_events.pop_front() {
             Some(message) => Some(Ok(message)),
@@ -191,35 +233,58 @@ pub(crate) async fn responses_websocket_session(
 /// future is dropped (and with it its recovery wait timer), nothing is
 /// projected, and no further provider business attempt starts. Transport
 /// frames are answered on the spot; client events are held for the session
-/// loop and never treated as a second in-flight request.
+/// loop and never treated as a second in-flight request. Reaching the held
+/// event bound applies read backpressure: the socket is not polled again
+/// until the in-flight request settles, so the peer's TCP send window blocks
+/// instead of queued business messages being dropped. A client Close sent
+/// after that bound is reached is therefore not observed until the request
+/// settles; this is the declared bound/cancellation trade-off.
 async fn await_outcome_while_observing_client<F>(
     socket: &mut WebSocket,
     future: F,
-    held_client_events: &mut VecDeque<Message>,
+    held_client_events: &mut HeldClientEvents,
 ) -> Result<F::Output, ()>
 where
     F: std::future::Future,
 {
-    let mut future = std::pin::pin!(future);
+    let mut future = Box::pin(future);
+    let mut client_close = false;
     loop {
+        if held_client_events.at_bound() {
+            return Ok(future.await);
+        }
         tokio::select! {
             client_event = socket.next() => {
                 match client_event {
                     Some(Ok(Message::Ping(payload))) => {
                         if socket.send(Message::Pong(payload)).await.is_err() {
-                            return Err(());
+                            break;
                         }
                     }
                     Some(Ok(Message::Pong(_))) => {}
                     Some(Ok(message @ (Message::Text(_) | Message::Binary(_)))) => {
-                        held_client_events.push_back(message);
+                        held_client_events.push(message);
                     }
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return Err(()),
+                    Some(Ok(Message::Close(_))) => {
+                        client_close = true;
+                        break;
+                    }
+                    None | Some(Err(_)) => break,
                 }
             }
             outcome = &mut future => return Ok(outcome),
         }
     }
+    // Drop the in-flight request future before the transport reply is driven,
+    // so the legal client-cancellation path abandons the recovery wait and does
+    // not start another provider business attempt for the cancelled request.
+    drop(future);
+    if client_close {
+        // tungstenite queues the protocol Close reply when it reads the client
+        // Close. Flush it to the wire before the session releases the socket.
+        let _ = socket.flush().await;
+    }
+    Err(())
 }
 
 pub(crate) async fn handle_responses_websocket_message_with_mode(
@@ -229,7 +294,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
     bytes: &[u8],
     execution_mode: V3EntryProtocolExecutionMode,
     pending_owner_symbol: Option<String>,
-    held_client_events: &mut VecDeque<Message>,
+    held_client_events: &mut HeldClientEvents,
 ) -> Result<(), ()> {
     let payload = match responses_websocket_create_payload(bytes) {
         Ok(payload) => payload,

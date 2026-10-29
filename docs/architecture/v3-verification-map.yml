@@ -2524,6 +2524,9 @@ features:
   - provider WebSocket/runtime errors remain internal; exhausted or uncompletable model requests end transport without HTTP errors, WebSocket error messages/application codes, or fabricated completion
   - client disconnect during incremental Runtime SSE projection drops the provider stream/connection instead of draining to terminal behind the client
   - client Close while one request waits inside a recoverable provider failure recovery wait is acknowledged promptly, abandons only that request without projecting business or error data, and starts no further provider business attempt for it
+  - client Close while one request waits inside a recoverable provider failure recovery wait is acknowledged with a real WebSocket close handshake before the server releases the socket, not merely an abrupt disconnect, on both the Direct and Relay public-entry paths
+  - client events read while one request is in flight are held under an explicit bound (32 events or 4 MiB retained); reaching the bound applies TCP read backpressure until the in-flight request settles, preserving order and never dropping a queued business message or terminating the recoverable request
+  - a sibling WebSocket session is unaffected while one session holds its bound of client events during a recovery wait
   - Server owns only client upgrade and framing while provider WebSocket state remains provider-owned
   - control fields do not enter provider/client normal payloads
   required_gates:

@@ -82,6 +82,8 @@ for (const phrase of [
   'responses_inbound_websocket_scope_mismatch_fails_before_provider_send',
   'responses_inbound_websocket_transport_failure_closes_without_fabricated_event',
   'responses_inbound_websocket_429_wait_cancels_without_further_business_attempts',
+  'responses_inbound_websocket_429_wait_cancels_direct_without_further_business_attempts',
+  'responses_inbound_websocket_429_wait_bounds_held_events_and_preserves_order',
   'responses_inbound_websocket_provider_429_never_reaches_the_client',
   'responses_inbound_websocket_binary_provider_error_body_never_reaches_the_client',
   'responses_inbound_websocket_upstream_502_closes_without_fabricated_event',
