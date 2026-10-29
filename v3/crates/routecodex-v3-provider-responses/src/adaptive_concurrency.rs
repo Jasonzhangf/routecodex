@@ -138,15 +138,6 @@ impl V3AdaptiveConcurrencyPermitGuard {
         self.probe_result = Some(result);
         self
     }
-
-    pub(crate) fn observe_rate_limit(&self, now_ms: u64) -> Result<(), String> {
-        let permit = self.permit.as_ref().expect("live guard owns its permit");
-        self.controller.observe_rate_limit_scoped(
-            &permit.provider_key,
-            permit.identity_scope.as_ref(),
-            now_ms,
-        )
-    }
 }
 
 impl Drop for V3AdaptiveConcurrencyPermitGuard {
