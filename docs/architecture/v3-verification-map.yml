@@ -2526,7 +2526,8 @@ features:
   - client Close while one request waits inside a recoverable provider failure recovery wait is acknowledged promptly, abandons only that request without projecting business or error data, and starts no further provider business attempt for it
   - client Close while one request waits inside a recoverable provider failure recovery wait is acknowledged with a real WebSocket close handshake before the server releases the socket, not merely an abrupt disconnect, on both the Direct and Relay public-entry paths
   - client events read while one request is in flight are held under an explicit bound (32 events or 4 MiB retained); reaching the bound applies TCP read backpressure until the in-flight request settles, preserving order and never dropping a queued business message or terminating the recoverable request
-  - a sibling WebSocket session is unaffected while one session holds its bound of client events during a recovery wait
+  - reaching the held-event bound stops reading the client socket so the peer observes write backpressure; a sibling WebSocket session still answers Ping/Pong while that session holds its bound, and settling the in-flight request resumes reading so every held event reaches the provider in arrival order
+  - when a recovery wait fills the held queue and the outcome is incremental Direct or Relay SSE, the same queue and bound continue through projection: the stream completes before any held event is served, no event is rejected as already in flight, and held Text/Binary order is preserved on both public paths
   - Server owns only client upgrade and framing while provider WebSocket state remains provider-owned
   - control fields do not enter provider/client normal payloads
   required_gates:

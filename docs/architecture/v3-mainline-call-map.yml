@@ -6007,6 +6007,9 @@ chains:
     # 32 events / 4 MiB and then stops reading the client socket to reapply
     # TCP backpressure. A client Close observed below that bound flushes the
     # protocol Close reply and cancels only the in-flight request.
+    # The same queue and bound continue through Direct CommittedSse and Relay
+    # SSE projection until the response settles, then held events are served
+    # in arrival order without being treated as a second request.
     resource_flow:
       consumes:
       - v3.request.normal_payload

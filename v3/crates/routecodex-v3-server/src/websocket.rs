@@ -402,7 +402,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                     Err(())
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
-                    send_responses_websocket_frame(socket, frame).await
+                    send_responses_websocket_frame(socket, frame, held_client_events).await
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(output) => {
                     send_responses_relay_websocket_output(
@@ -410,6 +410,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                         &evidence_request_id,
                         socket,
                         output,
+                        held_client_events,
                     )
                     .await
                 }
@@ -458,7 +459,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                     Err(())
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
-                    send_responses_websocket_frame(socket, frame).await
+                    send_responses_websocket_frame(socket, frame, held_client_events).await
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(output) => {
                     send_responses_relay_websocket_output(
@@ -466,6 +467,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                         &evidence_request_id,
                         socket,
                         output,
+                        held_client_events,
                     )
                     .await
                 }
@@ -611,6 +613,7 @@ pub(crate) fn responses_websocket_create_payload(
 pub(crate) async fn send_responses_websocket_frame(
     socket: &mut WebSocket,
     frame: V3Server16HttpFrame,
+    held_client_events: &mut HeldClientEvents,
 ) -> Result<(), ()> {
     if !frame.error_chain.is_empty() || frame.status >= 400 {
         let message = match frame.body {
@@ -654,7 +657,7 @@ pub(crate) async fn send_responses_websocket_frame(
             .await
         }
         V3Server16Body::CommittedSse(stream) => {
-            send_responses_websocket_committed_sse_stream(socket, stream).await
+            send_responses_websocket_committed_sse_stream(socket, stream, held_client_events).await
         }
     }
 }
@@ -662,31 +665,45 @@ pub(crate) async fn send_responses_websocket_frame(
 pub(crate) async fn send_responses_websocket_committed_sse_stream(
     socket: &mut WebSocket,
     mut stream: V3CommittedClientSseStream,
+    held_client_events: &mut HeldClientEvents,
 ) -> Result<(), ()> {
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+    let had_held_client_events = !held_client_events.events.is_empty();
     loop {
-        let next_chunk = tokio::select! {
-            client_message = socket.next() => {
-                match client_message {
-                    Some(Ok(Message::Ping(payload))) => {
-                        if socket.send(Message::Pong(payload)).await.is_err() {
+        let next_chunk = if held_client_events.at_bound() {
+            stream.next().await
+        } else {
+            tokio::select! {
+                client_message = socket.next() => {
+                    match client_message {
+                        Some(Ok(Message::Ping(payload))) => {
+                            if socket.send(Message::Pong(payload)).await.is_err() {
+                                return Err(());
+                            }
+                            continue;
+                        }
+                        Some(Ok(Message::Pong(_))) => continue,
+                        Some(Ok(Message::Close(_))) => {
+                            let _ = socket.flush().await;
                             return Err(());
                         }
-                        continue;
-                    }
-                    Some(Ok(Message::Pong(_))) => continue,
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return Err(()),
-                    Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_))) => {
-                        return send_responses_websocket_error(
-                            socket,
-                            "invalid_client_event",
-                            "response.create is already in flight",
-                        )
-                        .await;
+                        None | Some(Err(_)) => return Err(()),
+                        Some(Ok(message @ (Message::Text(_) | Message::Binary(_)))) => {
+                            if !had_held_client_events {
+                                return send_responses_websocket_error(
+                                    socket,
+                                    "invalid_client_event",
+                                    "response.create is already in flight",
+                                )
+                                .await;
+                            }
+                            held_client_events.push(message);
+                            continue;
+                        }
                     }
                 }
+                chunk = stream.next() => chunk,
             }
-            chunk = stream.next() => chunk,
         };
         let Some(chunk) = next_chunk else {
             break;
@@ -735,6 +752,7 @@ pub(crate) async fn send_responses_relay_websocket_output(
     request_id: &str,
     socket: &mut WebSocket,
     output: V3ResponsesRelayRuntimeOutput,
+    held_client_events: &mut HeldClientEvents,
 ) -> Result<(), ()> {
     if let Some(disposition) = output.terminal_disposition.as_ref() {
         // A provider terminal never projects onto the client: close the socket
@@ -763,7 +781,7 @@ pub(crate) async fn send_responses_relay_websocket_output(
             send_responses_websocket_json(socket, &event).await
         }
         V3ResponsesRelayClientBody::Sse(stream) => {
-            send_responses_relay_websocket_sse_stream(socket, stream).await
+            send_responses_relay_websocket_sse_stream(socket, stream, held_client_events).await
         }
     }
 }
@@ -771,31 +789,45 @@ pub(crate) async fn send_responses_relay_websocket_output(
 pub(crate) async fn send_responses_relay_websocket_sse_stream(
     socket: &mut WebSocket,
     mut stream: V3ResponsesRelayClientStream,
+    held_client_events: &mut HeldClientEvents,
 ) -> Result<(), ()> {
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+    let had_held_client_events = !held_client_events.events.is_empty();
     loop {
-        let next_chunk = tokio::select! {
-            client_message = socket.next() => {
-                match client_message {
-                    Some(Ok(Message::Ping(payload))) => {
-                        if socket.send(Message::Pong(payload)).await.is_err() {
+        let next_chunk = if held_client_events.at_bound() {
+            stream.next().await
+        } else {
+            tokio::select! {
+                client_message = socket.next() => {
+                    match client_message {
+                        Some(Ok(Message::Ping(payload))) => {
+                            if socket.send(Message::Pong(payload)).await.is_err() {
+                                return Err(());
+                            }
+                            continue;
+                        }
+                        Some(Ok(Message::Pong(_))) => continue,
+                        Some(Ok(Message::Close(_))) => {
+                            let _ = socket.flush().await;
                             return Err(());
                         }
-                        continue;
-                    }
-                    Some(Ok(Message::Pong(_))) => continue,
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return Err(()),
-                    Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_))) => {
-                        return send_responses_websocket_error(
-                            socket,
-                            "invalid_client_event",
-                            "response.create is already in flight",
-                        )
-                        .await;
+                        None | Some(Err(_)) => return Err(()),
+                        Some(Ok(message @ (Message::Text(_) | Message::Binary(_)))) => {
+                            if !had_held_client_events {
+                                return send_responses_websocket_error(
+                                    socket,
+                                    "invalid_client_event",
+                                    "response.create is already in flight",
+                                )
+                                .await;
+                            }
+                            held_client_events.push(message);
+                            continue;
+                        }
                     }
                 }
+                chunk = stream.next() => chunk,
             }
-            chunk = stream.next() => chunk,
         };
         let Some(chunk) = next_chunk else {
             break;
