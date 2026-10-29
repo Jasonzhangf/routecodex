@@ -326,21 +326,15 @@ impl V3ProviderActionGate {
             return Ok(V3ExactRateLimitAdmission::Unrestricted);
         };
         let now = Instant::now();
-        if now < state.next_admission_at || state.admitted_generation.is_some() {
+        if now < state.next_admission_at {
             return Ok(V3ExactRateLimitAdmission::Blocked(
                 key.recovery_witness(state.generation)?,
             ));
         }
-        state.admitted_generation = Some(state.generation);
-        state.updated_at = now;
-        Ok(V3ExactRateLimitAdmission::Admitted(
-            V3ProviderActionPermit {
-                gate: self.clone(),
-                key: key.clone(),
-                generation: state.generation,
-                armed: true,
-            },
-        ))
+        // A due 429 observation is not a request-owned exclusive resource.
+        // Provider health and the adaptive concurrency controller remain the
+        // owners of recovery eligibility and the shared in-flight limit.
+        Ok(V3ExactRateLimitAdmission::Unrestricted)
     }
     pub fn process_shared() -> Self {
         static SHARED: OnceLock<V3ProviderActionGate> = OnceLock::new();
@@ -857,14 +851,16 @@ impl V3ProviderActionWaiter {
                     return Ok(V3ProviderActionRecoveryTransition::Admitted(admission));
                 }
                 let now = Instant::now();
+                let reserve_action =
+                    self.admit_action && self.key.normalized_error_family != "provider_http_429";
                 let admission = if now >= state.next_admission_at
-                    && (!self.admit_action || !exact_has_active_admission)
+                    && (!reserve_action || !exact_has_active_admission)
                     && state.waiter_queue.front() == Some(&self.ticket)
                 {
                     let admission_mode = state.mode;
                     let admission_generation = state.generation;
                     let admission_minimum_delay_ms = state.minimum_delay_ms;
-                    if self.admit_action {
+                    if reserve_action {
                         state.admitted_generation = Some(admission_generation);
                         state.mode = V3ProviderActionGateMode::Sustained;
                         state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());
@@ -877,7 +873,7 @@ impl V3ProviderActionWaiter {
                         released_by_success: false,
                         reevaluate_after_terminal: false,
                         refreshed_recovery_witness: None,
-                        permit: self.admit_action.then(|| V3ProviderActionPermit {
+                        permit: reserve_action.then(|| V3ProviderActionPermit {
                             gate: self.gate.clone(),
                             key: self.key.clone(),
                             generation: admission_generation,
@@ -990,7 +986,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn issue44cc3af_exact_due_admission_is_atomic_and_other_identity_is_free() {
+    fn issue44cc3af_due_429_attempt_does_not_block_another_request() {
+        let session = V3ProviderFailureSessionScope::new("server", "route", "session").unwrap();
+        let key = V3ProviderActionGateKey::new(&session, "provider:key:model", "provider_http_429")
+            .unwrap();
+        let gate = V3ProviderActionGate::default();
+        gate.record_failure(&key).unwrap();
+        gate.lock_states()
+            .unwrap()
+            .get_mut(&key)
+            .unwrap()
+            .next_admission_at = Instant::now();
+
+        let first = gate.try_admit_exact_rate_limit(&key.provider_scope).unwrap();
+        assert!(!matches!(first, V3ExactRateLimitAdmission::Blocked(_)));
+        let second = gate.try_admit_exact_rate_limit(&key.provider_scope).unwrap();
+        assert!(
+            !matches!(second, V3ExactRateLimitAdmission::Blocked(_)),
+            "an unrelated request must not wait for the first permit"
+        );
+        drop(first);
+        gate.record_provider_success(&key.provider_scope).unwrap();
+        drop(second);
+        assert!(matches!(
+            gate.try_admit_exact_rate_limit(&key.provider_scope).unwrap(),
+            V3ExactRateLimitAdmission::Unrestricted
+        ));
+    }
+
+    #[test]
+    fn issue44cc3af_exact_due_admission_is_independent_and_other_identity_is_free() {
         let session = V3ProviderFailureSessionScope::new("server", "route", "session").unwrap();
         let key = V3ProviderActionGateKey::new(&session, "provider:key:model", "provider_http_429")
             .unwrap();
@@ -1014,31 +1039,22 @@ mod tests {
             .get_mut(&key)
             .unwrap()
             .next_admission_at = Instant::now();
-        let V3ExactRateLimitAdmission::Admitted(permit) = gate
-            .try_admit_exact_rate_limit(&key.provider_scope)
-            .unwrap()
-        else {
-            panic!("due identity must admit one attempt")
-        };
         assert!(matches!(
             gate.try_admit_exact_rate_limit(&key.provider_scope)
                 .unwrap(),
-            V3ExactRateLimitAdmission::Blocked(_)
+            V3ExactRateLimitAdmission::Unrestricted
         ));
-        drop(permit);
-        let V3ExactRateLimitAdmission::Admitted(permit) = gate
-            .try_admit_exact_rate_limit(&key.provider_scope)
-            .unwrap()
-        else {
-            panic!("cancellation must release the due identity without new backoff")
-        };
+        assert!(matches!(
+            gate.try_admit_exact_rate_limit(&key.provider_scope)
+                .unwrap(),
+            V3ExactRateLimitAdmission::Unrestricted
+        ));
         gate.record_provider_success(&key.provider_scope).unwrap();
         assert!(matches!(
             gate.try_admit_exact_rate_limit(&key.provider_scope)
                 .unwrap(),
             V3ExactRateLimitAdmission::Unrestricted
         ));
-        drop(permit);
     }
 
     #[tokio::test]

@@ -843,6 +843,55 @@ fn http_transport_request(
 }
 
 #[tokio::test]
+async fn business_429_with_probe_admission_does_not_reduce_budget() {
+    let provider_key = "business-429-probe-provider:key1";
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    controller.ensure_initial_budget(provider_key, 4).unwrap();
+    let first = controller.try_acquire_business(provider_key).unwrap();
+    let second = controller.try_acquire_business(provider_key).unwrap();
+    let third = controller.try_acquire_business(provider_key).unwrap();
+    controller.observe_rate_limit(provider_key, 0).unwrap();
+    controller.release(third.into_permit()).unwrap();
+    let probe_admission = controller.try_acquire(provider_key, 600_000).unwrap();
+    assert!(probe_admission.is_probe());
+    controller.release(first.into_permit()).unwrap();
+    controller.release(second.into_permit()).unwrap();
+    assert_eq!(controller.snapshot(provider_key).unwrap().budget, 2);
+
+    let body = br#"{"error":"limited"}"#;
+    let content_length = body.len().to_string();
+    let addr = spawn_http_error_response(429, &[("content-length", &content_length)], body).await;
+    let request = build_v3_transport_13_responses_http_request_from_parts(
+        "req-business-probe-admission-429",
+        "business-429-probe-provider",
+        format!("http://{addr}/v1/responses"),
+        V3ProviderAuthHandle {
+            alias: "key1".into(),
+            secret: V3ProviderAuthSecretHandle::ApiKey("test-key".into()),
+        },
+        V3ResponsesStreamIntent::Json,
+        json!({"model":"status-model","input":"hello","stream":false}),
+    )
+    .unwrap()
+    .with_pre_acquired_admission(probe_admission);
+    let error = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, V3ProviderError::HttpStatus { ref response } if response.status == 429),
+        "{error:?}"
+    );
+    let snapshot = controller.snapshot(provider_key).unwrap();
+    assert_eq!(snapshot.in_flight, 0);
+    assert!(!snapshot.probe_in_flight);
+    assert_eq!(
+        snapshot.budget, 2,
+        "a business 429 must not reduce capacity even when its admission is marked probe"
+    );
+}
+
+#[tokio::test]
 async fn transport_http_status_preserves_body_when_read_succeeds() {
     let body = br#"{"error":{"message":"upstream rejected request"}}"#;
     let content_length = body.len().to_string();
