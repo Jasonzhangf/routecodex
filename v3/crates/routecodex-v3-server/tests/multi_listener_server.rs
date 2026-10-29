@@ -72,6 +72,8 @@ mod image_input_blackbox;
 
 #[path = "support/pool_empty_recovery_blackbox.rs"]
 mod pool_empty_recovery_blackbox;
+#[path = "support/due_429_independence_blackbox.rs"]
+mod due_429_independence_blackbox;
 #[path = "support/sustained_429_window_blackbox.rs"]
 mod sustained_429_window_blackbox;
 
