@@ -31,7 +31,7 @@ endpoints = ["responses"]
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
-attempt_store = {}
+attempt_store = { residence_timeout_ms = 300 }
 [providers.limited]
 type = "responses"
 base_url = "http://limited.invalid/v1"
@@ -90,7 +90,7 @@ endpoints = ["responses"]
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
-attempt_store = {}
+attempt_store = { residence_timeout_ms = 300 }
 [providers.limited]
 type = "responses"
 base_url = "http://limited.invalid/v1"
@@ -242,35 +242,32 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
     assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
     assert_eq!(event.status, 502);
     assert_eq!(event.action, "switch_provider");
-    assert_eq!(event.failure_count, 1);
-    assert_eq!(event.health_state, "cooldown");
-    assert!(event.cooldown_until_ms.is_some());
+    assert_eq!(event.failure_count, 0);
+    assert_eq!(event.health_state, "pre_cool_observation");
+    assert_eq!(event.cooldown_until_ms, None);
 
+    let runtime_health = provider_health.runtime_health();
     let now = u64::MAX;
     assert!(
-        !provider_health
-            .store()
+        !runtime_health
             .availability("limited", Some("key1"), Some("gpt-5.5"), now)
             .available,
         "the exact failed identity must be cooled"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability("limited", Some("key1"), Some("other-model"), now)
             .available,
         "another model under the same provider and key must stay routable"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability("limited", Some("other-key"), Some("gpt-5.5"), now)
             .available,
         "another key under the same provider and model must stay routable"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability("minimax", Some("key1"), Some("MiniMax-M3"), now)
             .available,
         "the untried secondary provider must stay routable"
@@ -327,28 +324,26 @@ async fn truncated_http_200_cools_exact_identity_when_it_is_the_last_candidate()
         .expect("provider failure event");
     assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
     assert_eq!(event.status, 502);
-    assert_eq!(event.health_state, "cooldown");
-    assert!(event.failure_count >= 1);
-    assert!(event.cooldown_until_ms.is_some());
+    assert_eq!(event.health_state, "pre_cool_observation");
+    assert_eq!(event.failure_count, 0);
+    assert_eq!(event.cooldown_until_ms, None);
 
+    let runtime_health = provider_health.runtime_health();
     let now = u64::MAX;
     assert!(
-        !provider_health
-            .store()
+        !runtime_health
             .availability("limited", Some("key1"), Some("gpt-5.5"), now)
             .available,
         "a last-candidate truncated HTTP 200 body must cool the exact provider identity"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability("limited", Some("key1"), Some("other-model"), now)
             .available,
         "another model under the same provider and key must stay routable"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability("limited", Some("other-key"), Some("gpt-5.5"), now)
             .available,
         "another key under the same provider and model must stay routable"

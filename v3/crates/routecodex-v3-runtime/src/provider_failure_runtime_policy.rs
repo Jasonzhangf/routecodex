@@ -1040,48 +1040,47 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     // the request's last eligible candidate. Completed provider business
     // responses and request-local compatibility failures keep the health-neutral
     // last-candidate boundary; a real 429 backpressure owns its own lane.
-    let health_record =
-        if is_request_local_compat_failure
-            || (!has_alternative && status != 429 && !is_transport_failure)
-        {
-            V3ProviderFailureRecord {
-                scope_label: candidate_key.clone(),
-                provider_key: candidate_key.clone(),
-                state: if status == 429 {
-                    "rate_limit_capacity_wait"
-                } else if is_response_processing_failure {
-                    "request_local_response_processing"
-                } else if is_request_local_compat_failure {
-                    "request_local_provider_compat"
-                } else {
-                    "last_candidate_terminal"
-                }
-                .to_string(),
-                failure_count: 0,
-                cooldown_until_ms: None,
-                reason: reason.map(str::to_string),
+    let health_record = if is_request_local_compat_failure
+        || (!has_alternative && status != 429 && !is_transport_failure)
+    {
+        V3ProviderFailureRecord {
+            scope_label: candidate_key.clone(),
+            provider_key: candidate_key.clone(),
+            state: if status == 429 {
+                "rate_limit_capacity_wait"
+            } else if is_response_processing_failure {
+                "request_local_response_processing"
+            } else if is_request_local_compat_failure {
+                "request_local_provider_compat"
+            } else {
+                "last_candidate_terminal"
             }
-        } else {
-            context
-                .provider_health
-                .record_provider_failure_record_with_policy_for_interface(
-                    matched_policy,
-                    context.manifest,
-                    &context.failure_session_scope,
-                    &selected.candidate.provider_id,
-                    &selected.candidate.interface_id,
-                    Some(&selected.candidate.provider_type),
-                    Some(&selected.candidate.auth_alias),
-                    Some(&selected.candidate.model_id),
-                    reason,
-                    source_stage,
-                    status,
-                    error_type.as_deref(),
-                    &message,
-                    v3_relay_provider_policy_now_epoch_ms()
-                        .map_err(v3_relay_provider_policy_ordinary_error)?,
-                )?
-        };
+            .to_string(),
+            failure_count: 0,
+            cooldown_until_ms: None,
+            reason: reason.map(str::to_string),
+        }
+    } else {
+        context
+            .provider_health
+            .record_provider_failure_record_with_policy_for_interface(
+                matched_policy,
+                context.manifest,
+                &context.failure_session_scope,
+                &selected.candidate.provider_id,
+                &selected.candidate.interface_id,
+                Some(&selected.candidate.provider_type),
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+                reason,
+                source_stage,
+                status,
+                error_type.as_deref(),
+                &message,
+                v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(v3_relay_provider_policy_ordinary_error)?,
+            )?
+    };
     let retries_done = state
         .same_candidate_retries
         .get(&candidate_key)
