@@ -30,3 +30,4 @@ Controlled evidence:
 - Scope mismatch fails before provider send; Server does not repair continuation/history/tool state.
 - A provider terminal closes the current WebSocket without any client payload, so a WebSocket client never observes a provider status, code, or body; a runtime/validation failure still projects an explicit WebSocket error event without HTTP fallback.
 - Client disconnect during incremental Runtime SSE projection drops the provider stream/connection instead of silently draining to terminal behind the client.
+- While one request waits inside a recoverable provider failure recovery wait, the Server keeps reading the client socket: a client Close ends that transport, releases the request and its recovery wait, projects no business or error frame, and starts no further provider business attempt for it.

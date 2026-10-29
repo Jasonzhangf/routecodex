@@ -6012,6 +6012,7 @@ chains:
       side_channel_reads:
       - v3.config.published_manifest
       - v3.provider.health_state
+      - v3.responses.inbound_websocket_client_connection
       side_channel_writes: []
   - step_id: v3-inws-04
     from_node: V3Resp15ClientPayload

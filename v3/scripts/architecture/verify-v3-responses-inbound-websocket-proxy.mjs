@@ -57,6 +57,7 @@ for (const phrase of [
   'response.create must be a flat event; nested response payload is unsupported',
   'execute_responses_direct_server_outcome(',
   'async fn execute_responses_relay_websocket_output(',
+  'async fn await_outcome_while_observing_client<F>(',
   'if let Some(handoff) = relay_output.protocol_direct_handoff.take()',
   'send_responses_relay_websocket_output(',
   'execute_v3_responses_relay_runtime_with_default_transport_health(',
@@ -80,6 +81,7 @@ for (const phrase of [
   'responses_inbound_websocket_rejects_second_previous_response_id_without_provider_send',
   'responses_inbound_websocket_scope_mismatch_fails_before_provider_send',
   'responses_inbound_websocket_transport_failure_closes_without_fabricated_event',
+  'responses_inbound_websocket_429_wait_cancels_without_further_business_attempts',
   'responses_inbound_websocket_provider_429_never_reaches_the_client',
   'responses_inbound_websocket_binary_provider_error_body_never_reaches_the_client',
   'responses_inbound_websocket_upstream_502_closes_without_fabricated_event',
@@ -177,6 +179,10 @@ if (wsStart < 0 || wsEnd <= wsStart) {
 const clientSocketPolls = text.websocket.match(/client_message = socket\.next\(\) =>/g) ?? [];
 if (clientSocketPolls.length !== 2) {
   failures.push(files.websocket + ': expected Direct and Relay WebSocket stream client disconnect polling, got ' + clientSocketPolls.length);
+}
+const inFlightClientPolls = text.websocket.match(/client_event = socket\.next\(\) =>/g) ?? [];
+if (inFlightClientPolls.length !== 1) {
+  failures.push(files.websocket + ': expected one in-flight client cancellation poll, got ' + inFlightClientPolls.length);
 }
 const runtimeSseDecodeGuards = text.websocket.match(/match decoder\.push\(build_v3_sse_transport_in_01_raw_chunk\(&chunk\)\) \{\s*Ok\(frames\) => frames,\s*Err\(error\) => \{\s*return send_responses_websocket_error\(\s*socket,\s*"runtime_stream_error",/g) ?? [];
 if (runtimeSseDecodeGuards.length !== 2) {

@@ -4,6 +4,7 @@ use axum::extract::{Extension, Request, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, Response, StatusCode};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 pub(crate) async fn responses_websocket_endpoint(
@@ -137,7 +138,17 @@ pub(crate) async fn responses_websocket_session(
     pending_owner_symbol: Option<String>,
     mut socket: WebSocket,
 ) {
-    while let Some(message) = socket.next().await {
+    // Client events read while a request is in flight are held here so they
+    // keep their original order after that request finishes.
+    let mut held_client_events: VecDeque<Message> = VecDeque::new();
+    loop {
+        let message = match held_client_events.pop_front() {
+            Some(message) => Some(Ok(message)),
+            None => socket.next().await,
+        };
+        let Some(message) = message else {
+            break;
+        };
         let message = match message {
             Ok(message) => message,
             Err(_) => break,
@@ -161,11 +172,52 @@ pub(crate) async fn responses_websocket_session(
             &bytes,
             execution_mode,
             pending_owner_symbol.clone(),
+            &mut held_client_events,
         )
         .await
         .is_err()
         {
             break;
+        }
+    }
+}
+
+/// Poll the client socket while a request is in flight.
+///
+/// The Runtime buffers every provider attempt before any client frame is
+/// projected, so a request can sit in a declared recovery wait with no
+/// client-visible traffic. Reading the client socket concurrently keeps that
+/// wait cancellable: the client's own Close ends the transport, the request
+/// future is dropped (and with it its recovery wait timer), nothing is
+/// projected, and no further provider business attempt starts. Transport
+/// frames are answered on the spot; client events are held for the session
+/// loop and never treated as a second in-flight request.
+async fn await_outcome_while_observing_client<F>(
+    socket: &mut WebSocket,
+    future: F,
+    held_client_events: &mut VecDeque<Message>,
+) -> Result<F::Output, ()>
+where
+    F: std::future::Future,
+{
+    let mut future = std::pin::pin!(future);
+    loop {
+        tokio::select! {
+            client_event = socket.next() => {
+                match client_event {
+                    Some(Ok(Message::Ping(payload))) => {
+                        if socket.send(Message::Pong(payload)).await.is_err() {
+                            return Err(());
+                        }
+                    }
+                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Ok(message @ (Message::Text(_) | Message::Binary(_)))) => {
+                        held_client_events.push_back(message);
+                    }
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return Err(()),
+                }
+            }
+            outcome = &mut future => return Ok(outcome),
         }
     }
 }
@@ -177,6 +229,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
     bytes: &[u8],
     execution_mode: V3EntryProtocolExecutionMode,
     pending_owner_symbol: Option<String>,
+    held_client_events: &mut VecDeque<Message>,
 ) -> Result<(), ()> {
     let payload = match responses_websocket_create_payload(bytes) {
         Ok(payload) => payload,
@@ -234,24 +287,32 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
         responses_effective_execution_mode_for_entry_facts(execution_mode, &entry_facts);
     match effective_execution_mode {
         V3EntryProtocolExecutionMode::Direct => {
-            let outcome = execute_responses_direct_server_outcome(
-                state,
-                headers,
-                "WEBSOCKET".to_string(),
-                "/v1/responses".to_string(),
-                request_id,
-                Some(request_identity.pipeline_id.clone()),
-                execution_id,
-                payload,
-                protocol_plan.as_ref(),
-                None,
-                None,
-                None,
-                None,
-                None,
-                V3RequestPurpose::Conversation,
+            let outcome = match await_outcome_while_observing_client(
+                socket,
+                execute_responses_direct_server_outcome(
+                    state,
+                    headers,
+                    "WEBSOCKET".to_string(),
+                    "/v1/responses".to_string(),
+                    request_id,
+                    Some(request_identity.pipeline_id.clone()),
+                    execution_id,
+                    payload,
+                    protocol_plan.as_ref(),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    V3RequestPurpose::Conversation,
+                ),
+                held_client_events,
             )
-            .await;
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(()) => return Err(()),
+            };
             outcome.publish_observations(
                 state,
                 execution_scope.as_ref(),
@@ -290,16 +351,24 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             }
         }
         V3EntryProtocolExecutionMode::Relay => {
-            let outcome = execute_responses_relay_websocket_output(
-                state,
-                headers,
-                request_id,
-                request_identity.pipeline_id.clone(),
-                execution_id,
-                payload,
-                protocol_plan.as_ref(),
+            let outcome = match await_outcome_while_observing_client(
+                socket,
+                execute_responses_relay_websocket_output(
+                    state,
+                    headers,
+                    request_id,
+                    request_identity.pipeline_id.clone(),
+                    execution_id,
+                    payload,
+                    protocol_plan.as_ref(),
+                ),
+                held_client_events,
             )
-            .await;
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(()) => return Err(()),
+            };
             outcome.publish_observations(
                 state,
                 execution_scope.as_ref(),

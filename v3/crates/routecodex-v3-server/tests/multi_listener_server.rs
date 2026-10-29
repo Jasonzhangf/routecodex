@@ -8896,6 +8896,66 @@ async fn responses_inbound_websocket_transport_failure_closes_without_fabricated
 }
 
 #[tokio::test]
+async fn responses_inbound_websocket_429_wait_cancels_without_further_business_attempts() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_terminal_upstream(StatusCode::TOO_MANY_REQUESTS).await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-ws-cancel-429");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"client-test","input":"cancel during 429 recovery"})
+                .to_string(),
+        ))
+        .await
+        .unwrap();
+    let first = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("the original request must reach the provider")
+        .expect("the controlled provider capture must remain open");
+    assert_eq!(first.body["model"], "wire-test");
+    assert!(
+        timeout(Duration::from_millis(200), socket.next())
+            .await
+            .is_err(),
+        "recoverable provider failure must not project data or close the WebSocket"
+    );
+
+    socket.send(Message::Close(None)).await.unwrap();
+    let closed = timeout(Duration::from_secs(3), socket.next())
+        .await
+        .expect("client cancellation must be observed while recovery is pending");
+    assert!(
+        matches!(closed, None | Some(Err(_)) | Some(Ok(Message::Close(_)))),
+        "cancelled request must not emit business or error data: {closed:?}"
+    );
+    assert!(
+        timeout(Duration::from_secs(2), captures.recv())
+            .await
+            .is_err(),
+        "the cancelled request must not start another provider business attempt"
+    );
+
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn responses_inbound_websocket_provider_429_never_reaches_the_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let upstream_body = json!({
