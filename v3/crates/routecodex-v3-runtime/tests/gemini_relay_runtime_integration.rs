@@ -698,6 +698,45 @@ impl ResponsesTransport for StaticSseTransport {
     }
 }
 
+/// A sealed primary SSE attempt followed by a spare success. The malformed
+/// chunk proves the primary's attempt is rejected before commit, while the
+/// spare keeps the same request recoverable instead of waiting out the primary
+/// pre-cool observation.
+struct PrimaryFailsSpareSucceedsSseTransport {
+    primary_id: String,
+    malformed_chunks: Vec<Vec<u8>>,
+    success_chunks: Vec<Vec<u8>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for PrimaryFailsSpareSucceedsSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        assert!(
+            request.url().ends_with(":streamGenerateContent?alt=sse"),
+            "Gemini SSE transport must use the streaming endpoint: {}",
+            request.url()
+        );
+        let chunks = if request.provider_id() == self.primary_id {
+            self.malformed_chunks.clone()
+        } else {
+            self.success_chunks.clone()
+        };
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter(chunks.into_iter().map(Ok))),
+        ))
+    }
+}
+
 #[async_trait]
 impl ResponsesTransport for ClientDisconnectSseTransport {
     async fn send(
@@ -1184,11 +1223,19 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
     let failure_manifest = manifest_with_action_gate_spare(&manifest, server_id);
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&failure_manifest);
-    // Seed one recoverable malformed attempt so the next success can prove
-    // action-lane release while this provider remains eligible.
+    // Seed one recoverable malformed attempt: the primary's sealed SSE attempt
+    // enters a pre-cool observation, while the spare answers the same request.
+    // That keeps the seed fast and leaves only the exact primary identity held.
     {
-        let failing = StaticSseTransport {
-            chunks: Mutex::new(Some(vec![b"data: {malformed-json}\n\n".to_vec()])),
+        let failing = PrimaryFailsSpareSucceedsSseTransport {
+            primary_id: server_id.to_string(),
+            malformed_chunks: vec![b"data: {malformed-json}\n\n".to_vec()],
+            success_chunks: vec![
+                br#"data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"seed-recovered"}]},"finishReason":"STOP"}]}
+
+"#
+                .to_vec(),
+            ],
         };
         let failed = execute_v3_gemini_relay_runtime_with_provider_health(
             &failure_manifest,
@@ -1211,19 +1258,11 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
             provider_health.runtime_health(),
         )
         .await
-        .expect("failed provider attempt must reach terminal Error06");
-        assert_eq!(failed.status, 502, "{failed:?}");
-        assert_eq!(failed.error_chain.as_ref().map(Vec::len), Some(6));
-        assert_eq!(failed.node_trace.last(), Some(&"V3Error06ClientProjected"));
-        let failed_client_response = match failed.client_body {
-            V3GeminiRelayClientBody::Json(value) => value,
-            V3GeminiRelayClientBody::Sse(_) => {
-                panic!("failed provider attempt must not produce client SSE")
-            }
-        };
+        .expect("seed request must recover on the spare candidate");
+        assert_eq!(failed.status, 200, "{failed:?}");
         assert!(
-            failed_client_response.get("error").is_some(),
-            "malformed provider attempt must project one terminal error: {failed_client_response}"
+            failed.node_trace.contains(&"V3TargetLocalReselected"),
+            "seed request must reselect to the spare after the sealed primary attempt"
         );
     }
 
@@ -1235,22 +1274,35 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
             .to_vec(),
         ])),
     };
-    // Health recovery and action-lane release are separate: a matching
-    // semantic probe restores eligibility before the real terminal attempt.
+    // A single non-429 failure is observed before any cooldown: the runtime
+    // health view holds the exact identity for its pre-cool observation, while
+    // the health store itself stays available until that gate closes.
+    let observed = provider_health.runtime_health().availability(
+        server_id,
+        Some(server_id),
+        Some("gemini-wire"),
+        u64::MAX,
+    );
     assert!(
-        !provider_health
+        !observed.available,
+        "pre-cool observation must hold the seeded identity: {observed:?}"
+    );
+    assert!(
+        observed
+            .blocked_scopes
+            .iter()
+            .any(|scope| scope == "provider_pre_cool_observation"),
+        "seeded identity must be blocked by its pre-cool observation: {observed:?}"
+    );
+    assert!(
+        provider_health
             .store()
             .availability(server_id, Some(server_id), Some("gemini-wire"), u64::MAX)
-            .available
+            .available,
+        "a single non-429 failure must not cool before its observation gate"
     );
-    revive_cooled_provider(&provider_health, server_id).await;
-    assert!(provider_health
-        .store()
-        .provider_cooldown_probe_keys_due(u64::MAX)
-        .expect("provider cooldown probe inventory")
-        .is_empty());
     let successful = execute_v3_gemini_relay_runtime_with_provider_health(
-        &manifest,
+        &failure_manifest,
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -1276,7 +1328,7 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
         V3GeminiRelayClientBody::Json(_) => panic!("expected SSE"),
     };
 
-    let waiting_manifest = manifest.clone();
+    let waiting_manifest = failure_manifest.clone();
     let waiting_health = provider_health.runtime_health();
     let waiting_server_id = server_id.to_string();
     let waiter = tokio::spawn(async move {
@@ -1322,18 +1374,12 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
 }
 
 #[tokio::test]
-async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_seconds() {
+async fn broker_terminal_validation_holds_terminal_and_alternative_immediate() {
     use futures_util::StreamExt;
     let server_id = "gemini_active_recovery";
     const FAILURE_SESSION_ID: &str = "gemini-active-recovery-session";
     let manifest = manifest_with_two_providers_for_scope(server_id, true);
     let provider_health =
-        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    // The action gate is process-shared, while this second handle keeps the
-    // competing request's availability snapshot independent. That lets the
-    // test exercise the same Error05 lane instead of skipping the cooled
-    // primary before an action can be admitted.
-    let competing_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let (terminal_sender, terminal_receiver) = tokio::sync::mpsc::channel(2);
     terminal_sender
@@ -1381,12 +1427,19 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
         .expect("first recovery transport dropped its admission signal");
     assert!(
         !first_runtime.is_finished(),
-        "terminal frame without provider EOF must remain inside Runtime/Broker"
+        "validated terminal without provider EOF must remain inside Runtime/Broker"
     );
 
     let waiting_manifest = manifest.clone();
-    let waiting_health = competing_health.runtime_health();
+    let waiting_health = provider_health.runtime_health();
     let waiter = tokio::spawn(async move {
+        // The second request arrives after the primary is held by its
+        // pre-cool observation. It must not consume the primary's lane; the
+        // healthy secondary must answer immediately while the first request's
+        // committed terminal is still held by the Broker.
+        let transport = ReselectTransport {
+            provider_ids: Mutex::new(Vec::new()),
+        };
         execute_v3_gemini_relay_runtime_with_provider_health(
             &waiting_manifest,
             V3GeminiRelayRuntimeInput {
@@ -1404,17 +1457,26 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
                     "stream":false
                 }),
             },
-            &ReselectTransport {
-                provider_ids: Mutex::new(Vec::new()),
-            },
+            &transport,
             waiting_health,
         )
         .await
+        .map(|output| (output, transport.provider_ids.lock().unwrap().clone()))
     });
-    tokio::time::sleep(Duration::from_millis(5_200)).await;
+    let (released, provider_ids) = tokio::time::timeout(Duration::from_secs(2), waiter)
+        .await
+        .expect("healthy alternative must not be storm-locked by the held primary")
+        .expect("competing Gemini request task panicked")
+        .expect("competing Gemini request failed");
+    assert_eq!(
+        provider_ids.as_slice(),
+        ["secondary"],
+        "the competing request must bypass the held primary and use secondary directly"
+    );
+    assert_eq!(released.status, 200);
     assert!(
-        !waiter.is_finished(),
-        "active Broker recovery permit expired before validated terminal EOF"
+        !first_runtime.is_finished(),
+        "first request's committed terminal must remain held until clean EOF"
     );
 
     drop(terminal_sender);
@@ -1424,8 +1486,8 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
         .expect("first Gemini recovery task panicked")
         .expect("first Gemini recovery attempt failed");
     assert!(
-        first.node_trace.contains(&"V3ProviderActionGateAdmission"),
-        "the controlled committed SSE must be a recovery action"
+        first.node_trace.contains(&"V3TargetLocalReselected"),
+        "the first request must reselect from the failed primary to the healthy secondary"
     );
     let first_stream = match first.client_body {
         V3GeminiRelayClientBody::Sse(stream) => stream,
@@ -1438,19 +1500,6 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
     assert!(String::from_utf8(committed[0].clone())
         .unwrap()
         .contains("done"));
-
-    let released = tokio::time::timeout(Duration::from_secs(6), waiter)
-        .await
-        .expect("validated terminal did not release the queued Gemini recovery action")
-        .expect("queued Gemini recovery task panicked")
-        .expect("queued Gemini recovery action failed");
-    assert_eq!(released.status, 200);
-    assert!(
-        released
-            .node_trace
-            .contains(&"V3ProviderActionGateAdmission"),
-        "the competing Gemini request must also enter Error05 recovery"
-    );
 }
 
 #[tokio::test]
