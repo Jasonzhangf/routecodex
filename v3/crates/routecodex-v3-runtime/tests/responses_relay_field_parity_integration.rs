@@ -233,14 +233,6 @@ async fn responses_openai_chat_field_parity_normalization_preserves_failure_boun
             "conflicting input and messages",
         ),
         (
-            serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],"input":[{"type":"function_call_output","call_id":"call_orphan","output":"unpaired"}]}),
-            "orphan tool output",
-        ),
-        (
-            serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]}],"input":[{"type":"custom_tool_call_output","call_id":"call_known","output":"wrong kind"}]}),
-            "tool output kind mismatch",
-        ),
-        (
             serde_json::json!({"messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_known","content":"old"}],"input":[{"type":"function_call_output","call_id":"call_known","output":"different"}]}),
             "conflicting tool output",
         ),
@@ -274,6 +266,35 @@ async fn responses_openai_chat_field_parity_normalization_preserves_failure_boun
             "{message}"
         );
         assert!(transport.captures.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_preserves_unpaired_and_mismatched_outputs() {
+    for (kind, call_id, output) in [
+        ("function_call_output", "call_orphan", "unpaired"),
+        ("custom_tool_call_output", "call_known", "wrong kind"),
+    ] {
+        let transport = normalization_transport();
+        let result = execute_v3_responses_relay_runtime(
+            &manifest_openai_chat_wire(),
+            responses_relay_input("req04-preserve-output", serde_json::json!({
+                "messages":[{"role":"assistant","tool_calls":[{"id":"call_known","type":"function","function":{"name":"lookup","arguments":"{invalid"}}]}],
+                "input":[{"type":kind,"call_id":call_id,"output":output}]
+            })),
+            &transport,
+        ).await.expect("representable history must reach provider");
+        assert!(result.error_chain.is_none());
+        let captures = transport.captures.lock().unwrap();
+        assert_eq!(captures.len(), 1);
+        let body = provider_projection_body(&captures[0]);
+        assert_eq!(body["messages"][0]["tool_calls"][0]["id"], "call_known");
+        assert_eq!(
+            body["messages"][0]["tool_calls"][0]["function"]["arguments"],
+            "{invalid"
+        );
+        assert_eq!(body["messages"][1]["tool_call_id"], call_id);
+        assert_eq!(body["messages"][1]["content"], output);
     }
 }
 
