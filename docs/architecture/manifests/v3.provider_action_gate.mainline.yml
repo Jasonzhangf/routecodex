@@ -5,7 +5,7 @@ canonical_docs:
   - docs/goals/direct-relay-cross-request-error-storm-control-plan.md
   - docs/architecture/wiki/v3-provider-action-gate.md
 entrypoint: ProviderReqCompat06ProviderCompat
-return_path: [V3ExecutionRetryOrReselect, V3ProviderActionGateTerminalCommitted, V3ProviderActionSuccessRecorded, V3ProviderActionFailureRecorded, V3ProviderActionPermitAbandoned]
+return_path: [V3ProviderActionPermitInFlight, V3ProviderActionGateTerminalCommitted, V3ProviderActionSuccessRecorded, V3ProviderActionFailureRecorded, V3ProviderActionPermitAbandoned]
 nodes:
   - node_id: ProviderReqCompat06ProviderCompat
     owner: routecodex-v3-runtime
@@ -20,8 +20,6 @@ nodes:
   - node_id: V3Error05RecoveryWitness
     owner: routecodex-v3-error
   - node_id: V3ProviderActionGateAdmission
-    owner: routecodex-v3-runtime
-  - node_id: V3ExecutionRetryOrReselect
     owner: routecodex-v3-runtime
   - node_id: V3ProviderActionGateTerminalAdmission
     owner: routecodex-v3-runtime
@@ -105,13 +103,13 @@ edges:
     callee_symbol: V3ProviderActionGate::commit_terminal_generation_locked
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
   - step_id: v3-provider-action-gate-07
-    from: V3ProviderActionGateAdmission
-    to: V3ExecutionRetryOrReselect
+    from: V3ProviderReqOutbound08WirePayload
+    to: V3Error05RecoveryWitness
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3ProviderFailureRuntimeHealth::wait_for_exact_selected_provider_action
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderActionGate::wait_for_exact_provider_action
+    caller_symbol: V3ProviderFailureRuntimeHealth::try_admit_candidate_rate_limit
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
+    callee_symbol: V3ProviderActionGate::try_admit_exact_rate_limit
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
   - step_id: v3-provider-action-gate-08
     from: V3Error05RecoveryWitness
@@ -482,10 +480,62 @@ edges:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
     callee_symbol: V3ResponsesSseReducerState::apply_event
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+  - step_id: v3-provider-action-gate-52
+    from: V3ProviderReqOutbound08WirePayload
+    to: V3Error05RecoveryWitness
+    status: anchored
+    owner_feature_id: v3.provider_action_gate
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - step_id: v3-provider-action-gate-53
+    from: V3ProviderReqOutbound08WirePayload
+    to: V3Error05RecoveryWitness
+    status: anchored
+    owner_feature_id: v3.provider_action_gate
+    caller_symbol: execute_v3_direct_runtime_kernel_core_resident
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - step_id: v3-provider-action-gate-54
+    from: V3ProviderReqOutbound08WirePayload
+    to: V3Error05RecoveryWitness
+    status: anchored
+    owner_feature_id: v3.provider_action_gate
+    caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - step_id: v3-provider-action-gate-55
+    from: V3ProviderReqOutbound08WirePayload
+    to: V3Error05RecoveryWitness
+    status: anchored
+    owner_feature_id: v3.provider_action_gate
+    caller_symbol: execute_v3_relay_runtime_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+    callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - step_id: v3-provider-action-gate-56
+    from: V3ProviderReqOutbound08WirePayload
+    to: V3Error05RecoveryWitness
+    status: anchored
+    owner_feature_id: v3.provider_action_gate
+    caller_symbol: execute_v3_anthropic_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+    callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
 resources:
   - v3.error.execution_decision
   - v3.error.provider_action_gate
   - v3.provider.health_state
+request_independence:
+  business_scope: request_local
+  shared_recovery_scope: listener_provider_interface_model_auth_key
+  session_group_admission: forbidden
+  sibling_identity_delay_generation_mutation: forbidden
+  waiter_count_is_failure_evidence: false
+  precool_and_429_state_owner: existing_exact_identity_owner
 terminal_transition:
   admission_operation: V3ProviderActionGate::record_failure_and_commit_terminal_projection
   atomic_commit_operation: V3ProviderActionGate::commit_terminal_generation_locked
@@ -505,7 +555,8 @@ admission_permit:
   abandon_increments_failure_count: false
   abandon_mutates_provider_health: false
   waiter_order: fifo_ticket
-  fresh_request_consumes_active_recovery_lane: false
+  admission_scope: exact_control_lane_only
+  fresh_request_consumes_active_recovery_lane: http_429_only
 downstream_projection:
   owner_crate: routecodex-v3-error
   source_operation: terminal_projection_for

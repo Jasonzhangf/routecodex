@@ -11,11 +11,15 @@ use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
     build_v3_transport_13_responses_http_request_from_v3_provider_12, ReqwestResponsesTransport,
     ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderCancellation,
-    V3ProviderError, V3ProviderResponseBodyKind, V3ResponsesProviderTarget,
+    V3ProviderError, V3ProviderResponseBodyKind, V3ProviderTransportHandoffScope,
+    V3ProviderTransportSendPhase, V3ResponsesProviderTarget,
 };
 use serde_json::{json, Value};
-use std::{convert::Infallible, sync::Arc};
-use tokio::sync::{mpsc, oneshot};
+use std::{convert::Infallible, sync::Arc, time::Duration};
+use tokio::{
+    io::AsyncReadExt,
+    sync::{mpsc, oneshot},
+};
 
 #[derive(Debug)]
 struct Capture {
@@ -610,4 +614,314 @@ async fn auth_http_connect_and_client_disconnect_errors_remain_typed_failures() 
 
     std::env::remove_var("V3_GENERAL_ERROR_KEY");
     shutdown.send(()).unwrap();
+}
+
+#[derive(Clone)]
+struct RateLimitState {
+    barrier: Arc<tokio::sync::Barrier>,
+}
+
+async fn rate_limited_upstream(State(state): State<Arc<RateLimitState>>) -> Response<Body> {
+    // Refuse both concurrent attempts only after they are simultaneously in
+    // flight, so the observed 429 watermark is deterministic.
+    state.barrier.wait().await;
+    Response::builder()
+        .status(StatusCode::TOO_MANY_REQUESTS)
+        .header("content-type", "application/json")
+        .body(Body::from("{\"error\":{\"message\":\"rate limited\"}}"))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn upstream_429_collapses_adaptive_budget_below_the_refused_watermark() {
+    use routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = Router::new()
+        .route("/v1/responses", post(rate_limited_upstream))
+        .with_state(Arc::new(RateLimitState {
+            barrier: Arc::new(tokio::sync::Barrier::new(2)),
+        }));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    let base_url = format!("http://{address}/v1");
+    std::env::set_var("V3_ADAPTIVE_429_KEY", "secret-adaptive-429");
+
+    let provider_target = target(
+        "adaptive-429-blackbox",
+        &base_url,
+        "model-429",
+        "adaptive",
+        "V3_ADAPTIVE_429_KEY",
+    );
+    let provider_key = format!(
+        "{}:{}",
+        provider_target.provider_id, provider_target.auth.alias
+    );
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    controller
+        .ensure_initial_budget(&provider_key, provider_target.initial_concurrency_budget)
+        .unwrap();
+    let baseline = controller.snapshot(&provider_key).unwrap();
+    assert_eq!(
+        baseline.hard_max_in_flight, 8,
+        "the declared static maxInFlight must remain only the hard ceiling"
+    );
+    assert_eq!(baseline.budget, 8);
+    assert_eq!(baseline.rate_limit_samples, 0);
+    assert_eq!(baseline.smoothed_budget, 8);
+
+    let transport = ReqwestResponsesTransport::default();
+    let mut attempts = Vec::new();
+    for attempt in 0..2 {
+        let transport = transport.clone();
+        let provider_target = provider_target.clone();
+        attempts.push(tokio::spawn(async move {
+            let wire = build_v3_provider_12_responses_wire_payload(
+                format!("req-adaptive-429-{attempt}"),
+                provider_target,
+                json!({"model":"model-429","input":"hello"}),
+            )
+            .unwrap();
+            transport
+                .send(
+                    build_v3_transport_13_responses_http_request_from_v3_provider_12(wire).unwrap(),
+                )
+                .await
+        }));
+    }
+    for attempt in attempts {
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), attempt)
+            .await
+            .expect("both rate-limited attempts must terminate")
+            .unwrap();
+        assert!(
+            matches!(
+                result,
+                Err(V3ProviderError::HttpStatus { response }) if response.status == 429
+            ),
+            "the provider 429 must surface as a typed HTTP status error"
+        );
+    }
+
+    let scope =
+        routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+            interface_id: provider_target.interface_id.clone(),
+            model_id: provider_target.canonical_model_id.clone(),
+        };
+    let snapshot = controller
+        .snapshot_for_scope(&provider_key, Some(&scope))
+        .unwrap();
+    assert_eq!(
+        snapshot.rate_limit_samples, 2,
+        "each refused attempt must contribute one 429 watermark sample"
+    );
+    assert_eq!(
+        snapshot.smoothed_budget, 1,
+        "two 429s at an in-flight watermark of two must cap the budget one slot below it"
+    );
+    assert_eq!(
+        snapshot.budget, 1,
+        "the adaptive budget must drop to the refused watermark minus one, not step down by one"
+    );
+    assert!(snapshot.saturated);
+    assert!(snapshot.in_flight == 0, "both leases must be released");
+
+    std::env::remove_var("V3_ADAPTIVE_429_KEY");
+    shutdown_tx.send(()).unwrap();
+}
+fn handoff_scope(request_id: &str) -> V3ProviderTransportHandoffScope {
+    V3ProviderTransportHandoffScope {
+        pipeline_id: "general-provider".to_string(),
+        server_id: "general-server".to_string(),
+        port: 7777,
+        session_scope: format!("general:{request_id}"),
+        runtime_generation: 1,
+    }
+}
+
+#[tokio::test]
+async fn provider_send_fact_distinguishes_pre_send_cancel_from_first_poll_timeout() {
+    std::env::set_var("V3_GENERAL_SENDFACT_KEY", "secret-sendfact");
+    let transport = ReqwestResponsesTransport::default();
+
+    let cancellation = V3ProviderCancellation::new();
+    cancellation.cancel();
+    let cancelled = build_v3_provider_12_responses_wire_payload(
+        "req-sendfact-cancel",
+        target(
+            "sendfact",
+            "http://127.0.0.1:9/v1/responses",
+            "model",
+            "error",
+            "V3_GENERAL_SENDFACT_KEY",
+        ),
+        json!({"model":"model","input":"cancel"}),
+    )
+    .unwrap();
+    let cancelled_request =
+        build_v3_transport_13_responses_http_request_from_v3_provider_12(cancelled)
+            .unwrap()
+            .with_handoff_scope(handoff_scope("req-sendfact-cancel"))
+            .unwrap()
+            .with_cancellation(cancellation);
+    let cancelled_control = transport
+        .begin_transport_attempt(&cancelled_request)
+        .unwrap()
+        .expect("handoff request must expose a send fact control");
+    assert!(matches!(
+        transport
+            .send_observed(cancelled_request, Some(cancelled_control.clone()),)
+            .await
+            .unwrap_err(),
+        V3ProviderError::ClientDisconnect { .. }
+    ));
+    assert_eq!(
+        cancelled_control
+            .send_fact()
+            .expect("begun attempt must expose a send fact")
+            .phase,
+        V3ProviderTransportSendPhase::NotSent
+    );
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (request_received_tx, request_received_rx) = oneshot::channel::<Vec<u8>>();
+    let (server_shutdown_tx, server_shutdown_rx) = oneshot::channel::<()>();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 16_384];
+        let read = socket.read(&mut request).await.unwrap();
+        let _ = request_received_tx.send(request[..read].to_vec());
+        let _ = server_shutdown_rx.await;
+    });
+
+    let hanging = build_v3_provider_12_responses_wire_payload(
+        "req-sendfact-hang",
+        target(
+            "sendfact",
+            &format!("http://{address}/v1/responses"),
+            "model",
+            "error",
+            "V3_GENERAL_SENDFACT_KEY",
+        ),
+        json!({"model":"model","input":"hang"}),
+    )
+    .unwrap();
+    let hanging_request = build_v3_transport_13_responses_http_request_from_v3_provider_12(hanging)
+        .unwrap()
+        .with_handoff_scope(handoff_scope("req-sendfact-hang"))
+        .unwrap();
+    let hanging_control = transport
+        .begin_transport_attempt(&hanging_request)
+        .unwrap()
+        .expect("handoff request must expose a send fact control");
+    let timed_out = tokio::time::timeout(
+        Duration::from_millis(300),
+        transport.send_observed(hanging_request, Some(hanging_control.clone())),
+    )
+    .await;
+    assert!(timed_out.is_err(), "the held provider send must time out");
+    let received = tokio::time::timeout(Duration::from_secs(5), request_received_rx)
+        .await
+        .expect("provider send must reach the strict loopback fixture")
+        .expect("strict fixture must observe the request bytes");
+    assert!(!received.is_empty(), "the real request must not be empty");
+    assert_eq!(
+        hanging_control
+            .send_fact()
+            .expect("begun attempt must expose a send fact")
+            .phase,
+        V3ProviderTransportSendPhase::SendStarted
+    );
+
+    server_shutdown_tx.send(()).unwrap();
+    server.await.unwrap();
+    std::env::remove_var("V3_GENERAL_SENDFACT_KEY");
+}
+
+#[tokio::test]
+async fn provider_send_fact_control_is_single_use_per_attempt() {
+    std::env::set_var("V3_GENERAL_SENDFACT_KEY", "secret-sendfact");
+    let transport = ReqwestResponsesTransport::default();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (request_received_tx, request_received_rx) = oneshot::channel::<Vec<u8>>();
+    let (server_shutdown_tx, server_shutdown_rx) = oneshot::channel::<()>();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 16_384];
+        let read = socket.read(&mut request).await.unwrap();
+        let _ = request_received_tx.send(request[..read].to_vec());
+        let _ = server_shutdown_rx.await;
+    });
+
+    let wire = build_v3_provider_12_responses_wire_payload(
+        "req-sendfact-single-use",
+        target(
+            "sendfact",
+            &format!("http://{address}/v1/responses"),
+            "model",
+            "error",
+            "V3_GENERAL_SENDFACT_KEY",
+        ),
+        json!({"model":"model","input":"single use"}),
+    )
+    .unwrap();
+    let first_request = build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)
+        .unwrap()
+        .with_handoff_scope(handoff_scope("req-sendfact-single-use"))
+        .unwrap();
+    let control = transport
+        .begin_transport_attempt(&first_request)
+        .unwrap()
+        .expect("handoff request must expose a send fact control");
+    let second_wire = build_v3_provider_12_responses_wire_payload(
+        "req-sendfact-single-use",
+        target(
+            "sendfact",
+            &format!("http://{address}/v1/responses"),
+            "model",
+            "error",
+            "V3_GENERAL_SENDFACT_KEY",
+        ),
+        json!({"model":"model","input":"single use"}),
+    )
+    .unwrap();
+    let second_request =
+        build_v3_transport_13_responses_http_request_from_v3_provider_12(second_wire)
+            .unwrap()
+            .with_handoff_scope(handoff_scope("req-sendfact-single-use"))
+            .unwrap();
+
+    let first = transport.send_observed(first_request, Some(control.clone()));
+    let second = transport.send_observed(second_request, Some(control));
+    let _ = tokio::time::timeout(Duration::from_millis(300), first).await;
+    let second_error = tokio::time::timeout(Duration::from_secs(1), second)
+        .await
+        .expect("second send must resolve quickly")
+        .expect_err("second send must be rejected before upstream bytes");
+    assert!(
+        matches!(second_error, V3ProviderError::InternalTransport { .. }),
+        "second send with the same control must be rejected by the owning broker"
+    );
+
+    let received = tokio::time::timeout(Duration::from_secs(5), request_received_rx)
+        .await
+        .expect("first send must reach the strict loopback fixture")
+        .expect("strict fixture must observe the request bytes");
+    assert!(!received.is_empty(), "the real request must not be empty");
+
+    server_shutdown_tx.send(()).unwrap();
+    server.await.unwrap();
+    std::env::remove_var("V3_GENERAL_SENDFACT_KEY");
 }

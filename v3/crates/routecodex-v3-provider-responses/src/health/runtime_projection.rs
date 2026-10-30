@@ -74,14 +74,16 @@ fn key_health_projection(
     now_ms: u64,
 ) -> V3ProviderKeyHealthProjection {
     let history = state.adaptive_history.get(key);
-    let cooldown_until_ms = state
-        .provider_cooldown_probes
-        .get(key)
-        .and_then(|probe| probe.next_probe_at_ms);
-    let cooldown = state
-        .provider_cooldown_probes
-        .get(key)
-        .is_some_and(|probe| probe.active_probe.is_some() || probe.blocked_until_ms.is_some());
+    let cooldown_until_ms = history
+        .and_then(|history| history.rate_limit_episode.as_ref())
+        .and_then(|episode| episode.not_before_ms)
+        .or_else(|| {
+            state
+                .provider_cooldown_probes
+                .get(key)
+                .and_then(|probe| probe.next_probe_at_ms)
+        });
+    let cooldown = key_blocks_availability(state, key, now_ms);
     V3ProviderKeyHealthProjection {
         provider_id: key.provider_id.clone(),
         interface_id: key.interface_id.clone(),
@@ -98,8 +100,34 @@ fn key_health_projection(
 }
 
 fn record_health_delta(history: &mut V3ProviderAdaptiveHistory, delta: i32) {
-    history.score_milli =
-        (i64::from(history.score_milli) + i64::from(delta)).clamp(0, 150) as u32;
+    history.score_milli = (i64::from(history.score_milli) + i64::from(delta)).clamp(0, 150) as u32;
+}
+
+/// All availability projections read mandatory episode restrictions before
+/// advisory probe state. A timer cannot substitute for a required probe.
+fn key_blocks_availability(
+    state: &V3ProviderHealthState,
+    key: &V3ProviderCooldownProbeKey,
+    now_ms: u64,
+) -> bool {
+    if state.adaptive_history.get(key)
+        .and_then(|history| history.rate_limit_episode.as_ref())
+        .is_some_and(|episode| episode.probe_required
+            || episode.not_before_ms.is_some_and(|until| now_ms < until))
+    {
+        return true;
+    }
+    let Some(probe) = state.provider_cooldown_probes.get(key) else {
+        return false;
+    };
+    if probe.advisory_probe {
+        return probe.blocked_until_ms.is_some_and(|until| now_ms < until);
+    }
+    probe.active_probe.is_some()
+        || probe.next_probe_at_ms.is_some()
+        || probe
+            .blocked_until_ms
+            .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms)
 }
 
 fn provider_failure_session_scope_label(key: &V3ProviderFailureSessionKey) -> String {
@@ -257,6 +285,10 @@ fn upsert_provider_cooldown_probe(
         blocked_until_ms,
         V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
         false,
+        state
+            .failure_policies
+            .get(provider_id)
+            .is_some_and(|policy| policy.advisory_probe),
     );
 }
 
@@ -305,15 +337,24 @@ fn complete_provider_probe_success_at_generation(
     key: &V3ProviderCooldownProbeKey,
     now_ms: u64,
     expected_generation: Option<u64>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let current_generation = state
         .adaptive_history
         .get(key)
         .map_or(0, |history| history.score_generation);
     if let Some(expected_generation) = expected_generation {
         if expected_generation != current_generation {
-            return Ok(());
+            return Ok(false);
         }
+    }
+
+    if !rate_limit::accept_qualified_probe_success(
+        state,
+        key,
+        now_ms,
+        expected_generation.is_some(),
+    ) {
+        return Ok(false);
     }
 
     record_adaptive_success(state, key, now_ms);
@@ -330,7 +371,7 @@ fn complete_provider_probe_success_at_generation(
 
     state.provider_cooldown_probes.remove(key);
     state.auth_key_cooldowns.remove(key);
-    Ok(())
+    Ok(true)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -344,6 +385,7 @@ fn upsert_provider_cooldown_probe_with_interval(
     blocked_until_ms: u64,
     probe_interval_ms: u64,
     long_probe_backoff: bool,
+    advisory_probe: bool,
 ) {
     // 已有 probe 在途时保留 in-flight 标记：并发失败 re-upsert 不得清掉
     // 单飞锁，否则会并发启动第二个 probe。
@@ -381,6 +423,10 @@ fn upsert_provider_cooldown_probe_with_interval(
     state.provider_cooldown_probes.insert(
         provider_cooldown_probe_key_for_interface(provider_id, interface_id, auth_alias, model_id),
         V3ProviderCooldownProbeState {
+            // A new failure owns the cooldown state it creates. The 429 caller
+            // re-stamps `RateLimit` right after this upsert, so inheriting a
+            // previous cause here would let a later non-429 failure keep the
+            // bounded rate-limit marker and lose its probe-owned window.
             cooldown_cause: None,
             blocked_until_ms: Some(blocked_until_ms),
             next_probe_at_ms: Some(now_ms.saturating_add(probe_interval_ms.max(1))),
@@ -395,6 +441,7 @@ fn upsert_provider_cooldown_probe_with_interval(
             active_probe,
             probe_model_id: model_id.map(str::to_string),
             rescue_probe_attempted,
+            advisory_probe,
         },
     );
 }

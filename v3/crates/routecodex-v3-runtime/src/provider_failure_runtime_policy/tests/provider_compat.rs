@@ -245,22 +245,51 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
     .await
     .expect("generic provider HTTP 400 must follow provider-scoped health handling");
 
-    assert_eq!(
-        failed_candidates,
-        BTreeSet::from(["first:default:key:test".to_string()]),
-        "generic provider HTTP 400 must exclude only the failed exact candidate"
+    // A generic provider HTTP 400 is an ordinary recoverable failure here: the
+    // exact identity is held by typed observation, not by a permanent
+    // request-local exclusion.
+    assert!(
+        failed_candidates.is_empty(),
+        "generic provider HTTP 400 must not add a permanent request-local exclusion"
     );
     assert_ne!(
         result.event.health_record.state,
         "request_local_provider_compat"
     );
-    assert_eq!(result.event.health_record.failure_count, 1);
-    assert_eq!(result.event.health_record.state, "cooldown");
-    assert!(result.event.health_record.cooldown_until_ms.is_some());
+    assert_eq!(result.event.health_record.state, "pre_cool_observation");
+    assert_eq!(
+        result.event.health_record.failure_count, 0,
+        "a held provider HTTP 400 must not count before its observation"
+    );
+    assert_eq!(result.event.health_record.cooldown_until_ms, None);
+    let held = health.availability("first", Some("key"), Some("test"), u64::MAX);
+    assert!(
+        !held.available,
+        "the failed exact identity must be held for observation"
+    );
+    assert!(held
+        .blocked_scopes
+        .iter()
+        .any(|blocked| blocked == "provider_pre_cool_observation"));
+    assert!(
+        health
+            .store()
+            .availability("first", Some("key"), Some("test"), u64::MAX)
+            .available,
+        "the observation must not cool the identity before its declared gate"
+    );
+    complete_due_precool_failures(&health, 20_000).await;
     assert!(
         !health
             .availability("first", Some("key"), Some("test"), u64::MAX)
             .available
+    );
+    assert!(
+        !health
+            .store()
+            .availability("first", Some("key"), Some("test"), u64::MAX)
+            .available,
+        "the failed observation must commit the typed cooldown for the exact identity"
     );
     assert_eq!(result.event.action, "switch_provider");
     let retry = result
@@ -420,5 +449,18 @@ async fn relay_provider_failure_projects_target_expansion_error() {
         projection.body["error"]["code"],
         "captured_target_plan_expansion_failed"
     );
-    assert_eq!(failed_candidates.len(), 1);
+    // The attempt stays health-neutral because its own target resolution proved
+    // no alternative exists. An ordinary provider failure adds no permanent
+    // request-local exclusion before that typed projection.
+    assert_eq!(result.event.health_record.state, "last_candidate_terminal");
+    assert!(
+        failed_candidates.is_empty(),
+        "an ordinary provider failure must not add a permanent request-local exclusion"
+    );
+    assert!(
+        health
+            .availability("first", Some("key1"), Some("gpt-test"), 20_000)
+            .available,
+        "a terminal target-resolution projection must not mutate provider health"
+    );
 }

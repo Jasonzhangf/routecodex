@@ -8,7 +8,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::V3ProviderRecoveryKind;
 
 #[test]
-fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure() {
+fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
     let mut manifest = global_pool_alive_manifest("global_status_policy_classified");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -27,29 +27,92 @@ fn classified_global_health_honors_recoverable_repeat_and_terminal_first_failure
     let recoverable_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let classified =
         classified_provider_error("V3ProviderRespInbound01Raw", "provider_http_error", 429);
-    for attempt in 0..3 {
-        let now_ms = 10_000 + attempt as u64;
+    // An early 429 is capacity backpressure, not a health exclusion.
+    recoverable_health
+        .record_provider_global_health_for_classified_error(
+            &scope,
+            "first",
+            "default",
+            Some("key1"),
+            Some("gpt-test"),
+            &classified,
+            10_000,
+        )
+        .expect("classified 429 failure should record");
+    assert!(
         recoverable_health
-            .record_provider_global_health_for_classified_error(
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000)
+            .available,
+        "early 429 must leave health routable"
+    );
+    // Business success resets this unresolved episode.
+    recoverable_health
+        .store()
+        .record_provider_key_success("first", "key1", "gpt-test", 10_001)
+        .expect("business success resets the early episode");
+    assert!(
+        recoverable_health
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_001)
+            .available,
+        "business success preserves health availability"
+    );
+    // A new episode requires another actual 429 across the full window.
+    recoverable_health
+        .record_provider_global_health_for_classified_error(
+            &scope,
+            "first",
+            "default",
+            Some("key1"),
+            Some("gpt-test"),
+            &classified,
+            20_000,
+        )
+        .expect("second classified 429 failure should record");
+    assert!(
+        recoverable_health
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_000)
+            .available,
+        "a fresh early episode must remain health-neutral"
+    );
+    assert!(
+        recoverable_health
+            .store()
+            .availability_for_session(
                 &scope,
                 "first",
-                "default",
                 Some("key1"),
                 Some("gpt-test"),
-                &classified,
-                now_ms,
+                20_000 + 60_001,
             )
-            .expect("classified 429 failure should record");
-        let available = recoverable_health
+            .available,
+        "time alone cannot upgrade the episode"
+    );
+    recoverable_health
+        .record_provider_global_health_for_classified_error(
+            &scope,
+            "first",
+            "default",
+            Some("key1"),
+            Some("gpt-test"),
+            &classified,
+            140_000,
+        )
+        .expect("new actual 429 across two minutes");
+    assert!(
+        !recoverable_health
             .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), now_ms)
-            .available;
-        assert_eq!(
-            available,
-            attempt < 2,
-            "429 cools only after the third same-class failure; attempt={attempt}"
-        );
-    }
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 140_000,)
+            .available
+    );
+    assert!(
+        recoverable_health
+            .store()
+            .availability_for_session(&scope, "first", Some("key2"), Some("gpt-test"), 140_000,)
+            .available
+    );
 
     let unrecoverable_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let classified_401 =
@@ -154,7 +217,7 @@ fn classified_provider_error(
 }
 
 #[test]
-fn recoverable_http_429_blocks_after_third_global_failure() {
+fn early_http_429_does_not_enter_global_cooldown() {
     let mut manifest = global_pool_alive_manifest("recoverable_http_429_global_threshold");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -175,7 +238,8 @@ fn recoverable_http_429_blocks_after_third_global_failure() {
         .scheduling_projection("first", "key1", "gpt-test", 100, 1, 0)
         .expect("initial health projection");
 
-    for attempt in 0..3 {
+    // Repeated actual429 responses inside the window stay health-neutral.
+    for attempt in 0..6 {
         let now_ms = 10_000 + attempt as u64;
         health
             .record_provider_failure_record_with_policy(
@@ -199,10 +263,26 @@ fn recoverable_http_429_blocks_after_third_global_failure() {
             .scheduling_projection("first", "key1", "gpt-test", 100, 1, now_ms)
             .expect("health projection");
         let available = projection.available;
-        assert_eq!(
+        assert!(
             available,
-            attempt < 2,
-            "provider must cool only after consecutive third 429; attempt={attempt}"
+            "429 must not cool provider health; attempt={attempt}"
         );
     }
+    assert!(
+        health
+            .store()
+            .provider_cooldown_probe_keys_due(u64::MAX)
+            .expect("probe keys")
+            .is_empty(),
+        "an early429 must not create a health recovery probe"
+    );
+    // The passage of time without a new provider response cannot cool health.
+    let projection = health
+        .store()
+        .scheduling_projection("first", "key1", "gpt-test", 100, 1, 10_000 + 5 + 60_001)
+        .expect("post-window projection");
+    assert!(
+        projection.available,
+        "an unchanged early episode remains routable"
+    );
 }

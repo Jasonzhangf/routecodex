@@ -660,7 +660,16 @@ async fn anthropic_relay_anthropic_provider_sse_reaches_client_sse_events() {
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() {
     let server_id = "anthropic_wire_sse_eof_failure";
-    let manifest = manifest(server_id);
+    let mut manifest = manifest(server_id);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .expect("anthropic provider wire test server")
+        .execution
+        .as_mut()
+        .expect("execution policy")
+        .attempt_store
+        .residence_timeout_ms = 500;
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
@@ -772,6 +781,7 @@ async fn anthropic_relay_anthropic_provider_sse_eof_reselects_next_candidate() {
 
 #[tokio::test]
 async fn anthropic_relay_responses_provider_sse_eof_reselects_next_candidate() {
+    ensure_isolated_provider_state_dir();
     let server_id = "anthropic_wire_responses_sse_eof_reselect";
     let manifest = responses_reselect_manifest(server_id);
     let provider_health =
@@ -838,7 +848,16 @@ async fn anthropic_relay_responses_provider_sse_eof_reselects_next_candidate() {
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_inference() {
     let server_id = "anthropic_wire_tool_missing_name_failure";
-    let manifest = manifest(server_id);
+    let mut manifest = manifest(server_id);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .expect("anthropic provider wire test server")
+        .execution
+        .as_mut()
+        .expect("execution policy")
+        .attempt_store
+        .residence_timeout_ms = 500;
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(

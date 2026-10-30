@@ -16,7 +16,9 @@ pub(crate) mod plan_execution;
 mod resolve_target;
 mod single_node;
 pub(crate) use error_decision::{
-    run_v3_error_02_to_05_decision_operators, run_v3_error_06_terminal_projection_operator,
+    run_v3_error_02_to_05_decision_operators,
+    run_v3_error_02_to_05_decision_operators_with_target_recovery,
+    run_v3_error_06_terminal_projection_operator,
 };
 use operators::CaptureClientJsonOperator;
 use operators::ProjectStandardProviderRequestOperator;

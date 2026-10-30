@@ -11,7 +11,7 @@ pub(super) fn compile_auth(
 ) -> Result<V3ProviderAuthManifest, V3ConfigError> {
     if matches!(
         authoring.selection.strategy,
-        V3SelectionStrategy::RoundRobin
+        V3SelectionStrategy::RoundRobin | V3SelectionStrategy::Sticky
     ) {
         return Err(validation(format!(
             "provider {provider_id} auth only supports priority or weighted selection"

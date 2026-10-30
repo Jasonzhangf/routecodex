@@ -187,7 +187,6 @@ where
     *C::body_mut(&mut standardized) = resolved_request;
     let route_policy_pending = resolved_target.route_policy_pending;
     let route_policy_scope = resolved_target.route_policy_scope;
-    let route_policy_group_id = resolved_target.opaque_hit.routing_group_id.clone();
     trace.extend([
         "V3Router05RequestClassified",
         "V3Router06RoutePoolResolved",
@@ -217,7 +216,10 @@ where
             target_source,
             crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::OpaqueHit(_)
         );
-        let (planned_request, plan) = match crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes(
+        let (planned_request, plan) = match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
+            attempt_budget.residence_deadline(),
+            crate::operation_runner::plan_execution::run_v3_plan_execution_operator_with_probes(
+            attempt_budget.clone(),
             C::body(&standardized).clone(),
             manifest,
             target_source.clone(),
@@ -233,7 +235,7 @@ where
                 entry_protocol: C::HUB_ENTRY_PROTOCOL,
                 allowed_modes: allowed_modes.clone(),
             },
-        )
+        ))
         .await
         {
             Ok(value) => value,
@@ -264,6 +266,17 @@ where
                     entry_protocol: C::ENTRY_PROTOCOL.to_string(),
                     routing_group_id: Some(error.route.routing_group_id.clone()),
                     pool_id: Some(error.route.pool_id.clone()),
+                    attempts: Some(total_attempts(&accumulator, send_attempts)),
+                    provider_failure_events: provider_failure_events.clone(),
+                    timing: match runtime_timing.finish_runtime() {
+                        Ok(timing) => Some(timing),
+                        Err(error) => return direct_runtime_helpers_stream::source_failure_output(
+                            runtime_source("V3RuntimeTimingTerminal", error),
+                            last_external_http,
+                            trace,
+                            &crate::hooks::register_responses_direct_hooks(),
+                        ),
+                    },
                     provider_status: None,
                     response_status: Some("error".to_string()),
                     unavailable_candidates: error.attempted_candidates.clone(),
@@ -309,8 +322,8 @@ where
             }
         };
         *C::body_mut(&mut standardized) = planned_request;
-        failed_candidates.extend(plan.request_local_excluded_candidates);
-        request_local_busy_candidates.extend(plan.request_local_busy_candidates);
+        failed_candidates = plan.request_local_excluded_candidates;
+        request_local_busy_candidates = plan.request_local_busy_candidates;
         let expanded = plan.expanded;
         target_source =
             crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::Expanded(
@@ -333,7 +346,6 @@ where
             drop(provider_action_permit.take());
             provider_action_permit_target = None;
         }
-        attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         trace.push("V3Target10ConcreteProviderSelected");
         if let Some(sink) = route_selection_event_sink.as_ref() {
             let transport_label = if C::body(&standardized)
@@ -502,12 +514,19 @@ where
         };
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());
+        let mut _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
+            admission.take_rate_limit_control(&mut pending_provider_action_recovery)
+        });
         if pending_provider_action_recovery.is_some() {
             drop(selected_admission.take());
         }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
-                .wait_for_error05_recovery(&recovery, &selected)
+                .wait_for_error05_recovery(
+                    &recovery,
+                    &selected,
+                    attempt_budget.residence_deadline(),
+                )
                 .await
             {
                 Ok(V3ProviderActionRecoveryTransition::Admitted(mut admission)) => {
@@ -582,31 +601,39 @@ where
                 }
             }
         }
-        send_attempts = match attempt_budget.admit_transport_attempt() {
-            Ok(attempts) => attempts,
-            Err(error) => {
-                if let Err(release_error) = C::release_after_error(
-                    &control,
-                    manifest,
-                    C::server_id(&standardized),
-                    &standardized,
-                    C::request_id(&standardized),
-                    &mut trace,
-                ) {
-                    return error_output(
-                        release_error,
+        send_attempts =
+            match crate::provider_failure_runtime_policy::admit_v3_provider_transport_attempt(
+                &attempt_budget,
+                &mut selected_admission,
+                &mut _rate_limit_permit,
+                &mut provider_action_permit,
+            )
+            .await
+            {
+                Ok(attempts) => attempts,
+                Err(error) => {
+                    if let Err(release_error) = C::release_after_error(
+                        &control,
+                        manifest,
+                        C::server_id(&standardized),
+                        &standardized,
+                        C::request_id(&standardized),
+                        &mut trace,
+                    ) {
+                        return error_output(
+                            release_error,
+                            trace,
+                            &crate::hooks::register_responses_direct_hooks(),
+                        );
+                    }
+                    return direct_runtime_helpers_stream::source_failure_output(
+                        direct_runtime_helpers_stream::direct_attempt_budget_error_source(error),
+                        last_external_http.clone(),
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
                     );
                 }
-                return direct_runtime_helpers_stream::source_failure_output(
-                    direct_runtime_helpers_stream::direct_attempt_budget_error_source(error),
-                    last_external_http.clone(),
-                    trace,
-                    &crate::hooks::register_responses_direct_hooks(),
-                );
-            }
-        };
+            };
         if let Err(error) = runtime_timing.start_external() {
             return direct_runtime_helpers_stream::source_failure_output(
                 runtime_source("V3RuntimeTimingExternal", error),
@@ -624,6 +651,8 @@ where
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
             Err(V3ProviderError::ConcurrencyBusy { .. }) => {
+                attempt_budget.release_unsent_transport_attempt();
+                send_attempts = attempt_budget.transport_attempts();
                 if let Err(error) = runtime_timing.finish_external() {
                     return direct_runtime_helpers_stream::source_failure_output(
                         runtime_source("V3RuntimeTimingExternal", error),
@@ -640,12 +669,17 @@ where
                 continue;
             }
             Err(error) => {
-                let failed_attempt_evidence =
+                let failed_attempt_evidence = {
+                    if matches!(&error, V3ProviderError::HttpStatus { response } if response.status == 429)
+                    {
+                        attempt_budget.record_rate_limited_attempt();
+                    }
                     crate::hub_v1::build_v3_runtime_provider_failed_attempt_evidence_from_error(
                         total_attempts(&accumulator, send_attempts),
                         provider_request_snapshot.clone(),
                         &error,
-                    );
+                    )
+                };
                 if let Some(witness) =
                     crate::hub_v1::external_http_witness_from_provider_error(&error)
                 {
@@ -750,7 +784,13 @@ where
                     );
                 }
                 match &policy_result.decision.action {
+                    V3Error05ExecutionAction::ReevaluateTarget => {
+                        retry_selected = None;
+                        pending_provider_action_recovery = None;
+                        continue;
+                    }
                     V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                        retry_selected = policy_result.retry_selected.map(|selected| *selected);
                         if policy_result.retryable_transient {
                             // 瞬态失败切走：request-local witness 不经过
                             // provider action gate（无 lane 可等），立即重选。
@@ -841,6 +881,9 @@ where
         }
         if provider_raw.status() >= 400 {
             let provider_status = provider_raw.status();
+            if provider_status == 429 {
+                attempt_budget.record_rate_limited_attempt();
+            }
             let provider_name = provider_raw.provider_id().to_string();
             let response_headers = provider_raw
                 .headers()
@@ -951,6 +994,7 @@ where
             }
             match &policy_result.decision.action {
                 V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                    retry_selected = policy_result.retry_selected.map(|selected| *selected);
                     if policy_result.retryable_transient {
                         // 瞬态失败切走：request-local witness 不经过
                         // provider action gate（无 lane 可等），立即重选。
@@ -969,7 +1013,14 @@ where
                     pending_provider_action_recovery = Some(recovery.clone());
                     continue;
                 }
-                _ => {
+                V3Error05ExecutionAction::ReevaluateTarget => {
+                    retry_selected = None;
+                    pending_provider_action_recovery = None;
+                    continue;
+                }
+                V3Error05ExecutionAction::ProjectTerminal
+                | V3Error05ExecutionAction::ClientDisconnected
+                | V3Error05ExecutionAction::RejectNonProviderError => {
                     if let Err(release_error) = C::release_after_error(
                         &control,
                         manifest,
@@ -1128,6 +1179,7 @@ where
                 }
                 match &policy_result.decision.action {
                     V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                        retry_selected = policy_result.retry_selected.map(|selected| *selected);
                         pending_provider_action_recovery = Some(recovery.clone());
                         continue;
                     }
@@ -1136,7 +1188,14 @@ where
                         pending_provider_action_recovery = Some(recovery.clone());
                         continue;
                     }
-                    _ => {
+                    V3Error05ExecutionAction::ReevaluateTarget => {
+                        retry_selected = None;
+                        pending_provider_action_recovery = None;
+                        continue;
+                    }
+                    V3Error05ExecutionAction::ProjectTerminal
+                    | V3Error05ExecutionAction::ClientDisconnected
+                    | V3Error05ExecutionAction::RejectNonProviderError => {
                         if let Err(release_error) = C::release_after_error(
                             &control,
                             manifest,
@@ -1339,6 +1398,7 @@ where
                         let decision = policy_result.decision;
                         match &decision.action {
                             V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                                retry_selected = policy_result.retry_selected.map(|selected| *selected);
                                 if !policy_result.retryable_transient {
                                     pending_provider_action_recovery = Some(recovery.clone());
                                 }
@@ -1352,7 +1412,14 @@ where
                                 }
                                 continue;
                             }
-                            _ => {
+                            V3Error05ExecutionAction::ReevaluateTarget => {
+                                retry_selected = None;
+                                pending_provider_action_recovery = None;
+                                continue;
+                            }
+                            V3Error05ExecutionAction::ProjectTerminal
+                            | V3Error05ExecutionAction::ClientDisconnected
+                            | V3Error05ExecutionAction::RejectNonProviderError => {
                                 if let Err(release_error) = C::release_after_error(
                                     &control,
                                     manifest,
@@ -1491,7 +1558,14 @@ where
                             );
                         }
                         match &policy_result.decision.action {
+                            V3Error05ExecutionAction::ReevaluateTarget => {
+                                retry_selected = None;
+                                pending_provider_action_recovery = None;
+                                continue;
+                            }
                             V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+                                retry_selected =
+                                    policy_result.retry_selected.map(|selected| *selected);
                                 if !policy_result.retryable_transient {
                                     pending_provider_action_recovery = Some(recovery.clone());
                                 }
@@ -1582,21 +1656,9 @@ where
                 &crate::hooks::register_responses_direct_hooks(),
             );
         }
-        let policies =
-            match crate::route_policy::compile_route_policies(manifest, &route_policy_group_id) {
-                Ok(policies) => policies,
-                Err(error) => {
-                    return direct_runtime_helpers_stream::source_failure_output(
-                        runtime_source("V3Router06RoutePoolResolved", error),
-                        last_external_http.clone(),
-                        trace,
-                        &crate::hooks::register_responses_direct_hooks(),
-                    )
-                }
-            };
         if let Err(error) = route_policy_pending
             .as_ref()
-            .map(|pending| pending.commit(&policies, now_epoch_ms))
+            .map(|pending| pending.commit::<String>())
             .transpose()
         {
             return direct_runtime_helpers_stream::source_failure_output(

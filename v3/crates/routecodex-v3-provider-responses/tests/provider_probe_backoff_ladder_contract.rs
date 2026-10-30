@@ -210,10 +210,22 @@ fn session_business_success_does_not_remove_pending_probe() {
 }
 
 #[test]
-fn model_success_cannot_block_sibling_model_or_clear_pending_probe() {
+fn model_success_recovers_exact_model_without_clearing_sibling_probe() {
     let store = V3ProviderHealthStore::default();
     fail(&store, 1);
     fail(&store, 2);
+    for now in [1, 2] {
+        store
+            .record_provider_failure_in_session(
+                &scope(),
+                "provider-a",
+                Some("key-a"),
+                Some("model-c"),
+                Some("provider_error"),
+                now,
+            )
+            .unwrap();
+    }
     store
         .record_provider_key_success("provider-a", "key-a", "model-a", 30_003)
         .expect("model success");
@@ -230,9 +242,19 @@ fn model_success_cannot_block_sibling_model_or_clear_pending_probe() {
         "a failed model cannot block a sibling model"
     );
     assert_eq!(
-        store.provider_cooldown_probe_keys_due(5_003).unwrap().len(),
-        1,
-        "the exact identity probe remains the only recovery owner"
+        store.provider_cooldown_probe_keys_due(5_003).unwrap(),
+        vec![(
+            "provider-a".into(),
+            Some("key-a".into()),
+            Some("model-c".into())
+        )],
+        "matching business success clears only model-a, not the sibling probe"
+    );
+    assert!(
+        store
+            .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, 30004)
+            .unwrap()
+            .available
     );
 }
 
@@ -246,6 +268,7 @@ fn model_success_resets_exact_identity_consecutive_failures() {
         max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
+        advisory_probe: false,
         cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     };
     for now_ms in [1, 2] {
@@ -343,6 +366,7 @@ fn long_policy_probe_is_capped_at_thirty_minutes() {
         failure_threshold: 1,
         cooldown_ms: 60 * 60_000,
         long_probe_backoff: true,
+        advisory_probe: false,
     };
     store
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 1)

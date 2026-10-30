@@ -360,6 +360,7 @@ fn policy_error02_to_05_sdk_rejection_preserves_original_source() {
         false,
         false,
         None,
+        false,
     )
     .expect_err("the real Error02..05 SDK chain must reject a non-object source projection");
 
@@ -396,6 +397,7 @@ fn terminal_error06_rejection_preserves_decision_source_and_nonterminal_stays_no
         true,
         false,
         Some(recovery),
+        false,
     )
     .expect("real Error02..05 SDK chain must produce a switch-provider decision");
 
@@ -413,6 +415,7 @@ fn terminal_error06_rejection_preserves_decision_source_and_nonterminal_stays_no
         false,
         false,
         None,
+        false,
     )
     .expect("real Error02..05 SDK chain must produce a terminal decision");
     assert!(terminal_decision.clone().try_into_terminal().is_ok());

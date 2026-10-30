@@ -268,18 +268,13 @@ async fn manual_add_is_visible_in_the_listener_cooldown_pool() {
     managed.finish().await;
 }
 
-/// HS05: bounded score 0 is an additional cooldown trigger on the real public
-/// listener. A controlled loopback upstream lets the test drain the exact
-/// provider/key/model identity to score 0 with real 429s, prove the exact-key
-/// exclusion and sibling availability, then recover the identity through a valid
-/// 2xx probe. Startup/probe receipts are counted apart from business attempts.
-///
-/// The failure pattern is `F F S` (two 429s, then one business success). The
-/// success resets the failure streak, so the ordinary three-consecutive-429
-/// threshold never fires; the only trigger that can cool here is the score
-/// reaching 0 after `-5 -5 +1` per cycle.
+/// A real non-429 failure first observes, then cools only its exact identity
+/// after the matching observation fails. Healthy fallback and
+/// sibling traffic remain usable; only a matching successful probe restores it.
+/// The independent score-zero trigger is covered by the public typed consumer
+/// `hs03_zero_score_cools_exact_key_and_valid_probe_restores_100`.
 #[tokio::test]
-async fn zero_score_cooldown_excludes_exact_key_and_valid_probe_restores_it() {
+async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_COOLDOWN_MANUAL_TEST_KEY", "controlled-secret");
 
@@ -288,13 +283,16 @@ async fn zero_score_cooldown_excludes_exact_key_and_valid_probe_restores_it() {
     let upstream_port = listener.local_addr().unwrap().port();
     let upstream = Arc::new(ZeroUpstream::default());
     let (shutdown, stopped) = oneshot::channel::<()>();
-    let app = Router::new()
-        .route("/v1/responses", post(zero_provider))
-        .route(
-            "/fallback/v1/responses",
-            post(|| async { zero_rejection() }),
-        )
-        .with_state(upstream.clone());
+    let app =
+        Router::new()
+            .route("/v1/responses", post(zero_provider))
+            .route(
+                "/fallback/v1/responses",
+                post(|Json(body): Json<Value>| async move {
+                    zero_ok(body["input"].as_str().unwrap_or(""))
+                }),
+            )
+            .with_state(upstream.clone());
     let upstream_task = tokio::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
@@ -313,33 +311,28 @@ async fn zero_score_cooldown_excludes_exact_key_and_valid_probe_restores_it() {
         .unwrap();
     let base = managed.base.clone();
 
-    // Drain the exact identity to score 0. The `requests >= 20` guard fails loudly
-    // if a cooldown appears from the three-consecutive-429 threshold instead.
-    let mut requests = 0_u32;
-    let mut cooled = false;
-    'drive: for cycle in 0..16_u32 {
-        for attempt in 0..2_u32 {
-            let marker = format!("zero:fail-{cycle}-{attempt}");
-            zero_fail(&client, &base, "test", &marker).await;
-            zero_receipt(&upstream, &marker).await;
-            requests += 1;
-            if zero_is_cooled(&client, &base).await {
-                assert!(
-                    requests >= 20,
-                    "cooldown after only {requests} requests must be the 3-429 threshold, not score 0"
-                );
-                cooled = true;
-                break 'drive;
-            }
-        }
-        let marker = format!("zero:ok-{cycle}");
-        zero_success(&client, &base, "test", &marker).await;
-        zero_receipt(&upstream, &marker).await;
-        requests += 1;
-    }
+    let observation_probes_before = *upstream.probes.lock().await;
+    zero_success(&client, &base, "test", "zero:fail-first").await;
+    zero_receipt(&upstream, "zero:fail-first").await;
     assert!(
-        cooled,
-        "driving the exact identity to score 0 must admit its exact-key cooldown"
+        !zero_is_cooled(&client, &base).await,
+        "a business failure must not cool before observation"
+    );
+    timeout(Duration::from_secs(4), async {
+        loop {
+            if *upstream.probes.lock().await > observation_probes_before
+                && zero_is_cooled(&client, &base).await
+            {
+                break;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("failed observation must commit its exact declared cooldown");
+    assert!(
+        zero_is_cooled(&client, &base).await,
+        "real 503 must cool the exact identity while fallback succeeds"
     );
 
     // The cooldown is bound to the exact identity; siblings stay out of the pool.
@@ -370,10 +363,14 @@ async fn zero_score_cooldown_excludes_exact_key_and_valid_probe_restores_it() {
             .any(|entry| entry["provider_id"] == json!("independent")),
         "the sibling provider must not be cooled: {entries:?}"
     );
+    assert!(
+        !entries.iter().any(|entry| entry["auth_alias"] == "sibling"),
+        "the untried sibling key must not be cooled: {entries:?}"
+    );
 
     // The cooled identity receives no further business attempt.
     let blocked = "zero:blocked";
-    zero_fail(&client, &base, "test", blocked).await;
+    zero_success(&client, &base, "test", blocked).await;
     assert!(
         !upstream.business.lock().await.contains_key(blocked),
         "the cooled identity must not receive another business attempt"
@@ -384,10 +381,15 @@ async fn zero_score_cooldown_excludes_exact_key_and_valid_probe_restores_it() {
     zero_receipt(&upstream, "zero:sibling-model").await;
     zero_success(&client, &base, "independent", "zero:sibling-provider").await;
     zero_receipt(&upstream, "zero:sibling-provider").await;
+    zero_success(&client, &base, "sibling-key", "zero:sibling-key").await;
+    zero_receipt(&upstream, "zero:sibling-key").await;
 
     // A matching valid 2xx probe restores the exact identity. The operator probe
     // only makes it due now; the runtime still runs it over the same provider wire.
     let probes_before = *upstream.probes.lock().await;
+    upstream
+        .probe_ready
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let (status, body) = post_json(
         &client,
         managed.probe_url(),
@@ -403,7 +405,7 @@ async fn zero_score_cooldown_excludes_exact_key_and_valid_probe_restores_it() {
     assert_eq!(
         body["scheduled"],
         json!(true),
-        "the score-0 cooldown must carry probe state: {body}"
+        "the non-429 cooldown must carry probe state: {body}"
     );
 
     timeout(Duration::from_secs(15), async {
@@ -432,13 +434,13 @@ async fn zero_score_cooldown_excludes_exact_key_and_valid_probe_restores_it() {
 }
 
 /// Controlled loopback upstream: probe traffic and business traffic are recorded
-/// separately, and only business markers that ask for it return 429. The
-/// separate fallback remains eligible so failed primary attempts may change
-/// health under the last-candidate policy.
+/// separately. A matching recovery probe must actually succeed before the
+/// primary can return to routing; rescue probes cannot restore it early.
 #[derive(Default)]
 struct ZeroUpstream {
     business: Mutex<BTreeMap<String, usize>>,
     probes: Mutex<usize>,
+    probe_ready: std::sync::atomic::AtomicBool,
 }
 
 async fn zero_provider(
@@ -451,7 +453,11 @@ async fn zero_provider(
         || body.to_string().contains("ping; reply pong");
     if probe {
         *state.probes.lock().await += 1;
-        return zero_ok("pong");
+        return if state.probe_ready.load(std::sync::atomic::Ordering::SeqCst) {
+            zero_ok("pong")
+        } else {
+            zero_rejection()
+        };
     }
     let marker = body["input"].as_str().unwrap_or("").to_string();
     *state
@@ -468,10 +474,10 @@ async fn zero_provider(
 
 fn zero_rejection() -> Response<Body> {
     Response::builder()
-            .status(StatusCode::TOO_MANY_REQUESTS)
+            .status(StatusCode::SERVICE_UNAVAILABLE)
             .header("content-type", "application/json")
             .body(Body::from(
-                json!({"error":{"type":"rate_limit_error","code":"rate_limit_error","message":"controlled 429"}})
+                json!({"error":{"type":"server_error","code":"server_error","message":"controlled 503"}})
                     .to_string(),
             ))
             .unwrap()
@@ -488,22 +494,6 @@ fn zero_ok(text: &str) -> Response<Body> {
             .to_string(),
         ))
         .unwrap()
-}
-
-async fn zero_fail(client: &reqwest::Client, base: &str, model: &str, marker: &str) {
-    let result = timeout(
-        Duration::from_secs(5),
-        client
-            .post(format!("{base}/v1/responses"))
-            .json(&json!({"model":model,"input":marker,"stream":false}))
-            .send(),
-    )
-    .await
-    .expect("a provider 429 must terminate promptly");
-    assert!(
-        result.is_err(),
-        "a provider 429 must terminate the transport without a client error response"
-    );
 }
 
 async fn zero_success(client: &reqwest::Client, base: &str, model: &str, marker: &str) {
@@ -572,7 +562,7 @@ endpoints = ["responses"]
 type = "responses"
 base_url = "http://127.0.0.1:{upstream_port}/v1"
 default_model = "test"
-auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}] }}
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}, {{ alias = "sibling", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}] }}
 [providers.test.models.test]
 [providers.test.models.sibling]
 
@@ -602,6 +592,9 @@ targets = [{{ kind = "provider_model", provider = "test", model = "sibling", key
 [route_groups.default.pools.independent]
 match = {{ models = ["independent"], precedence = 10 }}
 targets = [{{ kind = "provider_model", provider = "independent", model = "test", key = "key", priority = 100 }}]
+[route_groups.default.pools.sibling-key]
+match = {{ models = ["sibling-key"], precedence = 10 }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "sibling", priority = 100 }}]
 
 {declaration}
 {execution}

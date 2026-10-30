@@ -66,11 +66,14 @@ impl fmt::Display for V3RelayCoreError {
     }
 }
 
-/// Provider attempt timeout, with the published default of five minutes.
+/// Provider attempt deadline. A provider that is missing from the compiled
+/// manifest keeps the remote first-byte budget of two minutes. An explicit
+/// whole-request budget is preserved unchanged; the SSE first-frame cap is
+/// enforced on the provider config.
 pub(crate) fn v3_relay_transport_response_timeout_from_ms(
     request_timeout_ms: Option<u64>,
 ) -> std::time::Duration {
-    std::time::Duration::from_millis(request_timeout_ms.filter(|&ms| ms > 0).unwrap_or(300_000))
+    std::time::Duration::from_millis(request_timeout_ms.filter(|&ms| ms > 0).unwrap_or(120_000))
 }
 
 #[cfg(test)]
@@ -89,11 +92,25 @@ mod response_header_timeout_contract_tests {
     fn relay_transport_header_timeout_defaults_and_zero_use_default_timeout() {
         assert_eq!(
             v3_relay_transport_response_timeout_from_ms(None),
-            std::time::Duration::from_millis(300_000)
+            std::time::Duration::from_millis(120_000)
         );
         assert_eq!(
             v3_relay_transport_response_timeout_from_ms(Some(0)),
-            std::time::Duration::from_millis(300_000)
+            std::time::Duration::from_millis(120_000)
+        );
+    }
+
+    #[test]
+    fn relay_transport_header_timeout_keeps_120_second_budget() {
+        assert_eq!(
+            v3_relay_transport_response_timeout_from_ms(Some(300_000)),
+            std::time::Duration::from_millis(300_000),
+            "the translation helper must not silently rewrite an already-compiled value"
+        );
+        assert_eq!(
+            v3_relay_transport_response_timeout_from_ms(None),
+            std::time::Duration::from_millis(120_000),
+            "a missing provider entry keeps the remote first-byte budget"
         );
     }
 }
@@ -390,6 +407,11 @@ pub(crate) async fn handle_provider_failure_with_response_code(
     provider_failure_events
         .push(build_v3_runtime_provider_failure_observation_from_policy_event(&result.event));
     match result.decision.action {
+        V3Error05ExecutionAction::ReevaluateTarget => {
+            *retry_selected = None;
+            *pending_recovery = None;
+            Ok(None)
+        }
         V3Error05ExecutionAction::WaitThenReselect { recovery } => {
             *retry_selected = result.retry_selected.map(|selected| *selected);
             if result.event.wait_ms.is_some() {

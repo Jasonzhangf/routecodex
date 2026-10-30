@@ -11,6 +11,11 @@ pub struct V3CurrentTurnSignals {
     pub has_current_turn_web_search: bool,
     pub has_current_turn_image: bool,
     pub last_assistant_tool: Option<RouteToolCallClassification>,
+    /// Every independent tool category observed in the current turn. The
+    /// single `last_assistant_tool` still serves existing consumers that need
+    /// the most recent call, but route classification must see them all so a
+    /// later lower-priority call cannot shadow an earlier higher-priority one.
+    pub current_turn_tool_categories: Vec<String>,
     pub current_user_text: String,
 }
 
@@ -19,8 +24,8 @@ pub struct V3CurrentTurnSignals {
 // vr.current_turn_typed_route_facts forbids the route classifier from reading
 // raw request payload. This enum is the only input allowed into the typed
 // builder; it carries only the structured facts that classify_route consumes
-// (role, entry kind, image / web_search / tool flags, user text). It must not
-// expose request business text, history beyond the current-turn segment, or
+// (role, entry kind, image / web_search / tool flags, current user text). It
+// must not expose raw payloads, history beyond the current-turn segment, or
 // response/SSE metadata carriers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum V3CurrentTurnEntries {
@@ -63,6 +68,7 @@ pub struct ResponsesTurnEntry {
     pub has_web_search: bool,
     pub is_tool_output_error: bool,
     pub tool_call_category: Option<String>,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -99,6 +105,7 @@ pub enum GeminiTurnRole {
     #[default]
     User,
     Assistant,
+    Tool,
     Other,
 }
 
@@ -108,6 +115,8 @@ pub struct TurnPart {
     pub has_image: bool,
     pub has_web_search: bool,
     pub text: String,
+    pub tool_name: String,
+    pub tool_arguments: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -125,7 +134,7 @@ pub enum TurnPartKind {
 // this builder is the sole source of the typed intermediate that fills
 // `has_image_attachment` / `has_current_turn_*` fields.
 pub fn build_v3_current_turn_route_facts(entries: &V3CurrentTurnEntries) -> V3CurrentTurnSignals {
-    let mut signals = match entries {
+    match entries {
         V3CurrentTurnEntries::Chat(entries) => extract_chat_signals(entries),
         V3CurrentTurnEntries::Responses(entries) => extract_responses_signals(entries),
         V3CurrentTurnEntries::Gemini(entries) => extract_gemini_signals(entries),
@@ -134,20 +143,7 @@ pub fn build_v3_current_turn_route_facts(entries: &V3CurrentTurnEntries) -> V3Cu
             ..Default::default()
         },
         V3CurrentTurnEntries::Empty => V3CurrentTurnSignals::default(),
-    };
-    // Normalization owns removal of older image carriers. Retained image
-    // facts must survive later text-only reminders, regardless of their role.
-    signals.has_current_turn_image = match entries {
-        V3CurrentTurnEntries::Chat(entries) => entries
-            .iter()
-            .any(|entry| entry.parts.iter().any(|part| part.has_image)),
-        V3CurrentTurnEntries::Responses(entries) => entries.iter().any(|entry| entry.has_image),
-        V3CurrentTurnEntries::Gemini(entries) => entries
-            .iter()
-            .any(|entry| entry.parts.iter().any(|part| part.has_image)),
-        V3CurrentTurnEntries::PromptText(_) | V3CurrentTurnEntries::Empty => false,
-    };
-    signals
+    }
 }
 
 fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
@@ -155,33 +151,50 @@ fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
     let latest_user_index = entries
         .iter()
         .rposition(|entry| matches!(entry.role, ChatTurnRole::User));
-    let Some(segment) = chat_active_segment(entries, latest_user_index, latest_role) else {
-        let latest_user = latest_user_index.and_then(|index| entries.get(index));
-        return V3CurrentTurnSignals {
-            latest_message_from_user: matches!(latest_role, Some(ChatTurnRole::User)),
-            current_user_text: latest_user.map(extract_chat_user_text).unwrap_or_default(),
-            has_current_turn_web_search: latest_user
-                .is_some_and(|entry| entry.parts.iter().any(|part| part.has_web_search)),
-            ..Default::default()
-        };
+    let current_user_start = latest_user_index
+        .map(|index| chat_current_user_run_start(entries, index))
+        .unwrap_or(0);
+    let tool_start = if matches!(latest_role, Some(ChatTurnRole::User)) {
+        entries.len()
+    } else {
+        latest_user_index.map(|index| index + 1).unwrap_or(0)
     };
     let mut has_current_turn_tool_output = false;
     let mut has_current_turn_tool_execution_error = false;
     let mut has_current_turn_web_search = false;
     let mut last_assistant_tool = None;
-    for entry in segment {
+    let mut current_turn_tool_categories = Vec::new();
+    for entry in &entries[current_user_start..] {
+        if entry.parts.iter().any(|part| part.has_web_search) {
+            has_current_turn_web_search = true;
+        }
+    }
+    for entry in &entries[tool_start..] {
         for part in &entry.parts {
-            if part.has_web_search {
-                has_current_turn_web_search = true;
-            }
-            match entry.role {
-                ChatTurnRole::Tool => {
-                    has_current_turn_tool_output = true;
-                    if part.kind == TurnPartKind::ToolOutput && part.text == "error" {
-                        has_current_turn_tool_execution_error = true;
+            if matches!(entry.role, ChatTurnRole::Assistant) && part.kind == TurnPartKind::ToolCall
+            {
+                has_current_turn_tool_output = true;
+                if !part.tool_name.is_empty() {
+                    let arguments = part
+                        .tool_arguments
+                        .as_deref()
+                        .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+                    if let Some(classification) =
+                        classify_tool_call(&part.tool_name, arguments.as_ref())
+                    {
+                        push_tool_category(
+                            &mut current_turn_tool_categories,
+                            &classification.category,
+                        );
+                        last_assistant_tool = Some(classification);
                     }
                 }
-                _ => {}
+            }
+            if matches!(entry.role, ChatTurnRole::Tool) {
+                has_current_turn_tool_output = true;
+                if part.kind == TurnPartKind::ToolOutput && part.text == "error" {
+                    has_current_turn_tool_execution_error = true;
+                }
             }
         }
         if matches!(entry.role, ChatTurnRole::Assistant) {
@@ -192,20 +205,35 @@ fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
                     .as_deref()
                     .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
                 if let Some(classification) = classify_tool_call(&call.name, arguments.as_ref()) {
+                    push_tool_category(&mut current_turn_tool_categories, &classification.category);
                     last_assistant_tool = Some(classification);
                 }
             }
         }
     }
+    let current_user_text = latest_user_index
+        .map(|index| {
+            let start = chat_current_user_run_start(entries, index);
+            entries[start..=index]
+                .iter()
+                .map(extract_chat_user_text)
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
     V3CurrentTurnSignals {
         latest_message_from_user: matches!(latest_role, Some(ChatTurnRole::User)),
-        current_user_text: String::new(),
+        current_user_text,
         has_current_turn_tool_output,
         has_current_turn_tool_execution_error,
         is_compaction: false,
         has_current_turn_web_search,
-        has_current_turn_image: false,
+        has_current_turn_image: entries[current_user_start..]
+            .iter()
+            .any(|entry| entry.parts.iter().any(|part| part.has_image)),
         last_assistant_tool,
+        current_turn_tool_categories,
     }
 }
 
@@ -214,45 +242,55 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
     let latest_user_index = entries
         .iter()
         .rposition(|entry| matches!(entry.role, ResponsesTurnRole::User));
-    let Some(segment) = responses_active_segment(entries, latest_user_index, latest_role) else {
-        let current_turn_start = latest_user_index
-            .map(|index| responses_current_user_run_start(entries, index))
-            .unwrap_or(0);
-        return V3CurrentTurnSignals {
-            latest_message_from_user: matches!(latest_role, Some(ResponsesTurnRole::User)),
-            current_user_text: String::new(),
-            is_compaction: latest_user_index.is_some_and(|index| {
-                entries[index..]
-                    .iter()
-                    .any(|entry| entry.kind == ResponsesTurnKind::Compaction)
-            }),
-            has_current_turn_web_search: latest_user_index.is_some_and(|index| {
-                entries[current_turn_start..=index]
-                    .iter()
-                    .any(|entry| entry.has_web_search)
-            }),
-            ..Default::default()
-        };
+    let current_turn_start = latest_user_index
+        .map(|index| responses_current_user_run_start(entries, index))
+        .unwrap_or(0);
+    let tool_start = if matches!(latest_role, Some(ResponsesTurnRole::User)) {
+        entries.len()
+    } else {
+        latest_user_index.map(|index| index + 1).unwrap_or(0)
     };
     let mut has_current_turn_tool_output = false;
     let mut has_current_turn_tool_execution_error = false;
     let mut is_compaction = false;
     let mut has_current_turn_web_search = false;
     let mut last_assistant_tool = None;
-    for entry in segment {
+    let mut current_turn_tool_categories = Vec::new();
+    let current_user_text = if matches!(latest_role, Some(ResponsesTurnRole::User)) {
+        latest_user_index
+            .map(|index| {
+                let start = responses_current_user_run_start(entries, index);
+                entries[start..=index]
+                    .iter()
+                    .filter(|entry| entry.role == ResponsesTurnRole::User)
+                    .map(|entry| entry.text.as_str())
+                    .filter(|text| !text.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    for entry in &entries[current_turn_start..] {
         if entry.has_web_search {
             has_current_turn_web_search = true;
         }
         if entry.kind == ResponsesTurnKind::Compaction {
             is_compaction = true;
         }
+    }
+    for entry in &entries[tool_start..] {
         if matches!(
             entry.kind,
             ResponsesTurnKind::ToolCall | ResponsesTurnKind::WebSearch
         ) {
             has_current_turn_tool_output = true;
             if let Some(category) = &entry.tool_call_category {
-                last_assistant_tool = classify_category(category);
+                if let Some(classification) = classify_category(category) {
+                    push_tool_category(&mut current_turn_tool_categories, &classification.category);
+                    last_assistant_tool = Some(classification);
+                }
             }
             continue;
         }
@@ -268,18 +306,24 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
         }
         if let Some(category) = &entry.tool_call_category {
             has_current_turn_tool_output = true;
-            last_assistant_tool = classify_category(category);
+            if let Some(classification) = classify_category(category) {
+                push_tool_category(&mut current_turn_tool_categories, &classification.category);
+                last_assistant_tool = Some(classification);
+            }
         }
     }
     V3CurrentTurnSignals {
         latest_message_from_user: matches!(latest_role, Some(ResponsesTurnRole::User)),
-        current_user_text: String::new(),
+        current_user_text,
         has_current_turn_tool_output,
         has_current_turn_tool_execution_error,
         is_compaction,
         has_current_turn_web_search,
-        has_current_turn_image: false,
+        has_current_turn_image: entries[current_turn_start..]
+            .iter()
+            .any(|entry| entry.has_image),
         last_assistant_tool,
+        current_turn_tool_categories,
     }
 }
 
@@ -288,69 +332,80 @@ fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
     let latest_user_index = entries
         .iter()
         .rposition(|entry| matches!(entry.role, GeminiTurnRole::User));
-    let segment_start = latest_user_index.unwrap_or(0);
+    let mut current_turn_start = latest_user_index.unwrap_or(0);
+    while current_turn_start > 0
+        && matches!(entries[current_turn_start - 1].role, GeminiTurnRole::User)
+    {
+        current_turn_start -= 1;
+    }
+    let mut has_current_turn_image = false;
+    let mut has_current_turn_tool_output = false;
     let mut has_current_turn_web_search = false;
-    for entry in entries.iter().skip(segment_start) {
+    let mut last_assistant_tool = None;
+    let mut current_turn_tool_categories = Vec::new();
+    for entry in entries.iter().skip(current_turn_start) {
         for part in &entry.parts {
+            has_current_turn_image |= part.has_image;
             if part.has_web_search {
                 has_current_turn_web_search = true;
+            }
+            if matches!(part.kind, TurnPartKind::ToolCall | TurnPartKind::ToolOutput) {
+                has_current_turn_tool_output = true;
+            }
+            if part.kind == TurnPartKind::ToolCall && !part.tool_name.is_empty() {
+                let arguments = part
+                    .tool_arguments
+                    .as_deref()
+                    .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+                if let Some(classification) =
+                    classify_tool_call(&part.tool_name, arguments.as_ref())
+                {
+                    push_tool_category(&mut current_turn_tool_categories, &classification.category);
+                    last_assistant_tool = Some(classification);
+                }
             }
         }
     }
     V3CurrentTurnSignals {
         latest_message_from_user: matches!(latest_role, Some(GeminiTurnRole::User)),
+        has_current_turn_tool_output,
         has_current_turn_web_search,
+        has_current_turn_image,
+        last_assistant_tool,
+        current_turn_tool_categories,
+        current_user_text: latest_user_index
+            .map(|end| {
+                entries[current_turn_start..=end]
+                    .iter()
+                    .flat_map(|entry| &entry.parts)
+                    .filter(|part| part.kind == TurnPartKind::Text)
+                    .map(|part| part.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default(),
         ..Default::default()
     }
 }
 
-fn chat_active_segment<'a>(
-    entries: &'a [ChatTurnEntry],
-    latest_user_index: Option<usize>,
-    latest_role: Option<ChatTurnRole>,
-) -> Option<&'a [ChatTurnEntry]> {
-    if matches!(latest_role, Some(ChatTurnRole::User)) {
-        return None;
+fn chat_current_user_run_start(entries: &[ChatTurnEntry], latest_user_index: usize) -> usize {
+    let mut start = latest_user_index;
+    while start > 0 && matches!(entries[start - 1].role, ChatTurnRole::User) {
+        start -= 1;
     }
-    let start = latest_user_index.map(|index| index + 1).unwrap_or(0);
-    Some(&entries[start..])
-}
-
-fn responses_active_segment<'a>(
-    entries: &'a [ResponsesTurnEntry],
-    latest_user_index: Option<usize>,
-    latest_role: Option<ResponsesTurnRole>,
-) -> Option<&'a [ResponsesTurnEntry]> {
-    if matches!(latest_role, Some(ResponsesTurnRole::User)) {
-        return None;
-    }
-    let start = latest_user_index.map(|index| index + 1).unwrap_or(0);
-    Some(&entries[start..])
+    start
 }
 
 fn responses_current_user_run_start(
     entries: &[ResponsesTurnEntry],
     latest_user_index: usize,
 ) -> usize {
-    // An explicit message is the current-turn boundary when an earlier user
-    // carrier exists. Its nested content is already represented by the message
-    // entry; never inherit image facts from preceding history/tool output.
-    if entries[latest_user_index].kind == ResponsesTurnKind::Other {
-        return if entries[..latest_user_index]
-            .iter()
-            .any(|entry| entry.role == ResponsesTurnRole::User)
-        {
-            latest_user_index
-        } else {
-            0
-        };
-    }
+    // Responses `input` has no turn id. Consecutive user carriers, whether bare
+    // `role:user`, an explicit `message`, or content parts, belong to one
+    // current turn; only an assistant/tool/system entry opens a new turn. This
+    // mirrors the Chat boundary so the whole trailing user run is aggregated.
     let mut start = latest_user_index;
-    while start > 0 {
-        let previous = &entries[start - 1];
-        if previous.role != ResponsesTurnRole::User || previous.kind == ResponsesTurnKind::Other {
-            break;
-        }
+    while start > 0 && entries[start - 1].role == ResponsesTurnRole::User {
         start -= 1;
     }
     start
@@ -360,9 +415,11 @@ fn extract_chat_user_text(entry: &ChatTurnEntry) -> String {
     entry
         .parts
         .iter()
-        .find(|part| part.kind == TurnPartKind::Text)
-        .map(|part| part.text.clone())
-        .unwrap_or_default()
+        .filter(|part| part.kind == TurnPartKind::Text)
+        .map(|part| part.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn classify_category(category: &str) -> Option<RouteToolCallClassification> {
@@ -377,6 +434,12 @@ fn classify_category(category: &str) -> Option<RouteToolCallClassification> {
         })
     } else {
         None
+    }
+}
+
+fn push_tool_category(categories: &mut Vec<String>, category: &str) {
+    if !category.is_empty() && !categories.iter().any(|existing| existing == category) {
+        categories.push(category.to_string());
     }
 }
 
@@ -498,6 +561,10 @@ fn project_chat_part(value: &Value) -> TurnPart {
             .and_then(Value::as_str)
             .map(|value| value.trim().to_ascii_lowercase())
             .unwrap_or_default();
+        let function_call = obj.get("functionCall").or_else(|| obj.get("function_call"));
+        let function_response = obj
+            .get("functionResponse")
+            .or_else(|| obj.get("function_response"));
         if type_value.contains("image") {
             part.kind = TurnPartKind::Image;
             part.has_image = true;
@@ -508,20 +575,40 @@ fn project_chat_part(value: &Value) -> TurnPart {
         }
         if matches!(
             type_value.as_str(),
-            "tool_call" | "tool_use" | "function_call"
-        ) {
+            "tool_call" | "tool_use" | "function_call" | "functioncall"
+        ) || function_call.is_some()
+        {
             part.kind = TurnPartKind::ToolCall;
         }
         if matches!(
             type_value.as_str(),
-            "tool_result" | "tool_output" | "function_call_output"
-        ) {
+            "tool_result"
+                | "tool_output"
+                | "function_call_output"
+                | "function_response"
+                | "functionresponse"
+        ) || function_response.is_some()
+        {
             part.kind = TurnPartKind::ToolOutput;
         }
         if part.kind == TurnPartKind::Text || part.kind == TurnPartKind::Other {
             if let Some(text) = obj.get("text").and_then(Value::as_str) {
                 part.text = text.to_string();
             }
+        }
+        if part.kind == TurnPartKind::ToolCall {
+            let call = function_call.unwrap_or(value);
+            part.tool_name = call
+                .get("name")
+                .or_else(|| call.pointer("/function/name"))
+                .or_else(|| obj.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            part.tool_arguments = ["args", "arguments", "input"]
+                .into_iter()
+                .find_map(|field| call.get(field))
+                .map(Value::to_string);
         }
     }
     if !part.has_image && value_contains_image(value) {
@@ -558,6 +645,16 @@ fn project_responses_entry(value: &Value) -> ResponsesTurnEntry {
     entry.has_web_search = responses_entry_has_web_search(value);
     entry.is_tool_output_error =
         matches!(kind, ResponsesTurnKind::ToolOutput) && tool_output_is_error(value);
+    if role == ResponsesTurnRole::User
+        && !matches!(
+            kind,
+            ResponsesTurnKind::ToolCall
+                | ResponsesTurnKind::ToolOutput
+                | ResponsesTurnKind::WebSearch
+        )
+    {
+        entry.text = responses_user_text(value);
+    }
     if matches!(
         kind,
         ResponsesTurnKind::ToolCall | ResponsesTurnKind::WebSearch
@@ -635,8 +732,67 @@ fn responses_entry_has_web_search(value: &Value) -> bool {
         .and_then(Value::as_str)
         .map(|value| value.trim().to_ascii_lowercase())
         .unwrap_or_default();
-    // web_search_call is a tool-call type; web_search_part inside content[] is the route fact.
-    matches!(type_value.as_str(), "web_search" | "websearch")
+    if matches!(type_value.as_str(), "web_search" | "websearch") {
+        return true;
+    }
+    // web_search_call is a tool-call type; a web_search part inside content[]
+    // is the user-level route fact.
+    value.get("content").is_some_and(contains_web_search_part)
+}
+
+fn contains_web_search_part(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(contains_web_search_part),
+        Value::Object(values) => {
+            let type_value = values
+                .get("type")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_ascii_lowercase())
+                .unwrap_or_default();
+            if matches!(type_value.as_str(), "web_search" | "websearch") {
+                return true;
+            }
+            ["content", "parts"]
+                .into_iter()
+                .filter_map(|field| values.get(field))
+                .any(contains_web_search_part)
+        }
+        _ => false,
+    }
+}
+
+fn responses_user_text(value: &Value) -> String {
+    let mut parts = Vec::new();
+    collect_responses_text(value.get("content").unwrap_or(value), &mut parts);
+    parts.join("\n")
+}
+
+fn collect_responses_text(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::String(text) => {
+            let text = text.trim();
+            if !text.is_empty() {
+                out.push(text.to_string());
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_responses_text(item, out);
+            }
+        }
+        Value::Object(values) => {
+            if let Some(text) = values.get("text").and_then(Value::as_str) {
+                let text = text.trim();
+                if !text.is_empty() {
+                    out.push(text.to_string());
+                }
+            }
+            if let Some(content) = values.get("content") {
+                collect_responses_text(content, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn tool_output_is_error(value: &Value) -> bool {
@@ -675,13 +831,21 @@ fn tool_category_from_call_value(value: &Value) -> Option<String> {
 fn project_gemini_entries(contents: &[Value]) -> Vec<GeminiTurnEntry> {
     contents
         .iter()
-        .map(|content| GeminiTurnEntry {
-            role: match content.get("role").and_then(Value::as_str) {
+        .map(|content| {
+            let parts = project_chat_parts(content.get("parts"), false);
+            let role = match content.get("role").and_then(Value::as_str) {
+                Some("user")
+                    if parts
+                        .iter()
+                        .any(|part| part.kind == TurnPartKind::ToolOutput) =>
+                {
+                    GeminiTurnRole::Tool
+                }
                 Some("user") => GeminiTurnRole::User,
                 Some("model") => GeminiTurnRole::Assistant,
                 _ => GeminiTurnRole::Other,
-            },
-            parts: project_chat_parts(content.get("parts"), false),
+            };
+            GeminiTurnEntry { role, parts }
         })
         .collect()
 }
@@ -718,7 +882,11 @@ fn value_contains_image(value: &Value) -> bool {
             if values.contains_key("image_url") {
                 return true;
             }
-            if values.contains_key("inline_data") || values.contains_key("file_data") {
+            if values.contains_key("inline_data")
+                || values.contains_key("file_data")
+                || values.contains_key("inlineData")
+                || values.contains_key("fileData")
+            {
                 return true;
             }
             if values

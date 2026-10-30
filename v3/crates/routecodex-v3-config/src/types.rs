@@ -541,12 +541,18 @@ pub struct V3ProviderAuthoringConfig {
     pub compatibility_profile: Option<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+    /// Declares a provider that serves on this machine (for example a local
+    /// model runtime). Only a declared local provider may exceed the remote
+    /// first-byte budget below.
+    #[serde(default)]
+    pub local: bool,
     /// per-request 总超时（毫秒）；默认 60_000（60s）。
     #[serde(default = "default_provider_request_timeout_ms")]
     pub request_timeout_ms: u64,
     /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30_000（30s）。
-    /// 本地慢部署（如 dwarfstar 缓存未命中可数分钟出首帧）按 provider 配置
-    /// 放宽，避免 idle 误杀；大多数 provider 无需配置。
+    /// Remote providers are capped at 120_000 by compile-time validation.
+    /// A declared local provider may raise it (for example a local runtime with
+    /// minutes of cold-start latency); most providers need no configuration.
     #[serde(default, alias = "sseFirstFrameTimeoutMs")]
     pub sse_first_frame_timeout_ms: Option<u64>,
     #[serde(default)]
@@ -557,6 +563,14 @@ pub struct V3ProviderAuthoringConfig {
 pub fn default_provider_request_timeout_ms() -> u64 {
     60_000
 }
+
+/// Upper bound for any remote provider's pre-first-byte wait, expressed through
+/// the SSE first-frame timeout. A remote provider that produces no first frame
+/// within this budget is a failed candidate, not a request to keep waiting.
+/// Only a provider declared `local = true` may exceed it. The whole-request
+/// `request_timeout_ms` is a separate budget and is not capped here, so a long
+/// healthy stream is not cut off.
+pub const V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS: u64 = 120_000;
 
 /// provider SSE 首帧/帧间隔超时默认值（毫秒）：30s。
 pub fn default_provider_sse_first_frame_timeout_ms() -> u64 {
@@ -580,6 +594,15 @@ pub struct V3ProviderHealthAuthoringConfig {
     /// bounded ladder, but never wait longer than this configured interval.
     #[serde(default)]
     pub probe_interval_ms: Option<u64>,
+    /// When true the recovery probe is advisory: probe success or failure only
+    /// updates the probe's own cadence. A scheduled, in-flight or failed probe
+    /// never removes the identity from formal candidate selection and never
+    /// advances the health ladder, so a probe failure cannot keep a provider
+    /// locked out while the upstream is down. Availability stays decided by the
+    /// real business failure hold window and by real business results. Defaults
+    /// to false, preserving cooling behavior.
+    #[serde(default)]
+    pub advisory_probe: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -613,6 +636,8 @@ pub struct V3ProviderModelAuthoringConfig {
     pub context_token_estimate_scale_bps: u64,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+    #[serde(default)]
+    pub availability: Option<crate::V3ProviderModelAvailabilityAuthoringConfig>,
 }
 
 fn default_context_token_estimate_scale_bps() -> u64 {
@@ -710,8 +735,8 @@ pub enum V3StreamingPolicy {
 #[serde(deny_unknown_fields)]
 pub struct V3ProviderConcurrencyAuthoringConfig {
     pub max_in_flight: u32,
-    /// Retained for compatibility with existing provider config files. Business request
-    /// admission never waits for provider capacity, so this value does not control it.
+    /// Runtime recovery waits for temporary capacity/cooldown exhaustion within
+    /// this budget. A single synchronous admission remains nonblocking.
     pub acquire_timeout_ms: u64,
     pub stale_lease_ms: u64,
 }
@@ -777,15 +802,6 @@ pub struct V3RoutePolicyAuthoringConfig {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum V3RouteConditionAuthoringConfig {
     CurrentCompaction,
-    SearchPoolTurnRatioAtLeast {
-        window_turns: usize,
-        numerator: usize,
-        denominator: usize,
-    },
-    ToolExecutionErrorTurnsAtLeast {
-        window_turns: usize,
-        count: usize,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -859,6 +875,16 @@ pub struct V3SelectionPolicy {
     pub strategy: V3SelectionStrategy,
 }
 
+impl V3SelectionPolicy {
+    pub fn is_sticky(&self) -> bool {
+        matches!(self.strategy, V3SelectionStrategy::Sticky)
+    }
+
+    pub fn is_default(&self) -> bool {
+        self.strategy == V3SelectionStrategy::Priority
+    }
+}
+
 impl Default for V3SelectionPolicy {
     fn default() -> Self {
         Self {
@@ -873,6 +899,7 @@ pub enum V3SelectionStrategy {
     Priority,
     Weighted,
     RoundRobin,
+    Sticky,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1192,6 +1219,9 @@ pub struct V3ProviderManifest {
     pub reasoning_effort: Option<V3ReasoningEffort>,
     pub compatibility_profile: Option<String>,
     pub features: BTreeMap<String, bool>,
+    /// Declares a provider served on this machine. Only such a provider may
+    /// exceed the remote first-byte budget.
+    pub local: bool,
     /// per-request 总超时（毫秒）
     pub request_timeout_ms: u64,
     /// provider SSE 首帧/帧间隔超时（毫秒）；None = 默认 30s。
@@ -1223,6 +1253,7 @@ pub struct V3ProviderModelManifest {
     pub max_context_tokens: Option<u64>,
     pub context_token_estimate_scale_bps: u64,
     pub features: BTreeMap<String, bool>,
+    pub availability: Option<crate::V3ProviderModelAvailabilityAuthoringConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

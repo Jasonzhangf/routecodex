@@ -29,7 +29,7 @@ use endpoint_handlers::{
     format_v3_request_id_entry, format_v3_request_id_token,
     merge_v3_direct_handoff_provider_failure_events, merge_v3_protocol_plan_trace,
     merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
-    next_v3_console_request_identity, pending_endpoint_after_responses_admission,
+    next_v3_console_request_identity, pending_endpoint_after_json_parse,
     prepend_v3_protocol_plan_trace_to_responses_relay_output,
     prepend_v3_relay_handoff_trace_to_direct_frame,
 };
@@ -106,8 +106,7 @@ use routecodex_v3_runtime::{
     execute_v3_responses_relay_dry_run_orchestration_outcome,
     execute_v3_responses_relay_runtime_with_default_transport,
     execute_v3_responses_relay_runtime_with_default_transport_health,
-    foundation_output_from_error_sdk_result,
-    plan_v3_responses_protocol_execution_with_provider_health,
+    foundation_output_from_error_sdk_result, plan_v3_responses_protocol_execution_with_recovery,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     project_v3_gemini_relay_runtime_failure, project_v3_http_boundary_error_via_sdk,
     project_v3_openai_chat_relay_runtime_failure, project_v3_protocol_execution_plan_failure,
@@ -139,9 +138,7 @@ use routecodex_v3_sse::{
 };
 use serde_json::{json, Map, Value};
 use session_admission::{
-    hold_response_body_admission_permit, hold_response_body_request_activity_permit,
-    V3ResponsesSessionAdmissionError, V3ResponsesSessionAdmissionGate,
-    V3ResponsesSessionAdmissionPermit, V3ResponsesSessionAdmissionScope, V3ServerMaintenanceGuard,
+    hold_response_body_request_activity_permit, V3ServerMaintenanceGuard,
     V3ServerRequestActivityGate,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -194,7 +191,6 @@ struct V3ListenerState {
     codex_sample_store: Arc<routecodex_v3_debug::V3CodexSampleStore>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeMap<String, u64>>>,
-    responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
     webui_observability: V3WebuiObservability,
@@ -480,6 +476,31 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     admin_config_path: Option<std::path::PathBuf>,
     hooks_sidecar_socket: Option<PathBuf>,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
+    spawn_v3_server_aggregate_with_health_dependencies(
+        manifest,
+        admin_webui,
+        admin_config_path,
+        hooks_sidecar_socket,
+        None,
+    )
+    .await
+}
+
+pub async fn spawn_v3_server_aggregate_with_health_observation_clock(
+    manifest: V3Config05ManifestPublished,
+    clock: Arc<dyn routecodex_v3_runtime::V3ProviderHealthObservationClock>,
+) -> Result<V3ServerAggregateHandle, std::io::Error> {
+    spawn_v3_server_aggregate_with_health_dependencies(manifest, None, None, None, Some(clock))
+        .await
+}
+
+async fn spawn_v3_server_aggregate_with_health_dependencies(
+    manifest: V3Config05ManifestPublished,
+    admin_webui: Option<V3AdminWebuiManifest>,
+    admin_config_path: Option<std::path::PathBuf>,
+    hooks_sidecar_socket: Option<PathBuf>,
+    observation_clock: Option<Arc<dyn routecodex_v3_runtime::V3ProviderHealthObservationClock>>,
+) -> Result<V3ServerAggregateHandle, std::io::Error> {
     let sse_dump_enabled = v3_sse_dump_env_flag();
     let console_enabled = manifest.debug.log_console;
     let debug_manifest = manifest.debug.clone();
@@ -633,12 +654,15 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                 bind: server.bind.clone(),
                 port: server.port,
             };
-            let listener_provider_health = Arc::new(
+            let mut listener_health =
                 V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener(
                     &manifest,
                     &listener_scope,
-                ),
-            );
+                );
+            if let Some(clock) = observation_clock.as_ref() {
+                listener_health = listener_health.with_observation_clock(clock.clone());
+            }
+            let listener_provider_health = Arc::new(listener_health);
             provider_health_handles.push(Arc::clone(&listener_provider_health));
             build_v3_listener_router(V3ListenerState {
                 server,
@@ -651,7 +675,6 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                 codex_sample_store: codex_sample_store.clone(),
                 provider_health: listener_provider_health,
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
-                responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
                 request_activity_gate: Arc::clone(&request_activity_gate),
                 front_transport_broker: front_transport_broker.clone(),
                 webui_observability,
@@ -1008,73 +1031,6 @@ fn current_epoch_ms() -> u64 {
         .unwrap_or(0)
 }
 
-async fn admit_v3_responses_session_after_json_parse(
-    state: &Arc<V3ListenerState>,
-    path: &str,
-    request_headers: &HeaderMap,
-    payload: &Value,
-) -> Result<Option<V3ResponsesSessionAdmissionPermit>, Response<Body>> {
-    let (session_id, conversation_id) =
-        match responses_control_scope_headers(request_headers, Some(payload)) {
-            Ok(scope) => scope,
-            Err(message) => {
-                let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
-                    Ok(request_id) => request_id,
-                    Err(response) => return Err(*response),
-                };
-                return Err(
-                    error_output_response_for_responses_request_with_project_path(
-                        &state.server,
-                        path,
-                        &request_id,
-                        project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                        request_headers,
-                        Some(payload),
-                        resolve_v3_console_project_path(request_headers, payload).as_deref(),
-                    ),
-                );
-            }
-        };
-    let permit = match state
-        .responses_session_admission
-        .admit(V3ResponsesSessionAdmissionScope {
-            endpoint: path.to_string(),
-            session_id,
-            conversation_id,
-        })
-        .await
-    {
-        Ok(permit) => permit,
-        Err(error @ V3ResponsesSessionAdmissionError::TokenSpaceExhausted) => {
-            // The gate cannot hand out a unique admission token any more. The
-            // failure belongs to this request only: every later request gets
-            // its own attempt instead of inheriting a poisoned hot path.
-            let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
-                Ok(request_id) => request_id,
-                Err(response) => return Err(*response),
-            };
-            return Err(
-                error_output_response_for_responses_request_with_project_path(
-                    &state.server,
-                    path,
-                    &request_id,
-                    project_v3_server_boundary_error_via_sdk(
-                        V3ErrorSourceKind::RuntimeFailure,
-                        "V3ServerResponsesSessionAdmission",
-                        "responses_session_admission_unavailable",
-                        error.to_string(),
-                        Some(598),
-                    ),
-                    request_headers,
-                    Some(payload),
-                    resolve_v3_console_project_path(request_headers, payload).as_deref(),
-                ),
-            );
-        }
-    };
-    Ok(permit)
-}
-
 async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
@@ -1251,16 +1207,6 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
             );
         }
     };
-    let admission_permit = if entry_protocol == "responses" {
-        match admit_v3_responses_session_after_json_parse(&state, &path, &request_headers, &payload)
-            .await
-        {
-            Ok(permit) => permit,
-            Err(response) => return response,
-        }
-    } else {
-        None
-    };
     let request_activity_permit = state.request_activity_gate.admit().await;
     // The Runtime owns full-attempt buffering, so no provider payload byte is
     // projected before the runtime outcome exists. The Server owns the client
@@ -1283,7 +1229,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
         None => (None, None),
     };
     let runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>> =
-        Box::pin(pending_endpoint_after_responses_admission(
+        Box::pin(pending_endpoint_after_json_parse(
             Arc::clone(&state),
             front_connection_identity,
             request_headers,
@@ -1324,10 +1270,6 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
     };
     let response =
         hold_response_body_request_activity_permit(response, request_activity_permit, front_socket);
-    let response = match admission_permit {
-        Some(permit) => hold_response_body_admission_permit(response, permit),
-        None => response,
-    };
     // The client-response sample must record the wire the client receives, so the
     // recorder wraps the final body after every transport owner has framed it.
     observe_v3_live_client_wire(response)
@@ -1527,11 +1469,12 @@ fn get_failure_session_scope(
     if let Some(scope) = build_v3_provider_failure_session_scope_for_request(server, headers)? {
         return Ok(scope);
     }
-    V3ProviderFailureSessionScope::new(
+    Ok(V3ProviderFailureSessionScope::new(
         &server.id,
         &server.routing_group,
         format!("request-local-{request_id}"),
-    )
+    )?
+    .as_request_local())
 }
 
 /// Record private Chat Relay failure evidence through the shared serializer.

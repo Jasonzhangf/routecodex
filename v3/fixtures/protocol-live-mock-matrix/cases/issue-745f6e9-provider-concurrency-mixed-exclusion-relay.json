@@ -17,8 +17,11 @@
     ],
     "provider_concurrency": {
       "maxInFlight": 1,
-      "acquireTimeoutMs": 60000,
+      "acquireTimeoutMs": 1000,
       "staleLeaseMs": 300000
+    },
+    "attempt_store": {
+      "residence_timeout_ms": 30000
     }
   },
   "client_request": {
@@ -246,7 +249,7 @@
     },
     "expected_exhaustion_client": {
       "transport": "closed",
-      "deadline_ms": 1500,
+      "deadline_ms": 4000,
       "error_codes_must_not": [
         "ETIMEDOUT"
       ]

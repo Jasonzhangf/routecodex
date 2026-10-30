@@ -96,15 +96,12 @@ try {
   failures.push(`package.json is not valid JSON: ${parseError.message}`);
 }
 
+forbidMatch(`${server}\n${admission}`, /V3ResponsesSessionAdmission|hold_response_body_admission_permit/,
+  "Independent requests must not regain a session/conversation business mutex");
 requireMatch(
   server,
-  /responses_session_admission:\s*Arc<V3ResponsesSessionAdmissionGate>/,
-  "V3ListenerState must own one listener-local Responses session admission gate",
-);
-requireMatch(
-  server,
-  /read_json_payload\(request\)\.await[\s\S]*admit_v3_responses_session_after_json_parse\([\s\S]*\)\.await[\s\S]*pending_endpoint_after_responses_admission/,
-  "Responses handler must await explicit-scope admission after the canonical JSON parser and before Runtime execution",
+  /read_json_payload\(request\)\.await[\s\S]*request_activity_gate\.admit\(\)\.await[\s\S]*pending_endpoint_after_json_parse/,
+  "Parsed requests must independently enter Runtime through the explicit maintenance owner",
 );
 forbidMatch(
   server,
@@ -113,43 +110,18 @@ forbidMatch(
 );
 requireMatch(
   `${server}\n${admission}`,
-  /hold_response_body_admission_permit[\s\S]*body\.into_data_stream\(\)[\s\S]*Body::from_stream/,
-  "Admission permit must be held by the HTTP response body lifetime",
-);
-requireMatch(
-  admission,
-  /impl V3ResponsesSessionAdmissionGate[\s\S]*pub\(crate\) async fn admit\([\s\S]*let notified = self\.notify\.notified\(\);[\s\S]*tokio::pin!\(notified\);[\s\S]*notified\.as_mut\(\)\.enable\(\);[\s\S]*self\.try_admit\(scope\.clone\(\)\)[\s\S]*notified\.await/,
-  "The session admission gate must uniquely own an async predicate wait with lost-wakeup-safe notification ordering",
+  /hold_response_body_request_activity_permit[\s\S]*body\.into_data_stream\(\)[\s\S]*Body::from_stream[\s\S]*hold_activity_until_flush\(permit\)/,
+  "Request-local activity must retain body and front-flush custody",
 );
 requireMatch(
   admission,
   /pub\(crate\) async fn wait_for_quiescence\(&self\)[\s\S]*let notified = self\.gate\.notify\.notified\(\);[\s\S]*tokio::pin!\(notified\);[\s\S]*notified\.as_mut\(\)\.enable\(\);[\s\S]*\.active\s*== 0[\s\S]*notified\.await/,
   "The exec drain gate must register its predicate waiter before the quiescence check",
 );
-requireMatch(
-  server,
-  /\.responses_session_admission\s*\.admit\(V3ResponsesSessionAdmissionScope\s*\{[\s\S]*?\}\)\s*\.await/,
-  "The V3 Server caller must await the gate owner instead of projecting overlap",
-);
 forbidMatch(
   server,
   /responses_session_admission\s*\.\s*try_admit|V3HttpBoundaryErrorKind::RequestInFlight/,
   "The V3 Server caller must not convert admission contention into request_in_flight",
-);
-forbidMatch(
-  admission,
-  /pub\(crate\)\s+fn\s+try_admit/,
-  "Nonblocking admission must not be exported for server callers",
-);
-requireMatch(
-  admission,
-  /impl Drop for V3ResponsesSessionAdmissionPermit[\s\S]*\.active[\s\S]*\.remove\(&token\)[\s\S]*notify\.notify_waiters\(\)/,
-  "Permit drop must remove only its exact token and wake every predicate waiter",
-);
-requireMatch(
-  admission,
-  /same_present_identity\(&active\.session_id,\s*&scope\.session_id\)[\s\S]*\|\|[\s\S]*same_present_identity\([\s\S]*active\.conversation_id/,
-  "Waiting contention must match either the explicit session or explicit conversation",
 );
 requireMatch(
   serverAll,
@@ -200,8 +172,8 @@ for (const [source, pattern, label] of [
   ],
   [
     resourceMap,
-    /resource_id:\s*v3\.server\.responses_session_admission\b/,
-    "V3 resource map must register the listener-scoped gate",
+    /resource_id:\s*v3\.front\.request_activity_gate\b/,
+    "V3 resource map must register the maintenance activity owner",
   ],
   [
     mainlineMap,
@@ -220,8 +192,8 @@ for (const [source, pattern, label] of [
   ],
   [
     wiki,
-    /V3Server03ResponsesSessionAdmissionBlock/,
-    "Admission wiki must expose the review node",
+    /independent/i,
+    "Request wiki must expose independent dispatch",
   ],
   [
     mainlineMap,
@@ -240,8 +212,8 @@ for (const [source, pattern, label] of [
   ],
   [
     tests,
-    /responses_same_listener_same_session_waits_for_release_then_returns_ok/,
-    "Controlled provider overlap wait-then-200 blackbox must exist",
+    /responses_same_listener_same_session_admits_independent_requests/,
+    "Controlled provider same-session independence blackbox must exist",
   ],
   [
     tests,
@@ -285,8 +257,8 @@ for (const scriptName of [
 const admissionBehaviorGate = scripts["test:v3-responses-session-admission"];
 for (const [testName, diagnostic] of [
   [
-    "responses_same_listener_same_session_waits_for_release_then_returns_ok",
-    "Admission behavior gate must execute the same-scope wait-then-200 blackbox",
+    "responses_same_listener_same_session_admits_independent_requests",
+    "Admission behavior gate must execute the same-scope independence blackbox",
   ],
   [
     "responses_same_listener_different_session_remains_concurrent",
@@ -318,19 +290,9 @@ for (const scriptName of [
 }
 requireMatch(workflow, /npm --prefix v3 run verify:ci/, "CI must dispatch the canonical V3 verification stack");
 requireMatch(
-  functionMap,
-  /<V3ResponsesSessionAdmissionPermit as Drop>::drop/,
-  "Function map must anchor the real Drop trait implementation symbol",
-);
-requireMatch(
-  resourceMap,
-  /<V3ResponsesSessionAdmissionPermit as Drop>::drop/,
-  "Resource map must anchor the real Drop trait implementation symbol",
-);
-requireMatch(
   `${admissionFunctionContract}\n${admissionResourceContract}\n${admissionMainlineContract}\n${admissionVerificationContract}\n${manifest}\n${wiki}`,
-  /V3ResponsesSessionAdmissionGate::admit/,
-  "Canonical maps and lifecycle docs must bind the async admission owner",
+  /V3ServerRequestActivityGate::admit/,
+  "Canonical maps must bind the existing maintenance activity owner",
 );
 forbidMatch(
   `${admissionMainlineContract}\n${admissionVerificationContract}\n${manifest}\n${wiki}`,

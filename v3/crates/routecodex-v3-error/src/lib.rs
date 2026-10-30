@@ -367,6 +367,7 @@ pub struct V3Error04TargetExhaustionDecision {
     pub route_pool_remaining_after_exclusion: usize,
     pub default_pool_available: bool,
     pub same_provider_retry_available: bool,
+    pub target_recovery_pending: bool,
     pub target_exhausted: bool,
 }
 
@@ -375,6 +376,12 @@ pub struct V3ProviderFailureSessionScope {
     server_id: String,
     routing_group: String,
     session_id: String,
+    /// True when the session id came from a client control header and can
+    /// therefore carry cross-request sticky selection. The request-local
+    /// fallback (a synthesized `request-local-*` id) must not feed sticky
+    /// state, because it is a fresh key per request.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    client_session: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     transport_pipeline_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -403,10 +410,18 @@ impl V3ProviderFailureSessionScope {
             server_id: required(server_id.into(), "server_id")?,
             routing_group: required(routing_group.into(), "routing_group")?,
             session_id: required(session_id.into(), "session_id")?,
+            client_session: true,
             transport_pipeline_id: None,
             transport_port: None,
             transport_runtime_generation: None,
         })
+    }
+
+    /// Marks this scope as a synthesized per-request fallback rather than a
+    /// client session. Such a scope must not participate in sticky selection.
+    pub fn as_request_local(mut self) -> Self {
+        self.client_session = false;
+        self
     }
 
     pub fn with_transport_handoff_scope(
@@ -435,6 +450,12 @@ impl V3ProviderFailureSessionScope {
 
     pub fn session_id(&self) -> &str {
         &self.session_id
+    }
+
+    /// True when the session id came from a client control header. Only such a
+    /// scope can carry sticky provider selection across requests.
+    pub fn is_client_session(&self) -> bool {
+        self.client_session
     }
 
     pub fn transport_handoff_scope(&self) -> Option<(&str, u16, u64)> {
@@ -518,6 +539,7 @@ impl V3Error05RecoveryAdmissionWitness {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum V3Error05ExecutionAction {
+    ReevaluateTarget,
     WaitThenRetrySame {
         recovery: V3Error05RecoveryAdmissionWitness,
     },
@@ -532,6 +554,7 @@ pub enum V3Error05ExecutionAction {
 impl V3Error05ExecutionAction {
     pub const fn observability_label(&self) -> &'static str {
         match self {
+            Self::ReevaluateTarget => "target_recovery_pending",
             Self::WaitThenRetrySame { .. } => "retry_same_provider",
             Self::WaitThenReselect { .. } => "target_local_reselect",
             Self::ProjectTerminal | Self::RejectNonProviderError => "project_client_error",
@@ -551,7 +574,10 @@ impl V3Error05ExecutionAction {
             Self::WaitThenRetrySame { recovery } | Self::WaitThenReselect { recovery } => {
                 Some(recovery)
             }
-            Self::ProjectTerminal | Self::ClientDisconnected | Self::RejectNonProviderError => None,
+            Self::ReevaluateTarget
+            | Self::ProjectTerminal
+            | Self::ClientDisconnected
+            | Self::RejectNonProviderError => None,
         }
     }
 }
@@ -1032,6 +1058,22 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
     default_pool_available: bool,
     same_provider_retry_available: bool,
 ) -> V3Error04TargetExhaustionDecision {
+    build_v3_error_04_target_exhaustion_decision_with_target_recovery(
+        local_action,
+        route_pool_remaining_after_exclusion,
+        default_pool_available,
+        same_provider_retry_available,
+        false,
+    )
+}
+
+pub fn build_v3_error_04_target_exhaustion_decision_with_target_recovery(
+    local_action: V3Error03TargetLocalAction,
+    route_pool_remaining_after_exclusion: usize,
+    default_pool_available: bool,
+    same_provider_retry_available: bool,
+    target_recovery_pending: bool,
+) -> V3Error04TargetExhaustionDecision {
     let provider_failure = matches!(
         local_action.classified.source.source_kind,
         V3ErrorSourceKind::ProviderFailure
@@ -1039,7 +1081,17 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
     let recoverable_response_processing =
         is_v3_recoverable_response_processing_source(&local_action.classified.source);
     let target_exhausted = if provider_failure || recoverable_response_processing {
-        route_pool_remaining_after_exclusion == 0 && !default_pool_available
+        route_pool_remaining_after_exclusion == 0
+            && !target_recovery_pending
+            && !default_pool_available
+            && !(same_provider_retry_available
+                && local_action
+                    .classified
+                    .source
+                    .external_error
+                    .as_ref()
+                    .and_then(|error| error.status)
+                    == Some(429))
     } else {
         matches!(
             local_action.classified.source.source_kind,
@@ -1061,6 +1113,7 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
         route_pool_remaining_after_exclusion,
         default_pool_available,
         same_provider_retry_available,
+        target_recovery_pending,
         target_exhausted,
     }
 }
@@ -1075,6 +1128,29 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
         exhaustion.route_pool_remaining_after_exclusion > 0 || exhaustion.default_pool_available;
     let action = match exhaustion.local_action.classified.source.source_kind {
         V3ErrorSourceKind::ClientDisconnect => V3Error05ExecutionAction::ClientDisconnected,
+        V3ErrorSourceKind::ProviderFailure if exhaustion.target_recovery_pending => {
+            V3Error05ExecutionAction::ReevaluateTarget
+        }
+        V3ErrorSourceKind::RuntimeFailure
+            if recoverable_response_processing && exhaustion.target_recovery_pending =>
+        {
+            V3Error05ExecutionAction::ReevaluateTarget
+        }
+        V3ErrorSourceKind::ProviderFailure
+            if exhaustion.same_provider_retry_available
+                && exhaustion
+                    .local_action
+                    .classified
+                    .source
+                    .external_error
+                    .as_ref()
+                    .and_then(|error| error.status)
+                    == Some(429) =>
+        {
+            V3Error05ExecutionAction::WaitThenRetrySame {
+                recovery: recovery.expect("429 retry requires global recovery admission"),
+            }
+        }
         V3ErrorSourceKind::ProviderFailure if alternatives_available => {
             V3Error05ExecutionAction::WaitThenReselect {
                 recovery: recovery

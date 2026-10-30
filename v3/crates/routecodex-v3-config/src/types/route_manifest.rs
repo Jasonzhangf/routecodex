@@ -18,15 +18,6 @@ pub struct V3RoutePolicyManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3RouteConditionManifest {
     CurrentCompaction,
-    SearchPoolTurnRatioAtLeast {
-        window_turns: usize,
-        numerator: usize,
-        denominator: usize,
-    },
-    ToolExecutionErrorTurnsAtLeast {
-        window_turns: usize,
-        count: usize,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

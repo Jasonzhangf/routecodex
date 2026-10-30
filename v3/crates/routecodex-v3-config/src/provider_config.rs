@@ -151,7 +151,7 @@ pub(crate) fn compile_provider_directory(
                 responses,
                 concurrency: provider.concurrency.map(|concurrency| {
                     V3ProviderConcurrencyAuthoringConfig {
-                        max_in_flight: concurrency.max_in_flight.unwrap_or(8),
+                        max_in_flight: concurrency.max_in_flight.unwrap_or(40),
                         acquire_timeout_ms: concurrency.acquire_timeout_ms.unwrap_or(60000),
                         stale_lease_ms: concurrency.stale_lease_ms.unwrap_or(300000),
                     }
@@ -162,6 +162,7 @@ pub(crate) fn compile_provider_directory(
                 reasoning_effort: v3.reasoning_effort,
                 compatibility_profile,
                 features: v3.features,
+                local: provider.local.unwrap_or(false),
                 request_timeout_ms: provider
                     .timeout
                     .unwrap_or(DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS),
@@ -439,6 +440,7 @@ fn compile_v2_provider_models(
                         .or(model.max_context),
                     context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                     features: model.features,
+                    availability: model.availability,
                 },
             )
         })
@@ -499,6 +501,10 @@ pub struct V2ProviderConfig {
     pub models: BTreeMap<String, V2ProviderModelConfig>,
     #[serde(default)]
     pub v3: Option<V2ProviderV3Config>,
+    /// Declares a local provider served on this machine. Only a declared local
+    /// provider may exceed the remote first-byte budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<bool>,
     /// per-request 总超时（毫秒）；默认 60_000（60s）。覆盖连接、响应头等待与 body 读取。
     #[serde(default)]
     pub timeout: Option<u64>,
@@ -597,6 +603,10 @@ pub struct V2ProviderModelConfig {
     pub web_search_backend: Option<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+    /// Optional daily availability windows. Omitted means the model is always
+    /// available.
+    #[serde(default)]
+    pub availability: Option<crate::V3ProviderModelAvailabilityAuthoringConfig>,
 }
 
 fn default_context_token_estimate_scale_bps() -> u64 {

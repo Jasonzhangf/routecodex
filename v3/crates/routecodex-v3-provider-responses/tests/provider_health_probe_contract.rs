@@ -1,5 +1,28 @@
 use routecodex_v3_provider_responses::V3ProviderHealthStore;
 
+fn real_http_failure_action(
+    status: u16,
+    code: &str,
+) -> routecodex_v3_provider_responses::V3ProviderFailureAction {
+    let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(
+        routecodex_v3_error::build_v3_error_01_source_raised_external(
+            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            code,
+            "controlled provider failure",
+            routecodex_v3_error::V3ExternalErrorLink {
+                kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+                status: Some(status),
+                code: Some(code.into()),
+                provider_id: Some("p".into()),
+                upstream_request_id: None,
+                message: Some("controlled provider failure".into()),
+            },
+        ),
+    );
+    routecodex_v3_error::build_v3_provider_failure_action_from_v3_error_02(&classified)
+}
+
 #[test]
 fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b() {
     for late in ["cancel", "success", "failure"] {
@@ -122,35 +145,46 @@ fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b()
 }
 
 #[test]
-fn business_success_immediately_recovers_429_cooldown() {
+fn business_success_resets_early_429_window_without_count_based_cooling() {
     let store = V3ProviderHealthStore::default();
-    let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("429");
-    action.failure_threshold = 3;
-    action.failure_fingerprint =
-        routecodex_v3_error::build_v3_provider_global_error_fingerprint(429).unwrap();
-    for time in 100..103 {
+    let action = real_http_failure_action(429, "rate_limit_error");
+    for time in [100, 101, 102, 60100] {
         let projection = store
             .record_provider_failure_action("p", "a", "m", &action, time)
             .unwrap();
-        assert_eq!(projection.cooldown, time == 102);
+        assert!(!projection.cooldown, "count alone cannot cool");
     }
     let recovered = store
-        .record_provider_key_success("p", "a", "m", 103)
+        .record_provider_key_success("p", "a", "m", 60101)
         .unwrap();
     assert!(recovered.available);
     assert!(!recovered.cooldown);
     assert_eq!(recovered.success_streak, 1, "one real success counts once");
+    for time in [120100, 180100] {
+        assert!(
+            store
+                .record_provider_failure_action("p", "a", "m", &action, time)
+                .unwrap()
+                .available,
+            "matching success starts a new unresolved window"
+        );
+    }
+    assert!(
+        store
+            .record_provider_failure_action("p", "a", "m", &action, 240100)
+            .unwrap()
+            .cooldown
+    );
 }
 
 #[test]
-fn consecutive_429_codes_share_count_and_success_invalidates_old_probe() {
+fn consecutive_429_codes_share_window_and_post_minimum_success_invalidates_old_probe() {
     let store = V3ProviderHealthStore::default();
     let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("429");
-    action.failure_threshold = 3;
     for (time, code) in [
         (100, "rate_limit"),
-        (101, "insufficient_quota"),
-        (102, "other"),
+        (60100, "insufficient_quota"),
+        (120100, "other"),
     ] {
         action.failure_fingerprint = Some(
             routecodex_v3_error::V3ProviderErrorFingerprint::new(
@@ -164,8 +198,19 @@ fn consecutive_429_codes_share_count_and_success_invalidates_old_probe() {
         let projection = store
             .record_provider_failure_action("p", "a", "m", &action, time)
             .unwrap();
-        assert_eq!(projection.failure_streak, (time - 99) as u32);
-        assert_eq!(projection.cooldown, time == 102);
+        assert_eq!(
+            projection.failure_streak, 0,
+            "429 does not penalize transport health"
+        );
+        assert_eq!(projection.cooldown, time == 120100);
+        for (key, model) in [("a", "other-model"), ("sibling", "m")] {
+            assert!(
+                store
+                    .scheduling_projection("p", key, model, 1, 1, time)
+                    .unwrap()
+                    .available
+            );
+        }
     }
     let permit = store
         .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
@@ -173,23 +218,23 @@ fn consecutive_429_codes_share_count_and_success_invalidates_old_probe() {
         .unwrap();
     let availability_generation = store.availability_generation();
     store
-        .record_provider_key_success("p", "a", "m", 104)
+        .record_provider_key_success("p", "a", "m", 1920101)
         .unwrap();
     assert_ne!(store.availability_generation(), availability_generation);
     store
-        .complete_provider_cooldown_probe_failure_with_permit(&permit, 105)
+        .complete_provider_cooldown_probe_failure_with_permit(&permit, 1920102)
         .unwrap();
     assert!(
         store
-            .scheduling_projection("p", "a", "m", 1, 1, 106)
+            .scheduling_projection("p", "a", "m", 1, 1, 1920103)
             .unwrap()
             .available
     );
     assert!(store
-        .provider_cooldown_probe_keys_due(1_000_000)
+        .provider_cooldown_probe_keys_due(2_000_000)
         .unwrap()
         .is_empty());
-    for time in [107, 108] {
+    for time in [1920104, 1920105] {
         assert!(
             store
                 .record_provider_failure_action("p", "a", "m", &action, time)
@@ -200,29 +245,32 @@ fn consecutive_429_codes_share_count_and_success_invalidates_old_probe() {
 }
 
 #[test]
-fn business_success_preserves_non_429_cause_after_later_429_diagnostic() {
+fn early_429_preserves_non429_cooldown_until_matching_business_success() {
     let store = V3ProviderHealthStore::default();
-    let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("503");
+    let mut action = real_http_failure_action(503, "provider_http_503");
     action.failure_threshold = 1;
-    action.failure_fingerprint =
-        routecodex_v3_error::build_v3_provider_global_error_fingerprint(503).unwrap();
     assert!(
         store
             .record_provider_failure_action("p", "a", "m", &action, 100)
             .unwrap()
             .cooldown
     );
-    action.failure_threshold = 3;
-    action.failure_fingerprint =
-        routecodex_v3_error::build_v3_provider_global_error_fingerprint(429).unwrap();
+    action = real_http_failure_action(429, "rate_limit_error");
     store
         .record_provider_failure_action("p", "a", "m", &action, 101)
         .unwrap();
     assert!(
+        !store
+            .scheduling_projection("p", "a", "m", 1, 1, 101)
+            .unwrap()
+            .available,
+        "a429 diagnostic cannot release the existing503 exclusion"
+    );
+    assert!(
         store
             .record_provider_key_success("p", "a", "m", 102)
             .unwrap()
-            .cooldown
+            .available
     );
 }
 

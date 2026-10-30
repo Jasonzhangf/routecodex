@@ -450,7 +450,16 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
 }
 
 #[test]
-fn persisted_429_cause_recovers_on_business_success_and_stays_removed() {
+fn persisted_429_minimum_requires_current_probe_and_stays_removed() {
+    assert_persisted_429_recovery(false);
+}
+
+#[test]
+fn persisted_429_hour_lock_requires_current_probe_after_reconstruction() {
+    assert_persisted_429_recovery(true);
+}
+
+fn assert_persisted_429_recovery(hour: bool) {
     let mut manifest = health_disabled_manifest();
     manifest
         .providers
@@ -460,41 +469,115 @@ fn persisted_429_cause_recovers_on_business_success_and_stays_removed() {
         .as_mut()
         .unwrap()
         .enabled = true;
-    let path =
-        std::env::temp_dir().join(format!("routecodex-429-cause-{}.json", std::process::id()));
+    // Advisory probe scheduling cannot bypass a persisted mandatory hour lock.
+    manifest
+        .providers
+        .get_mut("p")
+        .unwrap()
+        .health
+        .as_mut()
+        .unwrap()
+        .advisory_probe = hour;
+    let path = std::env::temp_dir().join(format!(
+        "routecodex-429-window-{}-{hour}.json",
+        std::process::id()
+    ));
     let store = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
-    let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("429");
-    action.failure_threshold = 3;
-    action.failure_fingerprint =
-        routecodex_v3_error::build_v3_provider_global_error_fingerprint(429).unwrap();
-    for time in 100..103 {
+    let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(
+        routecodex_v3_error::build_v3_error_01_source_raised_external(
+            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_http_429",
+            "real controlled429",
+            routecodex_v3_error::V3ExternalErrorLink {
+                kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+                status: Some(429),
+                code: Some("HTTP_429".into()),
+                provider_id: Some("p".into()),
+                upstream_request_id: None,
+                message: Some("real controlled429".into()),
+            },
+        ),
+    );
+    let action =
+        routecodex_v3_error::build_v3_provider_failure_action_from_v3_error_02(&classified);
+    for time in [100, 120100] {
         store
             .record_provider_failure_action("p", "k", "m", &action, time)
             .unwrap();
     }
+    if hour {
+        store
+            .record_provider_failure_action("p", "k", "m", &action, 3600100)
+            .unwrap();
+    }
+    // An active physical acquisition is deliberately abandoned across restart.
+    let abandoned = store
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .unwrap();
     store.flush_persistence().unwrap();
     drop(store);
+    drop(abandoned);
     let restored =
         V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
     assert!(
         !restored
-            .scheduling_projection("p", "k", "m", 1, 1, 104)
+            .scheduling_projection("p", "k", "m", 1, 1, 120101)
             .unwrap()
-            .available
+            .available,
+        "a persisted 429 hold must block during its window"
     );
+    let now = if hour { 3600101 } else { 120101 };
+    assert!(
+        !restored
+            .record_provider_key_success("p", "k", "m", now)
+            .unwrap()
+            .available,
+        "late business success cannot bypass a persisted minimum or required probe"
+    );
+    let entries = V3ProviderCooldownCoordinator::load(path.clone())
+        .unwrap()
+        .persisted_rate_limit_episodes();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].1.probe_required, hour);
+    assert_eq!(entries[0].1.not_before_ms, Some(1920100));
     assert!(
         restored
-            .record_provider_key_success("p", "k", "m", 105)
-            .unwrap()
-            .available
+            .cooldown_entries(now)
+            .iter()
+            .all(|entry| entry.state != "probing"),
+        "restart cannot inherit an active physical owner"
     );
+    let permit = restored
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .unwrap();
+    if !hour {
+        assert!(
+            !restored
+                .complete_provider_cooldown_probe_success_if_current_with_permit(&permit, now)
+                .unwrap(),
+            "even a current probe cannot shorten the minimum"
+        );
+    } else {
+        // Keep the hourly qualification for the final completion below.
+        restored.cancel_provider_cooldown_probe(&permit).unwrap();
+    }
+    let permit = restored
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .unwrap();
+    assert!(restored
+        .complete_provider_cooldown_probe_success_if_current_with_permit(&permit, now.max(1920100))
+        .unwrap());
     restored.flush_persistence().unwrap();
     drop(restored);
     let restored =
         V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
     assert!(
         restored
-            .scheduling_projection("p", "k", "m", 1, 1, 106)
+            .scheduling_projection("p", "k", "m", 1, 1, now.max(1920100))
             .unwrap()
             .available
     );

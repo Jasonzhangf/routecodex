@@ -9,6 +9,70 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Notify;
 
+// Test the post-observation policy separately from the public hold tests.
+// Await the real declared action gate, then finish a qualified physical
+// observation. No sleep, forced due time or synthetic cooldown is used.
+pub(crate) async fn complete_due_precool_failures(
+    health: &V3ProviderFailureRuntimeHealth,
+    now_ms: u64,
+) {
+    let tickets: Vec<_> = health
+        .precool
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(identity, action)| (identity.clone(), action.ticket.clone()))
+        .collect();
+    for (identity, ticket) in tickets {
+        let transition = tokio::time::timeout(
+            Duration::from_secs(15),
+            health
+                .action_gate
+                .wait_for_recovery_ticket(&ticket, ticket.key().provider_scope.clone()),
+        )
+        .await
+        .expect("declared observation gate must become due")
+        .unwrap();
+        let V3ProviderActionRecoveryTransition::Admitted(mut admission) = transition else {
+            panic!("isolated test observation must retain its current action: {transition:?}");
+        };
+        let permit = health
+            .store
+            .acquire_provider_precool_probe_for_interface(
+                &identity.provider_id,
+                &identity.interface_id,
+                identity.auth_alias.as_deref(),
+                identity.model_id.as_deref(),
+            )
+            .unwrap()
+            .expect("test observation must own the exact physical probe");
+        let observation = V3PrecoolObservationGuard {
+            health: health.clone(),
+            identity: identity.clone(),
+            generation: ticket.generation(),
+            _admission: admission.take_permit().expect("current action admission"),
+        };
+        let cancellation = V3ProviderProbeCancellationGuard {
+            store: health.store.clone(),
+            permit,
+        };
+        health
+            .complete_precool_observation(
+                &observation,
+                &cancellation,
+                Err(V3ProviderHealthProbeFailure::Provider(
+                    V3ProviderError::Transport {
+                        request_id: "controlled-negative-observation".into(),
+                        provider_id: identity.provider_id.clone(),
+                        reason: "controlled failed observation after declared hold".into(),
+                    },
+                )),
+                now_ms,
+            )
+            .unwrap();
+    }
+}
+
 #[path = "tests/terminal_projection.rs"]
 mod terminal_projection;
 include!("provider_action_gate_tests.rs");
@@ -41,6 +105,65 @@ mod responses_probe_terminal;
 mod relay_error_operator_fault;
 
 // 归一化优先级基线：隔离自适应分数阻断，让用例专测阈值语义。
+#[test]
+fn late_failure_of_already_cooled_identity_does_not_shadow_recovery_owner() {
+    let manifest = target_resolution_manifest("late-cooled-observation");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let scope = test_provider_failure_scope(
+        "late-cooled-observation",
+        "late-cooled-observation",
+        "late-inflight",
+    )
+    .unwrap();
+    health
+        .store
+        .record_provider_cooldown_failure(
+            "primary",
+            Some("key1"),
+            Some("gpt-test"),
+            "first qualified observation committed cooldown",
+            100,
+            5000,
+        )
+        .unwrap();
+    let record = health
+        .record_provider_failure_record_with_policy(
+            None,
+            &manifest,
+            &scope,
+            "primary",
+            Some("responses"),
+            Some("key1"),
+            Some("gpt-test"),
+            Some("late in-flight transport failure"),
+            "V3ProviderResp14Raw",
+            502,
+            Some("provider_transport_error"),
+            "late in-flight transport failure",
+            101,
+        )
+        .unwrap();
+    assert!(health.precool_probe_keys().unwrap().is_empty(),
+        "an already-cooled identity must stay with its cooldown recovery owner, not a new unacquirable precool lane");
+    assert_eq!(record.state, "cooldown");
+    let permit = health
+        .store
+        .acquire_provider_cooldown_probe("primary", Some("key1"), Some("gpt-test"))
+        .unwrap()
+        .unwrap();
+    health
+        .store
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 6000)
+        .unwrap();
+    assert!(
+        health
+            .session_bound_availability(&scope)
+            .availability_for_interface("primary", "default", Some("key1"), Some("gpt-test"), 6001)
+            .available,
+        "qualified recovery must not remain hidden behind a late precool entry"
+    );
+}
+
 fn normalize_global_pool_priorities(manifest: &mut V3Config05ManifestPublished) {
     for target in manifest
         .route_groups
@@ -353,13 +476,14 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
     assert_eq!(selected.candidate.provider_id, "second");
 }
 
-#[test]
-fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
+#[tokio::test]
+async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let mut manifest = global_pool_alive_manifest("global_status_policy");
     normalize_global_pool_priorities(&mut manifest);
-    // Account/billing classes (401/403) are typed irrecoverable and cool on their
-    // first failure. Ordinary 429 keeps a three-failure threshold; other typed
-    // recoverable classes currently use the shared threshold of one.
+    // Account/billing classes (401/403) are typed irrecoverable and keep their
+    // first-failure boundary. 429 stays health-neutral with streak 0 in its
+    // early window. Every ordinary non-429 class must first complete the
+    // declared pre-cool observation, then commit its typed threshold.
     let cases = [(401, 1), (403, 1), (429, 3), (500, 1), (502, 1), (599, 1)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -370,6 +494,7 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         )
         .expect("failure session scope");
         for attempt in 0..threshold {
+            let now_ms = 10_000 + attempt as u64;
             let record = health
                 .record_provider_failure_record_with_policy(
                     None,
@@ -384,42 +509,158 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                     status,
                     Some("provider_http_error"),
                     "upstream status",
-                    10_000 + attempt as u64,
+                    now_ms,
                 )
                 .expect(
                     "ordinary provider policy failure must remain distinct from a Source01 fault",
                 );
-            assert_eq!(record.failure_count, attempt + 1);
-            let expected_state = if attempt + 1 == threshold {
-                "cooldown"
+            if status == 429 {
+                // The early 429 window is capacity backpressure: the returned
+                // record must not count a provider failure streak.
+                assert_eq!(
+                    record.failure_count, 0,
+                    "early 429 must keep streak 0 instead of counting a failure"
+                );
+                assert_eq!(record.state, "rate_limit_capacity_wait");
+                assert_eq!(record.cooldown_until_ms, None);
+                assert!(
+                    health
+                        .availability("first", Some("key1"), Some("gpt-test"), now_ms)
+                        .available,
+                    "early 429 must stay capacity-neutral"
+                );
+                assert!(
+                    health
+                        .store()
+                        .availability_for_session(
+                            &scope,
+                            "first",
+                            Some("key1"),
+                            Some("gpt-test"),
+                            now_ms
+                        )
+                        .available
+                );
             } else {
-                "healthy"
-            };
-            assert_eq!(
-                record.state, expected_state,
-                "status {status} must cool only after {threshold} consecutive same-class failures"
-            );
-            assert_eq!(
+                // The pre-observation record truthfully reports the held action:
+                // no counted failure and no cooldown yet.
+                assert_eq!(
+                    record.failure_count, 0,
+                    "status {status} must not count a failure before its observation"
+                );
+                assert_eq!(record.state, "pre_cool_observation");
+                assert_eq!(record.cooldown_until_ms, None);
+                let observed = health.availability("first", Some("key1"), Some("gpt-test"), now_ms);
+                assert!(
+                    !observed.available,
+                    "status {status} must hold the exact identity for its observation"
+                );
+                assert!(observed
+                    .blocked_scopes
+                    .iter()
+                    .any(|blocked| blocked == "provider_pre_cool_observation"));
+                assert!(
+                    health
+                        .store()
+                        .availability_for_session(
+                            &scope,
+                            "first",
+                            Some("key1"),
+                            Some("gpt-test"),
+                            now_ms
+                        )
+                        .available,
+                    "status {status} must not cool before its declared observation gate"
+                );
+            }
+        }
+        if status == 429 {
+            assert!(
                 health
-                    .availability(
+                    .store()
+                    .availability_for_session(
+                        &scope,
                         "first",
                         Some("key1"),
                         Some("gpt-test"),
-                        10_000 + attempt as u64
+                        10_000
                     )
                     .available,
-                attempt + 1 < threshold,
-                "status {status} availability must honor its failure threshold"
+                "only the observed 429 case stays health-neutral in this failure matrix"
+            );
+        } else {
+            complete_due_precool_failures(&health, 10_010).await;
+            assert!(
+                !health
+                    .store()
+                    .availability_for_session(
+                        &scope,
+                        "first",
+                        Some("key1"),
+                        Some("gpt-test"),
+                        10_010
+                    )
+                    .available,
+                "status {status} must commit its declared cooldown after a failed observation"
+            );
+            assert!(
+                health
+                    .store()
+                    .availability_for_session(
+                        &scope,
+                        "second",
+                        Some("key1"),
+                        Some("gpt-test"),
+                        10_010
+                    )
+                    .available,
+                "status {status} cooldown must remain exact to the failed identity"
             );
         }
+    }
+
+    // Early429 stays capacity-only, including through the Runtime source path.
+    let rate_limited = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let rate_limited_scope = test_provider_failure_scope(
+        "global_status_policy",
+        "global_status_policy",
+        "runtime-policy-429",
+    )
+    .expect("failure session scope");
+    for attempt in 0..6 {
+        let now_ms = 10_000 + attempt as u64;
+        let record = rate_limited
+            .record_provider_failure_record_with_policy(
+                None,
+                &manifest,
+                &rate_limited_scope,
+                "first",
+                Some("responses"),
+                Some("key1"),
+                Some("gpt-test"),
+                Some("provider status failure"),
+                "V3ProviderRespInbound01Raw",
+                429,
+                Some("provider_http_error"),
+                "upstream status",
+                now_ms,
+            )
+            .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
+        assert_eq!(record.state, "rate_limit_capacity_wait");
+        assert_eq!(record.failure_count, 0);
         assert!(
-            !health
-                .store()
-                .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000)
+            rate_limited
+                .availability("first", Some("key1"), Some("gpt-test"), now_ms)
                 .available,
-            "status {status} must block after {threshold} consecutive failures"
+            "early429 must remain health-neutral; attempt={attempt}"
         );
     }
+    assert!(
+        rate_limited
+            .availability("first", Some("key1"), Some("gpt-test"), 10_000 + 5 + 60_001)
+            .available,
+        "time alone cannot create a health restriction"
+    );
 
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let scope = test_provider_failure_scope(
@@ -428,9 +669,12 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         "runtime-policy-negative",
     )
     .expect("failure session scope");
-    // Generic provider rejection is counted under the shared typed threshold.
+    // A generic provider rejection is still an ordinary recoverable failure: it
+    // waits for the declared observation and commits the typed threshold only
+    // after that observation fails.
     for attempt in 0..2 {
-        health
+        let now_ms = 20_000 + attempt as u64;
+        let record = health
             .record_provider_failure_record_with_policy(
                 None,
                 &manifest,
@@ -444,24 +688,31 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                 400,
                 Some("provider_http_error"),
                 "request rejected",
-                20_000 + attempt as u64,
+                now_ms,
             )
             .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
+        assert_eq!(
+            record.failure_count, 0,
+            "generic rejection must not count a failure before its observation; attempt={attempt}"
+        );
+        assert_eq!(record.state, "pre_cool_observation");
         let available = health
             .store()
-            .availability_for_session(
-                &scope,
-                "first",
-                Some("key1"),
-                Some("gpt-test"),
-                20_000 + attempt as u64,
-            )
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), now_ms)
             .available;
-        assert_eq!(
-            available, false,
-            "generic rejection must cool under the current typed threshold; attempt={attempt}"
+        assert!(
+            available,
+            "generic rejection must stay health-neutral before its observation; attempt={attempt}"
         );
     }
+    complete_due_precool_failures(&health, 20_010).await;
+    assert!(
+        !health
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_010)
+            .available,
+        "a failed observation must cool the generic rejection under the current typed threshold"
+    );
 }
 
 #[test]
@@ -760,6 +1011,7 @@ fn incomplete_key_identity_fails_before_provider_cooldown_write() {
         failure_threshold: 1,
         cooldown_ms: 60 * 60_000,
         long_probe_backoff: false,
+        advisory_probe: false,
     };
     let scope = test_provider_failure_scope(
         "incomplete_key_identity",
@@ -1153,17 +1405,88 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
         .expect("transport failure must reselect");
     assert_eq!(reselected.candidate.provider_id, "first");
     assert_eq!(reselected.candidate.auth_alias, "key2");
+    // An ordinary transport failure is owned by typed observation and health;
+    // it must not become a permanent request-local exclusion.
     assert_eq!(
         state.failed_candidates.len(),
-        1,
-        "transport failure must exclude only the failed exact provider key"
+        0,
+        "transport failure must not add a permanent request-local exclusion"
     );
-    assert!(state
-        .failed_candidates
-        .contains(&"first:default:key1:gpt-test".to_string()));
     assert!(!state
         .failed_candidates
         .contains(&"second:default:key1:gpt-test".to_string()));
+    assert!(!state
+        .failed_candidates
+        .contains(&"first:default:key2:gpt-test".to_string()));
+    assert_eq!(result.event.health_record.state, "pre_cool_observation");
+    assert_eq!(
+        result.event.health_record.failure_count, 0,
+        "a held transport failure must not count before its observation"
+    );
+    assert_eq!(result.event.health_record.cooldown_until_ms, None);
+    // Only the failed exact identity is held; its sibling key and the other
+    // provider stay eligible for the same request.
+    let held = health.availability("first", Some("key1"), Some("gpt-test"), 10_000);
+    assert!(
+        !held.available,
+        "the failed exact key must be held by its own observation"
+    );
+    assert!(held
+        .blocked_scopes
+        .iter()
+        .any(|blocked| blocked == "provider_pre_cool_observation"));
+    assert!(
+        health
+            .availability("first", Some("key2"), Some("gpt-test"), 10_000)
+            .available,
+        "the untried sibling key must stay eligible"
+    );
+    assert!(
+        health
+            .availability("second", Some("key1"), Some("gpt-test"), 10_000)
+            .available,
+        "another provider must stay eligible"
+    );
+    complete_due_precool_failures(&health, 10_000).await;
+    assert!(
+        !health
+            .store()
+            .availability_for_session(
+                &context.failure_session_scope,
+                "first",
+                Some("key1"),
+                Some("gpt-test"),
+                10_000,
+            )
+            .available,
+        "the failed observation must commit the cooldown for the exact failed key"
+    );
+    assert!(
+        health
+            .store()
+            .availability_for_session(
+                &context.failure_session_scope,
+                "first",
+                Some("key2"),
+                Some("gpt-test"),
+                10_000,
+            )
+            .available,
+        "the sibling key must keep its own health"
+    );
+    assert!(
+        health
+            .store()
+            .availability_for_session(
+                &context.failure_session_scope,
+                "second",
+                Some("key1"),
+                Some("gpt-test"),
+                10_000,
+            )
+            .available,
+        "another provider must keep its own health"
+    );
 }
 
 #[tokio::test]
@@ -1198,7 +1521,7 @@ targets = [
 [[error.provider_error_action_policy]]
 policy_id = "path_only"
 scope = { provider_type = "responses", model_id = "gpt-test" }
-match = { http_status = 429 }
+match = { http_status = 503 }
 [[error.provider_error_action_policy.path]]
 step = "project"
 reason_code = "path_rate_limit"
@@ -1237,9 +1560,9 @@ public_code = "E_PATH_RATE_LIMIT"
         &context,
         selected,
         "V3ProviderReqOutbound09TransportRequest",
-        429,
-        Some("provider_http_429".to_string()),
-        "quota exceeded".to_string(),
+        503,
+        Some("provider_http_503".to_string()),
+        "service unavailable".to_string(),
         None,
         &mut state,
     )
@@ -1248,7 +1571,7 @@ public_code = "E_PATH_RATE_LIMIT"
 
     let projection = result
         .terminal_projection
-        .expect("default-floor exhausted 429 must be terminal");
+        .expect("default-floor exhausted non-429 failure must be terminal");
     assert_eq!(
         projection.status, 502,
         "terminal pool exhaustion must use the declared public network error"

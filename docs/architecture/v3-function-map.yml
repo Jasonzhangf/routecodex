@@ -749,10 +749,12 @@ features:
   - V3RelayErrorOperatorFault
   - run_v3_err01_source_raised_operator
   - run_v3_error_02_to_05_decision_operators
+  - run_v3_error_02_to_05_decision_operators_with_target_recovery
   - run_v3_error_06_terminal_projection_operator
   - run_v3_err02_classified_operator
   - run_v3_error_03_target_local_action_operator
   - run_v3_error_04_target_exhaustion_operator
+  - run_v3_error_04_target_exhaustion_operator_with_target_recovery
   - execute_v3_operation_runner_error_err05_execution_decision
   - execute_v3_operation_runner_error_err06_client_projected
   - build_v3_error_01_source_raised
@@ -766,6 +768,7 @@ features:
   - build_v3_error_02_classified_from_v3_error_01
   - build_v3_error_03_target_local_action_from_v3_error_02
   - build_v3_error_04_target_exhaustion_decision_with_provider_availability
+  - build_v3_error_04_target_exhaustion_decision_with_target_recovery
   - build_v3_error_05_execution_decision_from_v3_error_04
   - build_v3_error_06_client_projected_from_v3_error_05
   - V3ProviderFailureRuntimeHealth::record_provider_failure_record
@@ -892,6 +895,9 @@ features:
   - build_v3_execution_11_protocol_decision_from_v3_target_10
   - plan_v3_responses_protocol_execution_with_provider_health
   - project_v3_protocol_execution_plan_failure
+  - plan_v3_responses_protocol_execution_with_recovery
+  - plan_v3_responses_protocol_execution_recovery_inner
+  - plan_v3_responses_protocol_execution_with_captured_target
   - finish_v3_protocol_execution_plan_failure
   - kernel::tests::protocol_plan_failure_preserves_source_status_and_pool_exhausted
   - tests::protocol_plan_operator_fault_consumer_preserves_sources_without_error06
@@ -1056,6 +1062,7 @@ features:
   - routecodex-v3-server
   owner_files:
   - v3/crates/routecodex-v3-target/src/lib.rs
+  - v3/crates/routecodex-v3-target/src/sticky.rs
   - v3/crates/routecodex-v3-config/src/types.rs
   - v3/crates/routecodex-v3-config/src/provider_priority_schedule.rs
   - v3/crates/routecodex-v3-config/src/user_config.rs
@@ -1100,10 +1107,15 @@ features:
   - V3TargetInterpreter::classify_kind
   - V3TargetInterpreter::expand_candidates
   - V3TargetInterpreter::select_available
+  - select_available_with_health_sticky
+  - V3StickySelectionState::select
+  - V3StickySelectionScope::new
   - V3TargetInterpreter::route_tier_index
   - V3TargetInterpreter::provider_priority_schedule_priority
   - V3ProviderPriorityScheduleAuthoringConfig::validate
   - V3ProviderPriorityScheduleAuthoringConfig::priority_for_provider
+  - V3ProviderModelAvailabilityAuthoringConfig::validate
+  - V3ProviderModelAvailabilityAuthoringConfig::is_available_at
   - candidate_context_admission
   - select_v3_target_with_session_then_global
   - select_v3_preplanned_direct_target
@@ -1161,13 +1173,21 @@ features:
   - npm run build:v3-cli
   - git diff --check
   required_contract:
-  - Request image/media facts are normal request data and must enter V3RouterRequestFacts
-    as multimodal/vision before pool matching.
+  - Request image/media facts from the current turn are normal request data and must enter
+    V3RouterRequestFacts as multimodal/vision before pool matching; earlier-turn images
+    never classify the current request.
   - Request tool facts include top-level tools and Responses additional_tools; Codex
     coding tools set coding and tool_search sets search from current-turn calls.
     web_search route activation requires strict current-user keyword intent or an
     explicit current-turn model web-search call; exposed tool declarations alone
     never set the web_search route or capability.
+  - Ordinary route classification consumes only the current turn and evaluates configured
+    non-empty pools in the fixed order hosted web_search, multimodal, longcontext, coding, thinking,
+    search, tools, default. The first matching pool is the only captured pool; no implicit
+    capability pool is built and no default or other pool is appended after it.
+  - Absent or empty optional pools are skipped without rejecting the request; the default
+    pool remains required and non-empty. The longcontext capability is retained and
+    its pool is skipped when absent or empty.
   - V3Router07OpaqueTargetHitOnce carries request route facts to Target as route/pool
     selection signals; route selection is not model capability filtering.
   - 'Target hard capability_mismatch is allowed only for capabilities the selected
@@ -1178,20 +1198,20 @@ features:
     and a candidate whose max_context_tokens is below request_input_tokens is marked
     context_window_exceeded and skipped before availability/transport. A candidate at 90
     percent through 100 percent remains eligible, is demoted only below normal candidates
-    in the same route tier, and still outranks every lower route tier. Explicit direct pins
-    and the default-pool floor remain last-resort eligible with the typed overflow reason,
-    while Provider availability/health and request-local provider-failure exclusion remain
-    explicit switch inputs.
-  - Tools, tool_outputs, reasoning/thinking, coding, longcontext, and
+    in the same route tier, and still outranks every lower route tier inside the captured
+    pool. Explicit direct pins remain eligible only inside their resolved direct plan;
+    Provider availability/health and request-local provider-failure exclusion remain
+    explicit switch inputs and no default-pool floor is appended after a matched pool.
+  - Tools, tool_outputs, reasoning/thinking, coding, and
     local_materialization are route/protocol signals; they may steer pool choice but
     must not mark a candidate as capability_mismatch.
   - previous_response_id is rejected before routing and is never treated as a model
     capability or provider-selection signal.
   - OpenAI Responses request.reasoning is also exposed as the thinking route fact
     so configs using either vocabulary route the same request.
-  - Target candidate dedupe preserves pool provenance, required capabilities, and
-    default-pool membership; the default floor is only a last-resort context-admission
-    fallback and never overrides health cooldown or request-local failure exclusion.
+  - Target candidate dedupe preserves pool provenance and required capabilities inside
+    the single captured pool; no default floor is appended after a matched pool and no
+    recovery or health change crosses into another classification pool.
   - Target09-to-Target10 selection first reads the session-scoped availability projection
     and request-local Error03 candidate exclusions; global availability may revive
     a multi-candidate plan only after no nonfailed session alternative remains.
@@ -1203,11 +1223,10 @@ features:
   - A Server-preplanned Target10 is revalidated from its captured Target09 candidate
     set at Direct kernel entry, so a provider cooled between planning and transport
     cannot bypass a currently available same-session alternative.
-  - For non-built-in requested model ids, explicit `match.models` pools declare inbound-model
-    to target mapping and the provider-wire hook rewrites outbound `body.model` to
-    the selected target wire model; only default/no-explicit-model paths are filtered
-    by configured target model ids to prevent wrong-model default success, and provider
-    aliases do not authorize runtime matching.
+  - Non-built-in requested model ids never select or filter an ordinary pool through
+    `match.models`; only a valid `provider.model` string creates a direct target plan.
+    Provider aliases and `match.models` remain configuration declarations, not runtime
+    routing truth for ordinary classification.
   runtime_status: owner_queryability_bound_to_existing_p5_source
 - feature_id: v3.models_capability_catalog
   owner_crates:
@@ -2225,16 +2244,25 @@ features:
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
   required_contract:
-  - Non-built-in requested model ids are carried on V3Router07OpaqueTargetHitOnce;
-    explicit model routes map inbound model to declared targets, while default/no-explicit-model
-    paths are filtered by configured target model ids before provider send. Provider
-    aliases are not runtime routing truth.
+  - A valid explicit `provider.model` string is carried as a direct target pin and is
+    the only model-driven target handoff; every other model string, virtual catalog
+    entry, and `auto` value uses current-turn classification and is not filtered or
+    selected by `match.models`. Provider aliases are not runtime routing truth.
+  - Ordinary classification resolves one fixed-order first match among configured
+    non-empty pools and captures exactly that pool; it never builds implicit capability
+    pools and never appends default or another pool after the match.
+  - Optional pools may be absent or empty and are skipped; the default pool is required,
+    non-empty, and remains the only no-match endpoint for ordinary requests.
+  - The longcontext capability is retained; an absent or empty longcontext pool is
+    skipped and cannot preempt a configured lower-order pool.
   - '`provider.model` direct routing pins a provider only when the segment before the
     first `.` is an enabled provider id that declares that model or one of its aliases.
     Every other client model string — no dot, an unknown provider segment, or an enabled
     provider that declares no such model — falls back to normal classification, the same
     path `auto` and virtual catalog entry names take. Only a resolved direct model that
     cannot serve the request media requirement fails explicitly without rerouting.'
+  - Explicit `provider.model` is a direct target handoff, not a classification; it cannot
+    be reshaped by historical policy, sticky state, or the current-turn classification order.
   - The stable gpt-5.5 Codex client surface remains a capability/priority-routed built-in
     selector and is not narrowed to one provider model.
   - 'Weighted selection is priority-first: only equal-minimum-priority targets participate
@@ -3898,18 +3926,15 @@ features:
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
   - v3.server.validated_http_input
-  - v3.server.responses_session_admission
+  - v3.front.request_activity_gate
   mainline_bindings:
-  - v3-responses-admission-01
-  - v3-responses-admission-release-03
+  - v3-responses-independent-dispatch-01
   entry_symbols:
   - read_json_payload
-  - admit_v3_responses_session_after_json_parse
-  - pending_endpoint_after_responses_admission
+  - pending_endpoint_after_json_parse
   - responses_control_scope_headers
-  - V3ResponsesSessionAdmissionGate::admit
-  - hold_response_body_admission_permit
-  - <V3ResponsesSessionAdmissionPermit as Drop>::drop
+  - V3ServerRequestActivityGate::admit
+  - hold_response_body_request_activity_permit
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -3931,11 +3956,10 @@ features:
     -- --nocapture
   - git diff --check
   semantic_contract:
-  - Same listener and explicit session or conversation contention waits inside the
-    listener-local gate until the exact response-body permit releases.
-  - Contention never enters Error01-06 and never projects request_in_flight or HTTP
-    409 to the client.
-  - Different scopes and different listener gate instances remain concurrent.
+  - Requests with matching session or conversation independently enter Runtime;
+    no response-body lifetime or business failure of another request gates dispatch.
+  - Explicit maintenance pauses new dispatch; activity and front-flush custody
+    remain request-local. Provider capacity retains its declared identity scope.
   runtime_status: source_pending_live_replay
 - feature_id: v3.sse_http_keepalive_boundary
   owner_crate: routecodex-v3-server
@@ -4289,8 +4313,18 @@ features:
   - v3-provider-action-gate-49
   - v3-provider-action-gate-50
   - v3-provider-action-gate-51
+  - v3-provider-action-gate-52
+  - v3-provider-action-gate-53
+  - v3-provider-action-gate-54
+  - v3-provider-action-gate-55
+  - v3-provider-action-gate-56
   entry_symbols:
   - V3ProviderActionGate
+  - V3ProviderActionGate::try_admit_exact_rate_limit
+  - V3ProviderFailureRuntimeHealth::defer_provider_health_action
+  - V3ProviderFailureRuntimeHealth::managed_precool_probe
+  - V3ProviderFailureRuntimeHealth::try_admit_candidate_rate_limit
+  - V3RuntimeProviderAdmission::take_rate_limit_control
   - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
   - provider_failure_runtime_policy::tests::post_commit_response_stream_failure_updates_global_key_health
   - provider_failure_runtime_policy::tests::post_commit_transient_stream_failures_count_toward_global_cooldown
@@ -4301,8 +4335,11 @@ features:
   - V3ProviderActionGate::record_failure_and_commit_terminal_projection
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
@@ -4698,21 +4735,22 @@ features:
   runtime_status: source_controlled_runtime_boundary_verified
 
 - feature_id: v3.history_image_cleanup
-  status: active_latest_image_preservation
+  status: retired_for_ordinary_classification
   change_risk: medium
-  owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: history_image_cleanup owns the stateless latest-carrier image
-    normalization rule. Relay invokes it from Chat Process Req04 in
-    relay_request.rs; Inbound remains lossless and does not rewrite payload.
-    Direct reaches it only through its existing registered request
-    standardization/hook path. ProviderReqCompat06 preserves representable
-    latest images, including paired tool image receipts and complete bytes.
+  owner_kind: retired_v3_runtime_chat_process_gate
+  owner_scope: Ordinary request classification no longer depends on destructive
+    historical-image rewriting. The earlier latest-carrier placeholder rule must
+    not be used to keep historical images out of current-turn classification or
+    to drop business history. If a target protocol cannot represent an image, the
+    projection stays at the adjacent ProviderReqCompat owner and keeps complete
+    opaque data. Current-turn image detection is owned by the route-classifier
+    current-turn fact builder.
   owner_crates:
   - routecodex-v3-runtime
   owner_files:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   allowed_paths:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   forbidden_paths:
@@ -4725,7 +4763,8 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_preserves_representable_latest_image
-  runtime_status: source_controlled_runtime_boundary_verified
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
+  runtime_status: retired_no_active_runtime_path
 
 - feature_id: v3.direct_runtime_kernel_core
   status: active_skeleton
@@ -4773,6 +4812,13 @@ features:
   status: source_active_live_verification_required
   change_risk: critical
   owner_kind: rust_v3_provider_adaptive_health_lifecycle
+  cross_feature_extensions:
+  - path: v3/crates/routecodex-v3-config/src/internal.rs
+    owner_feature_id: v3.simplified_user_config
+    reason: Declares the internal typed429 observation, minimumcooldown and probe-required windows consumed by the provider health owner, without adding user configuration or runtime state.
+  - path: v3/crates/routecodex-v3-config/src/internal.toml
+    owner_feature_id: v3.simplified_user_config
+    reason: Single source for the user-authorized120000,1800000,3600000 millisecond policy declarations; data-plane payloads and public config remain unchanged.
   owner_crates:
   - routecodex-v3-error
   - routecodex-v3-provider-responses
@@ -4790,6 +4836,7 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/runtime_projection.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/manual.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
@@ -4816,6 +4863,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
   - v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs
   - v3/crates/routecodex-v3-runtime/src/provider_probe_fairness_tests.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/probe_recovery.rs
@@ -4831,6 +4879,7 @@ features:
   - v3/crates/routecodex-v3-server/tests/fa22072_recovery_isolation.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_exec_probe_rollback.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_probe_fairness.rs
+  - v3/crates/routecodex-v3-server/tests/support/sustained_429_window_blackbox.rs
   - v3/crates/routecodex-v3-server/tests/support/fa22072_probe_fairness_fixture.rs
   - v3/crates/routecodex-v3-cli/tests/managed_lifecycle/fa22072_probe_rollback.rs
   resource_bindings:
@@ -4854,6 +4903,9 @@ features:
   - v3-provider-global-probe-02-resume
   - v3-provider-global-probe-02-quiesce
   - v3-provider-global-probe-02-schedule
+  - v3-provider-global-probe-429-status
+  - v3-provider-precool-probe-429-status
+  - v3-provider-precool-join-existing-cooldown
   entry_symbols:
   - build_v3_provider_global_error_fingerprint
   - build_v3_provider_global_error_fingerprint_from_classified
@@ -4883,9 +4935,14 @@ features:
   - V3ProviderFailureRuntimeHealth::initiate_cooldown_rescue_probe
   - V3ProviderFailureRuntimeHealth::managed_probe
   - complete_v3_provider_health_probe
+  - classify_provider_probe_failure
+  - V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit
+  - V3ProviderHealthStore::record_provider_failure_action_if_cooled_for_interface
+  - V3ProviderHealthStore::complete_provider_cooldown_probe_success_if_current_with_permit
   - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
   - build_v3_provider_global_probe_target
   - run_v3_plan_execution_operator_with_probes
+  - await_v3_plan_execution_with_deadline
   - PlanExecutionOperator::execute_plan
   - step_v3_target_planning_with_admission_sync
   - try_admit_v3_selected_target
@@ -4893,6 +4950,20 @@ features:
   - V3RuntimeProviderAdmission::drop
   - V3PreAcquiredProviderAdmission::release
   - V3AdaptiveConcurrencyPermitGuard::drop
+  - V3AdaptiveConcurrencyController::observe_rate_limit
+  - V3AdaptiveConcurrencyController::observe_business_success
+  - V3AdaptiveConcurrencyController::observe_rate_limit_scoped
+  - V3AdaptiveConcurrencyController::observe_business_success_scoped
+  - V3AdaptiveConcurrencyController::try_acquire_business_scoped
+  - V3AdaptiveConcurrencyController::wait_for_scoped_capacity_change
+  - V3AdaptiveConcurrencyController::snapshot_for_scope
+  - V3ConcurrencyIdentityScope
+  - V3AdaptiveConcurrencyController::complete_probe
+  - V3AdaptiveConcurrencyController::process_shared
+  - V3AdaptiveConcurrencyController::snapshot
+  - V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS
+  - V3_DEFAULT_PROVIDER_MAX_IN_FLIGHT
+  - V3AdaptiveConcurrencyRateLimitSample
   - V3ProviderResponsesTransport::send
   - ProviderResponsesTransport::send_probe
   - execute_v3_anthropic_relay_runtime_inner
@@ -4907,6 +4978,7 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health_tests.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/manual.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
@@ -4946,6 +5018,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs
   - v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs
   - v3/crates/routecodex-v3-runtime/src/provider_probe_fairness_tests.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/probe_recovery.rs
@@ -4953,6 +5026,7 @@ features:
   - v3/crates/routecodex-v3-server/tests/fa22072_recovery_isolation.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_exec_probe_rollback.rs
   - v3/crates/routecodex-v3-server/tests/fa22072_probe_fairness.rs
+  - v3/crates/routecodex-v3-server/tests/support/sustained_429_window_blackbox.rs
   - v3/crates/routecodex-v3-server/tests/support/fa22072_probe_fairness_fixture.rs
   - v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -5179,6 +5253,15 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
+  required_contract:
+  - History-based pool switching (search-pool ratio and tool-execution-error turns)
+    is retired for ordinary requests; these observations may no longer move a request
+    into another classification pool.
+  - The only retained route-policy selection is the registered compaction route object;
+    its selection stays inside the compact owner and does not form a second ordinary
+    classification order.
+  - Route-policy state remains typed control state; it never enters request, response,
+    provider, client, or metadata payloads.
   migration_target: rust
   runtime_status: source_controlled_runtime_pending_live_replay
 
@@ -5387,8 +5470,8 @@ features:
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   resource_bindings: [v3.sse.direct.accept_skeleton]
   entry_symbols:
-  - pending_endpoint_after_responses_admission
-  - pending_endpoint_after_responses_admission_inner
+  - pending_endpoint_after_json_parse
+  - pending_endpoint_after_json_parse_inner
   - V3DirectSseAccept01ClientChannel
   - V3DirectSseAccept02RuntimeWorker
   - V3DirectSseAccept03ProjectedClientFrame
@@ -6049,6 +6132,8 @@ features:
   - routecodex-v3-config
   - routecodex-v3-runtime
   owner_files:
+  - v3/crates/routecodex-v3-config/src/internal.rs
+  - v3/crates/routecodex-v3-config/src/internal.toml
   - v3/crates/routecodex-v3-config/src/attempt_store.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs
@@ -6063,11 +6148,15 @@ features:
   - v3.execution.attempt_payload_store
   entry_symbols:
   - V3AttemptBudget::admit_transport_attempt
+  - V3AttemptBudget::current_target_recovery_deadline
+  - V3AttemptBudget::advance_target_recovery_step_if_due
   - V3CommittedClientSseBuilder::push
   - collect_direct_sse_attempt_after_terminal
   - build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget
   - project_v3_anthropic_client_sse_stream_with_budget
   allowed_paths:
+  - v3/crates/routecodex-v3-config/src/internal.rs
+  - v3/crates/routecodex-v3-config/src/internal.toml
   - v3/crates/routecodex-v3-config/src/attempt_store.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs
@@ -6385,7 +6474,7 @@ features:
     boundary: pending acceptance retains existing Hub/Direct owners; single-node SDK wiring is not a global cutover; R02 image residual composition passed the combined matrix; Direct hooks are not migrated
   entry_symbols:
   - RuntimeRequestGraphEntry
-  - pending_endpoint_after_responses_admission_inner
+  - pending_endpoint_after_json_parse_inner
   - handle_responses_websocket_message_with_mode
   - capture_v3_operation_runner_client_json
   - register_v3_operation_runner_operator

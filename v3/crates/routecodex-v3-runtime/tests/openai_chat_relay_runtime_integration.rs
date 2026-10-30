@@ -2494,6 +2494,7 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
         failure_threshold: 3,
         cooldown_ms: 900_000,
         probe_interval_ms: Some(5_000),
+        advisory_probe: false,
     });
     std::env::set_var("ROUTECODEX_V3_POOL_PROBE_TEST_KEY", "routecodex-test-key");
     std::env::set_var("V3_OPENAI_CHAT_SECONDARY_KEY", "secondary-test-key");
@@ -4371,7 +4372,7 @@ impl ResponsesTransport for AnthropicWebSearchWireTransport {
 }
 
 #[test]
-fn routing_latest_image_attachment_survives_text_only_turns() {
+fn routing_only_current_turn_image_drives_multimodal() {
     let chat_history_image_then_text = json!({
         "model": "deepseek-v4-flash",
         "messages": [
@@ -4410,7 +4411,7 @@ fn routing_latest_image_attachment_survives_text_only_turns() {
             "chat history image + current text",
             &chat_history_image_then_text,
             "openai_chat",
-            true,
+            false,
         ),
         (
             "chat current turn image",
@@ -4422,7 +4423,7 @@ fn routing_latest_image_attachment_survives_text_only_turns() {
             "responses history image + current text",
             &responses_history_image_then_text,
             "responses",
-            true,
+            false,
         ),
     ];
     for (label, body, entry, expect_multimodal) in cases {

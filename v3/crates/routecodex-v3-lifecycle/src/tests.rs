@@ -1,14 +1,31 @@
 use super::*;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use tempfile::TempDir;
 
 #[cfg(unix)]
 #[path = "../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 
-pub(crate) static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+/// Tests mutate process environment variables under one lock. Recover a
+/// poisoned guard so one failing test cannot turn later tests into cascades.
+pub(crate) struct TestEnvLock(Mutex<()>);
+
+impl TestEnvLock {
+    const fn new() -> Self {
+        Self(Mutex::new(()))
+    }
+
+    pub(crate) fn lock(&self) -> Result<MutexGuard<'_, ()>, std::convert::Infallible> {
+        Ok(self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()))
+    }
+}
+
+pub(crate) static TEST_ENV_LOCK: TestEnvLock = TestEnvLock::new();
 pub(crate) const TEST_HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
 
 #[cfg(unix)]
@@ -204,6 +221,7 @@ async fn native_exec_failure_retains_aggregate_and_hooks_owner() {
 #[tokio::test]
 #[cfg(unix)]
 async fn live_persisted_hooks_group_does_not_block_reaping_running_runtime_control() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
@@ -232,7 +250,7 @@ async fn live_persisted_hooks_group_does_not_block_reaping_running_runtime_contr
         &root.path().join("config.v3.toml"),
         "digest",
         "/tmp/rccv3",
-        45_499,
+        45_557,
     );
     write_json_atomic(&instance_dir.join("instance.json"), &expected).unwrap();
     write_status(
@@ -330,6 +348,7 @@ async fn live_hooks_group_does_not_block_forced_stop() {
 #[tokio::test]
 #[cfg(unix)]
 async fn stale_identity_mismatch_hooks_group_does_not_block_runtime_reap() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
@@ -355,7 +374,7 @@ async fn stale_identity_mismatch_hooks_group_does_not_block_runtime_reap() {
         &root.path().join("config.v3.toml"),
         "digest",
         "/tmp/rccv3",
-        45_496,
+        45_558,
     );
     write_json_atomic(&instance_dir.join("instance.json"), &expected).unwrap();
     write_status(
@@ -1027,12 +1046,12 @@ fn restart_without_current_instance_state_fails_without_bootstrap() {
         .build()
         .unwrap();
     let error = runtime
-        .block_on(lifecycle.restart(&executable, Duration::from_millis(1)))
+        .block_on(lifecycle.restart(&executable, Duration::ZERO))
         .unwrap_err();
 
     assert!(
         matches!(&error, V3LifecycleError::NotRunning(instance_id) if instance_id == &declaration.instance_id),
-        "restart without live managed truth must fail explicitly instead of bootstrapping a detached runtime, got {error}"
+        "restart without managed truth must report NotRunning before budget expiry, got {error}"
     );
     assert!(
         !instance_dir.join("instance.json").exists(),
@@ -1042,6 +1061,94 @@ fn restart_without_current_instance_state_fails_without_bootstrap() {
         !instance_dir.join("status.json").exists(),
         "restart without live managed truth must not publish startup status"
     );
+}
+
+#[cfg(unix)]
+fn write_finite_restart_child_fixture(root: &Path) -> PathBuf {
+    let executable = root.join("restart-child.sh");
+    fs::write(
+        &executable,
+        "#!/bin/sh\nprintf 'started\\n' > \"$(dirname \"$0\")/restart-child-started\"\nexit 0\n",
+    )
+    .unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    executable
+}
+
+#[cfg(unix)]
+fn assert_expired_restart_budget_preserves_terminal_state(state: V3ManagedRunState) {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let port_listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = port_listener.local_addr().unwrap().port();
+    drop(port_listener);
+    let (config, executable, state_root) = fixture_with_port(&root, port);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state_root);
+    let (published, _) = lifecycle.declaration(&executable).unwrap();
+    let instance_dir = state_root.join("instances").join(&published.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &published).unwrap();
+    write_status(
+        &instance_dir,
+        &published.instance_id,
+        state.clone(),
+        Some("terminal state before expired restart".to_string()),
+    )
+    .unwrap();
+    assert_eq!(
+        read_json::<V3ManagedStatusRecord>(&instance_dir.join("status.json"))
+            .unwrap()
+            .state,
+        state,
+        "test setup must expose the intended terminal branch"
+    );
+
+    let instance_before = fs::read(instance_dir.join("instance.json")).unwrap();
+    let status_before = fs::read(instance_dir.join("status.json")).unwrap();
+    let started_marker = root.path().join("restart-child-started");
+    let replacement = write_finite_restart_child_fixture(root.path());
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let result = runtime.block_on(lifecycle.restart(&replacement, Duration::ZERO));
+    let instance_after = fs::read(instance_dir.join("instance.json")).unwrap();
+    let status_after = fs::read(instance_dir.join("status.json")).unwrap();
+
+    assert!(
+        matches!(&result, Err(V3LifecycleError::Timeout(_))),
+        "expired restart budget must return Timeout for {state:?}, got {result:?}"
+    );
+    assert_eq!(
+        instance_after, instance_before,
+        "expired restart budget must not rewrite instance.json for {state:?}"
+    );
+    assert_eq!(
+        status_after, status_before,
+        "expired restart budget must not rewrite status.json for {state:?}"
+    );
+    // The old bootstrap branch rewrites instance.json/status.json synchronously
+    // before spawn, so the byte assertions above catch a pre-spawn mutation
+    // even when the finite child has not been scheduled yet. A GREEN run never
+    // spawns it at all, so the marker can never appear for correct behavior.
+    assert!(
+        !started_marker.exists(),
+        "expired restart budget must not start a managed child for {state:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn expired_restart_budget_keeps_stopped_owner_state_without_spawning() {
+    assert_expired_restart_budget_preserves_terminal_state(V3ManagedRunState::Stopped);
+}
+
+#[cfg(unix)]
+#[test]
+fn expired_restart_budget_keeps_failed_owner_state_without_spawning() {
+    assert_expired_restart_budget_preserves_terminal_state(V3ManagedRunState::Failed);
 }
 
 #[test]

@@ -81,10 +81,11 @@ pub(super) async fn acquire_admission_and_connection_slot(
     V3ProviderError,
 > {
     let connection_slot = acquire_connection_slot(sessions, request, handoff, attempt_key).await?;
-    let admission = super::take_or_acquire_provider_admission(
+    let admission = super::take_or_acquire_provider_admission_scoped(
         request.pre_acquired_admission.take(),
         controller.clone(),
         provider_key.clone(),
+        request.identity_scope.as_ref(),
     );
     if admission.is_err() {
         if let Some(attempt_key) = attempt_key {

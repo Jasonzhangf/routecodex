@@ -18,7 +18,8 @@ pub use provider_config::{
 };
 pub use provider_priority_schedule::{
     default_provider_priority_timezone, V3DailyTimeWindowAuthoringConfig,
-    V3ProviderPriorityScheduleAuthoringConfig, V3ProviderPriorityScheduleEntryAuthoringConfig,
+    V3ProviderModelAvailabilityAuthoringConfig, V3ProviderPriorityScheduleAuthoringConfig,
+    V3ProviderPriorityScheduleEntryAuthoringConfig,
 };
 pub use runtime_config::{V3RuntimeAuthoringConfig, V3RuntimeManifest};
 mod validate;

@@ -70,7 +70,12 @@ features:
   - repeated success caps score at 150 and the next -5 deduction yields 145 without hidden credit
   - a globally scored identity reaching score 0 enters the exact-identity cooldown and a valid HTTP 2xx probe restores score 100
   - after prolonged backup success traffic, a semantic probe recovery returns the primary to Target selection immediately
-  - One recoverable provider failure immediately cools the exact providerId+interfaceId+authAlias+model identity; a successful semantic probe or real success clears the cooldown.
+  - A non-429 provider failure with a healthy alternative first holds only the exact providerId+interfaceId+authAlias+model identity for observation. Only a still-current failed observation may commit its declared health action; matching business success cancels it. Early HTTP429 is health-neutral capacity backpressure. Sustained real429 follows the two-minute minimum and one-hour required-probe episode policy; advisory probes cannot bypass its mandatory restrictions.
+  - Managed listener regressions cover health-neutral 429 fresh fallback, in-flight success waking exact-identity waiters before backoff, manual 2xx probe recovery, unfinished non-2xx probe isolation, and real non-429 exact-identity cooldown with healthy fallback. The independent score-zero branch remains covered by the public typed health consumer hs03_zero_score_cools_exact_key_and_valid_probe_restores_100.
+  - no_first_failure_cooldown_public_http proves a real HTTP 429 leaves the cooldown pool empty and fresh requests skip the constrained identity before backoff expiry; healthy sibling identities remain usable while real HTTP 500 and 401 cool only their complete identities and recover through healthy fallback.
+  - non429_hold_preserves_healthy_fallback_and_matching_success_cancels_cooling proves valid concurrent failures hold only the failed exact identity before cooling, healthy fallback remains immediately usable, and matching in-flight success cancels the pending cooling decision before the original observation floor.
+  - non429_business_success_supersedes_in_flight_observation_failure proves an admitted observation cannot resurrect cooling after matching business success; healthy sibling traffic continues while the old probe is pending.
+  - matching_business_success_recovers_only_its_non429_cooldown proves the public typed health consumer clears a probe-managed cooldown on matching real business success and preserves other interface, key and model cooldowns; explicit auth holds remain operator/probe owned.
   required_negative:
   - v3 persistence without probe_model_id fails explicitly
   - duplicate v4 key health identities fail instead of silently overwriting control truth
@@ -228,6 +233,7 @@ features:
   required_positive:
   - Ordered outer tiers compile to deterministic descending internal priority values (`N..1`), because current V3 Target selects the maximum numeric priority.
   - Omitted weights in one multi-member tier compile to equal weights.
+  - A pool may declare `selection = { strategy = "sticky" }`; it parses, projects into the Manifest pool selection, and round-trips while the default priority selection stays omitted from serialized output.
   - Different TOML table ordering and explicit equal weights produce the same normalized authoring and Manifest output.
   - The projected authoring enters the existing Config03, Config04, and Config05 functions without a second compiler.
   - Exact basename config.toml selects V3UserConfigStore once in the Config owner and server status consumes its loaded snapshot.
@@ -1355,21 +1361,25 @@ features:
   - Provider transport dispatches by selected provider_type; Anthropic targets use /v1/messages, x-api-key, anthropic-version, Anthropic wire, and Responses client projection
   - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
   - 'Adaptive provider concurrency is keyed by providerId plus authAlias: admission is atomic and a full candidate is skipped immediately for this request'
-  - 'Configured maxInFlight bounds business admission without queuing; Direct and Relay select the next eligible candidate and all-full pools exhaust immediately'
+  - 'Business HTTP429 samples and adjusts only the typed provider/interface/model/key dynamic bucket before releasing its lease; the providerId:authAlias shared hard ceiling remains unchanged and the Error/action gate owns retry timing. issue44cc3af_429_healthy_alternatives_keep_parallelism and issue44cc3af_direct_429_healthy_alternatives_keep_parallelism hold eight sibling-model requests before any success and require all eight configured slots; dynamic sampling must not be disabled to satisfy isolation'
+  - 'Configured maxInFlight bounds business admission; Direct and Relay try the next eligible candidate, then wait within the acquisition budget when remaining candidates are temporarily full'
+  - 'provider.concurrency.maxInFlight is only a static hard ceiling defaulting to 40; an HTTP 429 records the in-flight watermark at that moment, prunes samples older than one hour, and lowers the budget to the smaller of the current budget and the median refused watermark minus one, clamped to at least one'
+  - 'A business 2xx or an accepted probe restores one budget unit up to the hard maximum and clears saturation; an empty one-hour window implies the hard maximum as the smoothed ceiling'
+  - 'Temporary HTTP429 masks remain recoverable across pre-exhaustion and exhaustion probe continuations; a cooled peer must not turn the rate-limited healthy candidate into a permanent request-local failure'
   - 'Pure all-busy exhaustion retains TargetPoolExhausted/provider_concurrency_busy only when every captured Target09 candidate key was proven capacity-busy; mixed exhaustion remains selected_target_exhausted'
   - 'Concurrency exclusions remain request-local and never mutate provider failure health or cooldown; scheduled probes remain separately bounded'
   - 'WebSocketV2 preserves a granted lease for an available session slot, releases it before an actual slot wait, and returns typed ConcurrencyBusy on a losing readmission race for Runtime reselect; the exact candidate busy provenance survives subsequent request-local exhaustion'
   - 'When a cooled preceding-tier candidate already has a rescue probe in flight, selection skips it without waiting and continues to an eligible later tier; probe success can restore it for subsequent requests'
   - 'Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini preserve the target-specific acquireTimeoutMs; they do not fall back to the builder default when a typed target is available'
-  - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
+  - A successful ten-minute probe increases the budget, a rate-limited probe records the refused in-flight watermark and lowers the budget to the smoothed ceiling, and SSE leases release only when the raw stream is dropped or exhausted
   - Responses HTTP transport applies the configured provider SSE first-frame timeout to the response-header wait and the timeout reason projects as the health-neutral transient transport hang in both direct and relay failure policies
   - Responses, OpenAI Chat, Anthropic, and Gemini transport builders propagate the configured provider SSE first-frame timeout through the shared transport request
   - A Responses selection-time pool exhaustion (every candidate excluded by the context window before any provider attempt) breaks the client transport for both the streaming and the nonstreaming boundary instead of projecting the synthesized 502 `network_error` body, which stays provider-private Error06 evidence
   - A provider terminal disposition records provider-private evidence before the client transport breaks: the real external upstream status, headers, and body are persisted for the failed request, and a terminal with no provider response records that instead of a fabricated status
   required_contract:
-  - Provider concurrency policy is Config-owned; maxInFlight bounds business admission and acquireTimeoutMs bounds only scheduled probe admission; neither is reconstructed from payload, MetadataCenter, or Debug
+  - Provider concurrency policy is Config-owned; maxInFlight bounds business admission and acquireTimeoutMs bounds temporary capacity recovery and scheduled probe admission; neither is reconstructed from payload, MetadataCenter, or Debug
   - Reaching the adaptive concurrency budget immediately selects another request-eligible candidate without a capacity wait or Router reentry
-  - An explicit provider.model request remains pinned; a full pinned candidate exhausts immediately and cannot escape its pin
+  - An explicit provider.model request remains pinned; a full pinned candidate waits within its acquisition budget and cannot escape its pin
   - Only an actual typed provider failure such as HTTP 429 may enter Error recovery and select another provider after transport
   - routecodex-v3-provider-responses remains generic across provider IDs and may branch only by provider_type/protocol, never by deployment provider ID
   - Provider consumes an already selected target and never reads config, Virtual Router, Target interpreter, route groups, or Forwarder resources; only the probe-only Runtime target builder reads the published manifest to construct that target
@@ -1502,24 +1512,43 @@ features:
   - Target expands nested forwarders and performs all internal availability reselection
   - Router cannot import Provider availability and Target cannot mutate Provider health
   - P5 Runtime stops before Provider send and only full selected-target exhaustion enters Error01-Error06
-  - Request image/media facts survive trailing tool/function outputs and are carried to Target as multimodal/vision requirements
-  - The default tier may omit media requirements only as the last tier after multimodal tiers are absent or exhausted; ProviderReqCompat then projects images to deterministic session placeholders for a selected text-only target
-  - Router preserves default opaque entries with their distinct capability contract; Target deduplicates only equally eligible candidates and selects an available captured vision candidate before text-only default projection
+  - Current-turn image/media facts survive trailing tool/function outputs of the same
+    turn and are carried to Target as multimodal/vision requirements; earlier-turn
+    images never classify the current request
+  - The selected pool's candidates are expanded and reselected inside that single pool;
+    no default-tier media projection and no cross-pool default floor is appended after a
+    matched multimodal pool
   - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools and tool_search calls become routing facts, while web_search requires strict current-turn keyword intent or an explicit model call and never activates from a declaration alone
-  - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding/longcontext
+  - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding
       never hard-reject a candidate
-  - After genuine web_search/search and multimodal/vision capability validation, Target10 preserves configured candidate order among candidates within their declared context window; an omitted max_context_tokens compiles to the documented 200000-token default. The scaled context estimate is advisory ordering evidence only: a candidate at or above its declared window, including explicit direct pins and the default-pool floor, stays selectable and is never marked context_window_exceeded or skipped before availability/transport; provider health and request-local provider-failure exclusion remain the explicit switch inputs and the real provider owns the context verdict
+  - After genuine web_search/search and multimodal/vision capability validation, Target10 preserves configured candidate order among candidates within their declared context window; an omitted max_context_tokens compiles to the documented 200000-token default. The scaled context estimate is advisory ordering evidence only: a candidate at or above its declared window, including explicit direct pins, stays selectable and is never marked context_window_exceeded or skipped before availability/transport; provider health and request-local provider-failure exclusion remain the explicit switch inputs and the real provider owns the context verdict
   - A candidate at 90 percent through 100 percent of its context window remains eligible, is demoted only below normal candidates in the same route tier, and still outranks every lower route tier
   - Request/provider compatibility failures are candidate-scoped across providerId+interfaceId+authAlias+modelId and remain health-neutral, so sibling interfaces/models in the same provider remain selectable; transport and provider-health failures are interface-scoped across all auth keys/models for the failed provider+interface, while persistent cooldown remains provider-interface-key-model scoped
   - A cooldown or request-local failure on one interface never excludes a sibling interface of the same provider; the fallback request remains able to select the sibling interface with its own endpoint and transport contract
   - A non-null previous_response_id is rejected before routing; it never selects an exact-pin target, local restore, or Target model capability
   - OpenAI Responses request.reasoning is aliased to the thinking route fact before pool matching
-  - Target dedupe retains optional/default provenance; the default floor is only a last-resort context-admission fallback and never overrides health cooldown or request-local provider-failure exclusion
-  - Within a captured route plan, route-tier order is applied before candidate priority; candidate priority/weight/health select only among candidates in the same eligible route tier, so the default floor cannot overtake a matched semantic tier by numeric priority alone
+  - Target dedupe retains provenance inside the single captured pool; no classified request
+    ever appends default or another pool after its matched pool, and in-pool tier order is
+    applied before candidate priority so no lower-tier or default candidate can overtake
+    the matched pool's remaining candidates
+  - Ordinary classification evaluates configured non-empty pools in fixed order
+    (hosted web_search, multimodal, longcontext, coding, thinking, search, tools, default), skips
+    absent/empty optional pools, never builds implicit capability pools, and keeps
+    default as the required non-empty no-match endpoint. A retained longcontext
+    candidate is skipped when its pool is absent or empty.
+  - A matched pool that temporarily loses all candidates waits or probes through the
+    declared recovery path inside that same pool; only genuine declared exhaustion ends
+    the request transport without client error payload or fabricated success, and a
+    different classification pool is never consulted
   - Server-scoped provider schedules default to Asia/Shanghai, accept a configured IANA timezone and cross-midnight daily windows, and use one-based tiers where one is highest priority
   - Schedule adjustments apply only within the selected route pool and never bypass provider health/cooldown or enter request, provider, client, metadata, or debug control payloads
+  - A provider model may declare a timezone-aligned availability window with guarded edges; outside it the candidate is excluded from Target10 selection as a hard admission input with an availability_inactive diagnostic, never as a fallback tier, and the exclusion never mutates provider health
+  - One shared admission basis decides selection, the direct send gate, remaining-candidate accounting and recovery probes, so a candidate that Target10 admitted is never refused at send and a window-inactive sibling never counts as an alternative or inflates the single-candidate automatic-cooldown exemption
+  - A recovery or periodic probe is never sent outside the target model's declared availability window, and a pool whose every candidate is outside its window reaches exhaustion without waiting for the window
+  - A pool may declare selection strategy sticky: Target10 then keeps one primary and one standby provider per server+routingGroup+sessionId+pool binding, keyed by providerId+authAlias+modelId. The same session keeps its primary across attempts, uses the standby only when the primary is unusable, and rolls primary/standby only on a health or cooldown exclusion, never on a request-local provider failure; recovery is lazy and never pulls the session back. A fresh session takes the least-held primary in that pool so different sessions spread instead of stacking on the heaviest member, and a single-member pool keeps an empty standby. Sticky state is process-lifetime in-memory per pool with no cross-pool association, and a request without a client control session id creates no binding and keeps the previous selection behavior. Sticky only orders candidates the unchanged health/cooldown/availability/priority rules already admitted, inside the same eligible route tier.
   required_gates:
   - npm run test:v3-p5-router-target
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target sticky -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target multi_interface_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test provider_multi_interface_controlled -- --nocapture
@@ -1552,7 +1581,8 @@ features:
   status: source_bound_cli_replay_verified
   change_risk: high
   owner_kind: rust_project_v3
-  owner_scope: Full V3 request-fact pool matching, immutable optional-plus-default plan, one-shot opaque handoff, and Target-local plan exhaustion
+  owner_scope: Full V3 request-fact pool matching with one fixed-order classified pool,
+    one-shot opaque handoff, and Target-local plan exhaustion
   owner_modules:
   - v3/crates/routecodex-v3-virtual-router
   - v3/crates/routecodex-v3-target
@@ -1575,16 +1605,26 @@ features:
   - priority, priority-tiered smooth-weighted-round-robin (SWRR), and listener/group/pool isolated round-robin ordering; weighted state is isolated by listener/group/pool/priority, selection state persists
     across requests via the process-shared router, and peek ordering never advances it
   - high-weight higher-priority-number targets cannot win while any lower-priority-number target remains session-available; when the full lower tier is unavailable only that session advances
-  - optional/default semantic target deduplication without second Router hit
-  - Target internal Forwarder expansion and availability reselection across the captured plan
-  - non-built-in requested model ids use explicit `match.models` pools as inbound-to-target mapping declarations; default/no-explicit-model paths filter Target candidates by configured target model ids,
-    ignore provider aliases for runtime matching, and fail explicitly when no configured candidate matches
+  - single-pool target deduplication without second Router hit
+  - Target internal Forwarder expansion and availability reselection across the captured
+    single-pool plan
+  - non-built-in requested model ids never select or filter an ordinary pool through
+    `match.models`; only a valid `provider.model` string creates a direct target pin,
+    and every other model string uses current-turn classification without Target
+    requested-model alias matching
   - '`provider.model` direct routing follows V2 semantics: the client model splits on its first dot into an existing enabled provider id (unknown provider falls back to normal classification), aliases resolve
     to the canonical model id (an enabled provider that declares no such model also falls back to normal classification), unmet vision/multimodal requirements fail fast, health cooldowns are reported but never veto the pin while request-local
     exclusions still block, and /v1/models exposes every enabled provider model as a provider.model direct id'
   required_contract:
-  - default pool is explicit, non-empty, and captured during the original route decision
-  - virtual-router dry-run projects reasoning, defaultFloorProtected, routeResult, and an alias-only target object, and never advances round-robin/SWRR selection state
+  - Ordinary classification selects the first configured non-empty pool in the fixed
+    order hosted web_search, multimodal, longcontext, coding, thinking, search, tools, default; the
+    default pool is explicit, non-empty, and is the no-match endpoint rather than an
+    appended fallback after another matched pool
+  - Optional classification pools may be absent or empty and are skipped; no implicit
+    capability pool is built from provider declarations; no longcontext pool is
+    configured for ordinary requests, so a retained longcontext candidate is skipped
+  - virtual-router dry-run projects reasoning, routeResult, and an alias-only target
+    object, and never advances round-robin/SWRR selection state
   - Virtual Router cannot read Provider health/error or expand Forwarders/providers/keys/models
   - Target cannot re-enter Virtual Router after the opaque handoff
   - selection plan is non-Clone and cannot be consumed twice
@@ -1593,8 +1633,14 @@ features:
   - routing facts carry no continuation owner; a non-null previous_response_id fails before ordinary priority/weight allocation
   required_integration:
   - Runtime request facts select a non-default pool
-  - optional Provider failure continues through the captured default floor with one Router hit
-  - total plan exhaustion enters the global Error chain
+  - A controlled upstream on the classified pool fails to a second same-pool candidate
+    and succeeds; no lower-priority pool and no default pool records an upstream attempt
+  - Cooldown and recovery stay in the same classified pool; total same-pool exhaustion
+    enters the global Error chain and terminates the request transport without client
+    error payload or fabricated success
+  - A public-entry request with an earlier-turn image and current text-only user content
+    is classified without multimodal and without historical-image cleanup; the same
+    current-turn image on the same public entry still selects the multimodal pool
   - multi-listener CLI replay proves cursor and routing-group isolation
   required_gates:
   - npm run verify:v3-architecture-docs
@@ -1928,14 +1974,27 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   required_unit:
   - current-turn typed facts classify deterministically.
-  - normalized historical image placeholders cannot create multimodal route facts; the latest retained image carrier survives text-only reminders.
+  - Current-turn images classify multimodal; an image from an earlier user turn followed
+    by a later text-only user turn does not classify multimodal, and historical
+    images preserved as business history never create multimodal facts.
   - business text and tool arguments cannot create routing/control state.
   required_reverse:
-  - changing only earlier image carriers leaves route classification unchanged after history normalization.
+  - changing only earlier image carriers leaves current-turn route classification unchanged,
+    without destructive historical-image cleanup as the classification mechanism.
   - changing only request prose leaves route/control facts unchanged.
+  required_positive:
+  - Current-turn tool results and current-turn images continue to provide the same-turn
+    classification signals on Responses, OpenAI Chat, and Gemini normalized entries; earlier
+    tool turns provide none.
+  - hosted web_search and multimodal both present on the same current turn select
+    hosted web_search first; coding precedes thinking; search precedes tools; the fixed
+    order holds across configured optional-pool combinations.
+  - A valid explicit `provider.model` reaches the pinned target while current-turn image,
+    web-search, and historical-policy signals are present.
   required_gates:
   - npm run test:route-classifier-semantics
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server single_pool_public_blackbox
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - git diff --check
@@ -2825,6 +2884,7 @@ features:
   - Relay/Direct JSON timing remains Runtime-owned and Server read-only.
   - Direct and Relay handoffs move one typed Runtime-owned timing and attempt accumulator; Server does not restart, merge, or infer it.
   - Final attempts and external timing cover every provider transport leg across Direct-to-Relay, Relay-to-Direct, and nested handoffs without duplication.
+  - Direct pool exhaustion retains accumulated transport attempts, typed provider failure events and Runtime timing even when no final provider is selected; direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_wait and direct_sse_no_continuation_stream_error_is_not_silent_eof use explicit test-only residence budgets.
   required_negative:
   - Duplicate or premature external timing closeout fails instead of silently succeeding.
   - Direct SSE malformed tail or [DONE] without response.completed does not publish successful Runtime timing.
@@ -2855,7 +2915,7 @@ features:
   status: source_pending_live_replay
   change_risk: high
   owner_kind: rust_v3_server_http_boundary
-  owner_scope: Listener-local Responses request admission and exact HTTP response-body lifetime release; no Runtime, Virtual Router, provider, or codec ownership.
+  owner_scope: Independent parsed HTTP request dispatch, request-local activity and explicit aggregate maintenance; no session or conversation business mutex.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -2865,14 +2925,11 @@ features:
   - docs/architecture/wiki/v3-responses-session-admission.md
   - docs/architecture/manifests/v3.responses_session_admission.mainline.yml
   required_unit:
-  - Same listener plus same explicit session or conversation blocks the second request
-    inside the admission owner until the exact active permit releases, then admits it
-    without a client-visible overlap error.
+  - Matching session alone, conversation alone or both never waits for another response body; the second request reaches upstream before the first is released.
   - Different session on one listener and the same session on different listeners remain concurrently admissible.
   - Missing explicit scope does not invent a cross-request key.
-  - Response EOF, stream error, and client body drop release only the exact permit.
-  - Permit release wakes every predicate waiter so a waiter for an unrelated active
-    scope cannot strand the waiter whose scope became available.
+  - Cancelling one request cannot cancel or delay another matching-scope request.
+  - Explicit maintenance pauses new dispatch and cancellation restores it; activity release and successful front-flush custody remain intact.
   required_gates:
   - npm run verify:v3-responses-session-admission
   - npm run test:v3-responses-session-admission
@@ -3031,6 +3088,11 @@ features:
   - v3-provider-action-gate-49
   - v3-provider-action-gate-50
   - v3-provider-action-gate-51
+  - v3-provider-action-gate-52
+  - v3-provider-action-gate-53
+  - v3-provider-action-gate-54
+  - v3-provider-action-gate-55
+  - v3-provider-action-gate-56
   required_positive:
   - Responses Relay provider-bound request compatibility and wire encoding failures enter the shared provider failure policy and typed Error05 action lane before retry or reselect.
   - Terminal provider HTTP errors reach the public `/v1/responses` failure boundary without waiting for provider action admission.
@@ -3256,12 +3318,17 @@ features:
   completion_rule:
     source: protocol_tables unit tests and architecture CI pass; tables fail-fast on schema violation and never enter provider/client payload.
 - feature_id: v3.history_image_cleanup
-  status: active_latest_image_preservation
+  status: retired_for_ordinary_classification
   change_risk: medium
-  owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: history_image_cleanup owns the stateless latest-carrier image normalization rule. Relay invokes it from Chat Process Req04 in relay_request.rs; Inbound remains lossless and does not rewrite payload. Direct reaches it only through its existing registered request standardization/hook path. ProviderReqCompat06 preserves representable latest images and paired tool receipts independently of target capability metadata.
+  owner_kind: retired_v3_runtime_chat_process_gate
+  owner_scope: Ordinary request classification no longer depends on destructive
+    historical-image rewriting. The earlier latest-carrier placeholder rule must
+    not be used to keep historical images out of current-turn classification or
+    to drop business history. If a target protocol cannot represent an image, the
+    projection stays at the adjacent ProviderReqCompat owner and keeps complete
+    opaque data. Current-turn image detection is owned by the route-classifier
+    current-turn fact builder.
   owner_modules:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   required_gates:
@@ -3272,7 +3339,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib transient_stage_code_classifier
   completion_rule:
-    source: Runtime tests and public HTTP image_input_blackbox cases pass for Chat, Responses and Anthropic; latest images and tool identity survive even when multimodal metadata is absent or its route is cooled, and older images are placeholders. Live 7777 blind-image tool write/read/follow-up cases match hidden visual ground truth, while the no-image control returns NO_IMAGE.
+    source: Runtime tests and public HTTP image_input_blackbox cases pass for Chat, Responses and Anthropic; complete original history images and paired tool receipts survive standardization and reach the selected provider without placeholder rewriting, while current-turn image detection stays independent in the typed route facts. ProviderReqCompat preserves representable images and paired tool receipts independently of target capability metadata.
 - feature_id: v3.direct_runtime_kernel_core
   status: active_skeleton
   change_risk: critical
@@ -3285,6 +3352,10 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib target_recovery_does_not_reselect_ineligible_candidate
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server issue44cc3af_inactive_window_does_not_spin_or_block_http
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server issue44cc3af_first_byte_stall_keeps_sibling_requests_independent
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-cli --test managed_lifecycle inactive_recovery_requests_do_not_block_sigint_exit
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_direct_transport_header_timeout_keeps_120_second_budget
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_transport_header_timeout_keeps_120_second_budget
   - npm run verify:v3-architecture-ci
@@ -3329,6 +3400,10 @@ features:
   - step_v3_target_planning_with_admission_sync
   - try_admit_v3_selected_target
   required_positive:
+  - sustained_429_window_direct_public_http and sustained_429_window_relay_public_http prove real429 observations cross the two-minute window on the same injected health clock used by Runtime, commit a30-minute minimum, keep healthy alternatives and other listeners usable, and recover only through a real qualified probe after the minimum.
+  - sustained_429_hour_direct_public_http and sustained_429_hour_relay_public_http prove a real429 recovery probe extends the unresolved episode past one hour without sending more business traffic; a subsequent real503 probe remains excluded and a qualified202 probe restores the exact identity while healthy alternatives continue to serve.
+  - late_inflight_failure_cannot_shadow_existing_cooldown_recovery_public_http proves a held real business failure arriving after qualified cooldown switches to a healthy spare and cannot create a second precool owner that shadows the subsequent real successful probe and restored business dispatch.
+  - sustained_429_hour_requires_probe_and_ignores_late_business_success proves a one-hour unresolved episode cannot be cleared by business success or time alone; typed probe matrix preserves non429 failures and the persistence consumer retains the lock across Store reconstruction.
   - issue231_responses_relay_stale_probe_public_blackbox proves current Responses Relay delivers the real healthy later-tier payload while a preferred probe is held, then both stale completion branches preserve newer failure state and release their owner; exhausted requests close transport without an empty success while a healthy sibling continues
   - issue245_permission_11128_search_continuation_public_blackbox proves genuine HTTP400 permission_error cools the exact identity, preserves paired function-search and executed nonce history through Relay, remains excluded beyond the original deadline after a failed probe, restores only after a matching successful probe, and closes exhausted transport while explicit current-turn native hosted search continues; it does not replay or resolve the historical upstream/channel cause
   - one opaque typed acquisition identity owns each scheduled or rescue probe; matching current-health-generation success atomically resets score, streak, delta window, cooldown, and probe backoff state
@@ -3347,20 +3422,28 @@ features:
   - cc-sol and kdns providers configured with probe_interval_ms=120000 run the bounded ladder but never wait longer than two minutes between recovery probes
   - matched HTTP 401 and HTTP 403 automatic cooldown policies retain the exact selected provider+auth_alias+model identity
   - every automatic failure excludes and cools only the failed complete candidate; untried sibling keys, models and providers remain available
-  - 401 auth-key business cooldown remains until HTTP 2xx probe success, while its first recovery probe is due after 5 seconds and later failures advance the shared 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s ladder
-  - every HTTP 429 requires three consecutive HTTP 429 failures of the exact provider+auth_alias+model identity regardless of body code or fingerprint; success or a non-429 failure resets its streak; success immediately clears its exact 429-owned cooldown; other failures retain typed thresholds
+  - 401 exact-identity failures first enter observation; qualified negative observation commits their declared cooldown, while matching real business success cancels the hold and independent current probes follow the shared5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s ladder
+  - Early HTTP429 is exact-identity capacity backpressure; cross-session admission coordinates only that identity. A real two-minute unresolved episode commits30minute minimum and a real one-hour unresolved episode requires a current non429 probe. Matching business success clears only an unlocked observation and cannot shorten the minimum or replace a required probe.
   - private-profile probes preserve provider-specific request compatibility and accept HTTP 2xx before a successful next business request
   - a provider-declared terminal that carries a legal business result is forwarded as-is and never becomes a provider failure even without visible text: Responses incomplete content_filter, Anthropic refusal, and the OpenAI Chat empty-content content_filter finish; a complete attempt with no deliverable business content at all (empty end_turn/stop terminal with no text/tool/refusal/reasoning) is instead classified as an internal typed 502 for the Error chain
-  - a completely received upstream HTTP 502 with an empty or non-JSON body remains last_candidate_terminal and never enters provider cooldown; a truncated 2xx body at the last or only candidate through Direct or Relay likewise terminates detectably without cooldown, retry, fallback, or recovery probe
+  - A completely received upstream HTTP502 or truncated2xx body at the last candidate through Direct or Relay does not create cooldown, retry or a recovery probe for that identity. The request waits its original captured-pool recovery budget without business capacity; only final cancellation/deadline/eligibility exhaustion ends its own transport detectably.
   - a Relay client disconnect after a partial provider frame stays health-neutral, releases the request-local attempt, reaches the public Server boundary, and starts no additional provider attempt
   - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
-  - Public `/v1/responses` switches to a spare provider while the first provider remains held; all-full pools terminate promptly without an extra upstream request
-  - provider_concurrency_saturated_candidates_exhaust_without_send and provider_concurrency_relay_saturated_candidates_exhaust_without_send prove pure all-busy exhaustion retains TargetPoolExhausted/provider_concurrency_busy
+  - Public `/v1/responses` switches to a spare provider while the first remains held; all-full pools wait for capacity without extra upstream requests and terminate only after their declared wait budget
+  - provider_concurrency_saturated_candidates_wait_then_exhaust_without_send and provider_concurrency_relay_saturated_candidates_exhaust_without_send prove bounded waiting without wire sends and retain TargetPoolExhausted/provider_concurrency_busy
   - The async admission and WebSocket readmission paths preserve exact capacity-busy keys until the final direct or relay terminal source is built
-  - all_busy_async_admission_preserves_provider_concurrency_busy_source proves async pre-admission rejects every captured candidate as capacity-busy without waiting and returns TargetPoolExhausted/provider_concurrency_busy
+  - all_busy_async_admission_preserves_provider_concurrency_busy_source proves final budget-exhausted admission retains TargetPoolExhausted/provider_concurrency_busy after waiting
   - mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhausted proves a non-busy request-local exclusion prevents all-busy source relabeling and leaves generic selected_target_exhausted
   - Concurrency exclusions are request-local and health-neutral; reselect stays inside the captured Target09 candidate set without Router reentry
+  - Mixed prior-failure and temporary-busy exhaustion carries both exact typed sets and waits within the acquisition budget; a source label never reconstructs busy identities
+  - Successful admission removes scan-local busy exclusions before callers adopt the returned exclusion state; a busy candidate freed while its selected peer fails remains eligible for Direct and Relay recovery
+  - An exhausted scan retains transport-busy identities until the original request recovery due; level-triggered capacity availability or unrelated health notifications cannot clear them early. Healthy non-busy alternatives remain immediately eligible, and waits own no business lease.
+  - Actual probe work permits a fresh admission check only for busy identities discovered within the current planning call. Inherited transport-busy and permanent failures remain masked; metadata-only or no-permit probe rounds cannot reopen them, and failed admission rechecks retain busy provenance without repeating the probe phase.
+  - A received HTTP429 constrains only its exact identity; current and fresh requests immediately use healthy alternatives without joining that identity's wait lane, and unrelated keys/models retain their configured parallelism
+  - Post-attempt failure with only cooled peers remaining uses typed Error04 target_recovery_pending and Error05 ReevaluateTarget before bounded captured-target planning; the eight failed_attempt public cases cover Direct/Relay recovery, acquisition-budget exhaustion, whole-request residence deadline and client cancellation without retrying excluded A or forwarding its error payload
+  - issue44cc3af_all_tried_transport_failure_waits_for_recovered_peer and its native Direct counterpart prove real pre-header transport failures on every candidate do not immediately close the client; matching successful probe restores only the earlier failed peer, the last failed candidate is not cooled or retried, and the original business request completes through the recovered peer without an error payload
   - A full preferred candidate does not disable the caller-authorized semantic recovery of another eligible cooled candidate in Direct or Relay
+  - Direct Chat and Messages precommit SSE failures consume ReevaluateTarget and recover on a cooled peer; live Responses initial protocol preplanning shares one residence deadline with subsequent Direct or Relay execution
   - Business leases remain bounded and release after completion, error, cancellation, or stream drop; due scheduled probes retain their separate bounded admission
   required_negative:
   - stale successful or failed probe generations cannot mutate newer provider health state
@@ -3397,6 +3480,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_probe_fairness -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_probe_fairness_tests -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server pool_empty_recovery -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue44cc3af -- --nocapture --test-threads=1
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
@@ -3528,14 +3612,18 @@ features:
   required_positive:
   - Current turn is included in the bounded history window.
   - New user input resets prior task tool statistics.
-  - Search pool ratio reaches the 8/10 boundary.
-  - One turn with multiple tool errors counts once.
+  - Search-pool ratio observations remain typed history evidence only and no longer
+    switch an ordinary request out of its fixed-order matched pool.
+  - Tool-error turn observations remain typed history evidence only and no longer switch
+    an ordinary request out of its fixed-order matched pool.
   - Runtime commits a completed request once and discards an incomplete request without polluting history.
   - Provider failure-shaped response content is excluded from tool execution error facts.
   - Compact action selects independent compact route pool.
   required_negative:
   - Provider failure does not enter tool execution error facts.
   - Route policy action cannot carry provider/model fields.
+  - A history-derived route-policy action cannot override the current-turn fixed-order
+    matched pool; only the registered compact route object may be selected by policy.
   - Same-precedence policy ambiguity fails explicitly.
   - Control facts do not enter normal payload or protocol metadata.
   required_gates:
@@ -3807,6 +3895,11 @@ features:
   owner_kind: rust_v3_bounded_attempt_payload_store
   owner_scope: Direct and Relay append only through byte, frame, request, process, and residence admission before copy.
   required_gates:
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server hard_attempt_cap_waits -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server all_tried_transport_failure -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib target_recovery_ -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server pool_wait_outlives_single_candidate -- --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib unsent_capacity_rejection_releases_only_pending_attempt -- --nocapture
   - npm run verify:v3-execution-control-payload-architecture
   - npm run test:v3-execution-control-payload-architecture-red-fixtures
   completion_boundary: {source_controlled: true, live_cutover: required}
@@ -4060,7 +4153,7 @@ features:
   - candidate behavior is13of20 scoped; remaining7 are inverse projection and all6globalError nodes. Whole-graph execution, Native Direct payload migration, independent review, and main merge are not inferred
   - every inbound direction_bindings source names a path in that protocol's raw source inventory; outbound Chat sources are not constrained to wire inventory paths
   - Responses request.input[].type is read per input array item, and the selected request branch remains paired with that same request's typed inverse provenance for the response projection
-  - the target request design assigns historical image placeholders to Chat Process request governance after lossless normalization, retaining current-turn images and stable historical placeholders for tool-only replay
+  - the target request design keeps complete historical image bytes and paired tool receipts intact through Chat Process request governance after lossless normalization; current-turn image routing remains typed current-turn facts and no placeholder rule drops business history
   - this SDK migration leaves Anthropic/Gemini Direct behavior with its existing owners
   negative_assertions:
   - a protocol profile cannot authorize a field path absent from the source inventory

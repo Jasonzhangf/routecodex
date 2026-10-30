@@ -80,6 +80,24 @@ fn client_request() -> Value {
     })
 }
 
+fn current_turn_request(body: &Value) -> Value {
+    let mut current = body.clone();
+    let field = if body.get("messages").and_then(Value::as_array).is_some() {
+        "messages"
+    } else {
+        "input"
+    };
+    let items = body[field]
+        .as_array()
+        .expect("Responses fixture history array");
+    let start = items
+        .iter()
+        .rposition(|item| item.get("role").and_then(Value::as_str) == Some("user"))
+        .expect("Responses fixture current user message");
+    current[field] = Value::Array(items[start..].to_vec());
+    current
+}
+
 fn manifest(
     longcontext_threshold_tokens: u64,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
@@ -140,16 +158,27 @@ async fn responses_relay_routes_normalized_request_before_tool_thinking_governan
         .payload()
         .clone();
 
-    let normalized_facts =
-        build_v3_router_request_facts_for_entry(&normalized_request, "responses", None);
-    let governed_facts =
-        build_v3_router_request_facts_for_entry(&governed_request, "responses", None);
-    let threshold = governed_facts.input_tokens;
+    let normalized_current = current_turn_request(&normalized_request);
+    let governed_current = current_turn_request(&governed_request);
+    let normalized_current_tokens =
+        build_v3_router_request_facts_for_entry(&normalized_current, "responses", None)
+            .input_tokens;
+    let threshold =
+        build_v3_router_request_facts_for_entry(&governed_current, "responses", None).input_tokens;
     assert!(
-        normalized_facts.input_tokens < threshold,
+        normalized_current_tokens < threshold,
         "fixture must prove schema governance crosses the threshold: normalized={}, governed={}",
-        normalized_facts.input_tokens,
-        governed_facts.input_tokens
+        normalized_current_tokens,
+        threshold
+    );
+    let normalized_full_tokens =
+        build_v3_router_request_facts_for_entry(&normalized_request, "responses", None)
+            .input_tokens;
+    assert!(
+        normalized_full_tokens > normalized_current_tokens,
+        "fixture must retain completed history for provider capacity accounting: full={}, current={}",
+        normalized_full_tokens,
+        normalized_current_tokens
     );
     let manifest = manifest(threshold);
     let normalized_facts =
