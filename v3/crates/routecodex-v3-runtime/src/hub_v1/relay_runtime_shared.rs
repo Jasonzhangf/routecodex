@@ -447,6 +447,7 @@ pub(crate) async fn handle_provider_failure_with_response_code(
 pub(crate) fn build_v3_runtime_provider_failure_observation_from_policy_event(
     event: &V3RelayProviderFailurePolicyEvent,
 ) -> V3RuntimeProviderFailureObservation {
+    let external = event.diagnostic_source.external_error.as_ref();
     V3RuntimeProviderFailureObservation {
         provider_key: v3_relay_provider_candidate_key_parts(
             &event.candidate.provider_id,
@@ -459,14 +460,30 @@ pub(crate) fn build_v3_runtime_provider_failure_observation_from_policy_event(
         model_id: event.candidate.model_id.clone(),
         status: event.status,
         error_type: event.error_type.clone(),
-        external_error_kind: None,
-        external_error_code: event.error_type.clone(),
+        // The original typed Error01 source is the sole provenance truth for
+        // the attempt. Its external link keeps the real transport/body kind,
+        // upstream status, code and request id; the reduced policy event only
+        // holds a coarse error code and the side-channel provider status.
+        external_error_kind: external.map(|error| {
+            match error.kind {
+                routecodex_v3_error::V3ExternalErrorKind::Provider => "provider",
+                routecodex_v3_error::V3ExternalErrorKind::Upstream => "upstream",
+                routecodex_v3_error::V3ExternalErrorKind::Client => "client",
+                routecodex_v3_error::V3ExternalErrorKind::Transport => "transport",
+            }
+            .to_string()
+        }),
+        external_error_code: external
+            .and_then(|error| error.code.clone())
+            .or_else(|| event.error_type.clone()),
         // The real upstream HTTP status; `None` for a response-less failure.
-        external_error_status: event.provider_status,
+        // The typed source may carry a received status even when the policy
+        // event only received a coarse side-channel status.
+        external_error_status: external
+            .and_then(|error| error.status)
+            .or(event.provider_status),
         internal_code: None,
-        // V3RelayProviderFailurePolicyEvent does not carry the upstream request
-        // id: record an honest unknown rather than a synthesised value.
-        upstream_request_id: None,
+        upstream_request_id: external.and_then(|error| error.upstream_request_id.clone()),
         message: event.message.clone(),
         failure_count: event.health_record.failure_count,
         health_state: event.health_record.state.clone(),
