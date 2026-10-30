@@ -685,6 +685,9 @@ impl V3ResponsesSseReducerState {
                         || (identity.output_index.is_some()
                             && current.output_index == identity.output_index)
                 }) {
+                    typed
+                        .item_mut()
+                        .adopt_missing_content_part_annotations(existing.item());
                     *existing = typed;
                 } else {
                     self.items.push(typed);
@@ -1114,6 +1117,45 @@ impl V3ResponsesSseOutputItem {
             content.push(parsed);
         }
         Ok(())
+    }
+
+    /// Backfill content-part annotations that only intermediate events carried.
+    ///
+    /// A closing `response.output_item.done` part may omit `annotations` that an
+    /// earlier `response.content_part.added`/`done` already delivered. The
+    /// extension holds opaque business data, so it is merged positionally into
+    /// the closing part instead of being dropped. A part that already declares
+    /// `annotations` keeps its own value, including an explicitly empty list.
+    fn adopt_missing_content_part_annotations(&mut self, previous: &V3ResponsesSseOutputItem) {
+        let (
+            V3ResponsesSseItemPayload::Message { content, .. },
+            V3ResponsesSseItemPayload::Message {
+                content: previous_content,
+                ..
+            },
+        ) = (&mut self.payload, &previous.payload)
+        else {
+            return;
+        };
+        for (part, previous_part) in content.iter_mut().zip(previous_content.iter()) {
+            if part.part_type != previous_part.part_type {
+                continue;
+            }
+            let already_declared = part
+                .extensions
+                .iter()
+                .any(|extension| extension.name == "annotations");
+            if already_declared {
+                continue;
+            }
+            if let Some(extension) = previous_part
+                .extensions
+                .iter()
+                .find(|extension| extension.name == "annotations")
+            {
+                part.extensions.push(extension.clone());
+            }
+        }
     }
 
     fn append_function_arguments(&mut self, delta: &str) {
