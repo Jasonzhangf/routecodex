@@ -996,9 +996,12 @@ fn external_provider_error_branch_preserves_external_identity() {
                 headers: headers.clone(),
                 reason: "body stream failed".to_string(),
             },
+            // A truncated HTTP head (status 503) really arrived before the body
+            // read failed, so its status and request-id header survive as
+            // provenance instead of being dropped to `None`.
             "provider_transport_error",
             "provider-body",
-            None,
+            Some(503),
         ),
         (
             V3ProviderError::ResponseBody {

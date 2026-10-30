@@ -171,18 +171,30 @@ pub(crate) fn provider_runtime_failure(
         V3ProviderError::HttpStatus { response } => Some(response.status),
         _ => None,
     };
+    let provider_body_read_failure = match &error {
+        V3ProviderError::ResponseBodyUnreadable { reason, .. } => Some(reason.clone()),
+        _ => None,
+    };
+    let source_stage = provider_runtime_failure_stage(&error);
+    // A provider transport / HTTP-status error must keep its typed external
+    // link (Transport kind plus received status / request-id header) so the
+    // failure observation can distinguish it from a local response-body error
+    // and the global real-error counter can record it. Client disconnect stays
+    // on its own terminal lane and keeps `attempt_source = None`.
+    let attempt_source = if matches!(&error, V3ProviderError::ClientDisconnect { .. }) {
+        None
+    } else {
+        crate::hooks::build_v3_provider_error_source(source_stage, error).ok()
+    };
     V3ResponsesRelayProviderFailure {
         status,
         provider_status,
-        attempt_source: None,
-        provider_body_read_failure: match &error {
-            V3ProviderError::ResponseBodyUnreadable { reason, .. } => Some(reason.clone()),
-            _ => None,
-        },
+        attempt_source,
+        provider_body_read_failure,
         policy_error_type,
         policy_error_message: policy_error_message.clone(),
         provider_id: provider_id.to_string(),
-        source_stage: provider_runtime_failure_stage(&error),
+        source_stage,
         observability,
         terminal_projection,
         terminal_disposition: None,
