@@ -172,10 +172,11 @@ pub(crate) fn is_health_neutral_request_compat_failure(
         || error_type == Some("invalid_request_error")
 }
 
-/// A typed provider transport failure: the head arrived, but the connection or
-/// body/stream could not be read to the protocol terminal. `status` is the
-/// internal 502 cause, not an upstream HTTP error, so this class must not share
-/// the terminal or request-local health-neutral boundary.
+/// A typed provider transport failure that received a response head: the head
+/// arrived, but the body/stream could not be read to the protocol terminal.
+/// `status` is the internal 502 cause, not an upstream HTTP error. A
+/// response-less pre-head failure carries no response and stays outside this
+/// class so it keeps the health-neutral last-candidate boundary.
 pub(crate) fn is_provider_transport_failure(
     source_stage: &str,
     status: u16,
@@ -198,11 +199,11 @@ pub(crate) fn is_provider_transport_failure(
             Some("provider_error") | Some("provider_transport_error")
         )
         && provider_type != Some("gemini")
-        // A completed upstream HTTP error is not a transport failure. A
-        // response-less transport, a non-error head with a truncated body, or
-        // an explicit body-read failure keeps the exact-identity
-        // last-candidate health effect.
-        && (provider_status.is_none_or(|status| status < 400)
+        // A completed upstream HTTP error is not a transport failure. Only a
+        // received head (non-error upstream status or an explicit body-read
+        // failure) keeps the exact-identity last-candidate health effect; a
+        // response-less failure does not.
+        && (provider_status.is_some_and(|status| status < 400)
             || provider_body_read_failure.is_some())
 }
 
@@ -1036,9 +1037,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     let has_alternative = matches!(&resolution, V3RelayProviderTargetResolution::Selected(_));
     // Resolve another eligible identity before any health mutation. A terminal
     // attempt publishes diagnostics only; it does not update health or actions.
-    // A typed transport failure still owns its exact health identity when it is
-    // the request's last eligible candidate. Completed provider business
-    // responses and request-local compatibility failures keep the health-neutral
+    // A head-arrived transport failure (truncated body/stream) still owns its
+    // exact health identity when it is the request's last eligible candidate. A
+    // response-less transport failure, completed provider business response,
+    // and request-local compatibility failure keep the health-neutral
     // last-candidate boundary; a real 429 backpressure owns its own lane.
     let health_record = if is_request_local_compat_failure
         || (!has_alternative && status != 429 && !is_transport_failure)

@@ -911,21 +911,6 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 .as_ref()
                 .and_then(|error| error.code.as_deref()),
         );
-    // A provider HTTP error that really arrived carries an upstream status and
-    // must not be classified as a transport failure. Only a response-less
-    // transport failure keeps the exact-identity last-candidate health effect.
-    let has_completed_upstream_http_error = source
-        .external_error
-        .as_ref()
-        .and_then(|error| error.status)
-        .is_some_and(|external_status| external_status >= 400);
-    // A provider transport failure has no completed upstream HTTP error status.
-    // It is a typed provider failure, so the last-candidate terminal boundary
-    // must not suppress its exact-identity health effect.
-    let is_transport_failure = source.source_kind == V3ErrorSourceKind::ProviderFailure
-        && source.code == "provider_transport_error"
-        && !has_completed_upstream_http_error
-        && observed_status == 502;
     let failed_key = candidate_key(&selected.candidate);
     let expanded_candidates = match (context.expanded, context.provider_pinned) {
         (Some(expanded), _) => Some(&expanded.candidates),
@@ -1050,11 +1035,8 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         state.failed_candidates.insert(failed_key.clone());
     }
     // Health changes are allowed only after the captured target proves that
-    // another eligible, untried identity can take this request. A typed
-    // transport failure still owns its exact identity even as the last
-    // candidate; a real 429 backpressure keeps its own capacity-wait lane.
-    let health_record = if is_health_neutral_failure
-        || (remaining == 0 && !rate_limited && !is_transport_failure)
+    // another eligible, untried identity can take this request.
+    let health_record = if is_health_neutral_failure || (remaining == 0 && !rate_limited)
     {
         V3ProviderFailureRecord {
             scope_label: failed_key.clone(),
