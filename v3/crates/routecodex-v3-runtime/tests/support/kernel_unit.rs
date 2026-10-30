@@ -1530,6 +1530,101 @@ async fn transport_provider_failure_publishes_no_upstream_status_to_observabilit
 }
 
 #[tokio::test]
+async fn direct_stream_transport_failure_preserves_upstream_header_provenance() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct StreamReadFailsThenSecondSucceeds {
+        sends: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ResponsesTransport for StreamReadFailsThenSecondSucceeds {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            if self.sends.fetch_add(1, Ordering::SeqCst) == 0 {
+                assert_eq!(request.provider_id(), "first");
+                let headers = vec![
+                    V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"text/event-stream".to_vec(),
+                    },
+                    V3ProviderResponseHeader {
+                        name: "x-request-id".to_string(),
+                        value: b"upstream-direct-request".to_vec(),
+                    },
+                ];
+                return Ok(V3ProviderResp14Raw::from_sse(
+                    request.request_id().to_string(),
+                    request.provider_id().to_string(),
+                    200,
+                    headers.clone(),
+                    Box::pin(stream::iter([Err(
+                        V3ProviderError::ResponseBodyUnreadable {
+                            request_id: request.request_id().to_string(),
+                            provider_id: request.provider_id().to_string(),
+                            status: 200,
+                            headers,
+                            reason: "provider stream closed before the first frame".to_string(),
+                        },
+                    )])),
+                ));
+            }
+            assert_eq!(request.provider_id(), "second");
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                br#"{"id":"resp_second","output_text":"ok"}"#.to_vec(),
+            ))
+        }
+    }
+
+    let routing_group = "direct_stream_transport_provenance";
+    let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req-direct-stream-provenance",
+        "exec-direct-stream-provenance",
+        json!({"model":"client-model","input":"hello","stream":true}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let transport = StreamReadFailsThenSecondSucceeds {
+        sends: AtomicUsize::new(0),
+    };
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
+    let event = output
+        .observability
+        .as_ref()
+        .and_then(|observability| observability.provider_failure_events.first())
+        .expect("the failed Direct provider stream must publish one failure event");
+    assert_eq!(event.external_error_kind.as_deref(), Some("transport"));
+    assert_eq!(event.external_error_status, Some(200));
+    assert_eq!(
+        event.upstream_request_id.as_deref(),
+        Some("upstream-direct-request")
+    );
+}
+
+#[tokio::test]
 async fn provider_internal_transport_request_lane_recovers_without_client_error() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
