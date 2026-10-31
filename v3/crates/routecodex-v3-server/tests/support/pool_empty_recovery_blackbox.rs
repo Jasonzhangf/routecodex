@@ -155,6 +155,212 @@ async fn issue44cc3af_first_byte_stall_keeps_sibling_requests_independent() {
     std::env::remove_var("V3_P6_TEST_KEY");
 }
 
+/// Diagnostic upstream: answers `200` with a real SSE head and one event, then
+/// keeps the body open and never sends the promised remaining bytes. The client
+/// `request_timeout_ms` therefore fires while the body is still streaming.
+async fn start_partial_then_stalled_sse_upstream(
+    attempts: Arc<std::sync::atomic::AtomicUsize>,
+) -> (String, oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        loop {
+            let accepted = tokio::select! {
+                _ = &mut shutdown_rx => break,
+                accepted = listener.accept() => accepted,
+            };
+            let Ok((mut socket, _)) = accepted else {
+                break;
+            };
+            let attempts = Arc::clone(&attempts);
+            tokio::spawn(async move {
+                let mut request = [0u8; 8192];
+                let _ = socket.read(&mut request).await;
+                attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                // Only a non-semantic SSE comment: the first-frame guard keeps
+                // waiting for a semantic event until the client request timeout
+                // fires during the body read.
+                let body = b": keepalive\n\n";
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\
+                     content-length: {}\r\nconnection: close\r\n\r\n",
+                    body.len() + 1024,
+                );
+                let _ = socket.write_all(head.as_bytes()).await;
+                let _ = socket.write_all(body).await;
+                let _ = socket.flush().await;
+                // Hold the body open until the runtime aborts the attempt.
+                let mut sink = [0u8; 1];
+                let _ = socket.read(&mut sink).await;
+            });
+        }
+    });
+    (format!("http://{address}/v1"), shutdown_tx)
+}
+
+#[tokio::test]
+async fn issue9bb26d4_timeout_mid_body_reselects_eligible_peer() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("9bb26d4-timeout-mid-body");
+    std::env::set_var("V3_P6_TEST_KEY", "test-key");
+    let failing_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (failing_url, failing_shutdown) =
+        start_partial_then_stalled_sse_upstream(Arc::clone(&failing_attempts)).await;
+    let (healthy_url, mut healthy_requests, healthy_shutdown) = start_controlled_upstream().await;
+    let mut manifest = concurrency_switch_manifest(&failing_url, &healthy_url);
+    use_native_direct_responses(&mut manifest);
+    for provider in manifest.providers.values_mut() {
+        if provider.base_url == failing_url {
+            provider.request_timeout_ms = 800;
+            provider.sse_first_frame_timeout_ms = Some(5_000);
+        }
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let response = reqwest::Client::new()
+        .post(&endpoint)
+        .header("session-id", "9bb26d4-timeout-mid-body")
+        .json(&json!({"model":"client-test","input":"provider body timeout","stream":true}))
+        .send()
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "a provider body timeout with an eligible peer must not break the client \
+                 transport: {error}"
+            )
+        });
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "a provider body timeout with an eligible peer must reselect and answer 200, never \
+         project a client error status"
+    );
+    let body = response
+        .text()
+        .await
+        .unwrap_or_else(|error| panic!("client body must complete after reselection: {error}"));
+    assert_responses_sse_delivered_business_text(&body, "controlled SSE response");
+    assert!(
+        !body.contains("\"error\""),
+        "the client must never receive a provider/proxy error payload: {body}"
+    );
+    assert!(
+        failing_attempts.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+        "the stalled provider must be attempted before reselection"
+    );
+    timeout(Duration::from_secs(2), healthy_requests.recv())
+        .await
+        .expect("the eligible peer must receive the reselected attempt")
+        .unwrap();
+    handle.shutdown().await;
+    failing_shutdown.send(()).unwrap();
+    healthy_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+/// Diagnostic upstream: answers `200` SSE, emits a real semantic
+/// `response.created` event, then keeps the body open. The client
+/// `request_timeout_ms` fires while reading the body, producing
+/// `provider_response_body_error` at `V3ProviderResp14Raw` after a semantic
+/// first frame already crossed the first-event guard.
+async fn start_semantic_then_stalled_sse_upstream(
+    attempts: Arc<std::sync::atomic::AtomicUsize>,
+) -> (String, oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        loop {
+            let accepted = tokio::select! {
+                _ = &mut shutdown_rx => break,
+                accepted = listener.accept() => accepted,
+            };
+            let Ok((mut socket, _)) = accepted else {
+                break;
+            };
+            let attempts = Arc::clone(&attempts);
+            tokio::spawn(async move {
+                let mut request = [0u8; 8192];
+                let _ = socket.read(&mut request).await;
+                attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let body = b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_semantic_stall\",\"status\":\"in_progress\"}}\n\n";
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\
+                     content-length: {}\r\nconnection: close\r\n\r\n",
+                    body.len() + 4096,
+                );
+                let _ = socket.write_all(head.as_bytes()).await;
+                let _ = socket.write_all(body).await;
+                let _ = socket.flush().await;
+                // Hold the body open until the client request timeout aborts it.
+                let mut sink = [0u8; 1];
+                let _ = socket.read(&mut sink).await;
+            });
+        }
+    });
+    (format!("http://{address}/v1"), shutdown_tx)
+}
+
+#[tokio::test]
+async fn issue9bb26d4_semantic_then_stall_body_timeout_reselects_eligible_peer() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("9bb26d4-semantic-mid-body");
+    std::env::set_var("V3_P6_TEST_KEY", "test-key");
+    let failing_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (failing_url, failing_shutdown) =
+        start_semantic_then_stalled_sse_upstream(Arc::clone(&failing_attempts)).await;
+    let (healthy_url, mut healthy_requests, healthy_shutdown) = start_controlled_upstream().await;
+    let mut manifest = concurrency_switch_manifest(&failing_url, &healthy_url);
+    use_native_direct_responses(&mut manifest);
+    for provider in manifest.providers.values_mut() {
+        if provider.base_url == failing_url {
+            provider.request_timeout_ms = 500;
+            provider.sse_first_frame_timeout_ms = Some(5_000);
+        }
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let response = reqwest::Client::new()
+        .post(&endpoint)
+        .header("session-id", "9bb26d4-semantic-mid-body")
+        .json(&json!({"model":"client-test","input":"semantic then stall","stream":true}))
+        .send()
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "a provider body timeout after a semantic first frame with an eligible peer \
+                 must not break the client transport: {error}"
+            )
+        });
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "must reselect and answer 200, never project a client error status"
+    );
+    let body = response
+        .text()
+        .await
+        .unwrap_or_else(|error| panic!("client body must complete after reselection: {error}"));
+    assert_responses_sse_delivered_business_text(&body, "controlled SSE response");
+    assert!(
+        !body.contains("\"error\""),
+        "client must never receive a provider/proxy error payload: {body}"
+    );
+    assert!(
+        failing_attempts.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+        "the stalled provider must be attempted before reselection"
+    );
+    timeout(Duration::from_secs(2), healthy_requests.recv())
+        .await
+        .expect("eligible peer must receive reselected attempt")
+        .unwrap();
+    handle.shutdown().await;
+    failing_shutdown.send(()).unwrap();
+    healthy_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn issue44cc3af_inactive_window_does_not_spin_or_block_http() {
     let _guard = TEST_LOCK.lock().await;
@@ -3715,5 +3921,112 @@ async fn assert_request_independence_same_session(direct: bool) {
         let _ = peer.shutdown.send(());
         peer.task.abort();
     }
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+/// Raw TCP upstream that returns a real `200` SSE head, one partial event, then
+/// closes before the `content-length` it promised.
+///
+/// Axum always frames a body consistently with `content-length`, so a truncated
+/// body that fails *after* the head was parsed can only be produced by speaking
+/// HTTP over a raw socket. `connection: close` plus an over-declared length makes
+/// the early FIN an incomplete-message read error rather than a legal
+/// close-delimited end. The provider crate maps that read failure to
+/// `V3Error01` `provider_response_body_error` at `V3ProviderResp14Raw`, which is
+/// exactly the F0 terminal source.
+async fn start_truncated_sse_body_upstream(
+    attempts: Arc<std::sync::atomic::AtomicUsize>,
+) -> (String, oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        loop {
+            let accepted = tokio::select! {
+                _ = &mut shutdown_rx => break,
+                accepted = listener.accept() => accepted,
+            };
+            let Ok((mut socket, _)) = accepted else {
+                break;
+            };
+            let attempts = Arc::clone(&attempts);
+            tokio::spawn(async move {
+                let mut request = [0u8; 8192];
+                let _ = socket.read(&mut request).await;
+                attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let body = b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_body_read_failure\",\"status\":\"in_progress\"}}\n\n";
+                // Promise more bytes than are sent so the FIN is an incomplete
+                // body, not a legal end of a close-delimited stream.
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\
+                     content-length: {}\r\nconnection: close\r\n\r\n",
+                    body.len() + 512,
+                );
+                let _ = socket.write_all(head.as_bytes()).await;
+                let _ = socket.write_all(body).await;
+                let _ = socket.flush().await;
+                let _ = socket.shutdown().await;
+            });
+        }
+    });
+    (format!("http://{address}/v1"), shutdown_tx)
+}
+
+/// 9bb26d4 (F0) regression: a provider response-body read failure while an
+/// eligible candidate remains must reselect and deliver the peer's real business
+/// response. It must never surface a client 502, an error payload, or a client
+/// transport break: proxy-owned request termination is forbidden while recovery
+/// remains.
+#[tokio::test]
+async fn issue9bb26d4_direct_provider_body_read_failure_reselects_eligible_peer() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("9bb26d4-body-read-reselect");
+    std::env::set_var("V3_P6_TEST_KEY", "test-key");
+    let failing_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (failing_url, failing_shutdown) =
+        start_truncated_sse_body_upstream(Arc::clone(&failing_attempts)).await;
+    let (healthy_url, mut healthy_requests, healthy_shutdown) = start_controlled_upstream().await;
+    let mut manifest = concurrency_switch_manifest(&failing_url, &healthy_url);
+    use_native_direct_responses(&mut manifest);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let response = reqwest::Client::new()
+        .post(&endpoint)
+        .header("session-id", "9bb26d4-body-read")
+        .json(&json!({"model":"client-test","input":"provider body read failure","stream":true}))
+        .send()
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "a provider body-read failure with an eligible peer must not break the \
+                 client transport: {error}"
+            )
+        });
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "a provider body-read failure with an eligible peer must reselect and answer 200, \
+         never project a client error status"
+    );
+    let body = response
+        .text()
+        .await
+        .unwrap_or_else(|error| panic!("client body must complete after reselection: {error}"));
+    assert_responses_sse_delivered_business_text(&body, "controlled SSE response");
+    assert!(
+        !body.contains("\"error\""),
+        "the client must never receive a provider/proxy error payload: {body}"
+    );
+    assert!(
+        failing_attempts.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+        "the truncated provider must be attempted before reselection"
+    );
+    timeout(Duration::from_secs(2), healthy_requests.recv())
+        .await
+        .expect("the eligible peer must receive the reselected attempt")
+        .unwrap();
+    handle.shutdown().await;
+    failing_shutdown.send(()).unwrap();
+    healthy_shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
 }
