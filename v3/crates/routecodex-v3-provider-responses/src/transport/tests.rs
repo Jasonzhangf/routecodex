@@ -793,6 +793,179 @@ async fn responses_http_transport_uses_sse_first_frame_timeout_for_header_wait()
     }
 }
 
+#[tokio::test]
+async fn responses_http_transport_keeps_streaming_body_past_the_whole_request_wall_clock() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // F0 mechanism (issue 5c24057): `request_timeout_ms` and
+    // `sse_first_frame_timeout_ms` are equal, and the reqwest per-request total
+    // timeout covered the lazily-read SSE body, cutting a still-flowing business
+    // response at the whole-request wall clock (120007 ms) and turning it into a
+    // provider error that projected a client-facing 502. The whole-request wall
+    // clock and the first-frame wait are separate budgets: once the first frame
+    // has arrived, a response that keeps flowing must not be cut.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let frame_count = 10_u32;
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let n = stream.read(&mut buffer).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..n]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n";
+        stream.write_all(head.as_bytes()).await.unwrap();
+        for index in 0..frame_count {
+            let frame = format!(
+                "data: {{\"type\":\"response.output_text.delta\",\"delta\":\"frame-{index}\"}}\n\n"
+            );
+            let chunk = format!("{:x}\r\n{}\r\n", frame.len(), frame);
+            stream.write_all(chunk.as_bytes()).await.unwrap();
+            stream.flush().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let terminal = "data: [DONE]\n\n";
+        let chunk = format!("{:x}\r\n{}\r\n0\r\n\r\n", terminal.len(), terminal);
+        stream.write_all(chunk.as_bytes()).await.unwrap();
+        stream.flush().await.unwrap();
+    });
+
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-sse-streaming-body",
+            "inferai-test",
+            format!("http://{addr}/v1/chat/completions"),
+            V3ProviderAuthHandle {
+                alias: "key2".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-sse-streaming-body".into()),
+            },
+            V3ResponsesStreamIntent::Sse,
+            json!({"model":"deepseek-v4.1-flash","stream":true}),
+            Vec::new(),
+            // The whole-request wall clock equals the first-frame budget, exactly
+            // the F0 coupling that cut a healthy stream at 120s.
+            Some(Duration::from_millis(300)),
+            60_000,
+            Some(300),
+        )
+        .unwrap();
+
+    let started = tokio::time::Instant::now();
+    let raw = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect("the first frame must arrive within the first-frame budget");
+    let body = raw
+        .into_body_bytes()
+        .await
+        .expect("a still-flowing SSE body must not be cut by the whole-request wall clock");
+    server.abort();
+
+    let text = String::from_utf8_lossy(&body);
+    assert!(
+        text.contains("frame-9"),
+        "the last business frame must arrive past the whole-request wall clock, got {text:?}"
+    );
+    assert!(
+        text.contains("[DONE]"),
+        "the terminal frame must arrive past the whole-request wall clock, got {text:?}"
+    );
+    assert!(
+        started.elapsed() >= Duration::from_millis(500),
+        "the stream must keep flowing past the whole-request wall clock; elapsed {:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test]
+async fn responses_http_transport_keeps_whole_request_budget_for_a_finite_json_body() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // The decoupling is SSE-only. A finite JSON response is read in full, so the
+    // whole-request wall clock must still cut a body that is still trickling
+    // after the budget. This locks the Json branch of the changed conditional.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let n = stream.read(&mut buffer).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..n]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 16\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        // Trickle the JSON body far past the whole-request wall clock; the
+        // client read timeout (900s) must not be what stops it here.
+        stream.write_all(b"{\"done\":\"").await.unwrap();
+        stream.flush().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        stream.write_all(b"false\"}").await.unwrap();
+        stream.flush().await.unwrap();
+    });
+
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-json-trickle",
+            "inferai-test",
+            format!("http://{addr}/v1/chat/completions"),
+            V3ProviderAuthHandle {
+                alias: "key2".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-json-trickle".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"deepseek-v4.1-flash","stream":false}),
+            Vec::new(),
+            Some(Duration::from_millis(300)),
+            60_000,
+            Some(300),
+        )
+        .unwrap();
+
+    let started = tokio::time::Instant::now();
+    let error = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("a trickling JSON body must be cut by the whole-request wall clock");
+    server.abort();
+
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "the whole-request budget, not the client read timeout, must cut the JSON body; elapsed {:?}",
+        started.elapsed()
+    );
+    match error {
+        // A 2xx body read cut is a response-body failure, not a transport
+        // failure; the decoupling must not change that classification.
+        V3ProviderError::ResponseBodyUnreadable { reason, .. } => {
+            assert!(
+                reason.contains("operation timed out") || reason.contains("timed out"),
+                "expected a timeout reason, got {reason}"
+            );
+        }
+        other => panic!("expected response body unreadable, got {other:?}"),
+    }
+}
+
 async fn spawn_http_error_response(
     status: u16,
     headers: &[(&str, &str)],
