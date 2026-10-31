@@ -637,6 +637,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 &selected,
                 source,
                 503,
+                last_external_http.as_ref(),
                 &mut V3DirectProviderFailurePolicyState {
                     failed_candidates: &mut failed_candidates,
                     same_candidate_retries: &mut same_candidate_retries,
@@ -1044,6 +1045,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &policy.target,
                     source,
                     502,
+                    last_external_http.as_ref(),
                     &mut V3DirectProviderFailurePolicyState {
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
@@ -1272,6 +1274,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &policy.target,
                     source,
                     provider_status,
+                    last_external_http.as_ref(),
                     &mut V3DirectProviderFailurePolicyState {
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
@@ -1437,6 +1440,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &policy.target,
                     source,
                     provider_status,
+                    last_external_http.as_ref(),
                     &mut V3DirectProviderFailurePolicyState {
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
@@ -1700,6 +1704,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 &policy.target,
                                 source,
                                 provider_status,
+                                last_external_http.as_ref(),
                                 &mut V3DirectProviderFailurePolicyState {
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,

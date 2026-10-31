@@ -873,6 +873,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     source: V3Error01SourceRaised,
     status: u16,
+    provider_http_witness: Option<&V3ExternalHttpWitness>,
     state: &mut V3DirectProviderFailurePolicyState<'_>,
 ) -> Result<V3DirectProviderFailurePolicyResult, DirectPolicyFailure> {
     if matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect) {
@@ -910,6 +911,32 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 .external_error
                 .as_ref()
                 .and_then(|error| error.code.as_deref()),
+        );
+    // Direct passes `status` as a fallback/provider status (502, 503, or the
+    // upstream status), not always the internal 502 cause the shared classifier
+    // expects. Derive the transport class from the witness instead: a received
+    // head (upstream status < 400) or an explicit body-read failure is a
+    // truncated transport even when it is the last eligible candidate. A
+    // response-less failure (no head) or a completed upstream HTTP error
+    // (`>= 400`) stays outside the transport class and keeps its health-neutral
+    // last-candidate boundary.
+    let transport_internal_status = provider_http_witness
+        .map(|witness| {
+            if witness.status() < 400 || witness.body_read_failure().is_some() {
+                502u16
+            } else {
+                0u16
+            }
+        })
+        .unwrap_or(0);
+    let is_transport_failure = source.source_kind == V3ErrorSourceKind::ProviderFailure
+        && crate::provider_failure_runtime_policy::is_provider_transport_failure(
+            source.source_stage,
+            transport_internal_status,
+            Some(source.code.as_str()),
+            Some(selected.candidate.provider_type.as_str()),
+            provider_http_witness.map(V3ExternalHttpWitness::status),
+            provider_http_witness.and_then(V3ExternalHttpWitness::body_read_failure),
         );
     let failed_key = candidate_key(&selected.candidate);
     let expanded_candidates = match (context.expanded, context.provider_pinned) {
@@ -1035,8 +1062,13 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         state.failed_candidates.insert(failed_key.clone());
     }
     // Health changes are allowed only after the captured target proves that
-    // another eligible, untried identity can take this request.
-    let health_record = if is_health_neutral_failure || (remaining == 0 && !rate_limited) {
+    // another eligible, untried identity can take this request. A head-arrived
+    // transport failure still owns its exact identity as the last candidate; a
+    // response-less pre-head failure and a completed provider HTTP error stay
+    // on the health-neutral last-candidate boundary.
+    let health_record = if is_health_neutral_failure
+        || (remaining == 0 && !rate_limited && !is_transport_failure)
+    {
         V3ProviderFailureRecord {
             scope_label: failed_key.clone(),
             provider_key: failed_key.clone(),
