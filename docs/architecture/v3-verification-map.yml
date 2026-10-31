@@ -3459,9 +3459,11 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue231_responses_relay_stale_probe_public_blackbox -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue245_permission_11128_search_continuation_public_blackbox -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox db1f482_complete_upstream_http_502_keeps_last_candidate_health_neutral -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox db1f482_direct_last_candidate_truncated_http_200_cools_exact_identity_at_public_entry -- --exact --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox db1f482_truncated_openai_chat_sse_cools_exact_identity_at_public_entry -- --exact --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox db1f482_truncated_openai_chat_sse_relay_cools_exact_identity_at_public_entry -- --exact --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox db1f482_relay_client_disconnect_keeps_candidate_health_neutral_at_public_entry -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test openai_chat_truncated_200_health_contract openai_chat_direct_truncated_200_cools_exact_identity_when_it_is_the_last_candidate -- --exact --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration partial_client_disconnect_is_health_neutral_and_never_reselects -- --exact --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration partial_content_with_untyped_disconnect_cools_and_reselects_counterexample -- --exact --nocapture --test-threads=1
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test provider_account_pool_blackbox

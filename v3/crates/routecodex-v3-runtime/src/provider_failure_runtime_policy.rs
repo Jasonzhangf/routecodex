@@ -188,7 +188,9 @@ pub(crate) fn is_provider_transport_failure(
     // Gemini uncommitted-SSE EOF is a health-neutral request-local boundary, so
     // this semantic protocol discriminator excludes the Gemini wire from
     // transport-failure cooling; it is not a test-name special case.
-    source_stage == "V3ProviderReqOutbound09TransportRequest"
+    (source_stage == "V3ProviderReqOutbound09TransportRequest"
+        || source_stage == "V3Transport13ResponsesHttpRequest"
+        || source_stage == "V3ProviderResp14Raw")
         && status == 502
         // The generic Relay lane names this class `provider_error`; the
         // Responses Relay lane reports the same typed transport class under
@@ -196,7 +198,9 @@ pub(crate) fn is_provider_transport_failure(
         // truncated HTTP 200 body owns its exact identity in either lane.
         && matches!(
             error_type,
-            Some("provider_error") | Some("provider_transport_error")
+            Some("provider_error")
+                | Some("provider_transport_error")
+                | Some("provider_response_sse_stream")
         )
         && provider_type != Some("gemini")
         // A completed upstream HTTP error is not a transport failure. Only a

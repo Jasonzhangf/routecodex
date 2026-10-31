@@ -1203,6 +1203,128 @@ async fn db1f482_complete_upstream_http_502_keeps_last_candidate_health_neutral(
     std::env::remove_var(KEY_ENV);
 }
 
+/// db1f482 Direct last-candidate regression at the real public HTTP entry: a
+/// truncated provider HTTP 200 SSE body has a real upstream response head, so it
+/// is a typed provider transport failure even when the failed key is the only
+/// eligible identity. It must exclude the exact provider/interface/key/model
+/// identity from the next attempt, leave a configured sibling key untouched,
+/// keep the client free of provider error payloads, and retain a recovery path
+/// for the exact identity (the follow-up finishes the healthy stream).
+#[tokio::test]
+async fn db1f482_direct_last_candidate_truncated_http_200_cools_exact_identity_at_public_entry() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(KEY_ENV, "controlled-secret");
+    const KEY1_ENV: &str = "DB1F482_LAST_CANDIDATE_KEY1";
+    std::env::set_var(KEY1_ENV, "db1f482-last-key1-secret");
+    let partial = format!(
+        "data: {}\n\n",
+        json!({
+            "id": "chatcmpl_truncated_last",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "wire-test",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "partial-last-candidate"},
+                "finish_reason": null
+            }]
+        })
+    );
+    let healthy = format!(
+        "data: {}\n\ndata: [DONE]\n\n",
+        json!({
+            "id": "chatcmpl_recovered_last",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "wire-test",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "recovered-last-candidate"},
+                "finish_reason": "stop"
+            }]
+        })
+    );
+    let (endpoint, handle, mut captures, _headers, shutdown) = start_entry_configured(
+        "openai_chat",
+        "chat",
+        StatusCode::OK,
+        "text/event-stream",
+        partial.clone(),
+        EntryOptions {
+            health_enabled: true,
+            attempt_bodies: vec![partial.clone(), partial, healthy.clone(), healthy],
+            auth_entries: vec![("key1".into(), KEY1_ENV.into())],
+            pin_key: Some("key1".into()),
+            execution_mode: Some("direct".into()),
+            sibling_model: Some("sibling".into()),
+            health_failure_threshold: Some(1),
+            ..EntryOptions::default()
+        },
+    )
+    .await;
+    let base = endpoint.trim_end_matches("/v1/responses");
+    let first = consume_response(
+        client()
+            .post(format!("{base}/v1/chat/completions"))
+            .json(&json!({
+                "model": "test.test",
+                "messages": [{"role": "user", "content": "db1f482 direct truncated last candidate"}],
+                "stream": true
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    assert!(
+        first.transport_error.is_some(),
+        "the last eligible candidate has no fallback and must terminate only the request transport: {first:?}"
+    );
+    assert_no_error_payload(&first.body);
+    assert!(
+        !first.body.contains("partial-last-candidate") && !first.body.contains("[DONE]"),
+        "the truncated attempt must not leak partial business content or a fabricated terminal: {first:?}"
+    );
+
+    let recovered = consume_response(
+        client()
+            .post(format!("{base}/v1/chat/completions"))
+            .json(&json!({
+                "model": "test.test",
+                "messages": [{"role": "user", "content": "db1f482 direct recovered last candidate"}],
+                "stream": true
+            }))
+            .send()
+            .await,
+    )
+    .await;
+    assert_no_error_payload(&recovered.body);
+    assert!(
+        !recovered.body.contains("partial-last-candidate"),
+        "the cooled exact identity must not be retried by the follow-up: {recovered:?}"
+    );
+    assert!(
+        recovered.body.contains("recovered-last-candidate") && recovered.body.contains("[DONE]"),
+        "the recovered exact identity must serve visible business content: {recovered:?}"
+    );
+
+    stop_entry(handle, shutdown).await;
+    let mut last_candidate_attempts = 0;
+    while let Some(capture) = captures.recv().await {
+        if capture
+            .to_string()
+            .contains("db1f482 direct truncated last candidate")
+        {
+            last_candidate_attempts += 1;
+        }
+    }
+    assert_eq!(
+        last_candidate_attempts, 1,
+        "only the first request may enter the exact last-eligible identity; the cooled identity must not be retried by the follow-up"
+    );
+    std::env::remove_var(KEY_ENV);
+    std::env::remove_var(KEY1_ENV);
+}
+
 /// Stable public ID: a coalesced CRLF provider chunk must keep every event when
 /// the refill live sink shifts request-wide output indexes.
 #[tokio::test]
@@ -6006,7 +6128,9 @@ struct EntryOptions {
     execution_mode: Option<String>,
     capture_headers: bool,
     model_key: Option<String>,
+    sibling_model: Option<String>,
     wire_model: Option<String>,
+    health_failure_threshold: Option<u32>,
     live_forward: Option<LiveForward>,
     two_provider_route: bool,
     hold_attempt_open: bool,
@@ -6033,7 +6157,9 @@ impl Default for EntryOptions {
             execution_mode: None,
             capture_headers: false,
             model_key: None,
+            sibling_model: None,
             wire_model: None,
+            health_failure_threshold: None,
             live_forward: None,
             two_provider_route: false,
             hold_attempt_open: false,
@@ -6150,7 +6276,9 @@ async fn start_entry_configured(
         capture_headers,
         mixed,
         model_key,
+        sibling_model,
         wire_model,
+        health_failure_threshold,
         live_forward,
         two_provider_route,
         hold_attempt_open,
@@ -6232,6 +6360,12 @@ async fn start_entry_configured(
         .unwrap_or_default();
     let model_key = model_key.as_deref().unwrap_or("test");
     let wire_model = wire_model.as_deref().unwrap_or("wire-test");
+    let health_failure_threshold = health_failure_threshold.unwrap_or(2);
+    let sibling_model_declaration = sibling_model.as_deref().map_or_else(String::new, |model| {
+        format!(
+            "        [providers.test.models.\"{model}\"]\nwire_name = \"{wire_model}\"\ncapabilities = [\"text\", \"tools\", \"vision\"]\nsupports_streaming = true\nmax_tokens = 4096\nmax_context_tokens = 128000\n"
+        )
+    });
     // Anthropic's transport appends /v1/messages; Responses and Chat append
     // their endpoint to an API base that already includes /v1.
     let provider_base_url = if kind == "anthropic" {
@@ -6254,7 +6388,7 @@ type = "{kind}"
 base_url = "{provider_base_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{auth_entries_toml}] }}
-health = {{ enabled = {health_enabled}, failure_threshold = 2, cooldown_ms = 5000 }}
+health = {{ enabled = {health_enabled}, failure_threshold = {health_failure_threshold}, cooldown_ms = 5000 }}
 responses = {{ process = "{process}", streaming = "always" }}
         [providers.test.models."{model_key}"]
 wire_name = "{wire_model}"
@@ -6264,6 +6398,7 @@ capabilities = ["text", "tools", "vision"]
 supports_streaming = true
 max_tokens = 4096
 max_context_tokens = 128000
+{sibling_model_declaration}
 [providers.independent]
 type = "responses"
 base_url = "http://{upstream_addr}/v1"

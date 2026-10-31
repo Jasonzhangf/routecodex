@@ -1,8 +1,8 @@
-//! db1f482 regression on the OpenAI Chat relay boundary: a truncated provider
-//! HTTP 200 SSE body is a typed provider transport failure. Its health effect
-//! must bind the exact `provider.interfaces.auth.key.model` identity only; it
-//! must not cool untried keys, other models, or other providers, and must hold
-//! even when the failed identity is the request's last eligible candidate.
+//! db1f482 regression on the OpenAI Chat boundary: a truncated provider HTTP
+//! 200 SSE body is a typed provider transport failure. Its health effect must
+//! bind the exact `provider.interfaces.auth.key.model` identity only; it must
+//! not cool untried keys, other models, or other providers, and must hold even
+//! when the failed identity is the request's last eligible candidate.
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -12,8 +12,10 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_openai_chat_relay_runtime_with_provider_health, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3ResponsesRelayProviderHealthHandle,
+    execute_v3_direct_runtime_kernel_core,
+    execute_v3_openai_chat_relay_runtime_with_provider_health, V3ChatDirectCodec,
+    V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3RequestPurpose,
+    V3ResponsesRelayProviderHealthHandle,
 };
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -274,5 +276,88 @@ async fn openai_chat_truncated_200_switches_without_cooling_other_identities() {
             )
             .available,
         "the untried secondary provider must stay routable"
+    );
+}
+
+#[tokio::test]
+async fn openai_chat_direct_truncated_200_cools_exact_identity_when_it_is_the_last_candidate() {
+    let scope = "openai_chat_direct_truncated_last";
+    let transport = TruncatedSseTransport {
+        turn: AtomicUsize::new(0),
+    };
+    let manifest = manifest(scope, false);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let health = provider_health.runtime_health();
+    let request_id = format!("req-{scope}");
+    let server_port = manifest.servers[scope].port;
+    let failure_session_scope =
+        routecodex_v3_error::V3ProviderFailureSessionScope::new(scope, scope, &request_id)
+            .expect("direct test provider failure session scope")
+            .with_transport_handoff_scope(request_id.clone(), server_port, 1)
+            .expect("direct test transport handoff scope");
+    let raw = routecodex_v3_runtime::build_v3_server_03_http_request_raw_with_purpose_and_scope(
+        scope.into(),
+        failure_session_scope,
+        request_id.clone(),
+        request_id.clone(),
+        "POST".into(),
+        "/v1/chat/completions".into(),
+        V3RequestPurpose::Conversation,
+        Some(server_port),
+        Some(request_id),
+        json!({
+            "model": "chat-client-alias",
+            "messages": [{"role": "user", "content": "direct truncated stream"}],
+            "stream": true
+        }),
+    );
+    let output = execute_v3_direct_runtime_kernel_core::<V3ChatDirectCodec, _>(
+        (),
+        &manifest,
+        raw,
+        &transport,
+        health.clone(),
+        u64::MAX,
+        true,
+        None,
+        None,
+    )
+    .await;
+
+    assert!(
+        output.client_payload.status != 200,
+        "a last eligible candidate with no fallback must terminate the transport: {output:?}"
+    );
+    let now = u64::MAX;
+    assert!(
+        !health
+            .availability_for_interface(
+                scope,
+                "default",
+                Some("key1"),
+                Some("chat-wire-model"),
+                now,
+            )
+            .available,
+        "a Direct last-candidate truncated HTTP 200 must exclude the exact provider identity: {output:?}"
+    );
+    assert!(
+        health
+            .availability_for_interface(scope, "default", Some("key1"), Some("other-model"), now,)
+            .available,
+        "a sibling model under the same provider and key must stay routable"
+    );
+    assert!(
+        health
+            .availability_for_interface(
+                scope,
+                "default",
+                Some("other-key"),
+                Some("chat-wire-model"),
+                now,
+            )
+            .available,
+        "a sibling key under the same provider and model must stay routable"
     );
 }
