@@ -77,6 +77,7 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
         &selected,
         source,
         502,
+        None,
         &mut V3DirectProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut retries,
@@ -309,6 +310,7 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
         &selected,
         source.clone(),
         200,
+        None,
         &mut V3DirectProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut retries,
@@ -834,6 +836,182 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
                 .available
         );
     }
+}
+
+#[tokio::test]
+async fn direct_last_candidate_truncated_http_200_cools_exact_identity_only() {
+    use crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth;
+    use routecodex_v3_error::V3ExternalHttpWitness;
+
+    // Two keys under one provider and a second provider give real sibling
+    // identities, not undeclared defaults, so isolation is provable.
+    let manifest =
+        provider_concurrency_two_key_then_other_provider_manifest("trunc_a", "trunc_b", 80);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let scope = test_failure_session_scope("default");
+    let raw = crate::nodes::build_v3_server_03_http_request_raw(
+        "test".into(),
+        scope.clone(),
+        "trunc-last-candidate".into(),
+        "trunc-last-candidate-exec".into(),
+        "POST".into(),
+        "/v1/responses".into(),
+        json!({"model":"client-model","input":"truncated http 200"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw, health.clone(), 0);
+    let exact = plan.expanded.candidates[0].clone();
+    let sibling_key = plan.expanded.candidates[1].clone();
+    let other_provider = plan.expanded.candidates[2].clone();
+    assert_eq!(exact.provider_id, "trunc_a");
+    assert_eq!(exact.auth_alias, "key1");
+    assert_eq!(exact.model_id, "test");
+    assert_eq!(sibling_key.provider_id, "trunc_a");
+    assert_eq!(sibling_key.auth_alias, "key2");
+    assert_eq!(other_provider.provider_id, "trunc_b");
+    let exact_key = candidate_key(&exact);
+
+    // Only the exact identity is eligible: the provider HTTP 200 head arrived,
+    // so remaining == 0 is the last-candidate case under test.
+    let mut single = plan.expanded.clone();
+    single.candidates = vec![exact.clone()];
+    let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
+        route: single.route.clone(),
+        candidate: exact.clone(),
+        candidate_count: 1,
+        unavailable_candidates: Vec::new(),
+        attempts: 1,
+        default_floor_protected: false,
+    };
+    let availability = health.session_bound_availability(&scope);
+    // The real Direct SSE truncation surface: source_kind ProviderFailure,
+    // stage V3ProviderResp14Raw, code provider_response_sse_stream.
+    let source = crate::shared::direct_external_error(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_response_sse_stream",
+        "provider SSE body ended without a protocol terminal",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: None,
+            code: Some("provider_response_sse_stream".to_string()),
+            provider_id: Some(exact.provider_id.clone()),
+            upstream_request_id: None,
+            message: Some("truncated HTTP 200 SSE body".to_string()),
+        },
+    )
+    .expect("typed truncated HTTP 200 source");
+    let witness = V3ExternalHttpWitness::new(
+        200,
+        vec![("content-type".to_string(), b"text/event-stream".to_vec())],
+        b"data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n".to_vec(),
+    );
+    let mut failed_candidates = BTreeSet::new();
+    let mut retries = std::collections::BTreeMap::new();
+    let mut trace = Vec::new();
+    let result = run_v3_direct_provider_failure_policy(
+        &V3DirectProviderFailurePolicyContext {
+            failure_session_scope: &scope,
+            provider_health: &health,
+            availability: &availability,
+            expanded: Some(&single),
+            provider_pinned: false,
+            now_epoch_ms: 0,
+        },
+        &selected,
+        source,
+        200,
+        Some(&witness),
+        &mut V3DirectProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut retries,
+            trace: &mut trace,
+        },
+    )
+    .await
+    .expect("truncated HTTP 200 direct transport policy");
+
+    let exact_availability = health.availability_for_interface(
+        &exact.provider_id,
+        &exact.interface_id,
+        Some(&exact.auth_alias),
+        Some(&exact.model_id),
+        0,
+    );
+    assert!(
+        !exact_availability.available,
+        "a Direct last-candidate truncated HTTP 200 must cool the exact provider.model.key; exact={exact_key} projection={exact_availability:?} event={:?}",
+        result
+            .event
+            .as_ref()
+            .map(|event| (event.status, event.failure_count, event.cooldown_until_ms)),
+    );
+    for (label, sibling) in [
+        ("sibling key", &sibling_key),
+        ("other provider", &other_provider),
+    ] {
+        let projection = health.availability_for_interface(
+            &sibling.provider_id,
+            &sibling.interface_id,
+            Some(&sibling.auth_alias),
+            Some(&sibling.model_id),
+            0,
+        );
+        assert!(
+            projection.available,
+            "{label} {} must remain routable after cooling the exact identity: {projection:?}",
+            candidate_key(sibling),
+        );
+    }
+
+    // Recovery path: a matching success releases the pending exact identity
+    // while an unrelated identity's success never revives this one.
+    let receipt = V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
+    health
+        .record_provider_success_in_failure_scope(
+            &receipt,
+            &scope,
+            &exact.provider_id,
+            Some(&exact.auth_alias),
+            Some("other-model"),
+            1,
+        )
+        .expect("unrelated success receipt");
+    assert!(
+        !health
+            .availability_for_interface(
+                &exact.provider_id,
+                &exact.interface_id,
+                Some(&exact.auth_alias),
+                Some(&exact.model_id),
+                1,
+            )
+            .available,
+        "an unrelated model's success must not release the cooled exact identity",
+    );
+    health
+        .record_provider_success_in_failure_scope(
+            &receipt,
+            &scope,
+            &exact.provider_id,
+            Some(&exact.auth_alias),
+            Some(&exact.model_id),
+            2,
+        )
+        .expect("exact-key success receipt");
+    crate::provider_failure_runtime_policy::tests::complete_due_precool_failures(&health, 3).await;
+    assert!(
+        health
+            .availability_for_interface(
+                &exact.provider_id,
+                &exact.interface_id,
+                Some(&exact.auth_alias),
+                Some(&exact.model_id),
+                3,
+            )
+            .available,
+        "the cooled exact identity must retain a recovery path",
+    );
+    assert!(failed_candidates.contains(&exact_key));
 }
 
 #[test]
