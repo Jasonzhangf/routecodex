@@ -170,63 +170,112 @@ test('fe1ec4b fixtures bind public JSON/SSE evidence and typed countercases', ()
   assert.ok(responsesSourceCipher.expected_client.body_must_not.includes('411bd3dd-47a6-49c0-8eef-6a826f349bf6-source'));
 });
 
-test('provider concurrency replay fixtures bind both execution modes and exact all-busy evidence', () => {
+test('provider request independence fixtures bind Direct/Relay and arrival or typed recovery evidence', () => {
   const loaded = loadFixtures(realFixtureRoot);
   const byId = new Map(loaded.map(({ value }) => [value.case_id, value]));
-  for (const [caseId, mode] of [
-    ['issue-745f6e9-provider-concurrency-all-busy-direct', 'direct'],
-    ['issue-745f6e9-provider-concurrency-all-busy-relay', 'relay'],
-  ]) {
+  const cases = [
+    ['issue-745f6e9-provider-concurrency-all-busy-direct', 'direct', 'held_concurrent_requests'],
+    ['issue-745f6e9-provider-concurrency-all-busy-relay', 'relay', 'held_concurrent_requests'],
+    ['issue-745f6e9-provider-concurrency-mixed-exclusion-direct', 'direct', 'failure_isolation'],
+    ['issue-745f6e9-provider-concurrency-mixed-exclusion-relay', 'relay', 'failure_isolation'],
+  ];
+  for (const [caseId, mode, shape] of cases) {
     const value = byId.get(caseId);
     assert.ok(value, caseId);
     assert.equal(value.cell.mode, mode);
-    assert.equal(value.runtime_setup.provider_concurrency.maxInFlight, 1);
-    assert.equal(value.concurrency_replay.kind, 'provider_concurrency_all_busy');
-    assert.equal(value.concurrency_replay.upstream_business_sends, 1);
-    assert.deepEqual(value.concurrency_replay.typed_error_codes, ['provider_concurrency_busy']);
-    assert.equal(value.concurrency_replay.expected_exhaustion_client.error_codes_must_not[0], 'ETIMEDOUT');
-    const holderSession = value.client_request.headers['session-id'];
-    const exhaustedSession = value.concurrency_replay.exhaustion_client_request.headers['session-id'];
-    assert.notEqual(holderSession, exhaustedSession);
+    assert.equal(value.runtime_setup.provider_concurrency, undefined);
+    assert.equal(value.concurrency_replay, undefined);
+    assert.equal(value.request_independence_replay.kind, 'provider_request_independence');
+    assert.equal(value.request_independence_replay.shape, shape);
+    assert.ok(value.request_independence_replay.typed_error_codes_must_not.includes('provider_concurrency_busy'));
+    assert.equal(value.upstream_response.attempts[0].fault, 'hold-open-controlled');
+    if (mode === 'direct') {
+      assert.equal(value.runtime_setup.process, 'direct');
+    } else {
+      assert.equal(value.runtime_setup.process, undefined);
+    }
+    if (shape === 'held_concurrent_requests') {
+      assert.equal(value.request_independence_replay.concurrent_client_requests.length, 2);
+      assert.equal(value.request_independence_replay.expected_upstream_business_sends, 3);
+      const holderSession = value.client_request.headers['session-id'];
+      const concurrentSessions = value.request_independence_replay.concurrent_client_requests.map(
+        (request) => request.headers['session-id'],
+      );
+      assert.ok(concurrentSessions.includes(holderSession));
+      assert.ok(concurrentSessions.some((session) => session !== holderSession));
+      assert.equal(new Set(concurrentSessions).size, 2);
+    } else {
+      assert.ok(value.runtime_setup.candidate_ids.length >= 2);
+      assert.equal(value.runtime_setup.health.enabled, true);
+      assert.equal(value.request_independence_replay.failure_isolation.expected_action, 'switch_provider');
+      assert.equal(value.request_independence_replay.failure_isolation.expected_provider_status, 500);
+      assert.equal(value.request_independence_replay.failure_isolation.expected_failed_business_sends, 1);
+      assert.equal(value.request_independence_replay.failure_isolation.expected_recovery_business_sends, 2);
+    }
   }
 });
 
-test('provider concurrency replay mutations cannot weaken transport or typed-evidence contracts', () => {
-  const caseId = 'issue-745f6e9-provider-concurrency-all-busy-direct';
+test('provider request independence mutations cannot weaken arrival or typed-evidence contracts', () => {
   const mutations = [
     {
       name: 'missing typed code',
-      mutate(value) { value.concurrency_replay.typed_error_codes = []; },
-      expected: /typed_error_codes must be a non-empty string array/,
-    },
-    {
-      name: 'timeout accepted',
-      mutate(value) { value.concurrency_replay.expected_exhaustion_client.error_codes_must_not = []; },
-      expected: /error_codes_must_not must include ETIMEDOUT/,
+      caseId: 'issue-745f6e9-provider-concurrency-all-busy-direct',
+      mutate(value) { value.request_independence_replay.typed_error_codes_must_not = []; },
+      expected: /typed_error_codes_must_not must include provider_concurrency_busy/,
     },
     {
       name: 'second send allowed',
-      mutate(value) { value.concurrency_replay.upstream_business_sends = 2; },
-      expected: /upstream_business_sends must be 1/,
+      caseId: 'issue-745f6e9-provider-concurrency-all-busy-direct',
+      mutate(value) { value.request_independence_replay.expected_upstream_business_sends = 4; },
+      expected: /expected_upstream_business_sends must equal one holder plus each concurrent request/,
     },
     {
-      name: 'same session',
-      mutate(value) {
-        value.concurrency_replay.exhaustion_client_request.headers['session-id'] =
-          value.client_request.headers['session-id'];
-      },
-      expected: /exhaustion request must use a distinct session-id/,
+      name: 'missing client error marker',
+      caseId: 'issue-745f6e9-provider-concurrency-all-busy-direct',
+      mutate(value) { value.request_independence_replay.expected_concurrent_client.body_must_not = []; },
+      expected: /body_must_not must forbid provider_error/,
+    },
+    {
+      name: 'non-http provider failure',
+      caseId: 'issue-745f6e9-provider-concurrency-mixed-exclusion-direct',
+      mutate(value) { value.request_independence_replay.failure_isolation.expected_provider_status = 200; },
+      expected: /expected_provider_status must be a provider HTTP error status/,
     },
   ];
   for (const mutation of mutations) {
-    const value = realCase(caseId);
+    const value = realCase(mutation.caseId);
     mutation.mutate(value);
     withFixture(
-      { [caseId]: value },
-      validManifest([caseId]),
+      { [mutation.caseId]: value },
+      validManifest([mutation.caseId]),
       (root) => assert.match(findingsOf(root), mutation.expected, mutation.name),
     );
   }
+});
+
+test('provider request independence accepts same-session and different-session concurrent requests', () => {
+  const caseId = 'issue-745f6e9-provider-concurrency-all-busy-direct';
+  const holderSession = realCase(caseId).client_request.headers['session-id'];
+
+  const sameSession = realCase(caseId);
+  sameSession.request_independence_replay.concurrent_client_requests.forEach((request) => {
+    request.headers['session-id'] = holderSession;
+  });
+  withFixture(
+    { [caseId]: sameSession },
+    validManifest([caseId]),
+    (root) => assert.equal(findingsOf(root), ''),
+  );
+
+  const differentSessions = realCase(caseId);
+  differentSessions.request_independence_replay.concurrent_client_requests.forEach((request, index) => {
+    request.headers['session-id'] = `independent-${index + 2}`;
+  });
+  withFixture(
+    { [caseId]: differentSessions },
+    validManifest([caseId]),
+    (root) => assert.equal(findingsOf(root), ''),
+  );
 });
 
 test('Codex replay fixtures preserve exact raw arguments and assertion-only negatives', () => {

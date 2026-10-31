@@ -62,7 +62,7 @@ export async function startMockProvider(options = {}) {
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : Number(options.port ?? 0);
 
-  return {
+  const api = {
     port,
     url: `http://${host}:${port}`,
     get phase() {
@@ -103,13 +103,28 @@ export async function startMockProvider(options = {}) {
       return all.filter((capture) => capture.case_id === caseId);
     },
     waitForHeld(caseId, timeoutMs = 2000) {
-      requireCaseId(caseId, 'waitForHeld');
-      if (state.heldByCase.has(caseId)) return Promise.resolve(heldReceipt(caseId));
+      return api.waitForHeldCount(caseId, 1, timeoutMs);
+    },
+    // Resolve once `count` business requests for this case are held at once.
+    // Independent requests are the product behavior under test, so the mock
+    // must be able to hold more than one response per case.
+    waitForHeldCount(caseId, count, timeoutMs = 2000) {
+      requireCaseId(caseId, 'waitForHeldCount');
+      const wanted = positiveInteger(count, 'count');
+      const reached = (state.heldByCase.get(caseId) ?? []).length;
+      if (reached >= wanted) {
+        return Promise.resolve({ case_id: caseId, held: reached, requested: wanted });
+      }
       return new Promise((resolve, reject) => {
         const waiter = {
+          count: wanted,
           resolve: () => {
             clearTimeout(timer);
-            resolve(heldReceipt(caseId));
+            resolve({
+              case_id: caseId,
+              held: (state.heldByCase.get(caseId) ?? []).length,
+              requested: wanted,
+            });
           },
           reject: (error) => {
             clearTimeout(timer);
@@ -122,7 +137,7 @@ export async function startMockProvider(options = {}) {
           if (waiters?.size === 0) state.heldWaiters.delete(caseId);
           reject(new MockProviderError(
             'mock_hold_timeout',
-            `controlled hold did not arrive for ${caseId} within ${timeoutMs}ms`,
+            `controlled hold ${wanted} did not arrive for ${caseId} within ${timeoutMs}ms`,
             504,
           ));
         }, positiveInteger(timeoutMs, 'timeoutMs'));
@@ -131,22 +146,28 @@ export async function startMockProvider(options = {}) {
         state.heldWaiters.set(caseId, waiters);
       });
     },
+    heldCount(caseId) {
+      requireCaseId(caseId, 'heldCount');
+      return (state.heldByCase.get(caseId) ?? []).length;
+    },
     releaseHeld(caseId) {
       requireCaseId(caseId, 'releaseHeld');
-      const held = state.heldByCase.get(caseId) ?? null;
-      if (!held) return 0;
-      state.heldByCase.delete(caseId);
-      applyTurnTransition(held.capture, state);
-      for (const fragment of held.remaining) writeWire(held.response, held.wire, fragment);
-      endWire(held.response, held.wire);
-      return 1;
+      return releaseHeldResponse(caseId, state);
+    },
+    releaseHeldAll(caseId) {
+      requireCaseId(caseId, 'releaseHeldAll');
+      let released = 0;
+      while (releaseHeldResponse(caseId, state) === 1) released += 1;
+      return released;
     },
     async close() {
-      for (const held of state.heldByCase.values()) {
-        try {
-          held.response.end();
-        } catch {
-          // The tracked socket teardown below remains the primary close owner.
+      for (const heldList of state.heldByCase.values()) {
+        for (const held of heldList) {
+          try {
+            held.response.end();
+          } catch {
+            // The tracked socket teardown below remains the primary close owner.
+          }
         }
       }
       state.heldByCase.clear();
@@ -156,6 +177,7 @@ export async function startMockProvider(options = {}) {
       await closeServer(server);
     },
   };
+  return api;
 }
 
 async function handleRequest(request, response, options, state) {
@@ -252,17 +274,15 @@ async function handleRequest(request, response, options, state) {
 
   const sendReceipt = await sendScript(script, response, responseWire);
   if (sendReceipt.held) {
-    state.heldByCase.set(capture.case_id, {
+    const heldList = state.heldByCase.get(capture.case_id) ?? [];
+    heldList.push({
       response,
       remaining: sendReceipt.remaining,
       capture,
       wire: responseWire,
     });
-    const waiters = state.heldWaiters.get(capture.case_id);
-    if (waiters) {
-      state.heldWaiters.delete(capture.case_id);
-      for (const waiter of waiters) waiter.resolve();
-    }
+    state.heldByCase.set(capture.case_id, heldList);
+    resolveSatisfiedHeldWaiters(capture.case_id, heldList.length, state);
     return;
   }
   applyTurnTransition(capture, state);
@@ -396,8 +416,28 @@ function applyTurnTransition(capture, state) {
   }
 }
 
-function heldReceipt(caseId) {
-  return { case_id: caseId, held: true };
+function resolveSatisfiedHeldWaiters(caseId, heldCount, state) {
+  const waiters = state.heldWaiters.get(caseId);
+  if (!waiters) return;
+  for (const waiter of [...waiters]) {
+    if (heldCount < waiter.count) continue;
+    waiters.delete(waiter);
+    waiter.resolve();
+  }
+  if (waiters.size === 0) state.heldWaiters.delete(caseId);
+}
+
+// Release one held response for the case. Returns 1 when a response was
+// released and 0 when the case holds nothing.
+function releaseHeldResponse(caseId, state) {
+  const heldList = state.heldByCase.get(caseId) ?? null;
+  if (!heldList || heldList.length === 0) return 0;
+  const held = heldList.shift();
+  if (heldList.length === 0) state.heldByCase.delete(caseId);
+  applyTurnTransition(held.capture, state);
+  for (const fragment of held.remaining) writeWire(held.response, held.wire, fragment);
+  endWire(held.response, held.wire);
+  return 1;
 }
 
 function requireCaseId(caseId, operation) {

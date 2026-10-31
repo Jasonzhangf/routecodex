@@ -8,17 +8,17 @@
     "mode": "relay"
   },
   "runtime_setup": {
-    "provider_id": "mock-chat-busy",
+    "provider_id": "mock-chat-primary",
     "model": "mock.chat-model",
     "wire_model": "chat-model",
     "candidate_ids": [
-      "mock-chat-busy/mock.chat-model",
-      "mock-chat-excluded/mock.chat-model"
+      "mock-chat-primary/mock.chat-model",
+      "mock-chat-recovered/mock.chat-model"
     ],
-    "provider_concurrency": {
-      "maxInFlight": 1,
-      "acquireTimeoutMs": 1000,
-      "staleLeaseMs": 300000
+    "health": {
+      "enabled": true,
+      "failure_threshold": 1,
+      "cooldown_ms": 60000
     },
     "attempt_store": {
       "residence_timeout_ms": 30000
@@ -29,12 +29,12 @@
     "path": "/v1/responses",
     "headers": {
       "content-type": "application/json",
-      "session-id": "concurrency-mixed-held-relay",
-      "thread-id": "concurrency-mixed-held-relay"
+      "session-id": "independence-failure-relay-holder",
+      "thread-id": "independence-failure-relay-holder"
     },
     "body": {
       "model": "mock.chat-model",
-      "input": "hold the only relay provider capacity",
+      "input": "hold the relay provider while a sibling fails",
       "stream": true
     }
   },
@@ -68,7 +68,7 @@
         "sse_events": [
           {
             "data": {
-              "id": "chatcmpl_concurrency_mixed_relay",
+              "id": "chatcmpl_independence_failure_relay_holder",
               "object": "chat.completion.chunk",
               "choices": [
                 {
@@ -83,7 +83,7 @@
           },
           {
             "data": {
-              "id": "chatcmpl_concurrency_mixed_relay",
+              "id": "chatcmpl_independence_failure_relay_holder",
               "object": "chat.completion.chunk",
               "choices": [
                 {
@@ -93,7 +93,7 @@
                       "summary": [
                         {
                           "type": "summary_text",
-                          "text": "concurrency holder completed"
+                          "text": "relay failure holder completed"
                         }
                       ]
                     }
@@ -104,7 +104,7 @@
           },
           {
             "data": {
-              "id": "chatcmpl_concurrency_mixed_relay",
+              "id": "chatcmpl_independence_failure_relay_holder",
               "object": "chat.completion.chunk",
               "choices": [
                 {
@@ -121,13 +121,13 @@
         ]
       },
       {
-        "kind": "fault",
-        "fault": "controlled-probe-failure",
+        "kind": "json",
         "status": 500,
         "content_type": "application/json",
         "body": {
           "error": {
-            "message": "controlled probe failure"
+            "message": "controlled provider failure",
+            "code": "upstream_http_error"
           }
         }
       },
@@ -138,14 +138,14 @@
         "sse_events": [
           {
             "data": {
-              "id": "chatcmpl_concurrency_mixed_reuse_relay",
+              "id": "chatcmpl_independence_failure_relay_recovered",
               "object": "chat.completion.chunk",
               "choices": [
                 {
                   "index": 0,
                   "delta": {
                     "role": "assistant",
-                    "content": "capacity reused"
+                    "content": "recovered response"
                   }
                 }
               ]
@@ -153,7 +153,7 @@
           },
           {
             "data": {
-              "id": "chatcmpl_concurrency_mixed_reuse_relay",
+              "id": "chatcmpl_independence_failure_relay_recovered",
               "object": "chat.completion.chunk",
               "choices": [
                 {
@@ -163,7 +163,7 @@
                       "summary": [
                         {
                           "type": "summary_text",
-                          "text": "capacity reuse completed"
+                          "text": "relay failure recovered"
                         }
                       ]
                     }
@@ -174,7 +174,7 @@
           },
           {
             "data": {
-              "id": "chatcmpl_concurrency_mixed_reuse_relay",
+              "id": "chatcmpl_independence_failure_relay_recovered",
               "object": "chat.completion.chunk",
               "choices": [
                 {
@@ -203,7 +203,7 @@
       "output_items.0.content.0.type": "output_text",
       "output_items.0.content.0.text": "held response released",
       "output_items.1.type": "reasoning",
-      "output_items.1.summary.0.text": "concurrency holder completed"
+      "output_items.1.summary.0.text": "relay failure holder completed"
     },
     "body_must_not": [
       "provider_error",
@@ -213,101 +213,102 @@
     ],
     "semantic_terminal_required": true
   },
-  "concurrency_replay": {
-    "kind": "provider_concurrency_all_busy",
-    "shape": "mixed_exclusion",
-    "expected_source_kind": "provider_failure",
-    "expected_source_stage": null,
-    "expected_attempts_empty": true,
-    "exhaustion_client_request": {
+  "request_independence_replay": {
+    "kind": "provider_request_independence",
+    "shape": "failure_isolation",
+    "failed_client_request": {
       "method": "POST",
       "path": "/v1/responses",
       "headers": {
         "content-type": "application/json",
-        "session-id": "concurrency-mixed-exhausted-relay",
-        "thread-id": "concurrency-mixed-exhausted-relay"
+        "session-id": "independence-failure-relay-failed",
+        "thread-id": "independence-failure-relay-failed"
       },
       "body": {
         "model": "mock.chat-model",
-        "input": "must not reach either relay provider as business",
+        "input": "fail once then recover on the next relay candidate",
         "stream": true
       }
     },
-    "capacity_reuse_client_request": {
-      "method": "POST",
-      "path": "/v1/responses",
-      "headers": {
-        "content-type": "application/json",
-        "session-id": "concurrency-mixed-reuse-relay",
-        "thread-id": "concurrency-mixed-reuse-relay"
-      },
-      "body": {
-        "model": "mock.chat-model",
-        "input": "reuse released relay capacity",
-        "stream": true
-      }
-    },
-    "expected_exhaustion_client": {
-      "transport": "closed",
-      "deadline_ms": 4000,
-      "error_codes_must_not": [
-        "ETIMEDOUT"
-      ]
-    },
-    "expected_capacity_reuse_client": {
+    "expected_failed_client": {
       "transport": "complete",
       "status": 200,
       "body_must": {
-        "text": "capacity reused",
+        "text": "recovered response",
         "status": "completed",
         "output_items.0.type": "message",
         "output_items.0.role": "assistant",
         "output_items.0.content.0.type": "output_text",
-        "output_items.0.content.0.text": "capacity reused",
+        "output_items.0.content.0.text": "recovered response",
         "output_items.1.type": "reasoning",
-        "output_items.1.summary.0.text": "capacity reuse completed"
+        "output_items.1.summary.0.text": "relay failure recovered"
       },
       "body_must_not": [
         "provider_error",
         "internal_error",
-        "routecodex_internal",
-        "metadata_center"
+        "routecodex_internal"
       ],
       "semantic_terminal_required": true
     },
-    "typed_error_codes": [
-      "selected_target_exhausted"
-    ],
+    "post_recovery_client_request": {
+      "method": "POST",
+      "path": "/v1/responses",
+      "headers": {
+        "content-type": "application/json",
+        "session-id": "independence-failure-relay-post",
+        "thread-id": "independence-failure-relay-post"
+      },
+      "body": {
+        "model": "mock.chat-model",
+        "input": "independent relay request after recovery",
+        "stream": true
+      }
+    },
+    "expected_post_recovery_client": {
+      "transport": "complete",
+      "status": 200,
+      "body_must": {
+        "text": "recovered response",
+        "status": "completed",
+        "output_items.0.type": "message",
+        "output_items.0.role": "assistant",
+        "output_items.0.content.0.type": "output_text",
+        "output_items.0.content.0.text": "recovered response",
+        "output_items.1.type": "reasoning",
+        "output_items.1.summary.0.text": "relay failure recovered"
+      },
+      "body_must_not": [
+        "provider_error",
+        "internal_error",
+        "routecodex_internal"
+      ],
+      "semantic_terminal_required": true
+    },
+    "failure_isolation": {
+      "failed_provider_id": "mock-chat-primary",
+      "recovered_provider_id": "mock-chat-recovered",
+      "expected_provider_status": 500,
+      "expected_action": "switch_provider",
+      "expected_holder_business_sends": 1,
+      "expected_failed_business_sends": 1,
+      "expected_recovery_business_sends": 2
+    },
     "typed_error_codes_must_not": [
       "provider_concurrency_busy"
-    ],
-    "upstream_business_sends": 1,
-    "mixed_exclusion": {
-      "excluded_provider_id": "mock-chat-excluded",
-      "expected_holder_business_sends": 1,
-      "expected_reuse_business_sends": 1,
-      "expected_probe_sends": 1,
-      "expected_health_entry_count": 2,
-      "probe_input_contains": "ping; reply pong",
-      "cooldown_identity": {
-        "interface_id": "default",
-        "auth_alias": "key1",
-        "kind": "auth_key",
-        "duration_ms": 60000
-      }
-    }
+    ]
   },
   "assertions": {
-    "provider_attempt_count": 2,
+    "provider_attempt_count": 4,
     "probe_attempts_may_occur": true,
     "no_control_leakage": true
   },
   "source": {
+    "sha": "25c366feb",
     "files": [
       "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs"
     ],
     "tests": [
-      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_provider_concurrency_relay_mixed_exclusion_stays_generic"
+      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_relay_provider_503_never_reaches_the_client"
     ]
   },
   "contract_differences": []
