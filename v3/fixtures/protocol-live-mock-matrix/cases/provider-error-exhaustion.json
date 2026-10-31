@@ -21,7 +21,15 @@
     "mode": "json",
     "status": 429,
     "content_type": "application/json",
-    "body": {"error": {"type": "rate_limit_error", "message": "controlled rate limit"}}
+    "body": {"error": {"type": "rate_limit_error", "message": "controlled rate limit"}},
+    "attempts": [
+      {"protocol": "openai_chat", "mode": "json", "status": 429, "content_type": "application/json", "body": {"error": {"type": "rate_limit_error", "message": "controlled rate limit"}}},
+      {"protocol": "openai_chat", "mode": "json", "status": 429, "content_type": "application/json", "body": {"error": {"type": "rate_limit_error", "message": "controlled rate limit"}}},
+      {"protocol": "openai_chat", "mode": "json", "status": 429, "content_type": "application/json", "body": {"error": {"type": "rate_limit_error", "message": "controlled rate limit"}}},
+      {"protocol": "openai_chat", "mode": "json", "status": 429, "content_type": "application/json", "body": {"error": {"type": "rate_limit_error", "message": "controlled rate limit"}}},
+      {"protocol": "openai_chat", "mode": "json", "status": 429, "content_type": "application/json", "body": {"error": {"type": "rate_limit_error", "message": "controlled rate limit"}}},
+      {"protocol": "openai_chat", "mode": "json", "status": 429, "content_type": "application/json", "body": {"error": {"type": "rate_limit_error", "message": "controlled rate limit"}}}
+    ]
   },
   "expected_client": {
     "transport": "closed",
@@ -30,13 +38,16 @@
     "body_must_not": ["rate_limit_error", "controlled rate limit", "provider_error", "internal_error", "routecodex_internal", "metadata_center"],
     "semantic_terminal_required": false
   },
-  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "assertions": {"provider_attempt_count": 6, "probe_attempts_may_occur": true, "no_control_leakage": true},
   "runtime_setup": {
     "provider_id": "mock-chat",
     "model": "mock.unavailable-model",
     "wire_model": "unavailable-model",
     "candidate_ids": ["mock-chat/mock.unavailable-model"],
-    "all_candidates_fail": true
+    "all_candidates_fail": true,
+    "attempt_store": {
+      "residence_timeout_ms": 21000
+    }
   },
   "source": {
     "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
