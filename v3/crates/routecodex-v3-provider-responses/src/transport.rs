@@ -1170,7 +1170,26 @@ impl ProviderResponsesTransport {
             V3ProviderHttpAuthCarrier::GeminiApiKey => request.header("x-goog-api-key", &secret),
         };
         if let Some(deadline) = deadline {
-            request = request.timeout(remaining_timeout(deadline, &request_id, &provider_id)?);
+            let remaining = remaining_timeout(deadline, &request_id, &provider_id)?;
+            if stream_intent == V3ResponsesStreamIntent::Json {
+                // The reqwest per-request total timeout covers connect + header
+                // wait + full body read. A JSON response is read in full, so the
+                // whole-request wall clock is the correct budget here.
+                //
+                // An SSE body is a lazily-read stream whose healthy lifetime
+                // legitimately exceeds the whole-request wall clock. Applying
+                // the total timeout to it cut still-flowing business streams at
+                // the whole-request budget (issue 5c24057; F0 produced 22
+                // client-facing 502s at duration_ms=120007 when
+                // request_timeout_ms equaled the SSE first-frame budget). The
+                // SSE header wait is already bounded by the separate first-frame
+                // budget passed to `send_http_await`, and the still-flowing body
+                // is governed by the client read timeout and the runtime
+                // attempt/residence deadlines, which own the true whole-attempt
+                // lifetime. `request_timeout_ms` must not cut a healthy stream
+                // (types.rs / validate.rs contract).
+                request = request.timeout(remaining);
+            }
         }
         if anthropic_messages {
             request = apply_anthropic_messages_compat_headers(request, &secret, &provider_headers);
