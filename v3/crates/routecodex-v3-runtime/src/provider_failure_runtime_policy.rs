@@ -172,6 +172,45 @@ pub(crate) fn is_health_neutral_request_compat_failure(
         || error_type == Some("invalid_request_error")
 }
 
+/// A typed provider transport failure that received a response head: the head
+/// arrived, but the body/stream could not be read to the protocol terminal.
+/// `status` is the internal 502 cause, not an upstream HTTP error. A
+/// response-less pre-head failure carries no response and stays outside this
+/// class so it keeps the health-neutral last-candidate boundary.
+pub(crate) fn is_provider_transport_failure(
+    source_stage: &str,
+    status: u16,
+    error_type: Option<&str>,
+    provider_type: Option<&str>,
+    provider_status: Option<u16>,
+    provider_body_read_failure: Option<&str>,
+) -> bool {
+    // Gemini uncommitted-SSE EOF is a health-neutral request-local boundary, so
+    // this semantic protocol discriminator excludes the Gemini wire from
+    // transport-failure cooling; it is not a test-name special case.
+    (source_stage == "V3ProviderReqOutbound09TransportRequest"
+        || source_stage == "V3Transport13ResponsesHttpRequest"
+        || source_stage == "V3ProviderResp14Raw")
+        && status == 502
+        // The generic Relay lane names this class `provider_error`; the
+        // Responses Relay lane reports the same typed transport class under
+        // its external code `provider_transport_error`. Accept both so a
+        // truncated HTTP 200 body owns its exact identity in either lane.
+        && matches!(
+            error_type,
+            Some("provider_error")
+                | Some("provider_transport_error")
+                | Some("provider_response_sse_stream")
+        )
+        && provider_type != Some("gemini")
+        // A completed upstream HTTP error is not a transport failure. Only a
+        // received head (non-error upstream status or an explicit body-read
+        // failure) keeps the exact-identity last-candidate health effect; a
+        // response-less failure does not.
+        && (provider_status.is_some_and(|status| status < 400)
+            || provider_body_read_failure.is_some())
+}
+
 /// A Relay Error-operator contract failure. This is a typed control resource:
 /// the SDK did not produce a usable Error06, and the original Source remains
 /// available as evidence when it already existed.
@@ -982,6 +1021,14 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&attempt_source);
     let is_request_local_compat_failure = is_response_processing_failure
         || is_health_neutral_request_compat_failure(source_stage, error_type.as_deref());
+    let is_transport_failure = is_provider_transport_failure(
+        source_stage,
+        status,
+        error_type.as_deref(),
+        Some(selected.candidate.provider_type.as_str()),
+        provider_status,
+        provider_body_read_failure,
+    );
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
     let resolution = reselect_from_captured_target_plan(
@@ -994,9 +1041,14 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     let has_alternative = matches!(&resolution, V3RelayProviderTargetResolution::Selected(_));
     // Resolve another eligible identity before any health mutation. A terminal
     // attempt publishes diagnostics only; it does not update health or actions.
-    // The last or only eligible candidate stays health-neutral for every
-    // provider failure class.
-    let health_record = if is_request_local_compat_failure || (!has_alternative && status != 429) {
+    // A head-arrived transport failure (truncated body/stream) still owns its
+    // exact health identity when it is the request's last eligible candidate. A
+    // response-less transport failure, completed provider business response,
+    // and request-local compatibility failure keep the health-neutral
+    // last-candidate boundary; a real 429 backpressure owns its own lane.
+    let health_record = if is_request_local_compat_failure
+        || (!has_alternative && status != 429 && !is_transport_failure)
+    {
         V3ProviderFailureRecord {
             scope_label: candidate_key.clone(),
             provider_key: candidate_key.clone(),

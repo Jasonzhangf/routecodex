@@ -750,6 +750,7 @@ where
                     C::policy_target(&policy),
                     source,
                     502,
+                    last_external_http.as_ref(),
                     &mut V3DirectProviderFailurePolicyState {
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
@@ -961,6 +962,7 @@ where
                 C::policy_target(&policy),
                 source,
                 provider_status,
+                last_external_http.as_ref(),
                 &mut V3DirectProviderFailurePolicyState {
                     failed_candidates: &mut failed_candidates,
                     same_candidate_retries: &mut same_candidate_retries,
@@ -1146,6 +1148,7 @@ where
                         C::policy_target(&policy),
                         source,
                         502,
+                        last_external_http.as_ref(),
                         &mut V3DirectProviderFailurePolicyState {
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
@@ -1354,6 +1357,7 @@ where
                             C::policy_target(&policy),
                             source,
                             provider_status,
+                            last_external_http.as_ref(),
                             &mut V3DirectProviderFailurePolicyState {
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
@@ -1526,6 +1530,7 @@ where
                             C::policy_target(&policy),
                             source,
                             provider_status,
+                            last_external_http.as_ref(),
                             &mut V3DirectProviderFailurePolicyState {
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,

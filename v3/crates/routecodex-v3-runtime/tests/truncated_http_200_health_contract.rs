@@ -31,7 +31,7 @@ endpoints = ["responses"]
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
-attempt_store = {}
+attempt_store = { residence_timeout_ms = 300 }
 [providers.limited]
 type = "responses"
 base_url = "http://limited.invalid/v1"
@@ -90,7 +90,7 @@ endpoints = ["responses"]
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
-attempt_store = {}
+attempt_store = { residence_timeout_ms = 300 }
 [providers.limited]
 type = "responses"
 base_url = "http://limited.invalid/v1"
@@ -242,46 +242,42 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
     assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
     assert_eq!(event.status, 502);
     assert_eq!(event.action, "switch_provider");
-    assert_eq!(event.failure_count, 1);
-    assert_eq!(event.health_state, "cooldown");
-    assert!(event.cooldown_until_ms.is_some());
+    assert_eq!(event.failure_count, 0);
+    assert_eq!(event.health_state, "pre_cool_observation");
+    assert_eq!(event.cooldown_until_ms, None);
 
+    let runtime_health = provider_health.runtime_health();
     let now = u64::MAX;
     assert!(
-        !provider_health
-            .store()
+        !runtime_health
             .availability("limited", Some("key1"), Some("gpt-5.5"), now)
             .available,
         "the exact failed identity must be cooled"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability("limited", Some("key1"), Some("other-model"), now)
             .available,
         "another model under the same provider and key must stay routable"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability("limited", Some("other-key"), Some("gpt-5.5"), now)
             .available,
         "another key under the same provider and model must stay routable"
     );
     assert!(
-        provider_health
-            .store()
+        runtime_health
             .availability("minimax", Some("key1"), Some("MiniMax-M3"), now)
             .available,
         "the untried secondary provider must stay routable"
     );
 }
-
-/// A truncated HTTP 200 body stays health-neutral when the failed candidate is
-/// the request's last eligible one. The last-candidate terminal boundary owns
-/// every provider failure class and must not mutate provider health.
+/// A truncated HTTP 200 body is a typed provider transport failure: it cools the
+/// exact identity even when the failed candidate is the request's last eligible
+/// one, without cooling other keys or models under the same provider.
 #[tokio::test]
-async fn truncated_http_200_keeps_last_candidate_health_neutral() {
+async fn truncated_http_200_cools_exact_identity_when_it_is_the_last_candidate() {
     let server_id = "truncated_200_last_candidate";
     let manifest = single_candidate_manifest(server_id);
     let provider_health =
@@ -321,21 +317,36 @@ async fn truncated_http_200_keeps_last_candidate_health_neutral() {
         .observability
         .as_ref()
         .expect("console observability");
-    assert_eq!(observability.provider_failure_events.len(), 1);
-    let event = &observability.provider_failure_events[0];
+    assert!(!observability.provider_failure_events.is_empty());
+    let event = observability
+        .provider_failure_events
+        .last()
+        .expect("provider failure event");
     assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
     assert_eq!(event.status, 502);
-    assert_eq!(event.health_state, "last_candidate_terminal");
+    assert_eq!(event.health_state, "pre_cool_observation");
     assert_eq!(event.failure_count, 0);
     assert_eq!(event.cooldown_until_ms, None);
 
+    let runtime_health = provider_health.runtime_health();
     let now = u64::MAX;
     assert!(
-        provider_health
-            .store()
+        !runtime_health
             .availability("limited", Some("key1"), Some("gpt-5.5"), now)
             .available,
-        "a last-candidate truncated HTTP 200 body must stay health-neutral"
+        "a last-candidate truncated HTTP 200 body must cool the exact provider identity"
+    );
+    assert!(
+        runtime_health
+            .availability("limited", Some("key1"), Some("other-model"), now)
+            .available,
+        "another model under the same provider and key must stay routable"
+    );
+    assert!(
+        runtime_health
+            .availability("limited", Some("other-key"), Some("gpt-5.5"), now)
+            .available,
+        "another key under the same provider and model must stay routable"
     );
 }
 
